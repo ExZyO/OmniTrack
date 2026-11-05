@@ -1,6 +1,5 @@
 package com.omnitrack.app.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -26,10 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,14 +45,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -70,145 +66,145 @@ fun MediaCard(
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
     var showPlusOne by remember { mutableStateOf(false) }
+    val losslessCover = remember(item.coverUrl) { LosslessCoverMapper.toLosslessUrl(item.coverUrl) }
 
-    GlassmorphicSurface(
+    Column(
         modifier = modifier
             .scale(bounceScale.value)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onCardClick),
-        shape = RoundedCornerShape(12.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onCardClick
+            ),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Column {
-            // Cover image with gradient overlay
+        // Full-bleed Poster Container with dynamic shadow
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.68f)
+                .shadow(10.dp, RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp))
+        ) {
+            AsyncImage(
+                model = losslessCover,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+
+            // Bottom glass scrim for readable progress overlay
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(0.67f)
-            ) {
-                AsyncImage(
-                    model = item.coverUrl,
-                    contentDescription = item.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-
-                // Bottom gradient
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.85f))
-                            )
+                    .height(65.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.88f))
                         )
-                )
-
-                // Progress text overlay
-                val progressText = formatProgress(item)
-                if (progressText.isNotEmpty()) {
-                    Text(
-                        text = progressText,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 8.dp, bottom = 6.dp),
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.4.sp
                     )
-                }
+            )
 
-                // +1 Quick action button
-                Box(
+            // Progress text overlay
+            val progressText = formatProgress(item)
+            if (progressText.isNotEmpty()) {
+                Text(
+                    text = progressText,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(6.dp)
-                        .size(28.dp)
-                        .shadow(8.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(AccentArctic.copy(alpha = 0.9f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {
-                                scope.launch {
-                                    showPlusOne = true
-                                    bounceScale.animateTo(
-                                        targetValue = 0.92f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessHigh
-                                        )
-                                    )
-                                    bounceScale.animateTo(
-                                        targetValue = 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                    showPlusOne = false
-                                }
-                                onQuickProgress()
-                            }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "+1",
-                        tint = AmoledBlack,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                // Animated +1 indicator
-                androidx.compose.animation.AnimatedVisibility(
-                    visible = showPlusOne,
-                    enter = scaleIn(spring(dampingRatio = 0.4f)) + fadeIn(),
-                    exit = scaleOut() + fadeOut(),
-                    modifier = Modifier.align(Alignment.Center)
-                ) {
-                    Text(
-                        text = "+1",
-                        color = AccentJade,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                        .align(Alignment.BottomStart)
+                        .padding(start = 8.dp, bottom = 7.dp),
+                    color = TextSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.3.sp
+                )
             }
 
-            // Progress bar
+            // Tactile +1 Quick Action floating pill
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(6.dp)
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(AmoledBlack.copy(alpha = 0.75f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {
+                            scope.launch {
+                                showPlusOne = true
+                                bounceScale.animateTo(
+                                    targetValue = 0.94f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessHigh
+                                    )
+                                )
+                                bounceScale.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                                showPlusOne = false
+                            }
+                            onQuickProgress()
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "+1",
+                    tint = AccentArctic,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+
+            // Animated +1 burst indicator
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showPlusOne,
+                enter = scaleIn(spring(dampingRatio = 0.4f)) + fadeIn(),
+                exit = scaleOut() + fadeOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                Text(
+                    text = "+1",
+                    color = AccentJade,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Bottom embedded progress line
             if (item.totalProgress != null && item.totalProgress > 0) {
                 val progress = (item.currentProgress / item.totalProgress).toFloat().coerceIn(0f, 1f)
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(2.dp),
+                        .height(2.5.dp)
+                        .align(Alignment.BottomCenter),
                     color = if (progress >= 1f) AccentJade else AccentArctic,
-                    trackColor = DarkSurfaceCard,
-                )
-            }
-
-            // Title area
-            Column(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = item.title,
-                    color = TextPrimary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 15.sp
+                    trackColor = DarkSurfaceCard.copy(alpha = 0.5f),
                 )
             }
         }
+
+        // Title text directly on dark background (natural, clean, no boxed clutter)
+        Text(
+            text = item.title,
+            color = TextPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            lineHeight = 16.sp,
+            modifier = Modifier.padding(horizontal = 2.dp)
+        )
     }
 }
 

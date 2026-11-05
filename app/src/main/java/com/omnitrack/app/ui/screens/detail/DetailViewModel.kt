@@ -52,6 +52,12 @@ class DetailViewModel(
         }
     }
 
+    fun updateCover(newCoverUrl: String) {
+        viewModelScope.launch {
+            repository.updateCover(mediaId, newCoverUrl)
+        }
+    }
+
     fun updateStatus(status: TrackingStatus) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch

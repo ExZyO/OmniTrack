@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Release APK
 
 on:
   push:
@@ -15,12 +15,14 @@ permissions:
 
 jobs:
   build:
-    name: Build OmniTrack APK
+    name: Build & Release OmniTrack APK
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,23 +36,48 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload Debug APK Artifact
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir -p release-output
+          cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-release.apk
+          cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-v1.0.0-b${{ github.run_number }}.apk
+
+      - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OmniTrack-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: OmniTrack-release
+          path: release-output/OmniTrack-release.apk
           if-no-files-found: error
 
-      - name: Create Release
-        if: ${{ github.event.inputs.tag != '' }}
+      - name: Generate Release Notes & Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag }}
-          name: OmniTrack ${{ github.event.inputs.tag }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          tag_name: ${{ github.event.inputs.tag || format('v1.0.0-b{0}', github.run_number) }}
+          name: ${{ github.event.inputs.tag && format('OmniTrack {0}', github.event.inputs.tag) || format('OmniTrack v1.0.0 (Build #{0})', github.run_number) }}
+          files: |
+            release-output/OmniTrack-release.apk
+            release-output/OmniTrack-v1.0.0-b${{ github.run_number }}.apk
+          body: |
+            ## 📱 OmniTrack Release Build #${{ github.run_number }}
+
+            ### ✨ What's in this build (Non-Technical Summary)
+            - Latest update compiled directly from commit `${{ github.sha }}`.
+            - Includes all recent UI fluidity enhancements, seamless edge-to-edge layouts, and tracking improvements.
+            - Ready for direct installation on Android devices (signed with installable certificate).
+
+            ### 🔧 Technical Details
+            - **Commit:** `${{ github.sha }}`
+            - **Branch:** `${{ github.ref_name }}`
+            - **Target SDK:** 35 | **Min SDK:** 26 | **JDK:** 17
+            - **Build Type:** Optimized Release (`assembleRelease`)
+            - **Engine:** Jetpack Compose + Material 3 + Room SQLite + Coil 3
+            - **Changelog:**
+            ```text
+            ${{ github.event.head_commit.message }}
+            ```
           draft: false
           prerelease: false
         env:
