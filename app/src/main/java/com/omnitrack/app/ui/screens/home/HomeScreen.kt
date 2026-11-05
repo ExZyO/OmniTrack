@@ -386,35 +386,18 @@ fun HomeScreen(
                                 itemsIndexed(
                                     items = displayedItems,
                                     key = { _, item -> item.id }
-                                ) { index, item ->
-                                    var visible by remember { mutableStateOf(false) }
-                                    LaunchedEffect(item.id) {
-                                        delay(minOf(index * 25L, 250L))
-                                        visible = true
-                                    }
-
-                                    AnimatedVisibility(
-                                        visible = visible,
-                                        enter = fadeIn(tween(200)) + slideInVertically(
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                                stiffness = Spring.StiffnessMediumLow
-                                            ),
-                                            initialOffsetY = { it / 6 }
-                                        )
-                                    ) {
-                                        MediaCard(
-                                            item = item,
-                                            onCardClick = {
-                                                AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
-                                                onItemClick(item.id)
-                                            },
-                                            onQuickProgress = {
-                                                AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
-                                                viewModel.incrementProgress(item)
-                                            }
-                                        )
-                                    }
+                                ) { _, item ->
+                                    MediaCard(
+                                        item = item,
+                                        onCardClick = {
+                                            AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
+                                            onItemClick(item.id)
+                                        },
+                                        onQuickProgress = {
+                                            AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
+                                            viewModel.incrementProgress(item)
+                                        }
+                                    )
                                 }
                             }
                         }
