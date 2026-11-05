@@ -56,7 +56,7 @@ val defaultPlatforms = listOf(
 )
 
 /**
- * Unboxed Nuvio-style Game Progress Section:
+ * Unboxed Game Progress Section:
  * Floating hours typography, quick +/- steppers, and platform pills without heavy card boxes.
  */
 @OptIn(ExperimentalLayoutApi::class)

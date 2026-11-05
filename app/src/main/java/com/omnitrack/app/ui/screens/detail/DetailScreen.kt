@@ -94,7 +94,7 @@ fun DetailScreen(
     var synopsisExpanded by remember { mutableStateOf(false) }
     var canExpandSynopsis by remember { mutableStateOf(false) }
 
-    // Poweramp kinematic swipe-to-back physics
+    // Poweramp kinematic drag physics: swipe between entries & swipe-to-back
     var dragOffsetX by remember { mutableStateOf(0f) }
     val animatedDragOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
@@ -114,22 +114,30 @@ fun DetailScreen(
             .background(AmoledBlack)
             .graphicsLayer {
                 translationX = animatedDragOffsetX
-                alpha = (1f - (animatedDragOffsetX / 1000f)).coerceIn(0.6f, 1f)
+                val scale = (1f - (kotlin.math.abs(animatedDragOffsetX) / 1000f * 0.08f)).coerceIn(0.92f, 1f)
+                scaleX = scale
+                scaleY = scale
+                alpha = (1f - (kotlin.math.abs(animatedDragOffsetX) / 1000f * 0.4f)).coerceIn(0.6f, 1f)
             }
-            .pointerInput(Unit) {
+            .pointerInput(uiState.hasPreviousEntry, uiState.hasNextEntry) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (dragOffsetX > 240f) {
-                            onBack()
-                        } else {
-                            dragOffsetX = 0f
+                        when {
+                            dragOffsetX > 240f -> onBack()
+                            dragOffsetX > 140f && uiState.hasPreviousEntry -> {
+                                dragOffsetX = 0f
+                                viewModel.navigateToPrevious()
+                            }
+                            dragOffsetX < -140f && uiState.hasNextEntry -> {
+                                dragOffsetX = 0f
+                                viewModel.navigateToNext()
+                            }
+                            else -> dragOffsetX = 0f
                         }
                     },
                     onHorizontalDrag = { change, dragAmount ->
-                        if (dragAmount > 0 || dragOffsetX > 0) {
-                            dragOffsetX = (dragOffsetX + dragAmount).coerceAtLeast(0f)
-                            change.consume()
-                        }
+                        dragOffsetX += dragAmount
+                        change.consume()
                     }
                 )
             }
@@ -152,13 +160,13 @@ fun DetailScreen(
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                 ) {
-                    // Full-bleed Banner with Parallax Gradient Scrim
+                    // Full-bleed Banner with exponential bottom scrim (Zero top/side vignette!)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(290.dp)
+                            .height(340.dp)
                     ) {
-                        // Banner background image
+                        // Banner background image - 100% clean, vibrant, unshaded original art
                         AsyncImage(
                             model = item.bannerUrl ?: losslessCover,
                             contentDescription = null,
@@ -166,18 +174,21 @@ fun DetailScreen(
                             contentScale = ContentScale.Crop
                         )
 
-                        // Multi-stop non-linear gradient blend into pure AMOLED black
+                        // Clean Bottom-Only Gradient Scrim (Zero darkening on top/sides)
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
+                                .height(260.dp)
+                                .align(Alignment.BottomCenter)
                                 .background(
                                     Brush.verticalGradient(
                                         colorStops = arrayOf(
-                                            0.00f to AmoledBlack.copy(alpha = 0.35f),
-                                            0.20f to AmoledBlack.copy(alpha = 0.15f),
-                                            0.45f to AmoledBlack.copy(alpha = 0.35f),
-                                            0.70f to AmoledBlack.copy(alpha = 0.70f),
-                                            0.88f to AmoledBlack.copy(alpha = 0.95f),
+                                            0.00f to Color.Transparent,
+                                            0.16f to AmoledBlack.copy(alpha = 0.04f),
+                                            0.32f to AmoledBlack.copy(alpha = 0.14f),
+                                            0.50f to AmoledBlack.copy(alpha = 0.34f),
+                                            0.68f to AmoledBlack.copy(alpha = 0.62f),
+                                            0.84f to AmoledBlack.copy(alpha = 0.84f),
                                             1.00f to AmoledBlack
                                         )
                                     )

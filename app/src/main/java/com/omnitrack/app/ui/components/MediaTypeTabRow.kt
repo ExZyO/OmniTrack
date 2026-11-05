@@ -45,6 +45,13 @@ fun MediaTypeTabRow(
 ) {
     val listState = rememberLazyListState()
 
+    androidx.compose.runtime.LaunchedEffect(selectedType) {
+        val index = MediaType.filterTabs.indexOf(selectedType)
+        if (index >= 0) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
     LazyRow(
         state = listState,
         modifier = modifier

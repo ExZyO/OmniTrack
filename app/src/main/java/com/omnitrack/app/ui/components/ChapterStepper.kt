@@ -59,7 +59,7 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
 /**
- * Pure unboxed Nuvio Noir progress stepper:
+ * Pure unboxed noir progress stepper:
  * Floating typography, rolling mechanical tally counter, and tactile floating controls.
  * Zero chunky card borders or boxed containers.
  */

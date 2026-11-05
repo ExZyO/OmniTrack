@@ -20,25 +20,33 @@ import kotlinx.coroutines.launch
 data class DetailUiState(
     val item: MediaItemEntity? = null,
     val seasons: List<Season> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val hasPreviousEntry: Boolean = false,
+    val hasNextEntry: Boolean = false
 )
 
 class DetailViewModel(
     private val repository: MediaRepository,
-    private val mediaId: Long
+    mediaId: Long
 ) : ViewModel() {
 
     private val _mediaId = MutableStateFlow(mediaId)
 
     val uiState: StateFlow<DetailUiState> = _mediaId
-        .flatMapLatest { id -> repository.getMediaById(id) }
-        .filterNotNull()
-        .map { item ->
-            DetailUiState(
-                item = item,
-                seasons = generateMockSeasons(item),
-                isLoading = false
-            )
+        .flatMapLatest { id ->
+            repository.getMediaById(id).filterNotNull().flatMapLatest { currentItem ->
+                repository.getAllMedia().map { allItems ->
+                    val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
+                    val currentIndex = siblings.indexOfFirst { it.id == currentItem.id }
+                    DetailUiState(
+                        item = currentItem,
+                        seasons = generateMockSeasons(currentItem),
+                        isLoading = false,
+                        hasPreviousEntry = currentIndex > 0,
+                        hasNextEntry = currentIndex in 0 until siblings.size - 1
+                    )
+                }
+            }
         }
         .stateIn(
             scope = viewModelScope,
@@ -46,15 +54,47 @@ class DetailViewModel(
             initialValue = DetailUiState()
         )
 
+    fun navigateToPrevious(): Boolean {
+        val currentItem = uiState.value.item ?: return false
+        val currentId = _mediaId.value
+        viewModelScope.launch {
+            repository.getAllMedia().collect { allItems ->
+                val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
+                val currentIndex = siblings.indexOfFirst { it.id == currentId }
+                if (currentIndex > 0) {
+                    _mediaId.value = siblings[currentIndex - 1].id
+                }
+                return@collect
+            }
+        }
+        return true
+    }
+
+    fun navigateToNext(): Boolean {
+        val currentItem = uiState.value.item ?: return false
+        val currentId = _mediaId.value
+        viewModelScope.launch {
+            repository.getAllMedia().collect { allItems ->
+                val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
+                val currentIndex = siblings.indexOfFirst { it.id == currentId }
+                if (currentIndex in 0 until siblings.size - 1) {
+                    _mediaId.value = siblings[currentIndex + 1].id
+                }
+                return@collect
+            }
+        }
+        return true
+    }
+
     fun updateProgress(newProgress: Double) {
         viewModelScope.launch {
-            repository.updateProgress(mediaId, newProgress)
+            repository.updateProgress(_mediaId.value, newProgress)
         }
     }
 
     fun updateCover(newCoverUrl: String) {
         viewModelScope.launch {
-            repository.updateCover(mediaId, newCoverUrl)
+            repository.updateCover(_mediaId.value, newCoverUrl)
         }
     }
 
@@ -74,7 +114,6 @@ class DetailViewModel(
 
     /**
      * Generate mock season/episode data from the item's progress
-     * In production, this would come from the tracker APIs
      */
     private fun generateMockSeasons(item: MediaItemEntity): List<Season> {
         val total = item.totalProgress?.toInt() ?: return emptyList()

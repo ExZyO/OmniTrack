@@ -19,24 +19,26 @@ import com.omnitrack.app.ui.theme.AmoledBlack
 
 /**
  * Creates an immersive dynamic ambient glow behind media screens.
- * Seamlessly transitions into pure AMOLED Black (#000000) using multi-stop non-linear alpha decay.
+ * Seamlessly transitions into pure AMOLED Black (#000000) using continuous multi-stop alpha decay
+ * with zero visible boundary lines or edge cutoffs.
  */
 @Composable
 fun CoverGlowBox(
     imageUrl: String?,
     modifier: Modifier = Modifier,
-    glowHeight: Dp = 620.dp,
+    glowHeight: Dp = 680.dp,
     content: @Composable BoxScope.() -> Unit
 ) {
     val extractedColor = rememberCoverDominantColor(imageUrl)
     val animatedGlowColor by animateColorAsState(
-        targetValue = extractedColor.copy(alpha = 0.22f),
+        targetValue = extractedColor.copy(alpha = 0.28f),
         animationSpec = tween(600),
         label = "ambientGlowColor"
     )
 
     Box(modifier = modifier.background(AmoledBlack)) {
-        // Soft ambient bloom with multi-stop exponential decay — zero harsh line boundaries!
+        // Continuous, borderless ambient bloom centered behind poster zone
+        // Guaranteed zero sharp borders: starts at 0.0 alpha, peaks smoothly, fades to 0.0 alpha
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -45,32 +47,14 @@ fun CoverGlowBox(
                 .background(
                     brush = Brush.verticalGradient(
                         colorStops = arrayOf(
-                            0.00f to animatedGlowColor,
-                            0.20f to animatedGlowColor.copy(alpha = 0.16f),
-                            0.45f to animatedGlowColor.copy(alpha = 0.08f),
-                            0.70f to animatedGlowColor.copy(alpha = 0.03f),
-                            0.90f to Color.Transparent,
+                            0.00f to Color.Transparent,
+                            0.18f to Color.Transparent,
+                            0.32f to animatedGlowColor.copy(alpha = 0.08f),
+                            0.44f to animatedGlowColor,
+                            0.60f to animatedGlowColor.copy(alpha = 0.16f),
+                            0.78f to animatedGlowColor.copy(alpha = 0.04f),
                             1.00f to Color.Transparent
                         )
-                    )
-                )
-        )
-
-        // Radial specular highlight centered under the top-third
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(glowHeight * 0.7f)
-                .align(Alignment.TopCenter)
-                .background(
-                    brush = Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.00f to animatedGlowColor.copy(alpha = 0.20f),
-                            0.35f to animatedGlowColor.copy(alpha = 0.10f),
-                            0.70f to animatedGlowColor.copy(alpha = 0.02f),
-                            1.00f to Color.Transparent
-                        ),
-                        radius = 1200f
                     )
                 )
         )
