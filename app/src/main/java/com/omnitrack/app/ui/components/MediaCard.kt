@@ -165,7 +165,7 @@ fun MediaCard(
                 }
 
                 // Animated +1 indicator
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = showPlusOne,
                     enter = scaleIn(spring(dampingRatio = 0.4f)) + fadeIn(),
                     exit = scaleOut() + fadeOut(),
