@@ -107,7 +107,7 @@ fun SettingsView(
                 ) {
                     StatPill(count = allMedia.size.toString(), label = "Total Items")
                     StatPill(
-                        count = allMedia.count { it.status == com.omnitrack.app.data.model.TrackingStatus.CURRENT }.toString(),
+                        count = allMedia.count { it.status == com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS }.toString(),
                         label = "In Progress"
                     )
                     StatPill(

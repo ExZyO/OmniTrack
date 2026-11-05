@@ -52,7 +52,7 @@ fun HistoryView(
 ) {
     // Show items with active progress first
     val historyItems = allMedia.filter { it.currentProgress > 0 }
-        .sortedByDescending { it.updatedAt }
+        .sortedByDescending { it.lastUpdated }
 
     Column(
         modifier = modifier

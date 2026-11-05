@@ -181,7 +181,7 @@ fun DiscoverView(
                     ) {
                         AsyncImage(
                             model = candidate.url,
-                            contentDescription = candidate.title,
+                            contentDescription = candidate.description,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(0.68f)
@@ -190,7 +190,7 @@ fun DiscoverView(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = candidate.title,
+                            text = candidate.description ?: "Unknown",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = TextPrimary,
@@ -198,7 +198,7 @@ fun DiscoverView(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = candidate.source,
+                            text = candidate.sourceName,
                             fontSize = 10.sp,
                             color = AccentArctic
                         )
