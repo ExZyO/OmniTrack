@@ -13,9 +13,9 @@ object LosslessCoverMapper {
         clean = clean.replace(Regex("\\.(256|512)\\.jpg$"), ".jpg")
             .replace(Regex("\\.(256|512)\\.png$"), ".png")
 
-        // AniList: upgrade /large/ to /extra-large/ if present
-        if (clean.contains("anilist.co") && clean.contains("/cover/large/")) {
-            clean = clean.replace("/cover/large/", "/cover/extra-large/")
+        // AniList: upgrade /cover/medium/ to /cover/large/ if present
+        if (clean.contains("anilist.co") && clean.contains("/cover/medium/")) {
+            clean = clean.replace("/cover/medium/", "/cover/large/")
         }
 
         // TMDB: upgrade w500 or w300 to original

@@ -59,6 +59,7 @@ object AppUpdateInstaller {
                         if (totalBytes > 0) {
                             val progress = downloadedBytes.toFloat() / totalBytes.toFloat()
                             onProgress(progress)
+                            AppUpdateNotifier.showDownloadProgress(context, progress)
                         }
                     }
                     output.flush()
@@ -67,6 +68,7 @@ object AppUpdateInstaller {
 
             AppLogger.i("UpdateInstaller", "APK downloaded successfully (${apkFile.length()} bytes)")
             onProgress(1.0f)
+            AppUpdateNotifier.showInstallPrompt(context, apkFile)
 
             // Trigger system installer on main thread
             withContext(Dispatchers.Main) {

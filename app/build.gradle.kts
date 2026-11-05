@@ -10,12 +10,15 @@ android {
     namespace = "com.omnitrack.app"
     compileSdk = 35
 
+    val buildVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull() ?: 1
+    val buildVersionName = project.findProperty("versionName")?.toString() ?: "1.0.0"
+
     defaultConfig {
         applicationId = "com.omnitrack.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -23,10 +26,19 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("keystore/release.jks")
+            storePassword = "omnitrack_release_key"
+            keyAlias = "omnitrack"
+            keyPassword = "omnitrack_release_key"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.screens.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -24,8 +25,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.VideoLibrary
@@ -42,7 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,6 +79,8 @@ fun HomeScreen(
     var showDiagnostics by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppRelease?>(null) }
     var showUpdateSheet by remember { mutableStateOf(false) }
+    var isSearchVisible by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
     // Automatic non-blocking background update check (Ported from Gemini EPUB & Chimanew)
     LaunchedEffect(Unit) {
@@ -168,14 +175,63 @@ fun HomeScreen(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(DarkSurfaceElevated),
+                        .background(if (isSearchVisible) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                        .clickable {
+                            isSearchVisible = !isSearchVisible
+                            if (!isSearchVisible) searchQuery = ""
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Search,
+                        imageVector = if (isSearchVisible) Icons.Default.Close else Icons.Default.Search,
                         contentDescription = "Search",
-                        tint = TextPrimary,
+                        tint = if (isSearchVisible) AccentArctic else TextPrimary,
                         modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Animated In-Library Search Field
+        AnimatedVisibility(visible = isSearchVisible) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkSurfaceElevated)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp)
+                )
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
+                    cursorBrush = SolidColor(AccentArctic),
+                    decorationBox = { innerTextField ->
+                        if (searchQuery.isEmpty()) {
+                            Text("Filter library titles, native names...", color = TextMuted, fontSize = 13.5.sp)
+                        }
+                        innerTextField()
+                    }
+                )
+                if (searchQuery.isNotEmpty()) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear search",
+                        tint = TextMuted,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clickable { searchQuery = "" }
                     )
                 }
             }
@@ -197,6 +253,18 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Filter media items by search query if active
+        val displayedItems = remember(uiState.mediaItems, searchQuery) {
+            if (searchQuery.isBlank()) {
+                uiState.mediaItems
+            } else {
+                uiState.mediaItems.filter {
+                    it.title.contains(searchQuery, ignoreCase = true) ||
+                        it.nativeTitle?.contains(searchQuery, ignoreCase = true) == true
+                }
+            }
+        }
+
         // Content
         if (uiState.isLoading) {
             Box(
@@ -209,7 +277,7 @@ fun HomeScreen(
                     strokeWidth = 2.dp
                 )
             }
-        } else if (uiState.mediaItems.isEmpty()) {
+        } else if (displayedItems.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -225,22 +293,22 @@ fun HomeScreen(
                         modifier = Modifier.size(48.dp)
                     )
                     Text(
-                        text = "No items in this category",
+                        text = if (searchQuery.isNotEmpty()) "No results matching \"$searchQuery\"" else "No items in this category",
                         color = TextMuted,
                         fontSize = 14.sp
                     )
                 }
             }
         } else {
-            // High-density, borderless, seamless poster grid
+            // Adaptive, high-density, borderless, seamless poster grid
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Adaptive(minSize = 108.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 itemsIndexed(
-                    items = uiState.mediaItems,
+                    items = displayedItems,
                     key = { _, item -> item.id }
                 ) { index, item ->
                     var visible by remember { mutableStateOf(false) }

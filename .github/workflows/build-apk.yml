@@ -36,9 +36,6 @@ jobs:
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease --stacktrace
-
       - name: Determine Release Tag
         id: release_info
         run: |
@@ -50,6 +47,9 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Build Release APK
+        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=1.0.0-b${{ github.run_number }} --stacktrace
+
       - name: Prepare Release Artifact
         run: |
           mkdir -p release-output
@@ -59,7 +59,7 @@ jobs:
             "version": "${{ steps.release_info.outputs.tag }}",
             "versionCode": ${{ github.run_number }},
             "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}.apk",
-            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: In-app one-tap auto-update engine, unboxed Nuvio Noir progress controls, and Chimanew artwork waterfall."
+            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: Fixed in-place update signature, dynamic build versioning, lossless cover loader, multi-source category waterfall, seamless ambient glow, adaptive grid, and interactive search."
           }
           EOF
           cp release-output/version.json version.json

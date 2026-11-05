@@ -4,11 +4,13 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,6 +52,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +92,15 @@ fun DetailScreen(
     val item = uiState.item
     var showArtworkPicker by remember { mutableStateOf(false) }
     var synopsisExpanded by remember { mutableStateOf(false) }
+    var canExpandSynopsis by remember { mutableStateOf(false) }
+
+    // Poweramp kinematic swipe-to-back physics
+    var dragOffsetX by remember { mutableStateOf(0f) }
+    val animatedDragOffsetX by animateFloatAsState(
+        targetValue = dragOffsetX,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "powerampSwipe"
+    )
 
     LaunchedEffect(item?.id) {
         if (item != null) {
@@ -99,6 +112,27 @@ fun DetailScreen(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
+            .graphicsLayer {
+                translationX = animatedDragOffsetX
+                alpha = (1f - (animatedDragOffsetX / 1000f)).coerceIn(0.6f, 1f)
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (dragOffsetX > 240f) {
+                            onBack()
+                        } else {
+                            dragOffsetX = 0f
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        if (dragAmount > 0 || dragOffsetX > 0) {
+                            dragOffsetX = (dragOffsetX + dragAmount).coerceAtLeast(0f)
+                            change.consume()
+                        }
+                    }
+                )
+            }
     ) {
         if (uiState.isLoading || item == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -132,17 +166,19 @@ fun DetailScreen(
                             contentScale = ContentScale.Crop
                         )
 
-                        // Multi-stop gradient blend into pure AMOLED black
+                        // Multi-stop non-linear gradient blend into pure AMOLED black
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(
                                     Brush.verticalGradient(
-                                        colors = listOf(
-                                            AmoledBlack.copy(alpha = 0.4f),
-                                            AmoledBlack.copy(alpha = 0.2f),
-                                            AmoledBlack.copy(alpha = 0.7f),
-                                            AmoledBlack
+                                        colorStops = arrayOf(
+                                            0.00f to AmoledBlack.copy(alpha = 0.35f),
+                                            0.20f to AmoledBlack.copy(alpha = 0.15f),
+                                            0.45f to AmoledBlack.copy(alpha = 0.35f),
+                                            0.70f to AmoledBlack.copy(alpha = 0.70f),
+                                            0.88f to AmoledBlack.copy(alpha = 0.95f),
+                                            1.00f to AmoledBlack
                                         )
                                     )
                                 )
@@ -319,7 +355,7 @@ fun DetailScreen(
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Seamless Synopsis (Typography-first, no chunky box!)
+                    // Seamless Synopsis (Typography-first, with overflow-aware expansion)
                     if (!item.synopsis.isNullOrBlank()) {
                         Column(
                             modifier = Modifier
@@ -329,6 +365,7 @@ fun DetailScreen(
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null,
+                                    enabled = canExpandSynopsis,
                                     onClick = { synopsisExpanded = !synopsisExpanded }
                                 )
                         ) {
@@ -338,15 +375,22 @@ fun DetailScreen(
                                 fontSize = 13.5.sp,
                                 lineHeight = 20.sp,
                                 maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                onTextLayout = { textLayoutResult ->
+                                    if (!synopsisExpanded) {
+                                        canExpandSynopsis = textLayoutResult.hasVisualOverflow
+                                    }
+                                }
                             )
-                            Text(
-                                text = if (synopsisExpanded) "Show less" else "Read more",
-                                color = dominantAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
+                            if (canExpandSynopsis) {
+                                Text(
+                                    text = if (synopsisExpanded) "Show less" else "Read more",
+                                    color = dominantAccent,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(18.dp))
