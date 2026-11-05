@@ -16,6 +16,8 @@
 | **Release Pipeline Automation** | CI/CD | ✅ **COMPLETED** | Automated signed release APK generation and dual-tier GitHub Releases on push. |
 | **Phase 2: Step 1 (Lossless & Glow)** | v1.0.0-b2 | ✅ **COMPLETED** | Coil 3 `LosslessCoverMapper` + AndroidX Palette `CoverGlowExtractor`. |
 | **Phase 2: Step 2 (Artwork Discovery)** | v1.0.0-b2 | ✅ **COMPLETED** | `ArtworkWaterfallRepository` (MangaDex, AniList, Bangumi) + `ArtworkPickerBottomSheet` + Gallery Picker. |
+| **Diagnostics & Logging Suite** | v1.0.0-b6 | ✅ **COMPLETED** | Real-time `AppLogger` buffer, uncaught crash handler, one-tap clipboard copy & share, diagnostics UI sheet with toggle. |
+| **Crash Fix (Detail Screen Offset)** | v1.0.0-b6 | ✅ **COMPLETED** | Replaced negative padding with `Modifier.offset(y = (-50).dp)` to eliminate Compose runtime crash. |
 | **Fluid Unboxed UI Overhaul** | v1.0.0-b2 | ✅ **COMPLETED** | Removed boxed card clutter; full-bleed parallax hero, edge-to-edge typography, ambient bloom. |
 | **Poweramp Fluid Gesture Engine** | v1.1.0 | 📋 **PLANNED** | Smooth exit swipe-to-dismiss, folder pull-out physics, Predictive Back gestures. |
 | **Phase 2: Step 3 (Shelves & Modes)** | v1.0.0-b3 | ⏳ **NEXT UP** | Custom shelves, category reordering, Jetpack DataStore display modes (Compact, Comfortable, List). |

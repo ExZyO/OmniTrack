@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -73,6 +74,7 @@ import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -86,6 +88,12 @@ fun DetailScreen(
     val item = uiState.item
     var showArtworkPicker by remember { mutableStateOf(false) }
     var synopsisExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(item?.id) {
+        if (item != null) {
+            AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
+        }
+    }
 
     Box(
         modifier = modifier
@@ -200,7 +208,7 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 18.dp)
-                            .padding(top = (-50).dp),
+                            .offset(y = (-50).dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {

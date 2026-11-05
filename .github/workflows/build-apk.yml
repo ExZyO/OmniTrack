@@ -50,17 +50,16 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Prepare Release Artifacts
+      - name: Prepare Release Artifact
         run: |
           mkdir -p release-output
-          cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-release.apk
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OmniTrack-release
-          path: release-output/OmniTrack-release.apk
+          name: OmniTrack-${{ steps.release_info.outputs.tag }}
+          path: release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -68,9 +67,7 @@ jobs:
         with:
           tag_name: ${{ steps.release_info.outputs.tag }}
           name: OmniTrack ${{ steps.release_info.outputs.tag }}
-          files: |
-            release-output/OmniTrack-release.apk
-            release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          files: release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
           body: |
             ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
 
