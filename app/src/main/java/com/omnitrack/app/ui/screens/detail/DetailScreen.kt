@@ -352,17 +352,16 @@ fun DetailScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                     }
 
-                    // Progress Section (Integrated fluid tracker, no nested box clutter)
+                    // Progress Section (100% Unboxed flowing controls, zero box clutter)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 18.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         when (item.mediaType) {
                             MediaType.ANIME, MediaType.SHOW -> {
                                 ChapterStepper(
-                                    label = "EPISODES TRACKER",
                                     unitLabel = item.mediaType.unitLabel,
                                     currentProgress = item.currentProgress,
                                     totalProgress = item.totalProgress,
@@ -382,7 +381,6 @@ fun DetailScreen(
 
                             MediaType.MANGA, MediaType.NOVEL -> {
                                 ChapterStepper(
-                                    label = "CHAPTERS READ",
                                     unitLabel = item.mediaType.unitLabel,
                                     currentProgress = item.currentProgress,
                                     totalProgress = item.totalProgress,
@@ -401,7 +399,6 @@ fun DetailScreen(
 
                             MediaType.VISUAL_NOVEL -> {
                                 ChapterStepper(
-                                    label = "HOURS PLAYED",
                                     unitLabel = item.mediaType.unitLabel,
                                     currentProgress = item.currentProgress,
                                     totalProgress = item.totalProgress,
@@ -416,27 +413,42 @@ fun DetailScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(DarkSurfaceElevated)
                                         .clickable {
                                             viewModel.updateStatus(
                                                 if (isWatched) TrackingStatus.PLAN_TO_TRACK else TrackingStatus.COMPLETED
                                             )
                                         }
-                                        .padding(16.dp),
+                                        .padding(vertical = 12.dp, horizontal = 4.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(24.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isWatched) AccentJade else Color(0x22FFFFFF)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isWatched) {
+                                                Text("✓", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                        Text(
+                                            text = if (isWatched) "Watched" else "Mark as Watched",
+                                            color = if (isWatched) AccentJade else TextPrimary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 16.sp
+                                        )
+                                    }
+
                                     Text(
-                                        text = if (isWatched) "Completed & Watched" else "Mark as Watched",
-                                        color = if (isWatched) AccentJade else TextPrimary,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp
-                                    )
-                                    Text(
-                                        text = if (isWatched) "✓ Watched" else "Tap to check",
+                                        text = if (isWatched) "Completed" else "Plan to Watch",
                                         color = if (isWatched) AccentJade else TextMuted,
-                                        fontSize = 12.sp
+                                        fontSize = 13.sp
                                     )
                                 }
                             }

@@ -53,17 +53,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
+/**
+ * Pure unboxed Nuvio Noir progress stepper:
+ * Floating typography, rolling mechanical tally counter, and tactile floating controls.
+ * Zero chunky card borders or boxed containers.
+ */
 @Composable
 fun ChapterStepper(
-    label: String,
     unitLabel: String,
     currentProgress: Double,
     totalProgress: Double?,
@@ -81,175 +82,173 @@ fun ChapterStepper(
         )
     }
 
-    GlassmorphicSurface(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        // Unboxed Stepper Row: Floating [ - ]    845 / 1432 Chapters    [ + ]
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = label,
-                color = TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.5.sp
+            // Minimal floating minus button
+            UnboxedStepperButton(
+                icon = Icons.Default.Remove,
+                onClick = {
+                    val newVal = (currentProgress - step).coerceAtLeast(0.0)
+                    onProgressChanged(newVal)
+                }
             )
 
-            // Stepper row: [ - ]  Chapter 845 / 1432  [ + ]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Minus button
-                StepperButton(
-                    icon = Icons.Default.Remove,
-                    onClick = {
-                        val newVal = (currentProgress - step).coerceAtLeast(0.0)
-                        onProgressChanged(newVal)
-                    }
-                )
-
-                // Current value display (tappable for direct input)
-                if (showDirectInput) {
-                    TextField(
-                        value = textInput,
-                        onValueChange = { textInput = it },
-                        modifier = Modifier.width(120.dp),
-                        textStyle = MaterialTheme.typography.headlineMedium.copy(
-                            color = TextPrimary,
-                            textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Bold
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = if (isDecimal) KeyboardType.Decimal else KeyboardType.Number,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                val parsed = textInput.toDoubleOrNull()
-                                if (parsed != null) {
-                                    val clamped = if (totalProgress != null) parsed.coerceIn(0.0, totalProgress)
-                                    else parsed.coerceAtLeast(0.0)
-                                    onProgressChanged(clamped)
-                                }
-                                showDirectInput = false
-                                focusManager.clearFocus()
+            // Center: Big floating typography-first number (tappable for numeric keyboard)
+            if (showDirectInput) {
+                TextField(
+                    value = textInput,
+                    onValueChange = { textInput = it },
+                    modifier = Modifier.width(130.dp),
+                    textStyle = MaterialTheme.typography.headlineLarge.copy(
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 32.sp
+                    ),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = if (isDecimal) KeyboardType.Decimal else KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            val parsed = textInput.toDoubleOrNull()
+                            if (parsed != null) {
+                                val clamped = if (totalProgress != null) parsed.coerceIn(0.0, totalProgress)
+                                else parsed.coerceAtLeast(0.0)
+                                onProgressChanged(clamped)
                             }
-                        ),
-                        singleLine = true,
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = DarkSurfaceElevated,
-                            unfocusedContainerColor = DarkSurfaceElevated,
-                            cursorColor = AccentArctic,
-                            focusedIndicatorColor = AccentArctic,
-                            unfocusedIndicatorColor = Color.Transparent
-                        )
+                            showDirectInput = false
+                            focusManager.clearFocus()
+                        }
+                    ),
+                    singleLine = true,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        cursorColor = AccentArctic,
+                        focusedIndicatorColor = AccentArctic,
+                        unfocusedIndicatorColor = Color(0x33FFFFFF)
                     )
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { showDirectInput = true }
+                )
+            } else {
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { showDirectInput = true }
+                    )
+                ) {
+                    // Rolling tally animated number
+                    AnimatedContent(
+                        targetState = currentProgress,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                (slideInVertically { -it } + fadeIn()) togetherWith
+                                        (slideOutVertically { it } + fadeOut())
+                            } else {
+                                (slideInVertically { it } + fadeIn()) togetherWith
+                                        (slideOutVertically { -it } + fadeOut())
+                            }
+                        },
+                        label = "progressAnim"
+                    ) { progress ->
+                        val displayValue = if (isDecimal) String.format("%.1f", progress)
+                        else progress.toInt().toString()
+
+                        Text(
+                            text = displayValue,
+                            color = TextPrimary,
+                            fontSize = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
                         )
-                    ) {
-                        AnimatedContent(
-                            targetState = currentProgress,
-                            transitionSpec = {
-                                if (targetState > initialState) {
-                                    (slideInVertically { -it } + fadeIn()) togetherWith
-                                            (slideOutVertically { it } + fadeOut())
-                                } else {
-                                    (slideInVertically { it } + fadeIn()) togetherWith
-                                            (slideOutVertically { -it } + fadeOut())
-                                }
-                            },
-                            label = "progressAnim"
-                        ) { progress ->
-                            val displayValue = if (isDecimal) String.format("%.1f", progress)
-                            else progress.toInt().toString()
+                    }
 
-                            Text(
-                                text = displayValue,
-                                color = TextPrimary,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (totalProgress != null) {
-                            Text(
-                                text = "/ ${if (isDecimal) String.format("%.1f", totalProgress) else totalProgress.toInt()} $unitLabel",
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
-                        } else {
-                            Text(
-                                text = unitLabel,
-                                color = TextMuted,
-                                fontSize = 12.sp
-                            )
-                        }
+                    // Total progress suffix (flowing text, no badge box)
+                    if (totalProgress != null) {
+                        Text(
+                            text = "/ ${if (isDecimal) String.format("%.1f", totalProgress) else totalProgress.toInt()} $unitLabel",
+                            color = TextMuted,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(bottom = 5.dp)
+                        )
+                    } else if (unitLabel.isNotBlank()) {
+                        Text(
+                            text = unitLabel,
+                            color = TextMuted,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(bottom = 5.dp)
+                        )
                     }
                 }
+            }
 
-                // Plus button
-                StepperButton(
-                    icon = Icons.Default.Add,
-                    onClick = {
-                        val newVal = if (totalProgress != null)
-                            (currentProgress + step).coerceAtMost(totalProgress)
-                        else currentProgress + step
-                        onProgressChanged(newVal)
+            // Minimal floating plus button
+            UnboxedStepperButton(
+                icon = Icons.Default.Add,
+                onClick = {
+                    val newVal = if (totalProgress != null)
+                        (currentProgress + step).coerceAtMost(totalProgress)
+                    else currentProgress + step
+                    onProgressChanged(newVal)
+                }
+            )
+        }
+
+        // Unboxed scrub slider (seamless thin line directly on AMOLED canvas)
+        if (totalProgress != null && totalProgress > 0) {
+            val sliderProgress by animateFloatAsState(
+                targetValue = (currentProgress / totalProgress).toFloat().coerceIn(0f, 1f),
+                animationSpec = spring(stiffness = Spring.StiffnessLow),
+                label = "slider"
+            )
+
+            Slider(
+                value = sliderProgress,
+                onValueChange = { fraction ->
+                    val newProgress = (fraction * totalProgress)
+                    val rounded = if (isDecimal) {
+                        (newProgress * 10).toLong() / 10.0
+                    } else {
+                        newProgress.toLong().toDouble()
                     }
+                    onProgressChanged(rounded)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = AccentArctic,
+                    activeTrackColor = AccentArctic,
+                    inactiveTrackColor = Color(0x22FFFFFF)
                 )
-            }
-
-            // Quick slider for high chapter counts
-            if (totalProgress != null && totalProgress > 0) {
-                val sliderProgress by animateFloatAsState(
-                    targetValue = (currentProgress / totalProgress).toFloat().coerceIn(0f, 1f),
-                    animationSpec = spring(stiffness = Spring.StiffnessLow),
-                    label = "slider"
-                )
-
-                Slider(
-                    value = sliderProgress,
-                    onValueChange = { fraction ->
-                        val newProgress = (fraction * totalProgress)
-                        val rounded = if (isDecimal) {
-                            (newProgress * 10).toLong() / 10.0
-                        } else {
-                            newProgress.toLong().toDouble()
-                        }
-                        onProgressChanged(rounded)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = SliderDefaults.colors(
-                        thumbColor = AccentArctic,
-                        activeTrackColor = AccentArctic,
-                        inactiveTrackColor = DarkSurfaceCard
-                    )
-                )
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun StepperButton(
+private fun UnboxedStepperButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(46.dp)
             .clip(CircleShape)
-            .background(DarkSurfaceCard)
+            .background(Color(0x1AFFFFFF))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -257,7 +256,7 @@ private fun StepperButton(
             imageVector = icon,
             contentDescription = null,
             tint = AccentArctic,
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size(22.dp)
         )
     }
 }

@@ -36,10 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentViolet
-import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -58,6 +55,10 @@ val defaultPlatforms = listOf(
     GamePlatform("Mobile")
 )
 
+/**
+ * Unboxed Nuvio-style Game Progress Section:
+ * Floating hours typography, quick +/- steppers, and platform pills without heavy card boxes.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GameProgressCard(
@@ -68,69 +69,119 @@ fun GameProgressCard(
     modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Hours stepper
-        ChapterStepper(
-            label = "HOURS PLAYED",
-            unitLabel = "hrs",
-            currentProgress = hoursPlayed,
-            totalProgress = null,
-            onProgressChanged = onHoursChanged,
-            isDecimal = true,
-            step = 0.5
+        // Floating Hours Stepper Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x1AFFFFFF))
+                    .clickable { onHoursChanged((hoursPlayed - 1.0).coerceAtLeast(0.0)) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Remove,
+                    contentDescription = null,
+                    tint = AccentArctic,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // Unboxed Hours typography
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                AnimatedContent(
+                    targetState = hoursPlayed,
+                    transitionSpec = {
+                        if (targetState > initialState) {
+                            (slideInVertically { -it } + fadeIn()) togetherWith
+                                    (slideOutVertically { it } + fadeOut())
+                        } else {
+                            (slideInVertically { it } + fadeIn()) togetherWith
+                                    (slideOutVertically { -it } + fadeOut())
+                        }
+                    },
+                    label = "gameHoursAnim"
+                ) { hours ->
+                    Text(
+                        text = String.format("%.1f", hours),
+                        color = TextPrimary,
+                        fontSize = 36.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                }
+
+                Text(
+                    text = "hrs played",
+                    color = TextMuted,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(bottom = 5.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(CircleShape)
+                    .background(Color(0x1AFFFFFF))
+                    .clickable { onHoursChanged(hoursPlayed + 1.0) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = AccentArctic,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+        }
+
+        // Floating Platform Chips (Clean pills, no container box)
+        Text(
+            text = "PLATFORM",
+            color = TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 1.sp
         )
 
-        // Platform chips
-        GlassmorphicSurface(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "PLATFORM",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.5.sp
-                )
-
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    defaultPlatforms.forEach { platform ->
-                        val isSelected = platform.name == selectedPlatform
-
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { onPlatformSelected(platform.name) },
-                            label = {
-                                Text(
-                                    text = platform.name,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = DarkSurfaceElevated,
-                                labelColor = TextMuted,
-                                selectedContainerColor = AccentViolet.copy(alpha = 0.15f),
-                                selectedLabelColor = AccentViolet
-                            ),
-                            border = FilterChipDefaults.filterChipBorder(
-                                borderColor = GlassBorder,
-                                selectedBorderColor = AccentViolet.copy(alpha = 0.4f),
-                                enabled = true,
-                                selected = isSelected
-                            )
+            defaultPlatforms.forEach { platform ->
+                val isSelected = platform.name == selectedPlatform
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onPlatformSelected(platform.name) },
+                    label = {
+                        Text(
+                            text = platform.name,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                         )
-                    }
-                }
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AccentViolet.copy(alpha = 0.25f),
+                        selectedLabelColor = AccentViolet,
+                        containerColor = DarkSurfaceElevated,
+                        labelColor = TextMuted
+                    ),
+                    border = null,
+                    shape = RoundedCornerShape(20.dp)
+                )
             }
         }
     }
