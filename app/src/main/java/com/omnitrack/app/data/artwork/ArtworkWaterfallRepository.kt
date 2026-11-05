@@ -73,6 +73,12 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchBangumiCovers(title, type = 4) })
                     deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
                 }
+                MediaType.ALL, else -> {
+                    deferreds.add(async { fetchAniListCovers(title, isAnime = true) })
+                    deferreds.add(async { fetchTvMazeCovers(title) })
+                    deferreds.add(async { fetchSteamCovers(title) })
+                    deferreds.add(async { fetchBangumiCovers(title, type = 1) })
+                }
             }
 
             val results = deferreds.awaitAll().flatten()
