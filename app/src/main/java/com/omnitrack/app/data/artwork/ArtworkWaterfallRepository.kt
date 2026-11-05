@@ -73,7 +73,7 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchBangumiCovers(title, type = 4) })
                     deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
                 }
-                MediaType.ALL, else -> {
+                MediaType.ALL -> {
                     deferreds.add(async { fetchAniListCovers(title, isAnime = true) })
                     deferreds.add(async { fetchTvMazeCovers(title) })
                     deferreds.add(async { fetchSteamCovers(title) })
