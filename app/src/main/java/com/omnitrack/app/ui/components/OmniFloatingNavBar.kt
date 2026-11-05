@@ -1,9 +1,13 @@
 package com.omnitrack.app.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
@@ -38,7 +43,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -116,8 +120,13 @@ fun rememberOmniNavBarScrollState(): OmniNavBarScrollState {
 
 /**
  * Floating Liquid Glass Navigation Dock for OmniTrack.
- * Features scroll-aware collapse, liquid glass translucent surface,
- * spring-based fluid animations, and double-tap/re-tap actions (e.g. quick search trigger).
+ * Features:
+ * - Liquid glass translucent dark surface with subtle specular border.
+ * - Active tab expansion: ONLY the active tab displays its text label when expanded.
+ *   This guarantees all 4 buttons (Library, Discover, History, Settings) fit comfortably on any screen
+ *   with ZERO horizontal overflow or clipping.
+ * - Scroll-aware collapse: when scrolling down, collapses into an ultra-compact icon pill.
+ * - Double-tap / re-tap detection (380ms threshold) to trigger quick actions.
  */
 @Composable
 fun OmniFloatingNavBar(
@@ -129,20 +138,12 @@ fun OmniFloatingNavBar(
 ) {
     val labelFraction by animateFloatAsState(
         targetValue = scrollState.labelVisibility,
-        animationSpec = spring(stiffness = 300f),
+        animationSpec = spring(stiffness = 350f),
         label = "nav_label_fraction"
     )
 
-    // Dynamic horizontal padding: pill shrinks from 24dp to 64dp padding when labels collapse
-    val horizontalPadding by animateDpAsState(
-        targetValue = (24 + (40 * (1f - labelFraction))).dp,
-        animationSpec = spring(stiffness = 300f),
-        label = "nav_pill_padding"
-    )
-
     val pillHeight by animateDpAsState(
-        targetValue = (50 + (12 * labelFraction)).dp,
-        animationSpec = spring(stiffness = 300f),
+        targetValue = 54.dp,
         label = "nav_pill_height"
     )
 
@@ -154,29 +155,28 @@ fun OmniFloatingNavBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(bottom = 12.dp)
-            .padding(horizontal = horizontalPadding),
+            .padding(bottom = 12.dp, start = 16.dp, end = 16.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
         // Liquid Glass Pill Surface
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .wrapContentWidth()
                 .height(pillHeight)
                 .shadow(elevation = 20.dp, shape = CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(CircleShape)
                 .background(Color(0xE612141C)) // Liquid translucent dark surface
                 .border(width = 1.dp, color = Color(0x28FFFFFF), shape = CircleShape)
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 6.dp, vertical = 5.dp),
             contentAlignment = Alignment.Center
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 NavDestination.entries.forEach { destination ->
                     val isSelected = destination == selectedDestination
+                    val showLabel = isSelected && labelFraction > 0.5f
 
                     val iconTint by animateColorAsState(
                         targetValue = if (isSelected) AccentArctic else TextMuted,
@@ -190,6 +190,7 @@ fun OmniFloatingNavBar(
 
                     Row(
                         modifier = Modifier
+                            .height(44.dp)
                             .clip(CircleShape)
                             .background(pillBg)
                             .clickable(
@@ -203,7 +204,6 @@ fun OmniFloatingNavBar(
                                     lastTapTime = now
                                     lastTappedDest = destination
 
-                                    // If already active or rapid double tap, fire the re-select action (e.g. search trigger)
                                     if (isReTapOnActive || isDoubleTap) {
                                         scrollState.expand()
                                         onActiveTabReSelected?.invoke(destination)
@@ -212,7 +212,8 @@ fun OmniFloatingNavBar(
                                     }
                                 }
                             )
-                            .padding(horizontal = (10 * labelFraction + 8).dp, vertical = 6.dp),
+                            .padding(horizontal = if (showLabel) 14.dp else 12.dp)
+                            .animateContentSize(animationSpec = spring(stiffness = 400f)),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -220,17 +221,17 @@ fun OmniFloatingNavBar(
                             imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
                             contentDescription = destination.title,
                             tint = iconTint,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(20.dp)
                         )
 
-                        // Smooth label fade and collapse
-                        if (labelFraction > 0.15f) {
+                        // Only the active tab expands its label when dock is expanded
+                        if (showLabel) {
                             Text(
                                 text = destination.title,
-                                color = if (isSelected) AccentArctic else TextMuted,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                modifier = Modifier.alpha(labelFraction)
+                                color = AccentArctic,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
