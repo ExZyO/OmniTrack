@@ -49,9 +49,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -166,11 +169,13 @@ fun DetailScreen(
                             .fillMaxWidth()
                             .height(340.dp)
                     ) {
-                        // Banner background image - 100% clean, vibrant, unshaded original art
+                        // Banner background image with direct pixel feathering (zero vignette!)
                         AsyncImage(
                             model = item.bannerUrl ?: losslessCover,
                             contentDescription = null,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .featherArtwork(),
                             contentScale = ContentScale.Crop
                         )
 
@@ -531,4 +536,27 @@ fun DetailScreen(
             }
         }
     }
+}
+
+/**
+ * Direct pixel alpha masking using quintic smoothstep curve and DstIn compositing.
+ * Feathers the lower 45% of the banner directly into the background canvas with zero top/side shading.
+ */
+private fun Modifier.featherArtwork(): Modifier = graphicsLayer {
+    compositingStrategy = CompositingStrategy.Offscreen
+}.drawWithCache {
+    val fade = Brush.verticalGradient(
+        colorStops = Array(17) { index ->
+            val t = index / 16f
+            val progress = t * t * t * (t * (t * 6f - 15f) + 10f)
+            t to Color.Black.copy(alpha = 1f - progress)
+        },
+        startY = size.height * 0.55f,
+        endY = size.height,
+    )
+    onDrawWithContent {
+        drawContent()
+        drawRect(fade, blendMode = BlendMode.DstIn)
+    }
+}
 }
