@@ -44,13 +44,18 @@ fun rememberCoverDominantColor(
                 val loader = ImageLoader(context)
                 val request = ImageRequest.Builder(context)
                     .data(lossless)
-                    .allowHardware(false) // Required to read bitmap pixels for Palette
                     .build()
 
                 val result = loader.execute(request)
                 if (result is SuccessResult) {
-                    val bitmap = result.image.toBitmap()
-                    val palette = Palette.from(bitmap)
+                    val rawBitmap = result.image.toBitmap()
+                    val softwareBitmap = if (rawBitmap.config == Bitmap.Config.HARDWARE) {
+                        rawBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    } else {
+                        rawBitmap
+                    }
+
+                    val palette = Palette.from(softwareBitmap)
                         .maximumColorCount(16)
                         .generate()
 

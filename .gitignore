@@ -14,3 +14,7 @@
 *.aab
 *.ap_
 .kotlin
+Other/
+Other/*
+release-output/
+temp_release/
