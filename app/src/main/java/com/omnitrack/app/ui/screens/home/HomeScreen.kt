@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MediaTypeTabRow
 import com.omnitrack.app.ui.components.StatusFilterChips
@@ -49,6 +51,7 @@ import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.delay
 
 @Composable
@@ -58,6 +61,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    var showDiagnostics by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -65,7 +69,7 @@ fun HomeScreen(
             .background(AmoledBlack)
             .statusBarsPadding()
     ) {
-        // Blended Header: Title + Ambient Icon Actions
+        // Blended Header: Title + Ambient Actions (Search + Diagnostics)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -89,19 +93,39 @@ fun HomeScreen(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(DarkSurfaceElevated),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = TextPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Diagnostics Sheet trigger
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(DarkSurfaceElevated)
+                        .clickable { showDiagnostics = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BugReport,
+                        contentDescription = "Diagnostics",
+                        tint = AccentArctic,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Search trigger
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(DarkSurfaceElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
 
@@ -185,12 +209,23 @@ fun HomeScreen(
                     ) {
                         MediaCard(
                             item = item,
-                            onCardClick = { onItemClick(item.id) },
-                            onQuickProgress = { viewModel.incrementProgress(item) }
+                            onCardClick = {
+                                AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
+                                onItemClick(item.id)
+                            },
+                            onQuickProgress = {
+                                AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
+                                viewModel.incrementProgress(item)
+                            }
                         )
                     }
                 }
             }
+        }
+
+        // Live Diagnostics & System Logs Sheet
+        if (showDiagnostics) {
+            DiagnosticsSheet(onDismiss = { showDiagnostics = false })
         }
     }
 }
