@@ -1,0 +1,35 @@
+package com.omnitrack.app.data.db.entity
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.TrackingStatus
+
+@Entity(tableName = "media_items")
+data class MediaItemEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val title: String,
+    val nativeTitle: String? = null,
+    val synopsis: String? = null,
+    val coverUrl: String,
+    val bannerUrl: String? = null,
+    val mediaType: MediaType,
+    val status: TrackingStatus = TrackingStatus.IN_PROGRESS,
+    val currentProgress: Double = 0.0,
+    val totalProgress: Double? = null,
+    val userRating: Float? = null,
+    val platform: String? = null,
+    val categoryNames: String = "",
+    val anilistId: Long? = null,
+    val malId: Long? = null,
+    val traktId: Long? = null,
+    val simklId: Long? = null,
+    val tmdbId: Long? = null,
+    val vndbId: String? = null,
+    val comickId: String? = null,
+    val hardcoverId: String? = null,
+    val bangumiId: Long? = null,
+    val igdbId: Long? = null,
+    val lastUpdated: Long = System.currentTimeMillis()
+)
