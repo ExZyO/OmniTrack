@@ -559,4 +559,3 @@ private fun Modifier.featherArtwork(): Modifier = graphicsLayer {
         drawRect(fade, blendMode = BlendMode.DstIn)
     }
 }
-}
