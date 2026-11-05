@@ -54,6 +54,15 @@ jobs:
         run: |
           mkdir -p release-output
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          cat <<EOF > release-output/version.json
+          {
+            "version": "${{ steps.release_info.outputs.tag }}",
+            "versionCode": ${{ github.run_number }},
+            "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}.apk",
+            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: In-app one-tap auto-update engine, unboxed Nuvio Noir progress controls, and Chimanew artwork waterfall."
+          }
+          EOF
+          cp release-output/version.json version.json
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
@@ -67,22 +76,25 @@ jobs:
         with:
           tag_name: ${{ steps.release_info.outputs.tag }}
           name: OmniTrack ${{ steps.release_info.outputs.tag }}
-          files: release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          files: |
+            release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+            release-output/version.json
           body: |
             ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
 
             ### ✨ What's in this build (Non-Technical Summary)
-            - Seamless edge-to-edge UI with ambient dynamic cover glow that bleeds into AMOLED black.
-            - Integrated Artwork Waterfall Picker: Discover alternative covers from MangaDex, AniList, and Bangumi, or pick from device gallery.
-            - Tactile +1 tracking action on library posters with spring physics.
-            - Direct installation ready: signed release APK.
+            - **In-App Auto-Update Engine:** Seamless background version checking ported from Gemini EPUB & Chimanew. Whenever an update drops, a one-tap update prompt appears — tapping it downloads and launches the Android installer automatically, zero manual GitHub downloading needed!
+            - **Unboxed Nuvio Noir Progress Controls:** Removed all boxed containers and chunky cards around episode/chapter trackers. Large floating numbers roll vertically with mechanical spring animations directly on the AMOLED canvas.
+            - **Seamless Movie & Game Controls:** Unboxed clean checkmark toggle for movies and floating playtime counters for games with platform pills.
+            - **Chimanew Cover Waterfall:** Multi-source cover discovery (MangaDex, AniList, Bangumi) with lossless uncompressed artwork.
 
             ### 🔧 Technical Details
             - **Commit:** ${{ github.sha }}
             - **Build Type:** Release (`assembleRelease` with signingConfig)
-            - **Image Engine:** Coil 3.1.0 with LosslessCoverMapper and Palette color extraction
+            - **Update System:** Concurrent multi-source query (`releases/latest` + raw `version.json` with cache-busting timestamp), OkHttp streaming downloader, and FileProvider intent launcher.
+            - **Image Engine:** Coil 3.1.0 with LosslessCoverMapper and AndroidX Palette color bloom
             - **Network Layer:** OkHttp 4.12.0 with async coroutines
-            - **Database:** Room 2.6.1 SQLite
+            - **Database:** Room 2.6.1 SQLite with WAL enabled
           draft: false
           prerelease: false
         env:

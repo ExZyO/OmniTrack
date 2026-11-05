@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -40,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -47,11 +49,15 @@ import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MediaTypeTabRow
 import com.omnitrack.app.ui.components.StatusFilterChips
+import com.omnitrack.app.ui.components.UpdateBottomSheet
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.updater.AppRelease
+import com.omnitrack.app.updater.AppUpdateChecker
 import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.delay
 
@@ -62,8 +68,20 @@ fun HomeScreen(
     onItemClick: (Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     var showDiagnostics by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<AppRelease?>(null) }
+    var showUpdateSheet by remember { mutableStateOf(false) }
+
+    // Automatic non-blocking background update check (Ported from Gemini EPUB & Chimanew)
+    LaunchedEffect(Unit) {
+        val release = AppUpdateChecker().checkForUpdate(context)
+        if (release != null) {
+            availableUpdate = release
+            showUpdateSheet = true
+        }
+    }
 
     Column(
         modifier = modifier
@@ -71,7 +89,7 @@ fun HomeScreen(
             .background(AmoledBlack)
             .statusBarsPadding()
     ) {
-        // Blended Header: Title + Ambient Actions (Search + Diagnostics)
+        // Blended Header: Title + Ambient Actions (Update Pill + Search + Diagnostics)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -96,6 +114,37 @@ fun HomeScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Update Available Pill
+                if (availableUpdate != null) {
+                    Box(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(19.dp))
+                            .background(AccentJade.copy(alpha = 0.2f))
+                            .clickable { showUpdateSheet = true }
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = "Update Available",
+                                tint = AccentJade,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "v${availableUpdate?.version}",
+                                color = AccentJade,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
                 // Diagnostics Sheet trigger
                 Box(
                     modifier = Modifier
@@ -227,7 +276,21 @@ fun HomeScreen(
 
         // Live Diagnostics & System Logs Sheet
         if (showDiagnostics) {
-            DiagnosticsSheet(onDismiss = { showDiagnostics = false })
+            DiagnosticsSheet(
+                onDismiss = { showDiagnostics = false },
+                onUpdateFound = {
+                    availableUpdate = it
+                    showUpdateSheet = true
+                }
+            )
+        }
+
+        // In-App One-Tap Update Bottom Sheet
+        if (showUpdateSheet && availableUpdate != null) {
+            UpdateBottomSheet(
+                release = availableUpdate!!,
+                onDismiss = { showUpdateSheet = false }
+            )
         }
     }
 }

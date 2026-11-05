@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SystemUpdate
+import com.omnitrack.app.updater.AppRelease
+import com.omnitrack.app.updater.AppUpdateChecker
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -73,6 +76,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DiagnosticsSheet(
     onDismiss: () -> Unit,
+    onUpdateFound: (AppRelease) -> Unit = {},
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
     val context = LocalContext.current
@@ -221,6 +225,32 @@ fun DiagnosticsSheet(
                     Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Share", fontSize = 12.sp)
+                }
+
+                // Update Check Button
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            Toast.makeText(context, "Checking for updates...", Toast.LENGTH_SHORT).show()
+                            val release = AppUpdateChecker().checkForUpdate(context)
+                            if (release != null) {
+                                onUpdateFound(release)
+                                sheetState.hide()
+                                onDismiss()
+                            } else {
+                                Toast.makeText(context, "OmniTrack is up to date!", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentJade.copy(alpha = 0.15f)),
+                    colors = ButtonDefaults.textButtonColors(contentColor = AccentJade)
+                ) {
+                    Icon(imageVector = Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Update", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
 
                 // Clear button
