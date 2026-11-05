@@ -39,11 +39,22 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Determine Release Tag
+        id: release_info
+        run: |
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="v1.0.0-b${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
       - name: Prepare Release Artifacts
         run: |
           mkdir -p release-output
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-release.apk
-          cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-v1.0.0-b${{ github.run_number }}.apk
+          cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
@@ -52,32 +63,29 @@ jobs:
           path: release-output/OmniTrack-release.apk
           if-no-files-found: error
 
-      - name: Generate Release Notes & Publish GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || format('v1.0.0-b{0}', github.run_number) }}
-          name: ${{ github.event.inputs.tag && format('OmniTrack {0}', github.event.inputs.tag) || format('OmniTrack v1.0.0 (Build #{0})', github.run_number) }}
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: OmniTrack ${{ steps.release_info.outputs.tag }}
           files: |
             release-output/OmniTrack-release.apk
-            release-output/OmniTrack-v1.0.0-b${{ github.run_number }}.apk
+            release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
           body: |
-            ## 📱 OmniTrack Release Build #${{ github.run_number }}
+            ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
 
             ### ✨ What's in this build (Non-Technical Summary)
-            - Latest update compiled directly from commit `${{ github.sha }}`.
-            - Includes all recent UI fluidity enhancements, seamless edge-to-edge layouts, and tracking improvements.
-            - Ready for direct installation on Android devices (signed with installable certificate).
+            - Seamless edge-to-edge UI with ambient dynamic cover glow that bleeds into AMOLED black.
+            - Integrated Artwork Waterfall Picker: Discover alternative covers from MangaDex, AniList, and Bangumi, or pick from device gallery.
+            - Tactile +1 tracking action on library posters with spring physics.
+            - Direct installation ready: signed release APK.
 
             ### 🔧 Technical Details
-            - **Commit:** `${{ github.sha }}`
-            - **Branch:** `${{ github.ref_name }}`
-            - **Target SDK:** 35 | **Min SDK:** 26 | **JDK:** 17
-            - **Build Type:** Optimized Release (`assembleRelease`)
-            - **Engine:** Jetpack Compose + Material 3 + Room SQLite + Coil 3
-            - **Changelog:**
-            ```text
-            ${{ github.event.head_commit.message }}
-            ```
+            - **Commit:** ${{ github.sha }}
+            - **Build Type:** Release (`assembleRelease` with signingConfig)
+            - **Image Engine:** Coil 3.1.0 with LosslessCoverMapper and Palette color extraction
+            - **Network Layer:** OkHttp 4.12.0 with async coroutines
+            - **Database:** Room 2.6.1 SQLite
           draft: false
           prerelease: false
         env:
