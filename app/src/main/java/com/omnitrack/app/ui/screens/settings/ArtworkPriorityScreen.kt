@@ -2,6 +2,7 @@ package com.omnitrack.app.ui.screens.settings
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -253,25 +254,61 @@ private fun CategoryWaterfallList(
         mutableStateListOf<String>().apply { addAll(initialSources) }
     }
 
-    var draggingIdx by remember { mutableStateOf<Int?>(null) }
+    var activeDragIdx by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var itemHeightPx by remember { mutableFloatStateOf(with(density) { 70.dp.toPx() }) }
+    var itemHeightPx by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
 
-    LazyColumn(
+    val currentTargetSlot = activeDragIdx?.let { startIdx ->
+        val step = (dragOffsetY / itemHeightPx).roundToInt()
+        (startIdx + step).coerceIn(0, currentSources.lastIndex)
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        itemsIndexed(
-            items = currentSources,
-            key = { _, source -> "${category.name}_$source" }
-        ) { idx, source ->
-            val isDragging = draggingIdx == idx
+        currentSources.forEachIndexed { idx, source ->
+            val isDragging = activeDragIdx == idx
             val isEnabled = source !in disabledSources
 
-            val translationY = if (isDragging) dragOffsetY else 0f
-            val zIndexVal = if (isDragging) 2f else 0f
+            val shift = when {
+                activeDragIdx == null || currentTargetSlot == null -> 0f
+                isDragging -> 0f
+                // When dragging downward: items between start+1 and target shift UP
+                currentTargetSlot > activeDragIdx!! && idx > activeDragIdx!! && idx <= currentTargetSlot -> -itemHeightPx
+                // When dragging upward: items between target and start-1 shift DOWN
+                currentTargetSlot < activeDragIdx!! && idx < activeDragIdx!! && idx >= currentTargetSlot -> itemHeightPx
+                else -> 0f
+            }
+
+            val animatedShift by animateFloatAsState(
+                targetValue = shift,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                ),
+                label = "slotShift"
+            )
+
+            val translationY = if (isDragging) dragOffsetY else animatedShift
+            val zIndexVal = if (isDragging) 10f else 1f
+
+            val displayRank = when {
+                !isEnabled -> "OFF"
+                isDragging -> currentTargetSlot?.let { "#${it + 1}" } ?: "#${idx + 1}"
+                activeDragIdx != null && currentTargetSlot != null -> {
+                    val provisionalIdx = when {
+                        currentTargetSlot > activeDragIdx!! && idx > activeDragIdx!! && idx <= currentTargetSlot -> idx - 1
+                        currentTargetSlot < activeDragIdx!! && idx < activeDragIdx!! && idx >= currentTargetSlot -> idx + 1
+                        else -> idx
+                    }
+                    if (provisionalIdx == 0) "#1 PRI" else "#${provisionalIdx + 1}"
+                }
+                idx == 0 -> "#1 PRI"
+                else -> "#${idx + 1}"
+            }
 
             Row(
                 modifier = Modifier
@@ -280,37 +317,40 @@ private fun CategoryWaterfallList(
                     .graphicsLayer {
                         this.translationY = translationY
                         if (isDragging) {
-                            scaleX = 1.02f
-                            scaleY = 1.02f
-                            shadowElevation = 14f
+                            scaleX = 1.03f
+                            scaleY = 1.03f
+                            shadowElevation = 18f
                         }
                     }
                     .onGloballyPositioned { coords ->
-                        if (itemHeightPx == 0f || !isDragging) {
-                            itemHeightPx = coords.size.height.toFloat().coerceAtLeast(1f)
+                        if (coords.size.height > 0 && !isDragging) {
+                            itemHeightPx = coords.size.height.toFloat()
                         }
                     }
-                    .drawBehind {
-                        val strokeW = 1.dp.toPx()
-                        val dividerColor = if (isDragging) {
-                            AccentArctic.copy(alpha = 0.35f)
-                        } else {
-                            Color.White.copy(alpha = 0.07f)
-                        }
-                        drawLine(
-                            color = dividerColor,
-                            start = Offset(0f, size.height),
-                            end = Offset(size.width, size.height),
-                            strokeWidth = strokeW
-                        )
-                    }
+                    .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (isDragging) {
-                            Color(0xFF141720)
+                            Color(0xFF161B26)
                         } else {
                             Color.Transparent
                         }
                     )
+                    .border(
+                        width = 1.dp,
+                        color = if (isDragging) AccentArctic.copy(alpha = 0.50f) else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .drawBehind {
+                        if (!isDragging) {
+                            val strokeW = 1.dp.toPx()
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.08f),
+                                start = Offset(0f, size.height),
+                                end = Offset(size.width, size.height),
+                                strokeWidth = strokeW
+                            )
+                        }
+                    }
                     .padding(vertical = 12.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -344,21 +384,19 @@ private fun CategoryWaterfallList(
                         .background(
                             when {
                                 !isEnabled -> Color.White.copy(alpha = 0.04f)
-                                idx == 0 -> AccentJade.copy(alpha = 0.16f)
+                                displayRank.contains("PRI") -> AccentJade.copy(alpha = 0.16f)
+                                isDragging -> AccentArctic.copy(alpha = 0.20f)
                                 else -> Color.White.copy(alpha = 0.06f)
                             }
                         )
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
                     Text(
-                        text = when {
-                            !isEnabled -> "OFF"
-                            idx == 0 -> "#1 PRI"
-                            else -> "#${idx + 1}"
-                        },
+                        text = displayRank,
                         color = when {
                             !isEnabled -> TextMuted
-                            idx == 0 -> AccentJade
+                            displayRank.contains("PRI") -> AccentJade
+                            isDragging -> AccentArctic
                             else -> TextSecondary
                         },
                         fontSize = 10.sp,
@@ -401,38 +439,30 @@ private fun CategoryWaterfallList(
                         .pointerInput(idx) {
                             detectDragGestures(
                                 onDragStart = {
-                                    draggingIdx = idx
+                                    activeDragIdx = idx
                                     dragOffsetY = 0f
                                 },
                                 onDrag = { change, dragAmount ->
                                     // CRITICAL: Consume event so horizontal pager NEVER steals gesture!
                                     change.consume()
                                     dragOffsetY += dragAmount.y
-
-                                    val current = draggingIdx ?: return@detectDragGestures
-                                    val step = (dragOffsetY / itemHeightPx).roundToInt()
-                                    val target = (current + step).coerceIn(0, currentSources.lastIndex)
-
-                                    if (target != current) {
-                                        val movedItem = currentSources.removeAt(current)
-                                        currentSources.add(target, movedItem)
-                                        draggingIdx = target
-                                        dragOffsetY -= (target - current) * itemHeightPx
-                                    }
                                 },
                                 onDragEnd = {
-                                    draggingIdx = null
-                                    dragOffsetY = 0f
-                                    coroutineScope.launch {
-                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                    val start = activeDragIdx
+                                    val target = currentTargetSlot
+                                    if (start != null && target != null && start != target) {
+                                        val movedItem = currentSources.removeAt(start)
+                                        currentSources.add(target, movedItem)
+                                        coroutineScope.launch {
+                                            prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                        }
                                     }
+                                    activeDragIdx = null
+                                    dragOffsetY = 0f
                                 },
                                 onDragCancel = {
-                                    draggingIdx = null
+                                    activeDragIdx = null
                                     dragOffsetY = 0f
-                                    coroutineScope.launch {
-                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
-                                    }
                                 }
                             )
                         },

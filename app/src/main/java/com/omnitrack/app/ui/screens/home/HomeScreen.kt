@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,7 +103,7 @@ fun HomeScreen(
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
 
-    var currentNavDestination by remember { mutableStateOf(NavDestination.LIBRARY) }
+    var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.LIBRARY) }
     var showDiagnostics by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppRelease?>(null) }
     var showUpdateSheet by remember { mutableStateOf(false) }
