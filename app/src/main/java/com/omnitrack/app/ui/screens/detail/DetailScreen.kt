@@ -287,12 +287,8 @@ fun DetailScreen(
                                         fontWeight = FontWeight.Black,
                                         letterSpacing = 1.sp
                                     )
-                                    Text(text = "•", color = TextMuted, fontSize = 11.sp)
-                                    if (item.releaseYear != null) {
-                                        Text(text = "${item.releaseYear}", color = TextSecondary, fontSize = 11.5.sp)
-                                        Text(text = "•", color = TextMuted, fontSize = 11.sp)
-                                    }
                                     if (item.platform != null) {
+                                        Text(text = " • ", color = TextMuted, fontSize = 11.sp)
                                         Text(text = item.platform, color = TextSecondary, fontSize = 11.5.sp)
                                     }
                                 }
