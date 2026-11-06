@@ -12,7 +12,7 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 
 @Database(
     entities = [MediaItemEntity::class, CategoryEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

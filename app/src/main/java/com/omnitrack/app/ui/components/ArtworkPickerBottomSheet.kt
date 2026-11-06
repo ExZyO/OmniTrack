@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -76,8 +79,10 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.ArtworkCandidate
 import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
+import com.omnitrack.app.data.artwork.CoverStore
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
@@ -95,24 +100,36 @@ fun ArtworkPickerBottomSheet(
     title: String,
     mediaType: MediaType,
     currentCoverUrl: String,
+    mediaId: Long = 0,
+    currentRole: String = "DEFAULT",
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
+    onRoleSelected: ((String) -> Unit)? = null,
     repository: ArtworkWaterfallRepository = remember { ArtworkWaterfallRepository() },
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) }
     var candidates by remember { mutableStateOf<List<ArtworkCandidate>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
     var customUrlInput by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val coverStore = remember { CoverStore(context) }
 
     // Activity result launcher for picking image from device gallery
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            onCoverSelected(uri.toString())
-            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+            scope.launch {
+                val savedPath = coverStore.saveCustomCover(mediaId, uri)
+                if (savedPath != null) {
+                    onCoverSelected(savedPath)
+                } else {
+                    onCoverSelected(uri.toString())
+                }
+                sheetState.hide()
+            }.invokeOnCompletion { onDismiss() }
         }
     }
 
@@ -151,7 +168,7 @@ fun ArtworkPickerBottomSheet(
             ) {
                 Column {
                     Text(
-                        text = "Change Artwork",
+                        text = "Customize Artwork",
                         color = TextPrimary,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
@@ -180,7 +197,7 @@ fun ArtworkPickerBottomSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Mode Selector Tabs (Search / Direct URL / Device Gallery)
+            // Mode Selector Tabs (Live Search / Direct URL / Gallery / Roles)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -190,9 +207,10 @@ fun ArtworkPickerBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val tabs = listOf(
-                    Triple(0, "Live Search", Icons.Default.Search),
-                    Triple(1, "Direct URL", Icons.Default.Link),
-                    Triple(2, "Gallery", Icons.Default.PhotoLibrary)
+                    Triple(0, "Search", Icons.Default.Search),
+                    Triple(1, "URL", Icons.Default.Link),
+                    Triple(2, "Gallery", Icons.Default.PhotoLibrary),
+                    Triple(3, "Roles", Icons.Default.Tune)
                 )
 
                 tabs.forEach { (index, label, icon) ->
@@ -228,13 +246,13 @@ fun ArtworkPickerBottomSheet(
                             imageVector = icon,
                             contentDescription = null,
                             tint = tabColor,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(13.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = label,
                             color = tabColor,
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
@@ -262,7 +280,7 @@ fun ArtworkPickerBottomSheet(
                                 modifier = Modifier.size(28.dp)
                             )
                             Text(
-                                text = "Querying MangaDex, AniList & Bangumi...",
+                                text = "Querying AniList, MangaDex & Bangumi...",
                                 color = TextMuted,
                                 fontSize = 12.sp
                             )
@@ -469,7 +487,7 @@ fun ArtworkPickerBottomSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Select any local artwork, screenshot, or fanart from your photo gallery.",
+                        text = "Select any local artwork, screenshot, or fanart. It will be losslessly encoded as WebP in private storage.",
                         color = TextMuted,
                         fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -494,6 +512,82 @@ fun ArtworkPickerBottomSheet(
                             color = AmoledBlack,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+            }
+
+            // Tab 3: Artwork Role Swapping (Chimanew Parity)
+            if (selectedTab == 3) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Artwork Role Assignment",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Customize how cover and banner artworks are paired and displayed for this entry.",
+                        color = TextMuted,
+                        fontSize = 12.5.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    val roleOptions = listOf(
+                        Triple("DEFAULT", "Default Roles", "Cover as Poster, Banner as Backdrop"),
+                        Triple("COVER_AS_BANNER", "Cover as Banner", "Crop and ambient-fill cover across widescreen banner"),
+                        Triple("BANNER_AS_COVER", "Banner as Cover", "Frame horizontal banner into 2:3 vertical poster"),
+                        Triple("SYNCHRONIZED", "Synchronized Art", "Use a single unified image across both slots")
+                    )
+
+                    roleOptions.forEach { (roleKey, roleTitle, roleDesc) ->
+                        val isSelected = currentRole == roleKey
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) AccentArctic.copy(alpha = 0.14f) else DarkSurfaceElevated)
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) AccentArctic else GlassBorder,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    onRoleSelected?.invoke(roleKey)
+                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = roleTitle,
+                                    color = if (isSelected) AccentArctic else TextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = roleDesc,
+                                    color = TextMuted,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = AccentArctic,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

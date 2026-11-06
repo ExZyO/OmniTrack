@@ -20,5 +20,8 @@ data class MediaCardSummary(
     val currentProgress: Double = 0.0,
     val totalProgress: Double? = null,
     val userRating: Float? = null,
+    val customCoverPath: String? = null,
+    val customBannerPath: String? = null,
+    val artworkRole: String = "DEFAULT",
     val lastUpdated: Long = System.currentTimeMillis()
 )

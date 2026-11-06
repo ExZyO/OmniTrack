@@ -42,5 +42,8 @@ data class MediaItemEntity(
     val hardcoverId: String? = null,
     val bangumiId: Long? = null,
     val igdbId: Long? = null,
+    val customCoverPath: String? = null,
+    val customBannerPath: String? = null,
+    val artworkRole: String = "DEFAULT",
     val lastUpdated: Long = System.currentTimeMillis()
 )

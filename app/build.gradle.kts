@@ -92,6 +92,9 @@ dependencies {
     // Haze for Liquid Glass Backdrop Blur
     implementation(libs.haze)
 
+    // Jetpack DataStore Preferences
+    implementation(libs.androidx.datastore.preferences)
+
     // Coroutines & Serialization
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)

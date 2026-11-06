@@ -98,6 +98,25 @@ class DetailViewModel(
         }
     }
 
+    fun updateCustomCoverPath(path: String?) {
+        viewModelScope.launch {
+            repository.updateCustomCover(_mediaId.value, path)
+        }
+    }
+
+    fun updateArtworkRole(role: String) {
+        viewModelScope.launch {
+            repository.updateArtworkRole(_mediaId.value, role)
+        }
+    }
+
+    fun updateRating(rating: Float?) {
+        viewModelScope.launch {
+            val item = uiState.value.item ?: return@launch
+            repository.updateMedia(item.copy(userRating = rating))
+        }
+    }
+
     fun updateStatus(status: TrackingStatus) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch

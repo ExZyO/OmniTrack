@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.screens.home.views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,23 +24,39 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.BuildConfig
 import com.omnitrack.app.data.db.dto.MediaCardSummary
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.BannerSizing
+import com.omnitrack.app.data.preferences.DetailsBackdropStyle
+import com.omnitrack.app.data.preferences.DetailsPagePresentation
+import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -50,6 +67,7 @@ import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsView(
@@ -58,6 +76,15 @@ fun SettingsView(
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val prefManager = remember { PreferenceManager(context) }
+    val scope = rememberCoroutineScope()
+    val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+
+    var selectedPriorityCategory by remember { mutableStateOf(MediaType.ANIME) }
+    val currentPrioritySources by prefManager.getArtSourcePriority(selectedPriorityCategory)
+        .collectAsState(initial = PreferenceManager.getDefaultSourcesFor(selectedPriorityCategory))
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -115,36 +142,210 @@ fun SettingsView(
             }
         }
 
-        // Section: Presentation & Display
+        // Section: Presentation & Display (Chimanew & Nuvio Parity)
         SettingsSection(title = "VISUAL PRESENTATION & HERO") {
             GroupedSettingRow(
                 icon = Icons.Default.Image,
                 iconTint = AccentArctic,
                 title = "Backdrop Style",
-                subtitle = "Cinematic Blur (Gentle ambient glow + zero vignette)",
-                badge = "ACTIVE"
+                subtitle = "${presentationSettings.fallbackBackgroundStyle.displayName} — ${presentationSettings.fallbackBackgroundStyle.description}",
+                badge = "CYCLE",
+                onClick = {
+                    val next = when (presentationSettings.fallbackBackgroundStyle) {
+                        FallbackBackgroundStyle.CINEMATIC_BLUR -> FallbackBackgroundStyle.DOMINANT_COLOR
+                        FallbackBackgroundStyle.DOMINANT_COLOR -> FallbackBackgroundStyle.SOLID_BLACK
+                        FallbackBackgroundStyle.SOLID_BLACK -> FallbackBackgroundStyle.CINEMATIC_BLUR
+                    }
+                    scope.launch { prefManager.updateFallbackBackgroundStyle(next) }
+                }
             )
             SectionDivider()
             GroupedSettingRow(
                 icon = Icons.Default.Settings,
                 iconTint = AccentJade,
                 title = "Details Presentation",
-                subtitle = "Nuvio Hero (Unblocked banner + centered info pills)"
+                subtitle = "${presentationSettings.detailsPagePresentation.displayName} — ${presentationSettings.detailsPagePresentation.description}",
+                badge = "TOGGLE",
+                onClick = {
+                    val next = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                        DetailsPagePresentation.CLASSIC
+                    } else {
+                        DetailsPagePresentation.NUVIO_HERO
+                    }
+                    scope.launch { prefManager.updateDetailsPagePresentation(next) }
+                }
             )
             SectionDivider()
             GroupedSettingRow(
                 icon = Icons.Default.Image,
                 iconTint = AccentGold,
                 title = "Banner Sizing",
-                subtitle = "Cinema Showcase Card (Widescreen + Ambient Aura)"
+                subtitle = "${presentationSettings.bannerSizing.displayName} — ${presentationSettings.bannerSizing.description}",
+                badge = "TOGGLE",
+                onClick = {
+                    val next = if (presentationSettings.bannerSizing == BannerSizing.CINEMA_SHOWCASE) {
+                        BannerSizing.FULL_BLEED
+                    } else {
+                        BannerSizing.CINEMA_SHOWCASE
+                    }
+                    scope.launch { prefManager.updateBannerSizing(next) }
+                }
             )
             SectionDivider()
             GroupedSettingRow(
                 icon = Icons.Default.Image,
                 iconTint = AccentArctic,
                 title = "Backdrop Transition",
-                subtitle = "Cinematic Fade (17-stop quintic smoothstep curve)"
+                subtitle = "${presentationSettings.detailsBackdropStyle.displayName} — ${presentationSettings.detailsBackdropStyle.description}",
+                badge = "TOGGLE",
+                onClick = {
+                    val next = if (presentationSettings.detailsBackdropStyle == DetailsBackdropStyle.CINEMATIC_FADE) {
+                        DetailsBackdropStyle.SOLID_AMOLED
+                    } else {
+                        DetailsBackdropStyle.CINEMATIC_FADE
+                    }
+                    scope.launch { prefManager.updateDetailsBackdropStyle(next) }
+                }
             )
+        }
+
+        // Section: Art Source Priority Matrix (Chimanew Parity)
+        SettingsSection(title = "ART SOURCE PRIORITY & WATERFALL") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Configure upstream metadata & uncompressed artwork fallbacks per category:",
+                    fontSize = 12.sp,
+                    color = TextMuted
+                )
+
+                // Category selection chips
+                val categories = listOf(
+                    MediaType.ANIME,
+                    MediaType.MANGA,
+                    MediaType.NOVEL,
+                    MediaType.SHOW,
+                    MediaType.MOVIE,
+                    MediaType.GAME,
+                    MediaType.VISUAL_NOVEL
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    categories.forEach { cat ->
+                        val isSelected = selectedPriorityCategory == cat
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(8.dp))
+                                .clickable { selectedPriorityCategory = cat }
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = cat.displayName,
+                                color = if (isSelected) AccentArctic else TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+
+                // Active Priority Chain
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AmoledBlack.copy(alpha = 0.5f))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    currentPrioritySources.forEachIndexed { idx, source ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(if (idx == 0) AccentJade.copy(alpha = 0.2f) else DarkSurfaceElevated),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}",
+                                        color = if (idx == 0) AccentJade else TextMuted,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = source,
+                                    color = if (idx == 0) TextPrimary else TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                            if (idx == 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(AccentJade.copy(alpha = 0.15f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("PRIMARY", color = AccentJade, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Cycle Priority Button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(DarkSurfaceElevated)
+                        .clickable {
+                            if (currentPrioritySources.size > 1) {
+                                val rotated = currentPrioritySources.drop(1) + currentPrioritySources.take(1)
+                                scope.launch {
+                                    prefManager.updateArtSourcePriority(selectedPriorityCategory, rotated)
+                                }
+                            }
+                        }
+                        .padding(vertical = 8.dp, horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = AccentArctic,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Rotate Priority Order",
+                        color = AccentArctic,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
 
         // Section: Updates & Maintenance
@@ -180,7 +381,7 @@ fun SettingsView(
                 icon = Icons.Default.Storage,
                 iconTint = AccentArctic,
                 title = "Local Database Engine",
-                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL)"
+                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v3"
             )
             SectionDivider()
             GroupedSettingRow(

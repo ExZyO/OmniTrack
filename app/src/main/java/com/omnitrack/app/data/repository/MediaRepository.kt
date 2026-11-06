@@ -40,6 +40,10 @@ class MediaRepository(
 
     suspend fun updateCover(id: Long, coverUrl: String) = mediaDao.updateCover(id, coverUrl)
 
+    suspend fun updateCustomCover(id: Long, path: String?) = mediaDao.updateCustomCoverPath(id, path)
+
+    suspend fun updateArtworkRole(id: Long, role: String) = mediaDao.updateArtworkRole(id, role)
+
     suspend fun deleteMedia(item: MediaItemEntity) = mediaDao.deleteMedia(item)
 
     suspend fun insertCategory(category: CategoryEntity): Long = categoryDao.insertCategory(category)
