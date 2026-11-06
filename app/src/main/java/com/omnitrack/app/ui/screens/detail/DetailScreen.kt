@@ -127,7 +127,7 @@ fun DetailScreen(
     val animatedDragOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "powerampSwipe"
+        label = "horizontalSwipe"
     )
 
     LaunchedEffect(item?.id) {
@@ -175,7 +175,7 @@ fun DetailScreen(
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
         } else {
-            // Role Swapping Resolution (Chimanew Parity)
+            // Dynamic Artwork Role Resolution
             val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
                 item.customCoverPath ?: when (item.artworkRole) {
                     "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
@@ -225,8 +225,8 @@ fun DetailScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // PRESENTATION MODE 1: Nuvio Hero (Unblocked Banner + Zero-Box Flowing Metadata & Stats)
-                if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                // PRESENTATION MODE 1: Unblocked Hero (Unblocked Banner + Zero-Box Flowing Metadata & Stats)
+                if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
                     // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
                     Box(
                         modifier = Modifier
@@ -674,10 +674,10 @@ fun DetailScreen(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable {
-                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
                                         DetailsPagePresentation.CLASSIC
                                     } else {
-                                        DetailsPagePresentation.NUVIO_HERO
+                                        DetailsPagePresentation.UNBLOCKED_HERO
                                     }
                                     coroutineScope.launch {
                                         prefManager.updateDetailsPagePresentation(newMode)
@@ -702,7 +702,7 @@ fun DetailScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
                                         "Current: Unblocked Hero (Tap for Classic Poster)"
                                     } else {
                                         "Current: Classic Poster (Tap for Unblocked Hero)"

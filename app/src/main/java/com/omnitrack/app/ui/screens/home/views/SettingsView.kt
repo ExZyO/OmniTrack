@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -76,6 +77,7 @@ fun SettingsView(
     onCheckUpdate: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     onNavigateToArtworkPriority: () -> Unit = {},
+    onNavigateToVisualPresentation: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -140,70 +142,15 @@ fun SettingsView(
             }
         }
 
-        // Section: Presentation & Display (Chimanew & Nuvio Parity)
-        SettingsSection(title = "VISUAL PRESENTATION & HERO") {
+        // Section: Visual Presentation & Themes (Dedicated Screen with Live Mockup)
+        SettingsSection(title = "VISUAL PRESENTATION & THEMES") {
             GroupedSettingRow(
-                icon = Icons.Default.Image,
-                iconTint = AccentArctic,
-                title = "Backdrop Style",
-                subtitle = "${presentationSettings.fallbackBackgroundStyle.displayName} — ${presentationSettings.fallbackBackgroundStyle.description}",
-                badge = "CYCLE",
-                onClick = {
-                    val next = when (presentationSettings.fallbackBackgroundStyle) {
-                        FallbackBackgroundStyle.CINEMATIC_BLUR -> FallbackBackgroundStyle.DOMINANT_COLOR
-                        FallbackBackgroundStyle.DOMINANT_COLOR -> FallbackBackgroundStyle.SOLID_BLACK
-                        FallbackBackgroundStyle.SOLID_BLACK -> FallbackBackgroundStyle.CINEMATIC_BLUR
-                    }
-                    scope.launch { prefManager.updateFallbackBackgroundStyle(next) }
-                }
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Settings,
-                iconTint = AccentJade,
-                title = "Details Presentation",
-                subtitle = "${presentationSettings.detailsPagePresentation.displayName} — ${presentationSettings.detailsPagePresentation.description}",
-                badge = "TOGGLE",
-                onClick = {
-                    val next = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
-                        DetailsPagePresentation.CLASSIC
-                    } else {
-                        DetailsPagePresentation.NUVIO_HERO
-                    }
-                    scope.launch { prefManager.updateDetailsPagePresentation(next) }
-                }
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Image,
+                icon = Icons.Default.ViewCarousel,
                 iconTint = AccentGold,
-                title = "Banner Sizing",
-                subtitle = "${presentationSettings.bannerSizing.displayName} — ${presentationSettings.bannerSizing.description}",
-                badge = "TOGGLE",
-                onClick = {
-                    val next = if (presentationSettings.bannerSizing == BannerSizing.CINEMA_SHOWCASE) {
-                        BannerSizing.FULL_BLEED
-                    } else {
-                        BannerSizing.CINEMA_SHOWCASE
-                    }
-                    scope.launch { prefManager.updateBannerSizing(next) }
-                }
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Image,
-                iconTint = AccentArctic,
-                title = "Backdrop Transition",
-                subtitle = "${presentationSettings.detailsBackdropStyle.displayName} — ${presentationSettings.detailsBackdropStyle.description}",
-                badge = "TOGGLE",
-                onClick = {
-                    val next = if (presentationSettings.detailsBackdropStyle == DetailsBackdropStyle.CINEMATIC_FADE) {
-                        DetailsBackdropStyle.SOLID_AMOLED
-                    } else {
-                        DetailsBackdropStyle.CINEMATIC_FADE
-                    }
-                    scope.launch { prefManager.updateDetailsBackdropStyle(next) }
-                }
+                title = "Visual Presentation & Themes",
+                subtitle = "Interactive preview & customization for hero layouts, banner sizing & ambient auras",
+                badge = "CUSTOMIZE",
+                onClick = onNavigateToVisualPresentation
             )
         }
 
@@ -213,7 +160,7 @@ fun SettingsView(
                 icon = Icons.Default.Palette,
                 iconTint = AccentArctic,
                 title = "Artwork Priority & Waterfall",
-                subtitle = "Chimanew-style drag-to-reorder & toggle upstream fallbacks per category",
+                subtitle = "Fluid drag-to-reorder & toggle upstream fallbacks per category",
                 badge = "OPEN",
                 onClick = onNavigateToArtworkPriority
             )

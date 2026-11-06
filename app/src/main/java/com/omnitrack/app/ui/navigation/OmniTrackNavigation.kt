@@ -18,11 +18,13 @@ import com.omnitrack.app.ui.screens.detail.DetailViewModel
 import com.omnitrack.app.ui.screens.home.HomeScreen
 import com.omnitrack.app.ui.screens.home.HomeViewModel
 import com.omnitrack.app.ui.screens.settings.ArtworkPriorityScreen
+import com.omnitrack.app.ui.screens.settings.VisualPresentationScreen
 
 object Routes {
     const val HOME = "home"
     const val DETAIL = "detail/{mediaId}"
     const val ARTWORK_PRIORITY = "settings/artwork_priority"
+    const val VISUAL_PRESENTATION = "settings/visual_presentation"
 
     fun detail(mediaId: Long) = "detail/$mediaId"
 }
@@ -65,6 +67,9 @@ fun OmniTrackNavigation(
                 },
                 onNavigateToArtworkPriority = {
                     navController.navigate(Routes.ARTWORK_PRIORITY)
+                },
+                onNavigateToVisualPresentation = {
+                    navController.navigate(Routes.VISUAL_PRESENTATION)
                 }
             )
         }
@@ -119,6 +124,28 @@ fun OmniTrackNavigation(
             }
         ) {
             ArtworkPriorityScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.VISUAL_PRESENTATION,
+            enterTransition = {
+                fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            },
+            popExitTransition = {
+                fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+        ) {
+            VisualPresentationScreen(
                 onBack = { navController.popBackStack() }
             )
         }

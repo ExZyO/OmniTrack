@@ -516,7 +516,7 @@ fun ArtworkPickerBottomSheet(
                 }
             }
 
-            // Tab 3: Artwork Role Swapping (Chimanew Parity)
+            // Tab 3: Artwork Role Assignment
             if (selectedTab == 3) {
                 Column(
                     modifier = Modifier

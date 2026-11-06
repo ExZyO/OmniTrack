@@ -16,8 +16,16 @@ import java.io.IOException
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
-    NUVIO_HERO("Nuvio Hero", "Unblocked Banner, Centered Floating Tiles"),
-    CLASSIC("Classic Poster", "Overlaid Poster, Floating Information")
+    UNBLOCKED_HERO("Unblocked Hero", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
+    CLASSIC("Classic Poster", "Overlaid Poster, Floating Information");
+
+    companion object {
+        fun fromName(name: String?): DetailsPagePresentation = when (name) {
+            "CLASSIC" -> CLASSIC
+            "UNBLOCKED_HERO", "NUVIO_HERO" -> UNBLOCKED_HERO
+            else -> UNBLOCKED_HERO
+        }
+    }
 }
 
 enum class BannerSizing(val displayName: String, val description: String) {
@@ -37,7 +45,7 @@ enum class FallbackBackgroundStyle(val displayName: String, val description: Str
 }
 
 data class PresentationSettings(
-    val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.NUVIO_HERO,
+    val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.UNBLOCKED_HERO,
     val bannerSizing: BannerSizing = BannerSizing.CINEMA_SHOWCASE,
     val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
     val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR
@@ -66,8 +74,8 @@ class PreferenceManager(private val context: Context) {
         .map { prefs ->
             PresentationSettings(
                 detailsPagePresentation = prefs[PreferencesKeys.DETAILS_PAGE_PRESENTATION]?.let {
-                    runCatching { DetailsPagePresentation.valueOf(it) }.getOrNull()
-                } ?: DetailsPagePresentation.NUVIO_HERO,
+                    DetailsPagePresentation.fromName(it)
+                } ?: DetailsPagePresentation.UNBLOCKED_HERO,
                 bannerSizing = prefs[PreferencesKeys.BANNER_SIZING]?.let {
                     runCatching { BannerSizing.valueOf(it) }.getOrNull()
                 } ?: BannerSizing.CINEMA_SHOWCASE,

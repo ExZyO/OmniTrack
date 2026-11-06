@@ -30,7 +30,7 @@ class AppUpdateChecker(
         AppLogger.i("UpdateChecker", "Checking for updates. Current version: $currentVer (code $currentCode)")
 
         try {
-            // Concurrent Multi-Source Version Query (Ported from Gemini EPUB & Chimanew)
+            // Concurrent Multi-Source Version Query (Fast dual-channel update engine)
             // 1. Direct GitHub Releases API (Has complete assets and release notes)
             val releaseApiDeferred = async { fetchFromGithubRelease() }
 

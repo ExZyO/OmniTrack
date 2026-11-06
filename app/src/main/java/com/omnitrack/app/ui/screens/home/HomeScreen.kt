@@ -95,6 +95,7 @@ fun HomeScreen(
     viewModel: HomeViewModel,
     onItemClick: (Long) -> Unit,
     onNavigateToArtworkPriority: () -> Unit = {},
+    onNavigateToVisualPresentation: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -120,7 +121,7 @@ fun HomeScreen(
         }
     }
 
-    // Poweramp kinematic category pager
+    // Kinematic category pager
     val pagerState = rememberPagerState(
         initialPage = 0,
         pageCount = { MediaType.filterTabs.size }
@@ -333,7 +334,7 @@ fun HomeScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Main Content: Horizontal Pager for Category Swiping with Poweramp Kinematics
+                        // Main Content: Horizontal Pager for Category Swiping
                         if (uiState.isLoading) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -362,7 +363,7 @@ fun HomeScreen(
                                     }
                                 }
 
-                                // Poweramp Kinematic Layer: Scale decay and gentle parallax during finger drag
+                                // Kinematic Layer: Scale decay and gentle parallax during finger drag
                                 val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
                                 val kinematicScale = (1f - (abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
                                 val kinematicAlpha = (1f - (abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
@@ -459,7 +460,8 @@ fun HomeScreen(
                             }
                         },
                         onOpenDiagnostics = { showDiagnostics = true },
-                        onNavigateToArtworkPriority = onNavigateToArtworkPriority
+                        onNavigateToArtworkPriority = onNavigateToArtworkPriority,
+                        onNavigateToVisualPresentation = onNavigateToVisualPresentation
                     )
                 }
             }

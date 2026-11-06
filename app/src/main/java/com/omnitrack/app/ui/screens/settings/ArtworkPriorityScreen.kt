@@ -12,6 +12,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,7 +24,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -39,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -141,23 +145,33 @@ fun ArtworkPriorityScreen(
                     letterSpacing = (-0.3).sp
                 )
                 Text(
-                    text = "Chimanew-style waterfall & uncompressed cover priority",
+                    text = "Dynamic waterfall & uncompressed cover priority",
                     color = TextMuted,
                     fontSize = 12.sp
                 )
             }
         }
 
-        // Horizontal Category Tabs (Poweramp fluid style)
-        val tabScrollState = rememberScrollState()
-        Row(
+        // Horizontal Category Tabs (Synchronized auto-scroll with pager swiping)
+        val tabListState = rememberLazyListState()
+
+        // Auto-scroll the tab bar when pager swipes so current tab and next tab remain in view
+        LaunchedEffect(pagerState.currentPage) {
+            tabListState.animateScrollToItem(
+                index = pagerState.currentPage.coerceAtLeast(0),
+                scrollOffset = 0
+            )
+        }
+
+        LazyRow(
+            state = tabListState,
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(tabScrollState)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            categories.forEachIndexed { index, mediaType ->
+            itemsIndexed(categories) { index, mediaType ->
                 val isSelected = pagerState.currentPage == index
                 val tabBgColor by animateColorAsState(
                     targetValue = if (isSelected) AccentArctic.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
