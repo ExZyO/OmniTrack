@@ -68,7 +68,6 @@ fun rememberArtworkBackdrop(imageUrl: String?, enabled: Boolean = true): ImageBi
             .data(losslessUrl)
             .size(128)
             .precision(Precision.EXACT)
-            .allowHardware(false)
             .build()
         val result = SingletonImageLoader.get(context).execute(request) as? SuccessResult
             ?: return@LaunchedEffect

@@ -27,7 +27,7 @@ fun CoverGlowBox(
     imageUrl: String?,
     modifier: Modifier = Modifier,
     glowHeight: Dp = 680.dp,
-    content: @Composable BoxScope.() -> Unit
+    content: @Composable BoxScope.() -> Unit = {}
 ) {
     val extractedColor = rememberCoverDominantColor(imageUrl)
     val animatedGlowColor by animateColorAsState(

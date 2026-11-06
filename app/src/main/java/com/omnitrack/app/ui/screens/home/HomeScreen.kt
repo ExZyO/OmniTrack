@@ -82,8 +82,8 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.updater.AppRelease
 import com.omnitrack.app.updater.AppUpdateChecker
 import com.omnitrack.app.util.AppLogger
+import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -99,7 +99,7 @@ fun HomeScreen(
     val coroutineScope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsState()
     val navScrollState = rememberOmniNavBarScrollState()
-    val hazeState = rememberHazeState()
+    val hazeState = remember { HazeState() }
 
     var currentNavDestination by remember { mutableStateOf(NavDestination.LIBRARY) }
     var showDiagnostics by remember { mutableStateOf(false) }

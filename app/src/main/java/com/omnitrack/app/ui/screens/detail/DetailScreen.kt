@@ -171,7 +171,7 @@ fun DetailScreen(
                     CoverGlowBox(
                         imageUrl = backdropTargetUrl,
                         modifier = Modifier.fillMaxSize()
-                    )
+                    ) {}
                 }
                 BackgroundMode.NORMAL -> {
                     // Pure AMOLED black canvas
