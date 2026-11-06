@@ -33,7 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -45,9 +45,9 @@ import com.omnitrack.app.ui.theme.TextSecondary
 
 @Composable
 fun HistoryView(
-    allMedia: List<MediaItemEntity>,
+    allMedia: List<MediaCardSummary>,
     onItemClick: (Long) -> Unit,
-    onQuickProgress: (MediaItemEntity) -> Unit,
+    onQuickProgress: (MediaCardSummary) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Show items with active progress first
@@ -121,7 +121,7 @@ fun HistoryView(
 
 @Composable
 private fun HistoryItemCard(
-    item: MediaItemEntity,
+    item: MediaCardSummary,
     onClick: () -> Unit,
     onQuickProgress: () -> Unit
 ) {

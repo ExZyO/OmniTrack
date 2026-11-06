@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.ArtworkCandidate
 import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
-import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -62,7 +62,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun DiscoverView(
-    allMedia: List<MediaItemEntity>,
+    allMedia: List<MediaCardSummary>,
     onItemClick: (Long) -> Unit,
     modifier: Modifier = Modifier,
     repository: ArtworkWaterfallRepository = remember { ArtworkWaterfallRepository() }

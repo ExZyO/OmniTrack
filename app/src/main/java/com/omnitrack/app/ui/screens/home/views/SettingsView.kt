@@ -38,7 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.BuildConfig
-import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
@@ -53,7 +53,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 
 @Composable
 fun SettingsView(
-    allMedia: List<MediaItemEntity>,
+    allMedia: List<MediaCardSummary>,
     onCheckUpdate: () -> Unit,
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier

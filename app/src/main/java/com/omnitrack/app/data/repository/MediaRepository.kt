@@ -2,6 +2,7 @@ package com.omnitrack.app.data.repository
 
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.MediaDao
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
@@ -13,6 +14,8 @@ class MediaRepository(
     private val categoryDao: CategoryDao
 ) {
     fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia()
+
+    fun getAllMediaSummaries(): Flow<List<MediaCardSummary>> = mediaDao.getAllMediaSummaries()
 
     fun getMediaById(id: Long): Flow<MediaItemEntity?> = mediaDao.getMediaById(id)
 

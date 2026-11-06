@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
@@ -56,9 +57,23 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
+fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
+    id = id,
+    title = title,
+    nativeTitle = nativeTitle,
+    coverUrl = coverUrl,
+    bannerUrl = bannerUrl,
+    mediaType = mediaType,
+    status = status,
+    currentProgress = currentProgress,
+    totalProgress = totalProgress,
+    userRating = userRating,
+    lastUpdated = lastUpdated
+)
+
 @Composable
 fun MediaCard(
-    item: MediaItemEntity,
+    item: MediaCardSummary,
     onCardClick: () -> Unit,
     onQuickProgress: () -> Unit,
     modifier: Modifier = Modifier
@@ -139,17 +154,16 @@ fun MediaCard(
                                     targetValue = 0.94f,
                                     animationSpec = spring(
                                         dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessHigh
+                                        stiffness = Spring.StiffnessLow
                                     )
                                 )
                                 bounceScale.animateTo(
                                     targetValue = 1f,
                                     animationSpec = spring(
                                         dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
+                                        stiffness = Spring.StiffnessLow
                                     )
                                 )
-                                showPlusOne = false
                             }
                             onQuickProgress()
                         }
@@ -158,35 +172,42 @@ fun MediaCard(
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
-                    contentDescription = "+1",
-                    tint = AccentArctic,
+                    contentDescription = "+1 Progress",
+                    tint = AccentJade,
                     modifier = Modifier.size(16.dp)
                 )
             }
 
-            // Animated +1 burst indicator
+            // Animated "+1" particle feedback
             androidx.compose.animation.AnimatedVisibility(
                 visible = showPlusOne,
-                enter = scaleIn(spring(dampingRatio = 0.4f)) + fadeIn(),
-                exit = scaleOut() + fadeOut(),
+                enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                exit = fadeOut() + scaleOut(targetScale = 1.3f),
                 modifier = Modifier.align(Alignment.Center)
             ) {
                 Text(
                     text = "+1",
                     color = AccentJade,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Black
                 )
+                LaunchedEffect(showPlusOne) {
+                    if (showPlusOne) {
+                        kotlinx.coroutines.delay(450)
+                        showPlusOne = false
+                    }
+                }
             }
 
-            // Bottom embedded progress line
-            if (item.totalProgress != null && item.totalProgress > 0) {
-                val progress = (item.currentProgress / item.totalProgress).toFloat().coerceIn(0f, 1f)
+            // Progress bar if totalProgress is available
+            val total = item.totalProgress
+            if (total != null && total > 0) {
+                val progress = (item.currentProgress / total).toFloat().coerceIn(0f, 1f)
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(2.5.dp)
+                        .height(3.dp)
                         .align(Alignment.BottomCenter),
                     color = if (progress >= 1f) AccentJade else AccentArctic,
                     trackColor = DarkSurfaceCard.copy(alpha = 0.5f),
@@ -194,7 +215,7 @@ fun MediaCard(
             }
         }
 
-        // Title text directly on dark background (natural, clean, no boxed clutter)
+        // Title text directly on dark background
         Text(
             text = item.title,
             color = TextPrimary,
@@ -208,7 +229,22 @@ fun MediaCard(
     }
 }
 
-private fun formatProgress(item: MediaItemEntity): String {
+@Composable
+fun MediaCard(
+    item: MediaItemEntity,
+    onCardClick: () -> Unit,
+    onQuickProgress: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    MediaCard(
+        item = item.toSummary(),
+        onCardClick = onCardClick,
+        onQuickProgress = onQuickProgress,
+        modifier = modifier
+    )
+}
+
+private fun formatProgress(item: MediaCardSummary): String {
     val unit = item.mediaType.unitLabel
     val current = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
         String.format("%.1f", item.currentProgress)

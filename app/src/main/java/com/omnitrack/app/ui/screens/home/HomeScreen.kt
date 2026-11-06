@@ -350,8 +350,8 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaItems, uiState.selectedStatus, searchQuery, pageMediaType) {
-                                    uiState.allMediaItems.filter { item ->
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType) {
+                                    uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
@@ -431,14 +431,14 @@ fun HomeScreen(
 
                 NavDestination.DISCOVER -> {
                     DiscoverView(
-                        allMedia = uiState.allMediaItems,
+                        allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick
                     )
                 }
 
                 NavDestination.HISTORY -> {
                     HistoryView(
-                        allMedia = uiState.allMediaItems,
+                        allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick,
                         onQuickProgress = { viewModel.incrementProgress(it) }
                     )
@@ -446,7 +446,7 @@ fun HomeScreen(
 
                 NavDestination.SETTINGS -> {
                     SettingsView(
-                        allMedia = uiState.allMediaItems,
+                        allMedia = uiState.allMediaSummaries,
                         onCheckUpdate = {
                             coroutineScope.launch {
                                 val release = AppUpdateChecker().checkForUpdate(context)
