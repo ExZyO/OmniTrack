@@ -69,32 +69,33 @@ class CoverStore(
         }
 
         try {
-            val response = NetworkPacer.coalesce("cover_$mediaId") {
+            val bytes = NetworkPacer.coalesce<ByteArray?>("cover_$mediaId") {
                 NetworkPacer.withHostPacing(losslessUrl) {
                     val request = Request.Builder().url(losslessUrl).build()
-                    client.newCall(request).execute()
+                    client.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            response.body?.bytes()
+                        } else null
+                    }
                 }
             }
 
-            if (response.isSuccessful) {
-                val bytes = response.body?.bytes()
-                if (bytes != null && bytes.isNotEmpty()) {
-                    val options = BitmapFactory.Options().apply {
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
-                    }
-                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-                    if (bitmap != null) {
-                        FileOutputStream(cachedFile).use { out ->
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                                bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 95, out)
-                            } else {
-                                @Suppress("DEPRECATION")
-                                bitmap.compress(Bitmap.CompressFormat.WEBP, 95, out)
-                            }
+            if (bytes != null && bytes.isNotEmpty()) {
+                val options = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                }
+                val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                if (bitmap != null) {
+                    FileOutputStream(cachedFile).use { out ->
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                            bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 95, out)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            bitmap.compress(Bitmap.CompressFormat.WEBP, 95, out)
                         }
-                        bitmap.recycle()
-                        return@withContext cachedFile.absolutePath
                     }
+                    bitmap.recycle()
+                    return@withContext cachedFile.absolutePath
                 }
             }
         } catch (e: Exception) {

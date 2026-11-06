@@ -94,6 +94,17 @@ object NetworkPacer {
         block()
     }
 
+    suspend fun <T> withHostPacing(url: String, block: suspend () -> T): T {
+        val lower = url.lowercase()
+        return when {
+            "anilist" in lower -> withAniListPacing(block)
+            "mangadex" in lower -> withMangaDexPacing(block)
+            "themoviedb" in lower || "tmdb" in lower -> withTmdbPacing(block)
+            "steam" in lower -> withSteamPacing(block)
+            else -> withGeneralPacing(block)
+        }
+    }
+
     /**
      * Executes the block or joins an existing in-flight execution for the same cacheKey.
      */
