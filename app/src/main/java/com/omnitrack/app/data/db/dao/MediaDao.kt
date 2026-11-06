@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
@@ -13,6 +14,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MediaDao {
+
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated FROM media_items ORDER BY lastUpdated DESC")
+    fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMedia(): Flow<List<MediaItemEntity>>

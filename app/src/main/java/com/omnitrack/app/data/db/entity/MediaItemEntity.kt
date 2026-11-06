@@ -1,11 +1,22 @@
 package com.omnitrack.app.data.db.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 
-@Entity(tableName = "media_items")
+@Immutable
+@Entity(
+    tableName = "media_items",
+    indices = [
+        Index("mediaType"),
+        Index("status"),
+        Index("lastUpdated"),
+        Index("title")
+    ]
+)
 data class MediaItemEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

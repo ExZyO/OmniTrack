@@ -53,8 +53,10 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.ui.components.glass.GlassBarSurface
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.TextMuted
+import dev.chrisbanes.haze.HazeState
 
 enum class NavDestination(
     val title: String,
@@ -134,6 +136,7 @@ fun OmniFloatingNavBar(
     onDestinationSelected: (NavDestination) -> Unit,
     scrollState: OmniNavBarScrollState,
     modifier: Modifier = Modifier,
+    hazeState: HazeState? = null,
     onActiveTabReSelected: ((NavDestination) -> Unit)? = null
 ) {
     val labelFraction by animateFloatAsState(
@@ -158,19 +161,18 @@ fun OmniFloatingNavBar(
             .padding(bottom = 12.dp, start = 16.dp, end = 16.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
-        // Liquid Glass Pill Surface
+        // Liquid Glass Pill Surface with Haze & AGSL Refraction
         Box(
             modifier = Modifier
                 .wrapContentWidth()
                 .height(pillHeight)
                 .shadow(elevation = 20.dp, shape = CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-                .clip(CircleShape)
-                .background(Color(0xE612141C)) // Liquid translucent dark surface
-                .border(width = 1.dp, color = Color(0x28FFFFFF), shape = CircleShape)
-                .padding(horizontal = 6.dp, vertical = 5.dp),
+                .clip(CircleShape),
             contentAlignment = Alignment.Center
         ) {
+            GlassBarSurface(hazeState = hazeState, modifier = Modifier.matchParentSize())
             Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {

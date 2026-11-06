@@ -32,6 +32,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
+                    .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

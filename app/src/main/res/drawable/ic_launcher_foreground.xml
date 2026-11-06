@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Arctic Cyan Omni Ring -->
+    <path
+        android:strokeColor="#FF00E5FF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,28 A26,26 0 1,1 32,40" />
+    
+    <!-- Secondary Intersecting Track Ring -->
+    <path
+        android:strokeColor="#8000E5FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,80 A26,26 0 1,1 76,68" />
+    
+    <!-- Central Tracking Aperture -->
+    <path
+        android:fillColor="#FF00E5FF"
+        android:pathData="M54,54m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0" />
+
+    <!-- Orbital Tracker Nodes -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,28m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M80,54m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,68m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+</vector>

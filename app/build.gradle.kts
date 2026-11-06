@@ -89,6 +89,9 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.okhttp)
 
+    // Haze for Liquid Glass Backdrop Blur
+    implementation(libs.haze)
+
     // Coroutines & Serialization
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)

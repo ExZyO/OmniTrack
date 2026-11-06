@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -77,10 +77,11 @@ fun UpdateBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Row: Title & Close Button
+            // Header: Title, Version, and Close Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -88,36 +89,53 @@ fun UpdateBottomSheet(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
-                            .background(AccentJade.copy(alpha = 0.15f)),
+                            .background(AccentJade.copy(alpha = 0.16f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.SystemUpdate,
                             contentDescription = null,
                             tint = AccentJade,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             text = "Update Available",
                             color = TextPrimary,
-                            fontSize = 18.sp,
+                            fontSize = 19.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "v${release.version}",
-                            color = AccentJade,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentJade.copy(alpha = 0.2f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "v${release.version}",
+                                    color = AccentJade,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "Ready to install",
+                                color = TextMuted,
+                                fontSize = 11.5.sp
+                            )
+                        }
                     }
                 }
 
@@ -125,7 +143,7 @@ fun UpdateBottomSheet(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0x1AFFFFFF))
+                        .background(Color(0x16FFFFFF))
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -138,30 +156,36 @@ fun UpdateBottomSheet(
                 }
             }
 
-            // Release Notes (Scrollable, clean typography)
+            // Hairline divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color(0x14FFFFFF))
+            )
+
+            // Release Notes (Edge-to-edge typography, smooth scroll without restrictive container box)
             if (release.releaseNotes.isNotBlank()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkSurfaceElevated)
-                        .padding(14.dp)
+                        .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "WHAT'S NEW",
-                        color = TextSecondary,
+                        color = TextMuted,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.2.sp
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = release.releaseNotes,
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp
+                    MarkdownText(
+                        markdown = release.releaseNotes,
+                        modifier = Modifier.fillMaxWidth(),
+                        lineHeight = 21.sp,
+                        fontSize = 13.5.sp
                     )
                 }
             }
@@ -230,7 +254,7 @@ fun UpdateBottomSheet(
                 enabled = !isDownloading && release.apkDownloadUrl.isNotBlank(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
+                    .height(50.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AccentJade,
@@ -244,7 +268,7 @@ fun UpdateBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
         }
     }
 }
