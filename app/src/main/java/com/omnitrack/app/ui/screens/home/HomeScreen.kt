@@ -93,6 +93,7 @@ import kotlin.math.abs
 fun HomeScreen(
     viewModel: HomeViewModel,
     onItemClick: (Long) -> Unit,
+    onNavigateToArtworkPriority: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -456,7 +457,8 @@ fun HomeScreen(
                                 }
                             }
                         },
-                        onOpenDiagnostics = { showDiagnostics = true }
+                        onOpenDiagnostics = { showDiagnostics = true },
+                        onNavigateToArtworkPriority = onNavigateToArtworkPriority
                     )
                 }
             }

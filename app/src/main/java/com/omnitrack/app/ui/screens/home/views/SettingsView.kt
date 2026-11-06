@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
@@ -74,16 +75,13 @@ fun SettingsView(
     allMedia: List<MediaCardSummary>,
     onCheckUpdate: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onNavigateToArtworkPriority: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val prefManager = remember { PreferenceManager(context) }
     val scope = rememberCoroutineScope()
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
-
-    var selectedPriorityCategory by remember { mutableStateOf(MediaType.ANIME) }
-    val currentPrioritySources by prefManager.getArtSourcePriority(selectedPriorityCategory)
-        .collectAsState(initial = PreferenceManager.getDefaultSourcesFor(selectedPriorityCategory))
 
     Column(
         modifier = modifier
@@ -209,143 +207,16 @@ fun SettingsView(
             )
         }
 
-        // Section: Art Source Priority Matrix (Chimanew Parity)
-        SettingsSection(title = "ART SOURCE PRIORITY & WATERFALL") {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Configure upstream metadata & uncompressed artwork fallbacks per category:",
-                    fontSize = 12.sp,
-                    color = TextMuted
-                )
-
-                // Category selection chips
-                val categories = listOf(
-                    MediaType.ANIME,
-                    MediaType.MANGA,
-                    MediaType.NOVEL,
-                    MediaType.SHOW,
-                    MediaType.MOVIE,
-                    MediaType.GAME,
-                    MediaType.VISUAL_NOVEL
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    categories.forEach { cat ->
-                        val isSelected = selectedPriorityCategory == cat
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(8.dp))
-                                .clickable { selectedPriorityCategory = cat }
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = cat.displayName,
-                                color = if (isSelected) AccentArctic else TextSecondary,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
-                }
-
-                // Active Priority Chain
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AmoledBlack.copy(alpha = 0.5f))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    currentPrioritySources.forEachIndexed { idx, source ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .clip(CircleShape)
-                                        .background(if (idx == 0) AccentJade.copy(alpha = 0.2f) else DarkSurfaceElevated),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${idx + 1}",
-                                        color = if (idx == 0) AccentJade else TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                                Text(
-                                    text = source,
-                                    color = if (idx == 0) TextPrimary else TextSecondary,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (idx == 0) FontWeight.SemiBold else FontWeight.Normal
-                                )
-                            }
-                            if (idx == 0) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(AccentJade.copy(alpha = 0.15f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text("PRIMARY", color = AccentJade, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Cycle Priority Button
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(DarkSurfaceElevated)
-                        .clickable {
-                            if (currentPrioritySources.size > 1) {
-                                val rotated = currentPrioritySources.drop(1) + currentPrioritySources.take(1)
-                                scope.launch {
-                                    prefManager.updateArtSourcePriority(selectedPriorityCategory, rotated)
-                                }
-                            }
-                        }
-                        .padding(vertical = 8.dp, horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = null,
-                        tint = AccentArctic,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Rotate Priority Order",
-                        color = AccentArctic,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
+        // Section: Artwork & Metadata Sources (Dedicated Fullscreen Waterfall)
+        SettingsSection(title = "ARTWORK & METADATA SOURCES") {
+            GroupedSettingRow(
+                icon = Icons.Default.Palette,
+                iconTint = AccentArctic,
+                title = "Artwork Priority & Waterfall",
+                subtitle = "Chimanew-style drag-to-reorder & toggle upstream fallbacks per category",
+                badge = "OPEN",
+                onClick = onNavigateToArtworkPriority
+            )
         }
 
         // Section: Updates & Maintenance

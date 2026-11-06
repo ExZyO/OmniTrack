@@ -17,10 +17,12 @@ import com.omnitrack.app.ui.screens.detail.DetailScreen
 import com.omnitrack.app.ui.screens.detail.DetailViewModel
 import com.omnitrack.app.ui.screens.home.HomeScreen
 import com.omnitrack.app.ui.screens.home.HomeViewModel
+import com.omnitrack.app.ui.screens.settings.ArtworkPriorityScreen
 
 object Routes {
     const val HOME = "home"
     const val DETAIL = "detail/{mediaId}"
+    const val ARTWORK_PRIORITY = "settings/artwork_priority"
 
     fun detail(mediaId: Long) = "detail/$mediaId"
 }
@@ -60,6 +62,9 @@ fun OmniTrackNavigation(
                 viewModel = homeViewModel,
                 onItemClick = { mediaId ->
                     navController.navigate(Routes.detail(mediaId))
+                },
+                onNavigateToArtworkPriority = {
+                    navController.navigate(Routes.ARTWORK_PRIORITY)
                 }
             )
         }
@@ -92,6 +97,28 @@ fun OmniTrackNavigation(
 
             DetailScreen(
                 viewModel = detailViewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.ARTWORK_PRIORITY,
+            enterTransition = {
+                fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            },
+            popExitTransition = {
+                fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+        ) {
+            ArtworkPriorityScreen(
                 onBack = { navController.popBackStack() }
             )
         }

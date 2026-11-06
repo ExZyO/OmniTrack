@@ -52,6 +52,7 @@ class PreferenceManager(private val context: Context) {
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
+        fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
     }
 
     val presentationSettings: Flow<PresentationSettings> = context.dataStore.data
@@ -122,6 +123,27 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateArtSourcePriority(mediaType: MediaType, sources: List<String>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.priorityKey(mediaType)] = sources.joinToString(",")
+        }
+    }
+
+    fun getDisabledArtSources(mediaType: MediaType): Flow<Set<String>> {
+        return context.dataStore.data
+            .catch { exception ->
+                if (exception is IOException) emit(emptyPreferences()) else throw exception
+            }
+            .map { prefs ->
+                val raw = prefs[PreferencesKeys.disabledSourcesKey(mediaType)]
+                if (raw.isNullOrBlank()) {
+                    emptySet()
+                } else {
+                    raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                }
+            }
+    }
+
+    suspend fun updateDisabledArtSources(mediaType: MediaType, disabled: Set<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.disabledSourcesKey(mediaType)] = disabled.joinToString(",")
         }
     }
 
