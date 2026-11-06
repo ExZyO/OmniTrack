@@ -131,6 +131,13 @@ class DetailViewModel(
         }
     }
 
+    fun deleteItem() {
+        viewModelScope.launch {
+            val item = uiState.value.item ?: return@launch
+            repository.deleteMedia(item)
+        }
+    }
+
     /**
      * Generate mock season/episode data from the item's progress
      */

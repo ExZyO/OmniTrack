@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -33,11 +34,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,11 +52,14 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -91,6 +101,7 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.util.AppLogger
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,7 +116,9 @@ fun DetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val item = uiState.item
+    val coroutineScope = rememberCoroutineScope()
     var showArtworkPicker by remember { mutableStateOf(false) }
+    var showOptionsMenu by remember { mutableStateOf(false) }
     var synopsisExpanded by remember(item?.id) { mutableStateOf(false) }
     var canExpandSynopsis by remember(item?.id) { mutableStateOf(false) }
 
@@ -212,313 +225,127 @@ fun DetailScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // PRESENTATION MODE 1: Nuvio Hero (Unblocked Banner + 3 Centered Floating Glass Tiles)
+                // PRESENTATION MODE 1: Nuvio Hero (Unblocked Banner + Zero-Box Flowing Metadata & Stats)
                 if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
-                    // Top Bar (Back & Artwork Customization)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(AmoledBlack.copy(alpha = 0.65f))
-                                .border(1.dp, GlassBorder, CircleShape)
-                                .clickable(onClick = onBack),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = TextPrimary,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-
-                        // Customize Artwork Button
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(AmoledBlack.copy(alpha = 0.65f))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
-                                .clickable { showArtworkPicker = true }
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = null,
-                                    tint = dominantAccent,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = "Artwork",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-
-                    // Unblocked Cinema Showcase Card (Widescreen 16:9 + Ambient Aura)
-                    if (presentationSettings.bannerSizing == BannerSizing.CINEMA_SHOWCASE) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                                .aspectRatio(16f / 9f)
-                        ) {
-                            // Ambient Aura behind the card
-                            AsyncImage(
-                                model = backdropTargetUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        scaleX = 1.06f
-                                        scaleY = 1.06f
-                                        alpha = 0.45f
-                                    },
-                                contentScale = ContentScale.Crop
-                            )
-
-                            // Widescreen Card
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .shadow(18.dp, RoundedCornerShape(16.dp))
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                                    .clickable { showArtworkPicker = true }
-                            ) {
-                                AsyncImage(
-                                    model = backdropTargetUrl,
-                                    contentDescription = item.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            }
-                        }
-                    } else {
-                        // Full-Bleed unblocked hero
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(260.dp)
-                        ) {
-                            AsyncImage(
-                                model = backdropTargetUrl,
-                                contentDescription = item.title,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .featherArtwork(startYRatio = 0.55f),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    }
-
-                    // The 3 Centered Floating Glass Tiles (Progress, Status, Rating)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Tile 1: Progress Stepper
-                        CenteredGlassTile(
-                            modifier = Modifier.weight(1f),
-                            title = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-                                String.format("%.1f hrs", item.currentProgress)
-                            } else {
-                                "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
-                            },
-                            subtitle = item.mediaType.unitLabel,
-                            icon = Icons.Default.Add,
-                            iconTint = AccentJade,
-                            onClick = {
-                                val inc = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) 0.5 else 1.0
-                                val newProg = item.currentProgress + inc
-                                val clamped = if (item.totalProgress != null) newProg.coerceAtMost(item.totalProgress) else newProg
-                                viewModel.updateProgress(clamped)
-                            }
-                        )
-
-                        // Tile 2: Tracking Status Pill
-                        CenteredGlassTile(
-                            modifier = Modifier.weight(1f),
-                            title = item.status.displayName,
-                            subtitle = "Status",
-                            icon = Icons.Default.CheckCircle,
-                            iconTint = dominantAccent,
-                            onClick = {
-                                val next = when (item.status) {
-                                    TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
-                                    TrackingStatus.IN_PROGRESS -> TrackingStatus.COMPLETED
-                                    TrackingStatus.COMPLETED -> TrackingStatus.ON_HOLD
-                                    TrackingStatus.ON_HOLD -> TrackingStatus.DROPPED
-                                    TrackingStatus.DROPPED -> TrackingStatus.PLAN_TO_TRACK
-                                    else -> TrackingStatus.IN_PROGRESS
-                                }
-                                viewModel.updateStatus(next)
-                            }
-                        )
-
-                        // Tile 3: User Rating & Aggregate
-                        CenteredGlassTile(
-                            modifier = Modifier.weight(1f),
-                            title = item.userRating?.let { String.format("%.1f", it) } ?: "Rate",
-                            subtitle = "Rating",
-                            icon = Icons.Default.Star,
-                            iconTint = AccentGold,
-                            onClick = {
-                                val current = item.userRating ?: 7.0f
-                                val next = if (current >= 10.0f) 5.0f else current + 1.0f
-                                viewModel.updateRating(next)
-                            }
-                        )
-                    }
-
-                    // Clean Full-Width Title and Meta Header
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = item.title,
-                            color = TextPrimary,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 27.sp
-                        )
-                        if (item.nativeTitle != null) {
-                            Text(
-                                text = item.nativeTitle,
-                                color = TextMuted,
-                                fontSize = 12.5.sp
-                            )
-                        }
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(AccentArctic.copy(alpha = 0.15f))
-                                    .padding(horizontal = 7.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = item.mediaType.displayName,
-                                    color = AccentArctic,
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            if (item.platform != null) {
-                                Text(
-                                    text = item.platform,
-                                    color = TextMuted,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    // PRESENTATION MODE 2: Classic Poster Overlay
+                    // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(340.dp)
+                            .height(350.dp)
+                    ) {
+                        AsyncImage(
+                            model = backdropTargetUrl,
+                            contentDescription = item.title,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .featherArtwork(startYRatio = 0.50f),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    // Content Section directly beneath the banner: 100% ZERO BOXES!
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .offset(y = (-8).dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Title Row with '...' button cleanly beside the title
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = item.title,
+                                    color = TextPrimary,
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Black,
+                                    lineHeight = 29.sp
+                                )
+                                if (item.nativeTitle != null) {
+                                    Text(
+                                        text = item.nativeTitle,
+                                        color = TextMuted,
+                                        fontSize = 12.5.sp
+                                    )
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                ) {
+                                    Text(
+                                        text = item.mediaType.displayName.uppercase(),
+                                        color = AccentArctic,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Text(text = "•", color = TextMuted, fontSize = 11.sp)
+                                    if (item.releaseYear != null) {
+                                        Text(text = "${item.releaseYear}", color = TextSecondary, fontSize = 11.5.sp)
+                                        Text(text = "•", color = TextMuted, fontSize = 11.sp)
+                                    }
+                                    if (item.platform != null) {
+                                        Text(text = item.platform, color = TextSecondary, fontSize = 11.5.sp)
+                                    }
+                                }
+                            }
+
+                            // '...' Button (Cleanly beside the title, completely off the banner!)
+                            IconButton(
+                                onClick = { showOptionsMenu = true },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .padding(start = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        // 100% UNBOXED Inline Stats Row with Hairline Dividers
+                        UnboxedStatsRow(item = item, viewModel = viewModel)
+                    }
+                } else {
+                    // PRESENTATION MODE 2: Classic Overlapping Poster
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(350.dp)
                     ) {
                         AsyncImage(
                             model = backdropTargetUrl,
                             contentDescription = null,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .featherArtwork(startYRatio = 0.55f),
+                                .featherArtwork(startYRatio = 0.50f),
                             contentScale = ContentScale.Crop
                         )
-
-                        // Floating top bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(AmoledBlack.copy(alpha = 0.55f))
-                                    .clickable(onClick = onBack),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = TextPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(AmoledBlack.copy(alpha = 0.55f))
-                                    .clickable { showArtworkPicker = true }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Edit,
-                                        contentDescription = null,
-                                        tint = dominantAccent,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = "Cover",
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
                     }
 
-                    // Overlapping Poster Row
+                    // Overlapping Poster Row (Clean, no buttons over banner!)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 18.dp)
+                            .padding(horizontal = 20.dp)
                             .offset(y = (-50).dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(125.dp)
+                                .width(120.dp)
                                 .aspectRatio(0.68f)
                                 .shadow(18.dp, RoundedCornerShape(14.dp))
                                 .clip(RoundedCornerShape(14.dp))
@@ -538,25 +365,58 @@ fun DetailScreen(
                                 .padding(bottom = 6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = item.title,
-                                color = TextPrimary,
-                                fontSize = 21.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                lineHeight = 26.sp
-                            )
-                            if (item.nativeTitle != null) {
-                                Text(
-                                    text = item.nativeTitle,
-                                    color = TextMuted,
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = item.title,
+                                        color = TextPrimary,
+                                        fontSize = 22.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        lineHeight = 27.sp
+                                    )
+                                    if (item.nativeTitle != null) {
+                                        Text(
+                                            text = item.nativeTitle,
+                                            color = TextMuted,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = { showOptionsMenu = true },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Options",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
+                            Text(
+                                text = item.mediaType.displayName.uppercase(),
+                                color = AccentArctic,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Black
+                            )
                         }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 20.dp)
+                            .offset(y = (-30).dp)
+                    ) {
+                        UnboxedStatsRow(item = item, viewModel = viewModel)
                     }
                 }
 
@@ -711,6 +571,190 @@ fun DetailScreen(
                 Spacer(modifier = Modifier.height(48.dp))
             }
 
+            // Top Status Bar Gradient Scrim (so white back arrow never vanishes on bright banners)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(alpha = 0.50f), Color.Transparent)
+                        )
+                    )
+            )
+
+            // Circle-Free Pure White Back Arrow (Option B: circle-free, statusBarsPadding, soft drop shadow)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White,
+                        modifier = Modifier
+                            .size(24.dp)
+                            .shadow(elevation = 8.dp, shape = CircleShape)
+                    )
+                }
+            }
+
+            // Entry Options Bottom Sheet (Triggered by '...' button beside Title)
+            if (showOptionsMenu) {
+                ModalBottomSheet(
+                    onDismissRequest = { showOptionsMenu = false },
+                    containerColor = AmoledBlack,
+                    dragHandle = {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 10.dp)
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.2f))
+                        )
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Entry Options",
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+
+                        // 1. Change Artwork
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showOptionsMenu = false
+                                    showArtworkPicker = true
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = AccentArctic,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Change Artwork & Roles",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Search online covers, pick custom image, swap roles",
+                                    color = TextMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // 2. Toggle Layout (Unblocked Hero vs Classic Poster)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                                        DetailsPagePresentation.CLASSIC
+                                    } else {
+                                        DetailsPagePresentation.NUVIO_HERO
+                                    }
+                                    coroutineScope.launch {
+                                        prefManager.updateDetailsPagePresentation(newMode)
+                                    }
+                                    showOptionsMenu = false
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ViewCarousel,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Toggle Layout",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.NUVIO_HERO) {
+                                        "Current: Unblocked Hero (Tap for Classic Poster)"
+                                    } else {
+                                        "Current: Classic Poster (Tap for Unblocked Hero)"
+                                    },
+                                    color = TextMuted,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // 3. Remove from Library
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    showOptionsMenu = false
+                                    viewModel.deleteItem()
+                                    onBack()
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Remove from Library",
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Delete this media entry and its local cache",
+                                    color = Color(0xFFEF4444).copy(alpha = 0.7f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // Cover discovery & role customization bottom sheet
             if (showArtworkPicker) {
                 ArtworkPickerBottomSheet(
@@ -734,52 +778,163 @@ fun DetailScreen(
 }
 
 @Composable
-private fun CenteredGlassTile(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    iconTint: Color,
-    onClick: () -> Unit,
+private fun UnboxedStatsRow(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    viewModel: DetailViewModel,
     modifier: Modifier = Modifier
 ) {
-    Box(
+    Row(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(DarkSurfaceElevated.copy(alpha = 0.82f))
-            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .drawBehind {
+                val strokeW = 1.dp.toPx()
+                val dividerColor = Color.White.copy(alpha = 0.10f)
+                drawLine(dividerColor, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = strokeW)
+                drawLine(dividerColor, Offset(0f, size.height), Offset(size.width, size.height), strokeWidth = strokeW)
+            }
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(3.dp)
+        // Section 1: Progress Stepper (+1)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.clickable {
+                val inc = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) 0.5 else 1.0
+                val newProg = item.currentProgress + inc
+                val clamped = if (item.totalProgress != null) newProg.coerceAtMost(item.totalProgress) else newProg
+                viewModel.updateProgress(clamped)
+            }
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(AccentArctic.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(14.dp)
-                )
                 Text(
-                    text = title,
-                    color = TextPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    text = "+1",
+                    color = AccentArctic,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Black
                 )
             }
-            Text(
-                text = subtitle,
-                color = TextMuted,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Medium
+            Column {
+                Text(
+                    text = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
+                        String.format("%.1f hrs", item.currentProgress)
+                    } else {
+                        "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
+                    },
+                    color = TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = item.mediaType.unitLabel.uppercase(),
+                    color = TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Vertical hairline
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(28.dp)
+                .background(Color.White.copy(alpha = 0.12f))
+        )
+
+        // Section 2: Status with Glowing Dot
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.clickable {
+                val next = when (item.status) {
+                    TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    TrackingStatus.IN_PROGRESS -> TrackingStatus.COMPLETED
+                    TrackingStatus.COMPLETED -> TrackingStatus.ON_HOLD
+                    TrackingStatus.ON_HOLD -> TrackingStatus.DROPPED
+                    TrackingStatus.DROPPED -> TrackingStatus.PLAN_TO_TRACK
+                    else -> TrackingStatus.IN_PROGRESS
+                }
+                viewModel.updateStatus(next)
+            }
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when (item.status) {
+                            TrackingStatus.COMPLETED -> AccentJade
+                            TrackingStatus.IN_PROGRESS -> AccentArctic
+                            TrackingStatus.DROPPED -> Color(0xFFEF4444)
+                            else -> AccentGold
+                        }
+                    )
             )
+            Column {
+                Text(
+                    text = item.status.displayName,
+                    color = TextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "STATUS",
+                    color = TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Vertical hairline
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(28.dp)
+                .background(Color.White.copy(alpha = 0.12f))
+        )
+
+        // Section 3: Rating Score
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.clickable {
+                val current = item.userRating ?: 7.0f
+                val next = if (current >= 10.0f) 5.0f else current + 1.0f
+                viewModel.updateRating(next)
+            }
+        ) {
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = null,
+                tint = AccentGold,
+                modifier = Modifier.size(16.dp)
+            )
+            Column {
+                Text(
+                    text = item.userRating?.let { String.format("%.1f", it) } ?: "Rate",
+                    color = TextPrimary,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "SCORE",
+                    color = TextMuted,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
         }
     }
 }
