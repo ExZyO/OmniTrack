@@ -1,10 +1,12 @@
 package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -27,6 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,12 +42,14 @@ import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
+/**
+ * Pure AMOLED whitespace history view.
+ * Zero boxed card containers — uses seamless hairline row dividers and high-contrast typography.
+ */
 @Composable
 fun HistoryView(
     allMedia: List<MediaCardSummary>,
@@ -50,7 +57,7 @@ fun HistoryView(
     onQuickProgress: (MediaCardSummary) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Show items with active progress first
+    // Show items with active progress first, sorted by most recently updated
     val historyItems = allMedia.filter { it.currentProgress > 0 }
         .sortedByDescending { it.lastUpdated }
 
@@ -58,15 +65,17 @@ fun HistoryView(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
-            .padding(horizontal = 18.dp, vertical = 12.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
-        Column(modifier = Modifier.padding(bottom = 12.dp)) {
+        Column(modifier = Modifier.padding(bottom = 16.dp, top = 4.dp)) {
             Text(
                 text = "Tracking Activity",
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                fontSize = 24.sp,
+                letterSpacing = (-0.5).sp,
                 color = TextPrimary
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "Chronological progress and recent milestones",
                 fontSize = 12.sp,
@@ -81,22 +90,32 @@ fun HistoryView(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(48.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = TextMuted,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                     Text(
                         text = "No tracking activity yet",
-                        color = TextMuted,
-                        fontSize = 14.sp
+                        color = TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp
                     )
                     Text(
                         text = "Increment episodes or chapters to see your history feed",
-                        color = TextSecondary,
+                        color = TextMuted,
                         fontSize = 12.sp
                     )
                 }
@@ -104,11 +123,10 @@ fun HistoryView(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 96.dp)
+                contentPadding = PaddingValues(bottom = 96.dp)
             ) {
                 items(historyItems, key = { it.id }) { item ->
-                    HistoryItemCard(
+                    HistoryItemRow(
                         item = item,
                         onClick = { onItemClick(item.id) },
                         onQuickProgress = { onQuickProgress(item) }
@@ -120,7 +138,7 @@ fun HistoryView(
 }
 
 @Composable
-private fun HistoryItemCard(
+private fun HistoryItemRow(
     item: MediaCardSummary,
     onClick: () -> Unit,
     onQuickProgress: () -> Unit
@@ -128,44 +146,62 @@ private fun HistoryItemCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DarkSurfaceCard)
             .clickable(onClick = onClick)
-            .padding(10.dp),
+            .drawBehind {
+                val strokeW = 1.dp.toPx()
+                drawLine(
+                    color = Color.White.copy(alpha = 0.06f),
+                    start = Offset(62.dp.toPx(), size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = strokeW
+                )
+            }
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Thumbnail poster
+        // Thumbnail poster with subtle border
         AsyncImage(
             model = item.coverUrl,
             contentDescription = item.title,
             modifier = Modifier
-                .width(46.dp)
+                .width(48.dp)
                 .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
             contentScale = ContentScale.Crop
         )
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.title,
-                fontSize = 13.5.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(4.dp))
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = item.mediaType.displayName,
-                    fontSize = 11.sp,
-                    color = AccentArctic,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(text = "•", fontSize = 11.sp, color = TextMuted)
+                // Category badge pill
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AccentArctic.copy(alpha = 0.12f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = item.mediaType.displayName.uppercase(),
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentArctic,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+
                 val progressText = when (item.mediaType) {
                     MediaType.GAME, MediaType.VISUAL_NOVEL -> "${item.currentProgress} hrs"
                     MediaType.MOVIE -> if (item.currentProgress > 0) "Watched" else "Plan to Watch"
@@ -174,24 +210,26 @@ private fun HistoryItemCard(
                 }
                 Text(
                     text = progressText,
-                    fontSize = 11.sp,
-                    color = TextSecondary
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
 
-        // Quick +1 button
+        // Quick +1 action button: sleek frosted circle
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(36.dp)
                 .clip(CircleShape)
-                .background(DarkSurfaceElevated)
+                .background(Color.White.copy(alpha = 0.05f))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape)
                 .clickable(onClick = onQuickProgress),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "+1",
+                contentDescription = "+1 Progress",
                 tint = AccentArctic,
                 modifier = Modifier.size(18.dp)
             )

@@ -4,11 +4,17 @@ import android.app.Application
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
+import coil3.disk.DiskCache
+import coil3.disk.directory
+import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.crossfade
 import com.omnitrack.app.data.db.OmniTrackDatabase
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.util.AppLogger
+import okhttp3.Cache
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
@@ -24,7 +30,9 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
+        val httpCacheDir = File(cacheDir, "http_cache")
         val okHttpClient = OkHttpClient.Builder()
+            .cache(Cache(httpCacheDir, 100L * 1024 * 1024))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .addInterceptor { chain ->
@@ -40,6 +48,18 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             .components {
                 add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
             }
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizePercent(context, 0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(File(cacheDir, "image_cache"))
+                    .maxSizeBytes(250L * 1024 * 1024)
+                    .build()
+            }
+            .crossfade(true)
             .build()
     }
 }

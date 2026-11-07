@@ -437,7 +437,7 @@ private fun CategoryWaterfallList(
 
             val displayRank = when {
                 !isEnabled -> "OFF"
-                idx == 0 -> "#1 PRI"
+                idx == 0 -> "#1"
                 else -> "#${idx + 1}"
             }
 
@@ -522,7 +522,7 @@ private fun CategoryWaterfallList(
                         .background(
                             when {
                                 !isEnabled -> Color.White.copy(alpha = 0.04f)
-                                displayRank.contains("PRI") -> AccentJade.copy(alpha = 0.16f)
+                                idx == 0 -> AccentJade.copy(alpha = 0.16f)
                                 isDragging -> AccentArctic.copy(alpha = 0.20f)
                                 else -> Color.White.copy(alpha = 0.06f)
                             }
@@ -533,7 +533,7 @@ private fun CategoryWaterfallList(
                         text = displayRank,
                         color = when {
                             !isEnabled -> TextMuted
-                            displayRank.contains("PRI") -> AccentJade
+                            idx == 0 -> AccentJade
                             isDragging -> AccentArctic
                             else -> TextSecondary
                         },
