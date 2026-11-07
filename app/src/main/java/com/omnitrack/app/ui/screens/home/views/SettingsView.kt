@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
@@ -64,6 +65,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
+import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -91,6 +93,7 @@ fun SettingsView(
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     var showApiConfigSheet by remember { mutableStateOf(false) }
     var showBackupRestoreSheet by remember { mutableStateOf(false) }
+    var showTrackerAccountsSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -184,6 +187,18 @@ fun SettingsView(
             )
         }
 
+        // Section: Tracker Accounts & Cloud Sync
+        SettingsSection(title = "TRACKER ACCOUNTS & CLOUD SYNC") {
+            GroupedSettingRow(
+                icon = Icons.Default.CloudSync,
+                iconTint = AccentArctic,
+                title = "Tracker Accounts & Live Sync",
+                subtitle = "Connect AniList, MAL, Trakt, SIMKL, Comick, VNDB & Steam for two-way library sync",
+                badge = "OAUTH",
+                onClick = { showTrackerAccountsSheet = true }
+            )
+        }
+
         // Section: Backup & Restoration (.omnibk)
         SettingsSection(title = "BACKUP & RESTORATION (.OMNIBK)") {
             GroupedSettingRow(
@@ -250,6 +265,12 @@ fun SettingsView(
     if (showBackupRestoreSheet) {
         BackupRestoreSheet(
             onDismiss = { showBackupRestoreSheet = false }
+        )
+    }
+
+    if (showTrackerAccountsSheet) {
+        TrackerAccountsSheet(
+            onDismiss = { showTrackerAccountsSheet = false }
         )
     }
 }

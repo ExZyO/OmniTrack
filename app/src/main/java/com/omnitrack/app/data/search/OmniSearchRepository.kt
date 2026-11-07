@@ -58,6 +58,7 @@ class OmniSearchRepository(
                     deferreds.add(async { searchAniList(trimmed, isAnime = true) })
                     deferreds.add(async { searchAniList(trimmed, isAnime = false) })
                     deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(async { searchRanobeDb(trimmed) })
                     deferreds.add(async { searchOpenLibraryNovels(trimmed) })
                     deferreds.add(async { searchWlnUpdates(trimmed) })
                     deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey) })
@@ -74,8 +75,9 @@ class OmniSearchRepository(
                     deferreds.add(async { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
                 }
                 MediaType.NOVEL -> {
-                    // Multi-source novel discovery: Bangumi with native aliases, AniList LN, OpenLibrary & WLNUpdates
+                    // Multi-source novel discovery: Bangumi with native aliases, RanobeDB, AniList LN, OpenLibrary & WLNUpdates
                     deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(async { searchRanobeDb(trimmed) })
                     deferreds.add(async { searchAniList(trimmed, isAnime = false, formatNovel = true) })
                     deferreds.add(async { searchOpenLibraryNovels(trimmed) })
                     deferreds.add(async { searchWlnUpdates(trimmed) })
@@ -733,6 +735,49 @@ class OmniSearchRepository(
                     )
                 }
                 results
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun searchRanobeDb(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://ranobedb.org/api/v0/series?q=$encoded"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val series = root["series"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                series.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.content
+                        ?: obj["title_orig"]?.jsonPrimitive?.content
+                        ?: return@mapNotNull null
+                    val nativeTitle = obj["title_orig"]?.jsonPrimitive?.content
+                    val book = obj["book"]?.jsonObject
+                    val filename = book?.get("image")?.jsonObject?.get("filename")?.jsonPrimitive?.content
+                    val cover = if (filename != null) "https://images.ranobedb.org/$filename" else null
+                    val volCount = obj["volumes"]?.jsonObject?.get("count")?.jsonPrimitive?.content?.toDoubleOrNull()
+                        ?: obj["c_num_books"]?.jsonPrimitive?.content?.toDoubleOrNull()
+
+                    SearchResultItem(
+                        title = title,
+                        nativeTitle = if (nativeTitle != title) nativeTitle else null,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(cover ?: "https://images.ranobedb.org/default.jpg"),
+                        mediaType = MediaType.NOVEL,
+                        totalProgress = volCount,
+                        sourceProvider = "RanobeDB"
+                    )
+                }
             }
         } catch (_: Exception) {
             emptyList()

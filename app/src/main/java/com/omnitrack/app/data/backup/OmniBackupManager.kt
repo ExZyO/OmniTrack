@@ -103,7 +103,15 @@ object OmniBackupManager {
                 // 3. Preferences Dump
                 writeZipEntry(zipOut, "preferences.json", prefsDumpJson.toByteArray(StandardCharsets.UTF_8))
 
-                // 4. Custom Cover Artwork
+                // 4. Encrypted Tracker Tokens Dump (Portable AES-256-GCM)
+                val rawTokens = context.dataStore.data.first().asMap()
+                    .filterKeys { it.name.startsWith("token_") }
+                    .mapKeys { it.key.name }
+                    .mapValues { it.value.toString() }
+                val tokensDumpJson = json.encodeToString(OmniTrackerTokensDump(encryptedTokens = rawTokens))
+                writeZipEntry(zipOut, "tracker_tokens.json", tokensDumpJson.toByteArray(StandardCharsets.UTF_8))
+
+                // 5. Custom Cover Artwork
                 val customDir = coverCache.customCoverDir
                 if (customDir.exists()) {
                     customDir.listFiles()?.filter { it.isFile }?.forEach { coverFile ->
@@ -113,7 +121,7 @@ object OmniBackupManager {
                     }
                 }
 
-                // 5. Library Cached Covers
+                // 6. Library Cached Covers
                 val cacheDir = coverCache.cacheDir
                 if (cacheDir.exists()) {
                     val activeHashes = mediaItems.mapNotNull { coverCache.getCoverFile(it.coverUrl)?.name }.toSet()
@@ -148,6 +156,7 @@ object OmniBackupManager {
             var manifestBytes: ByteArray? = null
             var dbDumpBytes: ByteArray? = null
             var prefsBytes: ByteArray? = null
+            var tokensBytes: ByteArray? = null
             val customArtworks = mutableMapOf<String, ByteArray>()
             val cacheArtworks = mutableMapOf<String, ByteArray>()
 
@@ -159,6 +168,7 @@ object OmniBackupManager {
                         name == "manifest.json" -> manifestBytes = zipIn.readBytes()
                         name == "database_dump.json" -> dbDumpBytes = zipIn.readBytes()
                         name == "preferences.json" -> prefsBytes = zipIn.readBytes()
+                        name == "tracker_tokens.json" -> tokensBytes = zipIn.readBytes()
                         name.startsWith("artwork/custom/") && !entry.isDirectory -> {
                             val fileName = name.substringAfter("artwork/custom/")
                             customArtworks[fileName] = zipIn.readBytes()
@@ -239,6 +249,20 @@ object OmniBackupManager {
                     }
                 } catch (_: Exception) {
                     // Non-fatal preferences parse fallback
+                }
+            }
+
+            // Restore Encrypted Tracker Tokens
+            if (tokensBytes != null) {
+                try {
+                    val tokensDump = json.decodeFromString<OmniTrackerTokensDump>(String(tokensBytes!!, StandardCharsets.UTF_8))
+                    context.dataStore.edit { prefs ->
+                        for ((key, value) in tokensDump.encryptedTokens) {
+                            prefs[stringPreferencesKey(key)] = value
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Non-fatal tokens restore fallback
                 }
             }
 

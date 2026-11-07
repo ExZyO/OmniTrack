@@ -74,6 +74,42 @@ fun BackupRestoreSheet(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // System File Saver for Exporting .omnibk (Direct SAF stream, zero FileProvider dependency)
+    val exportFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isProcessing = true
+            errorMessage = null
+            statusMessage = "Exporting .omnibk compressed archive..."
+            scope.launch {
+                try {
+                    val stream = context.contentResolver.openOutputStream(uri)
+                    if (stream != null) {
+                        val result = OmniBackupManager.createBackup(
+                            context = context,
+                            database = app.database,
+                            coverCache = app.coverCache,
+                            outputStream = stream
+                        )
+                        if (result.success) {
+                            statusMessage = "Backup exported successfully (${result.mediaCount} items)!"
+                            Toast.makeText(context, statusMessage, Toast.LENGTH_LONG).show()
+                        } else {
+                            errorMessage = result.errorMessage
+                        }
+                    } else {
+                        errorMessage = "Could not open selected destination for writing"
+                    }
+                } catch (e: Exception) {
+                    errorMessage = e.message ?: "Failed to export backup"
+                } finally {
+                    isProcessing = false
+                }
+            }
+        }
+    }
+
     // System File Picker for Restoring .omnibk
     val restoreFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -224,23 +260,8 @@ fun BackupRestoreSheet(
                     .clip(RoundedCornerShape(14.dp))
                     .background(DarkSurfaceElevated)
                     .clickable(enabled = !isProcessing) {
-                        isProcessing = true
-                        errorMessage = null
-                        statusMessage = "Creating .omnibk compressed archive..."
-                        scope.launch {
-                            val result = OmniBackupManager.createBackup(
-                                context = context,
-                                database = app.database,
-                                coverCache = app.coverCache
-                            )
-                            isProcessing = false
-                            if (result.success && result.backupFile != null) {
-                                statusMessage = "Backup created: ${result.backupFile.name} (${result.mediaCount} items)"
-                                Toast.makeText(context, "Saved to ${result.backupFile.name}", Toast.LENGTH_LONG).show()
-                            } else {
-                                errorMessage = result.errorMessage
-                            }
-                        }
+                        val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                        exportFileLauncher.launch("omnitrack_backup_$timestamp.omnibk")
                     }
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
