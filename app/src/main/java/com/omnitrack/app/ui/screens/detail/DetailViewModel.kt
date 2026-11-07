@@ -7,6 +7,7 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.MediaEpisode
 import com.omnitrack.app.data.model.MediaSeason
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
@@ -1018,7 +1019,7 @@ class DetailViewModel(
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
             repository.updateCover(item.id, newCoverUrl)
-            repository.updateCustomCoverPath(item.id, null)
+            repository.updateCustomCover(item.id, null)
         }
     }
 
@@ -1026,7 +1027,7 @@ class DetailViewModel(
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
             repository.updateBanner(item.id, newBannerUrl)
-            repository.updateCustomBannerPath(item.id, null)
+            repository.updateCustomBanner(item.id, null)
         }
     }
 
