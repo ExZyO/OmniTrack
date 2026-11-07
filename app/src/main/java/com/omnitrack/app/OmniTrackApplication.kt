@@ -9,6 +9,9 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.omnitrack.app.data.cache.CoverCache
+import com.omnitrack.app.data.coil.CoverCacheMapper
+import com.omnitrack.app.data.coil.CoverCacheNetworkInterceptor
 import com.omnitrack.app.data.db.OmniTrackDatabase
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.util.AppLogger
@@ -21,6 +24,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
     val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao()) }
+    val coverCache by lazy { CoverCache(this) }
 
     override fun onCreate() {
         super.onCreate()
@@ -42,10 +46,12 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
                     .build()
                 chain.proceed(request)
             }
+            .addNetworkInterceptor(CoverCacheNetworkInterceptor(coverCache))
             .build()
 
         return ImageLoader.Builder(context)
             .components {
+                add(CoverCacheMapper(coverCache))
                 add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
             }
             .memoryCache {

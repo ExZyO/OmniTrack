@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,11 +86,16 @@ fun MediaCard(
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
     var showPlusOne by remember { mutableStateOf(false) }
-    val losslessCover = remember(item.coverUrl) { LosslessCoverMapper.toLosslessUrl(item.coverUrl) }
+    val coverModel = remember(item.customCoverPath, item.coverUrl) {
+        item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+    }
 
     Column(
         modifier = modifier
-            .scale(bounceScale.value)
+            .graphicsLayer {
+                scaleX = bounceScale.value
+                scaleY = bounceScale.value
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -106,7 +112,7 @@ fun MediaCard(
                 .clip(RoundedCornerShape(14.dp))
         ) {
             AsyncImage(
-                model = losslessCover,
+                model = coverModel,
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop

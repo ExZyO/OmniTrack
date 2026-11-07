@@ -377,15 +377,14 @@ fun HomeScreen(
                                     }
                                 }
 
-                                // Kinematic Layer: Scale decay and gentle parallax during finger drag
-                                val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                                val kinematicScale = (1f - (abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
-                                val kinematicAlpha = (1f - (abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
-
+                                // Kinematic Layer: Scale decay and gentle parallax during finger drag (RenderNode layer only — zero recomposition)
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .graphicsLayer {
+                                            val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                            val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
+                                            val kinematicAlpha = (1f - (kotlin.math.abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
                                             scaleX = kinematicScale
                                             scaleY = kinematicScale
                                             alpha = kinematicAlpha
