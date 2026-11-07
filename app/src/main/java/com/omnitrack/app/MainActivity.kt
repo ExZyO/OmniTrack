@@ -74,6 +74,12 @@ class MainActivity : ComponentActivity() {
 
         if (service.isBlank()) return
         val tokenManager = app.trackerTokenManager
+        val effectiveRedirectUri = when {
+            scheme == "komikku" -> "komikku://bangumi-auth"
+            scheme == "app.mihon" -> "app.mihon://comick-auth"
+            scheme == "nuvio" -> "nuvio://auth/$service"
+            else -> "omnitrack://auth/$service"
+        }
 
         var token: String? = null
         val fragment = data.fragment
@@ -103,7 +109,7 @@ class MainActivity : ComponentActivity() {
                                     "code": "$code",
                                     "client_id": "${TrackerAccountVerifier.SIMKL_CLIENT_ID}",
                                     "client_secret": "${TrackerAccountVerifier.SIMKL_CLIENT_SECRET}",
-                                    "redirect_uri": "nuvio://auth/simkl",
+                                    "redirect_uri": "$effectiveRedirectUri",
                                     "grant_type": "authorization_code"
                                 }
                             """.trimIndent()
@@ -176,6 +182,7 @@ class MainActivity : ComponentActivity() {
                                 .add("client_id", TrackerAccountVerifier.MAL_CLIENT_ID)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
+                                .add("redirect_uri", effectiveRedirectUri)
                                 .build()
                             val req = Request.Builder()
                                 .url("https://myanimelist.net/v1/oauth2/token")
@@ -197,7 +204,7 @@ class MainActivity : ComponentActivity() {
                                     "code": "$code",
                                     "client_id": "${TrackerAccountVerifier.TRAKT_CLIENT_ID}",
                                     "client_secret": "${TrackerAccountVerifier.TRAKT_CLIENT_SECRET}",
-                                    "redirect_uri": "nuvio://auth/trakt",
+                                    "redirect_uri": "$effectiveRedirectUri",
                                     "grant_type": "authorization_code"
                                 }
                             """.trimIndent()

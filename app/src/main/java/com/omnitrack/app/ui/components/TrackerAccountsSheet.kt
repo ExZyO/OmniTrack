@@ -100,6 +100,11 @@ fun TrackerAccountsSheet(
     var simklPinInfo by remember { mutableStateOf<TrackerAccountVerifier.SimklPinCode?>(null) }
     var isPollingSimkl by remember { mutableStateOf(false) }
 
+    // Trakt Device Code State
+    var showTraktDeviceDialog by remember { mutableStateOf(false) }
+    var traktDeviceInfo by remember { mutableStateOf<TrackerAccountVerifier.TraktDeviceCode?>(null) }
+    var isPollingTrakt by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -224,7 +229,7 @@ fun TrackerAccountsSheet(
                                 val verifier = com.omnitrack.app.data.sync.PkceUtil.generateCodeVerifier()
                                 TrackerAccountVerifier.pendingMalVerifier = verifier
                                 tokenManager.saveMalVerifier(verifier)
-                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${TrackerAccountVerifier.MAL_CLIENT_ID}&code_challenge=$verifier&code_challenge_method=plain"
+                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${TrackerAccountVerifier.MAL_CLIENT_ID}&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=omnitrack://auth/mal"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             }
                         },
@@ -238,16 +243,39 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 3. Trakt.tv (1-Tap Browser OAuth)
+            // 3. Trakt.tv (Instant Device Code or Browser OAuth)
             OAuthDirectTrackerCard(
                 title = "Trakt.tv",
                 subtitle = "TV Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
-                oauthUrl = "https://trakt.tv/oauth/authorize?response_type=code&client_id=${TrackerAccountVerifier.TRAKT_CLIENT_ID}&redirect_uri=nuvio://auth/trakt",
-                oauthButtonLabel = "Login",
                 verifyFn = { TrackerAccountVerifier.verifyTrakt(it) },
-                onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } }
+                onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } },
+                customActionButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode()
+                                if (codeInfo != null) {
+                                    traktDeviceInfo = codeInfo
+                                    showTraktDeviceDialog = true
+                                } else {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://trakt.tv/oauth/authorize?response_type=code&client_id=${TrackerAccountVerifier.TRAKT_CLIENT_ID}&redirect_uri=omnitrack://auth/trakt")
+                                    )
+                                    context.startActivity(intent)
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
             // 4. SIMKL (Direct PIN Code Flow)
@@ -505,6 +533,123 @@ fun TrackerAccountsSheet(
                         Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Open Link", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    // Trakt.tv Device Code Dialog
+    if (showTraktDeviceDialog && traktDeviceInfo != null) {
+        val info = traktDeviceInfo!!
+        LaunchedEffect(info) {
+            isPollingTrakt = true
+            while (isPollingTrakt) {
+                delay(info.interval * 1000L)
+                val token = TrackerAccountVerifier.pollTraktDeviceToken(info.deviceCode)
+                if (!token.isNullOrBlank()) {
+                    tokenManager.saveTraktToken(token)
+                    Toast.makeText(context, "Trakt.tv connected successfully!", Toast.LENGTH_LONG).show()
+                    isPollingTrakt = false
+                    showTraktDeviceDialog = false
+                    break
+                }
+            }
+        }
+
+        androidx.compose.ui.window.Dialog(onDismissRequest = {
+            isPollingTrakt = false
+            showTraktDeviceDialog = false
+        }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFED1C24).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = Color(0xFFED1C24),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Text(
+                    text = "Authorize on Trakt.tv",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Text(
+                    text = "Enter this 8-character code at trakt.tv/activate:",
+                    fontSize = 12.sp,
+                    color = TextMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(AmoledBlack)
+                        .border(1.dp, Color(0xFFED1C24).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = info.userCode,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFFED1C24),
+                        letterSpacing = 4.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Trakt Code", info.userCode))
+                            Toast.makeText(context, "Code copied!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Copy", color = TextPrimary, fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Open Link", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
