@@ -63,7 +63,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.omnitrack.app.data.model.MediaType
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import com.omnitrack.app.data.preferences.PosterCardStyle
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MediaTypeTabRow
@@ -101,9 +103,12 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val prefManager = remember { PreferenceManager(context) }
+    val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val uiState by viewModel.uiState.collectAsState()
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
+    val gridStates = remember { List(MediaType.filterTabs.size) { androidx.compose.foundation.lazy.grid.LazyGridState() } }
 
     var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.LIBRARY) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -415,7 +420,8 @@ fun HomeScreen(
                                     } else {
                                         // Adaptive poster grid with 96dp bottom padding for liquid floating nav
                                         LazyVerticalGrid(
-                                            columns = GridCells.Adaptive(minSize = 108.dp),
+                                            state = gridStates[pageIndex],
+                                            columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
                                             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 96.dp),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                                             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -427,6 +433,9 @@ fun HomeScreen(
                                             ) { _, item ->
                                                 MediaCard(
                                                     item = item,
+                                                    cornerRadiusDp = posterStyle.cornerRadiusDp,
+                                                    isLandscape = posterStyle.isLandscape,
+                                                    hideLabels = posterStyle.hideLabels,
                                                     onCardClick = {
                                                         AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
                                                         onItemClick(item.id)
@@ -491,6 +500,10 @@ fun HomeScreen(
             hazeState = hazeState,
             onActiveTabReSelected = { destination ->
                 if (destination == NavDestination.LIBRARY) {
+                    val activeGridState = gridStates.getOrNull(pagerState.currentPage)
+                    coroutineScope.launch {
+                        activeGridState?.animateScrollToItem(0)
+                    }
                     isSearchVisible = !isSearchVisible
                 }
             },

@@ -213,6 +213,7 @@ fun TrackerAccountsSheet(
                 subtitle = "GraphQL OAuth • Anime, Manga & Japanese LNs",
                 accentColor = Color(0xFF02A9FF),
                 initialToken = tokens.anilistToken.orEmpty(),
+                oauthUrl = "https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token",
                 onSave = { scope.launch { tokenManager.saveAnilistToken(it); Toast.makeText(context, "AniList token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveAnilistToken(null); Toast.makeText(context, "AniList disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -223,6 +224,7 @@ fun TrackerAccountsSheet(
                 subtitle = "REST API v2 • Anime & Manga status sync",
                 accentColor = Color(0xFF2E51A2),
                 initialToken = tokens.malToken.orEmpty(),
+                oauthUrl = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=3342466cfb744b714350df413002f5ef&code_challenge=omnitrack_challenge",
                 onSave = { scope.launch { tokenManager.saveMalToken(it); Toast.makeText(context, "MAL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -233,6 +235,7 @@ fun TrackerAccountsSheet(
                 subtitle = "REST OAuth v2 • Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
+                oauthUrl = "https://trakt.tv/oauth/authorize?response_type=code&client_id=d6981fae6206d203ddb5bc77583647864bbffb5be03816a75f8f533a110034a7&redirect_uri=omnitrack://auth/trakt",
                 onSave = { scope.launch { tokenManager.saveTraktToken(it); Toast.makeText(context, "Trakt token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -243,6 +246,7 @@ fun TrackerAccountsSheet(
                 subtitle = "Unified API • Anime, Shows & Movies tracker",
                 accentColor = Color(0xFF00E676),
                 initialToken = tokens.simklToken.orEmpty(),
+                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=457b98d9f43058fbeffcf31c77ce8d7b38cb7ffc76ff8b7fc93bf8fa0cb41fe2&redirect_uri=omnitrack://auth/simkl",
                 onSave = { scope.launch { tokenManager.saveSimklToken(it); Toast.makeText(context, "SIMKL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -253,6 +257,7 @@ fun TrackerAccountsSheet(
                 subtitle = "Manga & Webtoon chapter progress bridge",
                 accentColor = Color(0xFFF43F5E),
                 initialToken = tokens.comickToken.orEmpty(),
+                oauthUrl = null,
                 onSave = { scope.launch { tokenManager.saveComickToken(it); Toast.makeText(context, "Comick token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -263,6 +268,7 @@ fun TrackerAccountsSheet(
                 subtitle = "Kana REST API • Visual Novels list & votes",
                 accentColor = Color(0xFF3B82F6),
                 initialToken = tokens.vndbToken.orEmpty(),
+                oauthUrl = "https://vndb.org/u/tokens",
                 onSave = { scope.launch { tokenManager.saveVndbToken(it); Toast.makeText(context, "VNDB token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveVndbToken(null); Toast.makeText(context, "VNDB disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -273,6 +279,7 @@ fun TrackerAccountsSheet(
                 subtitle = "Web API • Video Games playtime sync",
                 accentColor = Color(0xFF66C0F4),
                 initialToken = tokens.steamApiKey.orEmpty(),
+                oauthUrl = "https://steamcommunity.com/dev/apikey",
                 onSave = { scope.launch { tokenManager.saveSteamApiKey(it); Toast.makeText(context, "Steam API key saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveSteamApiKey(null); Toast.makeText(context, "Steam disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -288,9 +295,11 @@ private fun TrackerConfigCard(
     subtitle: String,
     accentColor: Color,
     initialToken: String,
+    oauthUrl: String? = null,
     onSave: (String) -> Unit,
     onDisconnect: () -> Unit
 ) {
+    val context = LocalContext.current
     var textValue by remember(initialToken) { mutableStateOf(initialToken) }
     var isRevealed by remember { mutableStateOf(false) }
     val isConnected = initialToken.isNotBlank()
@@ -388,6 +397,26 @@ private fun TrackerConfigCard(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (oauthUrl != null && !isConnected) {
+                Button(
+                    onClick = {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(oauthUrl))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
             if (isConnected) {
                 Button(
                     onClick = {

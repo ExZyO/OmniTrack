@@ -9,6 +9,11 @@ object LosslessCoverMapper {
     fun toLosslessUrl(url: String): String {
         var clean = url.trim()
 
+        // Enforce HTTPS across all remote artwork to prevent Android cleartext network blocks
+        if (clean.startsWith("http://")) {
+            clean = clean.replaceFirst("http://", "https://")
+        }
+
         // MangaDex: strip .512.jpg or .256.jpg
         clean = clean.replace(Regex("\\.(256|512)\\.jpg$"), ".jpg")
             .replace(Regex("\\.(256|512)\\.png$"), ".png")

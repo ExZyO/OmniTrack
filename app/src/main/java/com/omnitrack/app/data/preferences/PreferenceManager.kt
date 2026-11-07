@@ -2,6 +2,7 @@ package com.omnitrack.app.data.preferences
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -15,6 +16,13 @@ import kotlinx.coroutines.flow.map
 import java.io.IOException
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
+
+data class PosterCardStyle(
+    val widthDp: Int = 126,
+    val cornerRadiusDp: Int = 12,
+    val isLandscape: Boolean = false,
+    val hideLabels: Boolean = false
+)
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
     HERO("Hero Layout", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
@@ -66,6 +74,11 @@ class PreferenceManager(private val context: Context) {
         val FANART_API_KEY = stringPreferencesKey("fanart_api_key")
         val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
         val AI_SEMANTIC_SEARCH_ENABLED = booleanPreferencesKey("ai_semantic_search_enabled")
+
+        val POSTER_WIDTH_DP = intPreferencesKey("poster_card_width_dp")
+        val POSTER_CORNER_RADIUS_DP = intPreferencesKey("poster_card_corner_radius_dp")
+        val POSTER_LANDSCAPE = booleanPreferencesKey("poster_card_landscape")
+        val POSTER_HIDE_LABELS = booleanPreferencesKey("poster_card_hide_labels")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -166,6 +179,42 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun updateAiSemanticSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] = enabled }
+    }
+
+    val posterCardStyle: Flow<PosterCardStyle> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            PosterCardStyle(
+                widthDp = prefs[PreferencesKeys.POSTER_WIDTH_DP] ?: 126,
+                cornerRadiusDp = prefs[PreferencesKeys.POSTER_CORNER_RADIUS_DP] ?: 12,
+                isLandscape = prefs[PreferencesKeys.POSTER_LANDSCAPE] ?: false,
+                hideLabels = prefs[PreferencesKeys.POSTER_HIDE_LABELS] ?: false
+            )
+        }
+
+    suspend fun updatePosterWidthDp(width: Int) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_WIDTH_DP] = width }
+    }
+
+    suspend fun updatePosterCornerRadiusDp(radius: Int) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_CORNER_RADIUS_DP] = radius }
+    }
+
+    suspend fun updatePosterLandscape(landscape: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_LANDSCAPE] = landscape }
+    }
+
+    suspend fun updatePosterHideLabels(hide: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_HIDE_LABELS] = hide }
+    }
+
+    suspend fun resetPosterStyle() {
+        context.dataStore.edit {
+            it.remove(PreferencesKeys.POSTER_WIDTH_DP)
+            it.remove(PreferencesKeys.POSTER_CORNER_RADIUS_DP)
+            it.remove(PreferencesKeys.POSTER_LANDSCAPE)
+            it.remove(PreferencesKeys.POSTER_HIDE_LABELS)
+        }
     }
 
     fun getArtSourcePriority(mediaType: MediaType): Flow<List<String>> {

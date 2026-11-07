@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
@@ -65,6 +66,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
+import com.omnitrack.app.ui.components.PosterCustomizationSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
@@ -94,6 +96,7 @@ fun SettingsView(
     var showApiConfigSheet by remember { mutableStateOf(false) }
     var showBackupRestoreSheet by remember { mutableStateOf(false) }
     var showTrackerAccountsSheet by remember { mutableStateOf(false) }
+    var showPosterCustomizationSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -161,6 +164,15 @@ fun SettingsView(
                 title = "Visual Presentation & Themes",
                 subtitle = "Interactive preview & customization for hero layouts, banner sizing & ambient auras",
                 onClick = onNavigateToVisualPresentation
+            )
+            SectionDivider()
+            GroupedSettingRow(
+                icon = Icons.Default.ViewModule,
+                iconTint = AccentArctic,
+                title = "Poster Card Style",
+                subtitle = "Configure grid density (104–140dp), corner radius (0–24dp), 16:9 mode & labels",
+                badge = "STYLE",
+                onClick = { showPosterCustomizationSheet = true }
             )
         }
 
@@ -271,6 +283,13 @@ fun SettingsView(
     if (showTrackerAccountsSheet) {
         TrackerAccountsSheet(
             onDismiss = { showTrackerAccountsSheet = false }
+        )
+    }
+
+    if (showPosterCustomizationSheet) {
+        PosterCustomizationSheet(
+            preferenceManager = prefManager,
+            onDismiss = { showPosterCustomizationSheet = false }
         )
     }
 }

@@ -81,7 +81,12 @@ fun MediaCard(
     item: MediaCardSummary,
     onCardClick: () -> Unit,
     onQuickProgress: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cornerRadiusDp: Int = 12,
+    isLandscape: Boolean = false,
+    hideLabels: Boolean = false,
+    badgeText: String? = null,
+    badgeColor: Color = AccentArctic
 ) {
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
@@ -94,6 +99,8 @@ fun MediaCard(
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
         item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
     }
+
+    val shape = RoundedCornerShape(cornerRadiusDp.dp)
 
     Column(
         modifier = modifier
@@ -112,12 +119,43 @@ fun MediaCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(0.68f)
-                .shadow(10.dp, RoundedCornerShape(14.dp))
-                .clip(RoundedCornerShape(14.dp))
+                .aspectRatio(if (isLandscape) 16f / 9f else 0.68f)
+                .shadow(10.dp, shape)
+                .clip(shape)
         ) {
             AsyncImage(
                 model = coverModel,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                onSuccess = {
+                    if (coverModel is String && coverCache != null) {
+                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            coverCache.promoteFromDiskCache(coverModel, diskCache)
+                        }
+                    }
+                }
+            )
+
+            // Optional Top-Start Badge (e.g. Discover source provider)
+            if (badgeText != null) {
+                Box(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .align(Alignment.TopStart)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AmoledBlack.copy(alpha = 0.75f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = badgeText.uppercase(),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = badgeColor
+                    )
+                }
+            }
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
@@ -238,17 +276,19 @@ fun MediaCard(
             }
         }
 
-        // Title text directly on dark background
-        Text(
-            text = item.title,
-            color = TextPrimary,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(horizontal = 2.dp)
-        )
+        // Title text directly on dark background (hidden if hideLabels enabled)
+        if (!hideLabels) {
+            Text(
+                text = item.title,
+                color = TextPrimary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 16.sp,
+                modifier = Modifier.padding(horizontal = 2.dp)
+            )
+        }
     }
 }
 
@@ -257,13 +297,23 @@ fun MediaCard(
     item: MediaItemEntity,
     onCardClick: () -> Unit,
     onQuickProgress: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cornerRadiusDp: Int = 12,
+    isLandscape: Boolean = false,
+    hideLabels: Boolean = false,
+    badgeText: String? = null,
+    badgeColor: Color = AccentArctic
 ) {
     MediaCard(
         item = item.toSummary(),
         onCardClick = onCardClick,
         onQuickProgress = onQuickProgress,
-        modifier = modifier
+        modifier = modifier,
+        cornerRadiusDp = cornerRadiusDp,
+        isLandscape = isLandscape,
+        hideLabels = hideLabels,
+        badgeText = badgeText,
+        badgeColor = badgeColor
     )
 }
 

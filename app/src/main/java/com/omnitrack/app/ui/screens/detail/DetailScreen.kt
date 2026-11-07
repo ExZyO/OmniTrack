@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +68,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,6 +96,12 @@ import com.omnitrack.app.ui.components.GameProgressCard
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
+import com.omnitrack.app.ui.screens.detail.components.AttachedStatusFanArcOverlay
+import com.omnitrack.app.ui.screens.detail.components.DualSpeedJogWheelOverlay
+import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
+import com.omnitrack.app.ui.screens.detail.components.ProgressEditSheet
+import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
+import com.omnitrack.app.ui.screens.detail.components.StatusPickerSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -123,6 +132,17 @@ fun DetailScreen(
     var showOptionsMenu by remember { mutableStateOf(false) }
     var synopsisExpanded by remember(item?.id) { mutableStateOf(false) }
     var canExpandSynopsis by remember(item?.id) { mutableStateOf(false) }
+
+    var showProgressEditSheet by remember { mutableStateOf(false) }
+    var showJogWheelOverlay by remember { mutableStateOf(false) }
+    var jogWheelAnchor by remember { mutableStateOf(Offset.Zero) }
+
+    var showStatusPickerSheet by remember { mutableStateOf(false) }
+    var showStatusFanArcOverlay by remember { mutableStateOf(false) }
+    var statusFanArcAnchor by remember { mutableStateOf(Offset.Zero) }
+
+    var showScoreRatingSheet by remember { mutableStateOf(false) }
+    var showMultiTrackerSheet by remember { mutableStateOf(false) }
 
     val scrollState = rememberScrollState()
 
@@ -418,7 +438,21 @@ fun DetailScreen(
                         }
 
                         // 100% UNBOXED Inline Stats Row with Hairline Dividers
-                        UnboxedStatsRow(item = item, viewModel = viewModel)
+                        UnboxedStatsRow(
+                            item = item,
+                            onEditProgress = { showProgressEditSheet = true },
+                            onLongPressProgress = { anchor ->
+                                jogWheelAnchor = anchor
+                                showJogWheelOverlay = true
+                            },
+                            onEditStatus = { showStatusPickerSheet = true },
+                            onLongPressStatus = { anchor ->
+                                statusFanArcAnchor = anchor
+                                showStatusFanArcOverlay = true
+                            },
+                            onEditScore = { showScoreRatingSheet = true },
+                            onOpenTrackers = { showMultiTrackerSheet = true }
+                        )
 
                         // Multi-Source Metadata Enrichment Ratings
                         EnrichmentRatingsRow(item = item)
@@ -535,7 +569,21 @@ fun DetailScreen(
                             .offset(y = (-30).dp)
                     ) {
                         Column {
-                            UnboxedStatsRow(item = item, viewModel = viewModel)
+                            UnboxedStatsRow(
+                                item = item,
+                                onEditProgress = { showProgressEditSheet = true },
+                                onLongPressProgress = { anchor ->
+                                    jogWheelAnchor = anchor
+                                    showJogWheelOverlay = true
+                                },
+                                onEditStatus = { showStatusPickerSheet = true },
+                                onLongPressStatus = { anchor ->
+                                    statusFanArcAnchor = anchor
+                                    showStatusFanArcOverlay = true
+                                },
+                                onEditScore = { showScoreRatingSheet = true },
+                                onOpenTrackers = { showMultiTrackerSheet = true }
+                            )
                             EnrichmentRatingsRow(item = item)
                         }
                     }
@@ -914,6 +962,68 @@ fun DetailScreen(
                     }
                 )
             }
+
+            // Interactive Progress Modal Sheet
+            if (showProgressEditSheet) {
+                ProgressEditSheet(
+                    initialProgress = item.currentProgress,
+                    totalProgress = item.totalProgress,
+                    mediaType = item.mediaType,
+                    onDismiss = { showProgressEditSheet = false },
+                    onConfirm = { viewModel.updateProgress(it) }
+                )
+            }
+
+            // Dual-Speed Precision Radial Jog-Wheel Overlay (Long-Press Progress)
+            if (showJogWheelOverlay) {
+                DualSpeedJogWheelOverlay(
+                    initialProgress = item.currentProgress,
+                    totalProgress = item.totalProgress,
+                    mediaType = item.mediaType,
+                    centerAnchor = jogWheelAnchor,
+                    onDismiss = { showJogWheelOverlay = false },
+                    onCommit = { viewModel.updateProgress(it) }
+                )
+            }
+
+            // Interactive Status Picker Modal Sheet
+            if (showStatusPickerSheet) {
+                StatusPickerSheet(
+                    currentStatus = item.status,
+                    onDismiss = { showStatusPickerSheet = false },
+                    onStatusSelected = { viewModel.updateStatus(it) }
+                )
+            }
+
+            // Attached Contiguous Fan Arc Overlay (0px Gap Between Sectors - Long-Press Status)
+            if (showStatusFanArcOverlay) {
+                AttachedStatusFanArcOverlay(
+                    currentStatus = item.status,
+                    thumbAnchor = statusFanArcAnchor,
+                    onDismiss = { showStatusFanArcOverlay = false },
+                    onCommit = { viewModel.updateStatus(it) }
+                )
+            }
+
+            // Tenth-Decimal Score & Rating Sheet (1.0 to 10.0, 0.1 precision)
+            if (showScoreRatingSheet) {
+                ScoreRatingSheet(
+                    initialScore = item.userRating,
+                    onDismiss = { showScoreRatingSheet = false },
+                    onScoreConfirmed = { viewModel.updateRating(it) }
+                )
+            }
+
+            // Chimanew-Style Multi-Tracker Sheet
+            if (showMultiTrackerSheet) {
+                MultiTrackerSheet(
+                    item = item,
+                    onDismiss = { showMultiTrackerSheet = false },
+                    onUpdateItem = { updatedItem ->
+                        viewModel.updateMediaItem(updatedItem)
+                    }
+                )
+            }
         }
     }
 }
@@ -921,9 +1031,31 @@ fun DetailScreen(
 @Composable
 private fun UnboxedStatsRow(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
-    viewModel: DetailViewModel,
+    onEditProgress: () -> Unit,
+    onLongPressProgress: (Offset) -> Unit,
+    onEditStatus: () -> Unit,
+    onLongPressStatus: (Offset) -> Unit,
+    onEditScore: () -> Unit,
+    onOpenTrackers: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var progressPillCoords by remember { mutableStateOf(Offset.Zero) }
+    var statusPillCoords by remember { mutableStateOf(Offset.Zero) }
+
+    val boundCount = remember(item) {
+        listOfNotNull(
+            item.anilistId,
+            item.malId,
+            item.traktId,
+            item.simklId,
+            item.tmdbId,
+            item.vndbId,
+            item.comickId,
+            item.bangumiId,
+            item.igdbId
+        ).size
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -937,46 +1069,48 @@ private fun UnboxedStatsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Section 1: Progress Stepper (+1)
+        // Section 1: Progress Stepper & Jog-Wheel
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.clickable {
-                val inc = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) 0.5 else 1.0
-                val newProg = item.currentProgress + inc
-                val clamped = if (item.totalProgress != null) newProg.coerceAtMost(item.totalProgress) else newProg
-                viewModel.updateProgress(clamped)
-            }
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .onGloballyPositioned { progressPillCoords = it.positionInRoot() }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onEditProgress() },
+                        onLongPress = { offset -> onLongPressProgress(progressPillCoords + offset) }
+                    )
+                }
         ) {
             Box(
                 modifier = Modifier
-                    .size(32.dp)
+                    .size(28.dp)
                     .clip(CircleShape)
                     .background(AccentArctic.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "+1",
-                    color = AccentArctic,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = AccentArctic,
+                    modifier = Modifier.size(14.dp)
                 )
             }
             Column {
                 Text(
                     text = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-                        String.format("%.1f hrs", item.currentProgress)
+                        String.format("%.1f", item.currentProgress)
                     } else {
                         "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
                     },
                     color = TextPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
                 Text(
                     text = item.mediaType.unitLabel.uppercase(),
                     color = TextMuted,
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
                 )
@@ -991,21 +1125,18 @@ private fun UnboxedStatsRow(
                 .background(Color.White.copy(alpha = 0.12f))
         )
 
-        // Section 2: Status with Glowing Dot
+        // Section 2: Status with Glowing Dot & Fan Arc
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.clickable {
-                val next = when (item.status) {
-                    TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
-                    TrackingStatus.IN_PROGRESS -> TrackingStatus.COMPLETED
-                    TrackingStatus.COMPLETED -> TrackingStatus.ON_HOLD
-                    TrackingStatus.ON_HOLD -> TrackingStatus.DROPPED
-                    TrackingStatus.DROPPED -> TrackingStatus.PLAN_TO_TRACK
-                    else -> TrackingStatus.IN_PROGRESS
+            modifier = Modifier
+                .onGloballyPositioned { statusPillCoords = it.positionInRoot() }
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onEditStatus() },
+                        onLongPress = { offset -> onLongPressStatus(statusPillCoords + offset) }
+                    )
                 }
-                viewModel.updateStatus(next)
-            }
         ) {
             Box(
                 modifier = Modifier
@@ -1024,13 +1155,13 @@ private fun UnboxedStatsRow(
                 Text(
                     text = item.status.displayName,
                     color = TextPrimary,
-                    fontSize = 13.5.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "STATUS",
                     color = TextMuted,
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
                 )
@@ -1049,11 +1180,7 @@ private fun UnboxedStatsRow(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.clickable {
-                val current = item.userRating ?: 7.0f
-                val next = if (current >= 10.0f) 5.0f else current + 1.0f
-                viewModel.updateRating(next)
-            }
+            modifier = Modifier.clickable { onEditScore() }
         ) {
             Icon(
                 imageVector = Icons.Default.Star,
@@ -1065,13 +1192,50 @@ private fun UnboxedStatsRow(
                 Text(
                     text = item.userRating?.let { String.format("%.1f", it) } ?: "Rate",
                     color = TextPrimary,
-                    fontSize = 13.5.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "SCORE",
                     color = TextMuted,
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Vertical hairline
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(28.dp)
+                .background(Color.White.copy(alpha = 0.12f))
+        )
+
+        // Section 4: Trackers Pill (Chimanew Option 2)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.clickable { onOpenTrackers() }
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(if (boundCount > 0) AccentJade else TextMuted.copy(alpha = 0.5f))
+            )
+            Column {
+                Text(
+                    text = if (boundCount > 0) "$boundCount Bound" else "None",
+                    color = if (boundCount > 0) AccentJade else TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "TRACKERS",
+                    color = TextMuted,
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
                 )

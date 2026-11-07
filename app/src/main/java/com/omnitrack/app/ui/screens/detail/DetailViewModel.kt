@@ -220,6 +220,12 @@ class DetailViewModel(
         }
     }
 
+    fun updateMediaItem(item: MediaItemEntity) {
+        viewModelScope.launch {
+            repository.updateMedia(item)
+        }
+    }
+
     fun deleteItem() {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch

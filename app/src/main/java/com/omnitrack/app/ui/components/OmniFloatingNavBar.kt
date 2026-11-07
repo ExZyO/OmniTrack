@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -92,6 +94,9 @@ class OmniNavBarScrollState {
     var labelVisibility by mutableFloatStateOf(1f)
         private set
 
+    var isVisible by mutableStateOf(true)
+        private set
+
     private var accumulatedDelta = 0f
 
     val nestedScrollConnection: NestedScrollConnection = object : NestedScrollConnection {
@@ -101,12 +106,14 @@ class OmniNavBarScrollState {
 
             accumulatedDelta += deltaY
 
-            if (accumulatedDelta < -SCROLL_THRESHOLD && labelVisibility != 0f) {
-                // Scrolling down -> collapse to compact icon-only dock
+            if (accumulatedDelta < -SCROLL_THRESHOLD) {
+                // Scrolling down -> auto-hide dock smoothly offscreen
+                isVisible = false
                 labelVisibility = 0f
                 accumulatedDelta = 0f
-            } else if (accumulatedDelta > SCROLL_THRESHOLD && labelVisibility != 1f) {
-                // Scrolling up -> expand with labels
+            } else if (accumulatedDelta > SCROLL_THRESHOLD) {
+                // Scrolling up -> reveal dock smoothly
+                isVisible = true
                 labelVisibility = 1f
                 accumulatedDelta = 0f
             }
@@ -119,6 +126,7 @@ class OmniNavBarScrollState {
     }
 
     fun expand() {
+        isVisible = true
         labelVisibility = 1f
         accumulatedDelta = 0f
     }
@@ -180,6 +188,12 @@ fun OmniFloatingNavBar(
         label = "nav_label_fraction"
     )
 
+    val navHideOffset by animateDpAsState(
+        targetValue = if (scrollState.isVisible) 0.dp else 120.dp,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "nav_auto_hide_offset"
+    )
+
     val pillHeight by animateDpAsState(
         targetValue = 62.dp,
         label = "nav_pill_height"
@@ -192,6 +206,7 @@ fun OmniFloatingNavBar(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .offset(y = navHideOffset)
             .navigationBarsPadding()
             .padding(bottom = 12.dp, start = 16.dp, end = 16.dp),
         contentAlignment = Alignment.BottomCenter

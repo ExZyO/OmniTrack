@@ -59,9 +59,12 @@ import com.omnitrack.app.data.ai.AiQueryEngine
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -92,6 +95,7 @@ fun DiscoverView(
     val openRouterKey by prefManager.openRouterApiKey.collectAsState(initial = "")
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
     val aiSearchSetting by prefManager.aiSemanticSearchEnabled.collectAsState(initial = false)
+    val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf(MediaType.ALL) }
@@ -326,9 +330,9 @@ fun DiscoverView(
             )
 
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(bottom = 110.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -340,11 +344,44 @@ fun DiscoverView(
                         )
                     }
 
-                    SearchResultCard(
-                        item = item,
-                        existingInLibrary = existingInLibrary,
-                        onAdd = { onAddMedia(item) },
-                        onOpenDetail = { existingInLibrary?.id?.let(onItemClick) }
+                    val summary = existingInLibrary ?: MediaCardSummary(
+                        id = 0L,
+                        title = item.title,
+                        nativeTitle = item.nativeTitle,
+                        coverUrl = item.coverUrl,
+                        bannerUrl = item.bannerUrl,
+                        mediaType = item.mediaType,
+                        status = TrackingStatus.PLAN_TO_TRACK,
+                        currentProgress = 0.0,
+                        totalProgress = item.totalProgress?.toDouble(),
+                        userRating = item.communityScore,
+                        customCoverPath = null,
+                        customBannerPath = null,
+                        artworkRole = "DEFAULT",
+                        lastUpdated = System.currentTimeMillis()
+                    )
+
+                    MediaCard(
+                        item = summary,
+                        cornerRadiusDp = posterStyle.cornerRadiusDp,
+                        isLandscape = posterStyle.isLandscape,
+                        hideLabels = posterStyle.hideLabels,
+                        badgeText = if (existingInLibrary != null) "IN LIBRARY" else item.sourceProvider,
+                        badgeColor = if (existingInLibrary != null) AccentJade else AccentArctic,
+                        onCardClick = {
+                            if (existingInLibrary != null) {
+                                onItemClick(existingInLibrary.id)
+                            } else {
+                                onAddMedia(item)
+                            }
+                        },
+                        onQuickProgress = {
+                            if (existingInLibrary != null) {
+                                onItemClick(existingInLibrary.id)
+                            } else {
+                                onAddMedia(item)
+                            }
+                        }
                     )
                 }
             }
@@ -365,205 +402,24 @@ fun DiscoverView(
                 color = TextSecondary,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            val spotlight = allMedia.take(8)
+            val spotlight = allMedia.take(12)
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 108.dp),
+                columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(bottom = 110.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(spotlight, key = { it.id }) { item ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurfaceCard)
-                            .clickable { onItemClick(item.id) }
-                            .padding(6.dp)
-                    ) {
-                        AsyncImage(
-                            model = item.coverUrl,
-                            contentDescription = item.title,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(0.68f)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = item.title,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = item.mediaType.displayName,
-                            fontSize = 10.sp,
-                            color = AccentArctic
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SearchResultCard(
-    item: SearchResultItem,
-    existingInLibrary: MediaCardSummary?,
-    onAdd: () -> Unit,
-    onOpenDetail: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DarkSurfaceCard)
-            .clickable {
-                if (existingInLibrary != null) onOpenDetail() else onAdd()
-            }
-            .padding(8.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(10.dp))
-        ) {
-            AsyncImage(
-                model = LosslessCoverMapper.toLosslessUrl(item.coverUrl),
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-
-            // Provider Pill (top start)
-            Box(
-                modifier = Modifier
-                    .padding(6.dp)
-                    .align(Alignment.TopStart)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(AmoledBlack.copy(alpha = 0.75f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = item.sourceProvider.uppercase(),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentArctic
-                )
-            }
-
-            // Score Badge (top end)
-            if (item.communityScore != null) {
-                Row(
-                    modifier = Modifier
-                        .padding(6.dp)
-                        .align(Alignment.TopEnd)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(AmoledBlack.copy(alpha = 0.75f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = null,
-                        tint = AccentGold,
-                        modifier = Modifier.size(10.dp)
-                    )
-                    Text(
-                        text = String.format("%.1f", item.communityScore),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                    MediaCard(
+                        item = item,
+                        cornerRadiusDp = posterStyle.cornerRadiusDp,
+                        isLandscape = posterStyle.isLandscape,
+                        hideLabels = posterStyle.hideLabels,
+                        onCardClick = { onItemClick(item.id) },
+                        onQuickProgress = { onItemClick(item.id) }
                     )
                 }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        Text(
-            text = item.title,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${item.mediaType.displayName}${item.releaseYear?.let { " • $it" } ?: ""}",
-                fontSize = 10.5.sp,
-                color = TextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Action Button: "+ Track" or "✓ In Library"
-        if (existingInLibrary != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(AccentJade.copy(alpha = 0.15f))
-                    .clickable { onOpenDetail() }
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = null,
-                    tint = AccentJade,
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "In Library",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentJade
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(AccentArctic)
-                    .clickable { onAdd() }
-                    .padding(vertical = 6.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = AmoledBlack,
-                    modifier = Modifier.size(13.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Track",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AmoledBlack
-                )
             }
         }
     }

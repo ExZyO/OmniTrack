@@ -7,11 +7,13 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -49,6 +51,7 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchAniListCovers(title, isAnime = true) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 2) })
                     deferreds.add(async { fetchKitsuCovers(title, isAnime = true) })
+                    deferreds.add(async { fetchMangaDexCovers(title) })
                 }
                 MediaType.MANGA -> {
                     deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
@@ -203,33 +206,50 @@ class ArtworkWaterfallRepository(
 
     private fun fetchBangumiCovers(title: String, type: Int): List<ArtworkCandidate> {
         return try {
-            val encoded = URLEncoder.encode(title, "UTF-8")
+            val payload = buildJsonObject {
+                put("keyword", title.trim())
+                putJsonObject("filter") {
+                    putJsonArray("type") {
+                        add(type)
+                    }
+                }
+            }
+
             val request = Request.Builder()
-                .url("https://api.bgm.tv/search/subject/$encoded?type=$type&responseGroup=small&max_results=5")
-                .get()
+                .url("https://api.bgm.tv/v0/search/subjects")
+                .header("User-Agent", "OmniTrack/1.0.0 (Android; https://github.com/ExZyO/OmniTrack)")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return emptyList()
                 val responseStr = response.body?.string() ?: return emptyList()
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
-                val list = parsed["list"]?.jsonArray ?: return emptyList()
+                val data = parsed["data"]?.jsonArray ?: return emptyList()
 
-                list.mapNotNull { item ->
-                    val images = item.jsonObject["images"]?.jsonObject
-                    val url = images?.get("large")?.jsonPrimitive?.content
+                val candidates = mutableListOf<ArtworkCandidate>()
+                data.forEach { elem ->
+                    val item = elem.jsonObject
+                    val images = item["images"]?.jsonObject
+                    val rawUrl = images?.get("large")?.jsonPrimitive?.content
                         ?: images?.get("common")?.jsonPrimitive?.content
-                    val name = item.jsonObject["name_cn"]?.jsonPrimitive?.content
-                        ?: item.jsonObject["name"]?.jsonPrimitive?.content
+                    val url = rawUrl?.let { if (it.startsWith("http://")) it.replaceFirst("http://", "https://") else it }
+                    val name = item["name_cn"]?.jsonPrimitive?.content
+                        ?: item["name"]?.jsonPrimitive?.content
+                        ?: title
 
                     if (url != null) {
-                        ArtworkCandidate(
-                            url = url,
-                            sourceName = "Bangumi",
-                            description = name
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = url,
+                                sourceName = "Bangumi",
+                                description = name,
+                                isBanner = false
+                            )
                         )
-                    } else null
+                    }
                 }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()
@@ -341,7 +361,19 @@ class ArtworkWaterfallRepository(
                     val id = elem.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
                     val name = elem.jsonObject["name"]?.jsonPrimitive?.content ?: title
                     // Steam high-res 600x900 library capsule (cover)
-                    val verticalCapsuleUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
+                    val verticalCapsule2xUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
+                    val verticalCapsuleUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg"
+                    val headerBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
+                    val heroBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
+
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = verticalCapsule2xUrl,
+                            sourceName = "Steam",
+                            description = "$name (2x HD)",
+                            isBanner = false
+                        )
+                    )
                     candidates.add(
                         ArtworkCandidate(
                             url = verticalCapsuleUrl,
@@ -350,13 +382,19 @@ class ArtworkWaterfallRepository(
                             isBanner = false
                         )
                     )
-                    // Steam hero widescreen banner
-                    val heroBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
                     candidates.add(
                         ArtworkCandidate(
                             url = heroBannerUrl,
                             sourceName = "Steam",
                             description = "$name (Hero Banner)",
+                            isBanner = true
+                        )
+                    )
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = headerBannerUrl,
+                            sourceName = "Steam",
+                            description = "$name (Store Header)",
                             isBanner = true
                         )
                     )
