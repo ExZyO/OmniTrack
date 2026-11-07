@@ -364,6 +364,52 @@ class DetailViewModel(
                     }
                 } catch (_: Exception) {}
 
+                // For TV Shows, also fetch season-level videos (Trailers, Bloopers, Featurettes, Teasers, Clips)
+                if (type == "tv") {
+                    try {
+                        val sUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}?api_key=$tmdbKey"
+                        val sReq = Request.Builder().url(sUrl).get().build()
+                        client.newCall(sReq).execute().use { sResp ->
+                            if (sResp.isSuccessful) {
+                                val sBody = sResp.body?.string()
+                                if (sBody != null) {
+                                    val sRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(sBody).jsonObject
+                                    val seasonsArray = sRoot["seasons"]?.jsonArray
+                                    val sNumbers = seasonsArray?.mapNotNull { it.jsonObject["season_number"]?.jsonPrimitive?.content?.toIntOrNull() }
+                                        ?.filter { it > 0 }?.take(8) ?: emptyList()
+                                    for (sNum in sNumbers) {
+                                        try {
+                                            val svUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}/season/$sNum/videos?api_key=$tmdbKey"
+                                            val svReq = Request.Builder().url(svUrl).get().build()
+                                            client.newCall(svReq).execute().use { svResp ->
+                                                if (svResp.isSuccessful) {
+                                                    val svBody = svResp.body?.string()
+                                                    if (svBody != null) {
+                                                        val svRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(svBody).jsonObject
+                                                        val svResults = svRoot["results"]?.jsonArray
+                                                        if (svResults != null) {
+                                                            for (vElem in svResults) {
+                                                                val vObj = vElem.jsonObject
+                                                                val vSite = vObj["site"]?.jsonPrimitive?.content ?: ""
+                                                                val vKey = vObj["key"]?.jsonPrimitive?.content ?: continue
+                                                                val vTitle = vObj["name"]?.jsonPrimitive?.content ?: "Season $sNum Video"
+                                                                val vType = vObj["type"]?.jsonPrimitive?.content ?: "Trailer"
+                                                                if (vSite.equals("YouTube", ignoreCase = true)) {
+                                                                    trailerList.add(MediaTrailer(title = "S$sNum: $vTitle", youtubeKey = vKey, type = vType))
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+
                 // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
                 try {
                     val searchType = if (type == "movie") "movie" else "show"
