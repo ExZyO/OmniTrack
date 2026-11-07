@@ -51,8 +51,8 @@ interface MediaDao {
     @Query("UPDATE media_items SET artworkRole = :role, lastUpdated = :updated WHERE id = :id")
     suspend fun updateArtworkRole(id: Long, role: String, updated: Long = System.currentTimeMillis())
 
-    @Query("UPDATE media_items SET clearartUrl = :clearart, communityScore = :score, imdbScore = :imdb, rtScore = :rt, metacriticScore = :meta WHERE id = :id")
-    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?)
+    @Query("UPDATE media_items SET clearartUrl = :clearart, communityScore = :score, imdbScore = :imdb, rtScore = :rt, metacriticScore = :meta, traktScore = :trakt, audienceScore = :audience WHERE id = :id")
+    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?, trakt: Int? = null, audience: Int? = null)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMedia(item: MediaItemEntity): Long

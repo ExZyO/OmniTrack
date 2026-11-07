@@ -159,10 +159,9 @@ fun DetailScreen(
     BackHandler(enabled = selectedCompany != null) {
         selectedCompany = null
     }
-    BackHandler(enabled = uiState.isPreviewMode && selectedPerson == null && selectedCompany == null) {
-        val isDirectPreview = item?.id == -1L
+    BackHandler(enabled = (uiState.isPreviewMode || mediaId == -1L) && selectedPerson == null && selectedCompany == null) {
         viewModel.closePreview()
-        if (isDirectPreview) onBack()
+        onBack()
     }
 
     if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
@@ -682,31 +681,7 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(14.dp))
                 }
 
-                // Watch Trailer Action (Clean unboxed pill, zero metadata boxes)
-                if (!item.trailerYoutubeKey.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFFF0000).copy(alpha = 0.18f))
-                            .border(1.dp, Color(0xFFFF0000).copy(alpha = 0.5f), RoundedCornerShape(999.dp))
-                            .clickable {
-                                val key = item.trailerYoutubeKey
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key"))
-                                context.startActivity(intent)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text("▶", fontSize = 11.sp, color = Color(0xFFFF0000), fontWeight = FontWeight.Black)
-                            Text("Watch Trailer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
+
 
                 // Progress Section (100% Unboxed flowing controls)
                 Column(
@@ -922,10 +897,9 @@ fun DetailScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (uiState.isPreviewMode) {
-                            val isDirectPreview = item?.id == -1L
+                        if (uiState.isPreviewMode || mediaId == -1L) {
                             viewModel.closePreview()
-                            if (isDirectPreview) onBack()
+                            onBack()
                         } else {
                             onBack()
                         }
@@ -1371,13 +1345,18 @@ private fun UnboxedStatsRow(
 
 @Composable
 private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemEntity) {
+    val releaseYearText = item.releaseYear?.trim()?.takeIf { it.isNotBlank() }
     val genres = item.categoryNames.split(",")
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .take(2)
         .joinToString(", ")
         .takeIf { it.isNotBlank() }
-    val releaseLine = genres
+
+    val releaseLine = when {
+        releaseYearText != null -> releaseYearText
+        else -> genres
+    }
 
     val runtimeText = item.runtimeMinutes?.let { minutes ->
         val h = minutes / 60
@@ -1390,8 +1369,12 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
     }
 
     val ageBadge = item.contentRating?.trim()?.takeIf { it.isNotBlank() }
+    val fallbackScore = item.communityScore?.takeIf { (item.imdbScore == null && item.traktScore == null) }?.let {
+        val s = if (it <= 10f) it.toInt() else (it / 10f).toInt()
+        "★ $s"
+    }
 
-    if (releaseLine != null || runtimeText != null || ageBadge != null) {
+    if (releaseLine != null || runtimeText != null || ageBadge != null || fallbackScore != null) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1428,6 +1411,21 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+            }
+            fallbackScore?.let { scoreText ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF331B28))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = scoreText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFFF4081)
                     )
                 }
             }

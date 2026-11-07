@@ -52,8 +52,8 @@ class MediaRepository(
 
     suspend fun updateArtworkRole(id: Long, role: String) = mediaDao.updateArtworkRole(id, role)
 
-    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?) =
-        mediaDao.updateEnrichment(id, clearart, score, imdb, rt, meta)
+    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?, trakt: Int? = null, audience: Int? = null) =
+        mediaDao.updateEnrichment(id, clearart, score, imdb, rt, meta, trakt, audience)
 
     suspend fun deleteMedia(item: MediaItemEntity) = mediaDao.deleteMedia(item)
 

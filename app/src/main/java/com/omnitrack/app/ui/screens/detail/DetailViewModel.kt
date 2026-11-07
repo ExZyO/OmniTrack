@@ -81,8 +81,10 @@ class DetailViewModel(
         }
     }
 
-    private fun maybeEnrich(item: MediaItemEntity) {
-        if (!enrichedIds.add(item.id)) return
+    private fun maybeEnrich(item: MediaItemEntity, force: Boolean = false) {
+        val hasStaleRatings = item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null)
+        if (!force && !hasStaleRatings && !enrichedIds.add(item.id)) return
+        enrichedIds.add(item.id)
         viewModelScope.launch(Dispatchers.IO) {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
@@ -94,21 +96,27 @@ class DetailViewModel(
                 tmdbApiKey = tmdbKey,
                 mdblistApiKey = mdbKey
             )
-            repository.updateMedia(
-                item.copy(
-                    clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
-                    communityScore = enrichment.communityScore ?: item.communityScore,
-                    imdbScore = enrichment.imdbScore ?: item.imdbScore,
-                    rtScore = enrichment.rtScore ?: item.rtScore,
-                    metacriticScore = enrichment.metacriticScore ?: item.metacriticScore,
-                    trailerYoutubeKey = enrichment.trailerYoutubeKey ?: item.trailerYoutubeKey,
-                    studioOrNetwork = enrichment.studioOrNetwork ?: item.studioOrNetwork,
-                    runtimeMinutes = enrichment.runtimeMinutes ?: item.runtimeMinutes,
-                    contentRating = enrichment.contentRating ?: item.contentRating,
-                    airStatus = enrichment.airStatus ?: item.airStatus
-                )
+            val updated = item.copy(
+                clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
+                communityScore = enrichment.communityScore ?: item.communityScore,
+                imdbScore = enrichment.imdbScore ?: item.imdbScore,
+                rtScore = enrichment.rtScore ?: item.rtScore,
+                metacriticScore = enrichment.metacriticScore ?: item.metacriticScore,
+                traktScore = enrichment.traktScore ?: item.traktScore,
+                audienceScore = enrichment.audienceScore ?: item.audienceScore,
+                releaseYear = enrichment.releaseYear ?: item.releaseYear,
+                trailerYoutubeKey = enrichment.trailerYoutubeKey ?: item.trailerYoutubeKey,
+                studioOrNetwork = enrichment.studioOrNetwork ?: item.studioOrNetwork,
+                runtimeMinutes = enrichment.runtimeMinutes ?: item.runtimeMinutes,
+                contentRating = enrichment.contentRating ?: item.contentRating,
+                airStatus = enrichment.airStatus ?: item.airStatus,
+                totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
             )
-            loadRecommendationsAndReviews(item)
+            repository.updateMedia(updated)
+            if (enrichment.videos.isNotEmpty()) {
+                _trailers.value = enrichment.videos
+            }
+            loadRecommendationsAndReviews(updated)
         }
     }
 

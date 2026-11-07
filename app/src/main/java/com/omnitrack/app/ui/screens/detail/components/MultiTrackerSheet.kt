@@ -605,9 +605,10 @@ private fun UniversalSyncControlsBar(
                                 when (item.status) {
                                     TrackingStatus.COMPLETED -> AccentJade
                                     TrackingStatus.IN_PROGRESS -> AccentArctic
+                                    TrackingStatus.PLAN_TO_TRACK -> AccentGold
+                                    TrackingStatus.ON_HOLD -> Color(0xFFF59E0B)
                                     TrackingStatus.DROPPED -> Color(0xFFEF4444)
-                                    TrackingStatus.ON_HOLD -> AccentGold
-                                    else -> Color(0xFF9E9E9E)
+                                    else -> AccentGold
                                 }
                             )
                     )
@@ -649,8 +650,13 @@ private fun UniversalSyncControlsBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                val progressText = if (totalProgress > 0.0) {
+                    "${item.currentProgress.toInt()} / ${totalProgress.toInt()}"
+                } else {
+                    "${item.currentProgress.toInt()} ${item.mediaType.unitLabel.lowercase()}"
+                }
                 Text(
-                    text = "${item.currentProgress.toInt()} / ${if (totalProgress > 0) totalProgress.toInt() else "∞"}",
+                    text = progressText,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Black,
                     color = AccentArctic
@@ -1836,9 +1842,13 @@ private fun SearchAndRebindBottomSheet(
                             "MAL" -> res.malId?.toString()
                             "BANGUMI" -> res.bangumiId?.toString()
                             "TMDB" -> res.tmdbId?.toString()
+                            "TRAKT" -> res.tmdbId?.toString() ?: res.anilistId?.toString()
+                            "SIMKL" -> res.tmdbId?.toString() ?: res.malId?.toString() ?: res.anilistId?.toString()
                             "VNDB" -> res.vndbId
                             "IGDB" -> res.igdbId?.toString()
-                            else -> null
+                            "STEAM" -> res.igdbId?.toString()
+                            "COMICK" -> res.title
+                            else -> res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.bangumiId?.toString()
                         } ?: return@forEach
 
                         Row(

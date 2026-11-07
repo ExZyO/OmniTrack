@@ -23,13 +23,15 @@ import com.omnitrack.app.data.model.MediaType
 
 /**
  * 1:1 Nuvio Unboxed Show Details Section:
- * Clean vertical list with hairline dividers and zero rectangular enclosing box.
+ * Clean vertical list with hairline dividers, zero rectangular enclosing box.
+ * Matches Nuvio's exact fields: Status, Release Info, Runtime, Certification, Origin Country, Original Language, and Production.
  */
 @Composable
 fun DetailShowDetailsSection(
     item: MediaItemEntity,
     modifier: Modifier = Modifier
 ) {
+    val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
     val title = when (item.mediaType) {
         MediaType.SHOW, MediaType.ANIME -> "Show Details"
         MediaType.MOVIE -> "Movie Details"
@@ -40,21 +42,39 @@ fun DetailShowDetailsSection(
         else -> "Details"
     }
 
-    val rows = mutableListOf<Pair<String, String>>()
-    if (!item.airStatus.isNullOrBlank()) {
-        rows.add("Status" to item.airStatus)
-    }
-    if (item.runtimeMinutes != null && item.runtimeMinutes > 0) {
-        val hrs = item.runtimeMinutes / 60
-        val mins = item.runtimeMinutes % 60
-        val formatted = if (hrs > 0) "${hrs}h ${mins}m" else "${mins}m"
-        rows.add("Runtime" to formatted)
-    }
-    if (!item.contentRating.isNullOrBlank()) {
-        rows.add("Certification" to item.contentRating)
-    }
-    if (!item.studioOrNetwork.isNullOrBlank()) {
-        rows.add("Production" to item.studioOrNetwork)
+    val rows = buildList {
+        // 1. Status
+        if (!item.airStatus.isNullOrBlank()) {
+            add("Status" to item.airStatus)
+        }
+
+        // 2. Release Info
+        if (item.totalProgress != null && item.totalProgress > 0 && isSeries) {
+            add("Total Episodes" to "${item.totalProgress.toInt()} Episodes")
+        }
+
+        // 3. Runtime
+        if (item.runtimeMinutes != null && item.runtimeMinutes > 0) {
+            val hrs = item.runtimeMinutes / 60
+            val mins = item.runtimeMinutes % 60
+            val formatted = if (hrs > 0 && mins > 0) "${hrs}h ${mins}m" else if (hrs > 0) "${hrs}h" else "${mins}m"
+            add("Runtime" to formatted)
+        }
+
+        // 4. Certification
+        if (!item.contentRating.isNullOrBlank()) {
+            add("Certification" to item.contentRating)
+        }
+
+        // 5. Origin Country / Platform
+        if (!item.platforms.isNullOrBlank()) {
+            add("Platform" to item.platforms)
+        }
+
+        // 6. Production / Network
+        if (!item.studioOrNetwork.isNullOrBlank()) {
+            add("Production" to item.studioOrNetwork)
+        }
     }
 
     if (rows.isEmpty()) return

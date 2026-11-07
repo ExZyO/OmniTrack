@@ -95,11 +95,6 @@ fun TrackerAccountsSheet(
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
     var isSyncing by remember { mutableStateOf(false) }
 
-    // Trakt Device Code State
-    var showTraktDeviceDialog by remember { mutableStateOf(false) }
-    var traktDeviceCodeInfo by remember { mutableStateOf<TrackerAccountVerifier.TraktDeviceCode?>(null) }
-    var isPollingTrakt by remember { mutableStateOf(false) }
-
     // SIMKL PIN Code State
     var showSimklPinDialog by remember { mutableStateOf(false) }
     var simklPinInfo by remember { mutableStateOf<TrackerAccountVerifier.SimklPinCode?>(null) }
@@ -226,7 +221,8 @@ fun TrackerAccountsSheet(
                     Button(
                         onClick = {
                             scope.launch {
-                                val verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+                                val verifier = com.omnitrack.app.data.sync.PkceUtil.generateCodeVerifier()
+                                TrackerAccountVerifier.pendingMalVerifier = verifier
                                 tokenManager.saveMalVerifier(verifier)
                                 val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${TrackerAccountVerifier.MAL_CLIENT_ID}&code_challenge=$verifier&code_challenge_method=plain"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -242,35 +238,16 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 3. Trakt.tv (8-Char Device Code Flow)
+            // 3. Trakt.tv (1-Tap Browser OAuth)
             OAuthDirectTrackerCard(
                 title = "Trakt.tv",
                 subtitle = "TV Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
+                oauthUrl = "https://trakt.tv/oauth/authorize?response_type=code&client_id=${TrackerAccountVerifier.TRAKT_CLIENT_ID}&redirect_uri=nuvio://auth/trakt",
+                oauthButtonLabel = "Login",
                 verifyFn = { TrackerAccountVerifier.verifyTrakt(it) },
-                onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode()
-                                if (codeInfo != null) {
-                                    traktDeviceCodeInfo = codeInfo
-                                    showTraktDeviceDialog = true
-                                } else {
-                                    Toast.makeText(context, "Failed to generate Trakt device code", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+                onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
             // 4. SIMKL (Direct PIN Code Flow)
@@ -341,6 +318,7 @@ fun TrackerAccountsSheet(
                         onClick = {
                             scope.launch {
                                 val pkce = com.omnitrack.app.data.sync.PkceUtil.generateS256Codes()
+                                TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
                                 tokenManager.saveComickVerifier(pkce.codeVerifier)
                                 val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=" + pkce.codeChallenge + "&code_challenge_method=S256"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
@@ -523,150 +501,6 @@ fun TrackerAccountsSheet(
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
                         shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Open Link", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-
-    // Trakt Device Code Dialog
-    if (showTraktDeviceDialog && traktDeviceCodeInfo != null) {
-        val info = traktDeviceCodeInfo!!
-        LaunchedEffect(info) {
-            isPollingTrakt = true
-            while (isPollingTrakt) {
-                delay(info.intervalSeconds * 1000L)
-                val token = TrackerAccountVerifier.pollTraktDeviceToken(info.deviceCode)
-                if (!token.isNullOrBlank()) {
-                    tokenManager.saveTraktToken(token)
-                    Toast.makeText(context, "Trakt.tv connected successfully!", Toast.LENGTH_LONG).show()
-                    isPollingTrakt = false
-                    showTraktDeviceDialog = false
-                    break
-                }
-            }
-        }
-
-        androidx.compose.ui.window.Dialog(onDismissRequest = {
-            isPollingTrakt = false
-            showTraktDeviceDialog = false
-        }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFED1C24).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tv,
-                        contentDescription = null,
-                        tint = Color(0xFFED1C24),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                Text(
-                    text = "Authorize on Trakt",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-
-                Text(
-                    text = "Enter this 8-character activation code at trakt.tv/activate:",
-                    fontSize = 12.sp,
-                    color = TextMuted,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                // Large user code box
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(AmoledBlack)
-                        .border(1.dp, Color(0xFFED1C24).copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                        .clickable {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Trakt Code", info.userCode))
-                            Toast.makeText(context, "Copied ${info.userCode} to clipboard", Toast.LENGTH_SHORT).show()
-                        }
-                        .padding(horizontal = 24.dp, vertical = 14.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = info.userCode,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color(0xFFED1C24)
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy",
-                            tint = TextMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFFED1C24),
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "Waiting for authorization on Trakt...",
-                        fontSize = 11.5.sp,
-                        color = TextSecondary
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            isPollingTrakt = false
-                            showTraktDeviceDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                        shape = RoundedCornerShape(999.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Cancel", color = TextMuted, fontSize = 12.sp)
-                    }
-
-                    Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))
-                            context.startActivity(intent)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
-                        shape = RoundedCornerShape(999.dp),
-                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
@@ -1089,12 +923,23 @@ private fun ManualTokenTrackerCard(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
+            val isUnchanged = initialToken.isNotBlank() && textValue.trim() == initialToken.trim()
             Button(
                 onClick = { onSave(textValue.trim()) },
-                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                enabled = !isUnchanged && textValue.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accentColor,
+                    contentColor = AmoledBlack,
+                    disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                    disabledContentColor = TextMuted
+                ),
                 shape = RoundedCornerShape(999.dp)
             ) {
-                Text(text = "Save Token", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (isUnchanged) "Saved" else "Save Token",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -1318,12 +1163,23 @@ private fun SteamTrackerCard(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
+            val isUnchanged = isConnected && apiKeyText.trim() == initialApiKey.trim() && steamIdText.trim() == initialSteamId64.trim()
             Button(
                 onClick = { onSave(apiKeyText.trim(), steamIdText.trim()) },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66C0F4)),
+                enabled = !isUnchanged && apiKeyText.isNotBlank() && steamIdText.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF66C0F4),
+                    contentColor = AmoledBlack,
+                    disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                    disabledContentColor = TextMuted
+                ),
                 shape = RoundedCornerShape(999.dp)
             ) {
-                Text("Save Credentials", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = if (isUnchanged) "Saved" else "Save Credentials",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

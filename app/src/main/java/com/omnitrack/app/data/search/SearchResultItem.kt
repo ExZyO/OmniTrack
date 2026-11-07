@@ -44,6 +44,7 @@ data class SearchResultItem(
             tmdbId = tmdbId,
             igdbId = igdbId,
             vndbId = vndbId,
+            releaseYear = releaseYear,
             communityScore = communityScore
         )
     }

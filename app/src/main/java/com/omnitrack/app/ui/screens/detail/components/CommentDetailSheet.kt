@@ -1,9 +1,14 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -82,10 +87,6 @@ fun CommentDetailSheet(
     val scrollState = rememberScrollState()
     val haptic = LocalHapticFeedback.current
 
-    var isSpoilerRevealed by rememberSaveable(review.author + review.comment.take(20)) {
-        mutableStateOf(!review.hasSpoiler)
-    }
-
     LaunchedEffect(review.author) {
         scrollState.scrollTo(0)
     }
@@ -122,204 +123,235 @@ fun CommentDetailSheet(
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header Row: Author + Review Badge + Close
+            // Header Row: Top Bar with stationary Close Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(AccentArctic.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = review.author.take(1).uppercase(),
-                            color = AccentArctic,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = review.author,
-                                color = TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (review.isReview) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(AccentJade.copy(alpha = 0.15f))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "REVIEW",
-                                        color = AccentJade,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-
-                        Text(
-                            text = review.source + (review.date?.let { " • $it" } ?: ""),
-                            color = TextMuted,
-                            fontSize = 11.5.sp
-                        )
-                    }
-                }
+                Text(
+                    text = "Review & Discussion",
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
 
                 IconButton(onClick = onDismiss) {
                     Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
                 }
             }
 
-            // Rating & Likes Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (review.isReview) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFF1B3D2F))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "REVIEW",
-                            color = Color(0xFF00E054),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
+            // Animated Review Body with bilateral slide transitions
+            AnimatedContent(
+                targetState = currentIndex to review,
+                transitionSpec = {
+                    if (targetState.first > initialState.first) {
+                        (slideInHorizontally(animationSpec = tween(280)) { width -> width / 3 } + fadeIn(animationSpec = tween(280)))
+                            .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { width -> -width / 3 } + fadeOut(animationSpec = tween(280)))
+                    } else {
+                        (slideInHorizontally(animationSpec = tween(280)) { width -> -width / 3 } + fadeIn(animationSpec = tween(280)))
+                            .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { width -> width / 3 } + fadeOut(animationSpec = tween(280)))
                     }
+                },
+                label = "ReviewSlideAnimation"
+            ) { (_, currentReview) ->
+                var currentSpoilerRevealed by rememberSaveable(currentReview.author + currentReview.comment.take(20)) {
+                    mutableStateOf(!currentReview.hasSpoiler)
                 }
 
-                if (review.rating != null) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Author Row
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AccentGold.copy(alpha = 0.15f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
-                        Text(
-                            text = "${review.rating.toInt()}/10",
-                            color = AccentGold,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                if (review.likes > 0) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(12.dp))
-                        Text(
-                            text = "${review.likes}",
-                            color = Color(0xFFEF4444),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                if (review.hasSpoiler) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
-                        Text(
-                            text = "Spoiler",
-                            color = Color(0xFFF59E0B),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            // Comment Body (with clean formatting and spoiler reveal)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f, fill = false)
-                    .heightIn(max = 380.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF121212).copy(alpha = 0.75f))
-                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                    .padding(16.dp)
-                    .verticalScroll(scrollState)
-            ) {
-                if (review.hasSpoiler && !isSpoilerRevealed) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Color(0xFFF59E0B),
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Text(
-                            text = "This review contains spoiler content.",
-                            color = TextSecondary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Button(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                isSpoilerRevealed = true
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
-                            shape = RoundedCornerShape(999.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(AccentArctic.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("Reveal Spoiler", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = currentReview.author.take(1).uppercase(),
+                                color = AccentArctic,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = currentReview.author,
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (currentReview.isReview) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentJade.copy(alpha = 0.15f))
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "REVIEW",
+                                            color = AccentJade,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = currentReview.source + (currentReview.date?.let { " • $it" } ?: ""),
+                                color = TextMuted,
+                                fontSize = 11.5.sp
+                            )
                         }
                     }
-                } else {
-                    Text(
-                        text = review.comment.replace(Regex("\\[/?spoiler\\]", RegexOption.IGNORE_CASE), ""),
-                        color = TextPrimary,
-                        fontSize = 13.5.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Normal
-                    )
+
+                    // Rating & Likes Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (currentReview.isReview) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFF1B3D2F))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "REVIEW",
+                                    color = Color(0xFF00E054),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                        }
+
+                        if (currentReview.rating != null) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(AccentGold.copy(alpha = 0.15f))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
+                                Text(
+                                    text = "${currentReview.rating.toInt()}/10",
+                                    color = AccentGold,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (currentReview.likes > 0) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFFEF4444).copy(alpha = 0.12f))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(12.dp))
+                                Text(
+                                    text = "${currentReview.likes}",
+                                    color = Color(0xFFEF4444),
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        if (currentReview.hasSpoiler) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
+                                    .padding(horizontal = 9.dp, vertical = 4.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
+                                Text(
+                                    text = "Spoiler",
+                                    color = Color(0xFFF59E0B),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Comment Body (with clean formatting and spoiler reveal)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = 380.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF121212).copy(alpha = 0.75f))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                            .padding(16.dp)
+                            .verticalScroll(scrollState)
+                    ) {
+                        if (currentReview.hasSpoiler && !currentSpoilerRevealed) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Text(
+                                    text = "This review contains spoiler content.",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Button(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        currentSpoilerRevealed = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
+                                    shape = RoundedCornerShape(999.dp)
+                                ) {
+                                    Text("Reveal Spoiler", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = currentReview.comment.replace(Regex("\\[/?spoiler\\]", RegexOption.IGNORE_CASE), ""),
+                                color = TextPrimary,
+                                fontSize = 13.5.sp,
+                                lineHeight = 22.sp,
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
                 }
             }
 

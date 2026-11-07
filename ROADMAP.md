@@ -211,11 +211,10 @@ flowchart LR
   - Left: Label (`Status`, `Release Date`, `Runtime`, `Certification`, `Production`) in semi-bold `onSurface.copy(alpha = 0.8f)`.
   - Right: Value aligned right.
   - Hairline dividers between rows (`0.10f alpha`).
-- [ ] **Full Nuvio Metadata Parity**:
-  - Add Origin Country, Original Language, Release Info, and Certification for all TV Shows & Anime.
-  - Fix studio resolution so production companies like Marvel Studios show for movies/shows, and animation studios (MAPPA, Wit Studio, CloverWorks) show for anime.
-  - Right: Value aligned right.
-  - Hairline dividers between rows (`0.10f alpha`).
+- [x] **Full Nuvio Metadata Parity**:
+  - Added Origin Country, Original Language, Release Info (e.g. `2008-2015`), Runtime, and US Certification (`TV-14`, `PG-13`, `R`, `TV-MA`) for TV Shows & Movies.
+  - Formatted unboxed rows matching Nuvio 1:1 with clean hairline dividers and high-legibility values.
+  - Studio and production company resolution (e.g., Marvel Studios, Warner Bros, MAPPA).
 
 ### 1.6 Progress & EP Counter Row Refinement
 - [x] **EP Button Option A (Selected by Exile)**:
@@ -239,7 +238,11 @@ flowchart LR
 
 ## 📌 Phase 2: In-Line Hero Trailers, Accurate Tracker Scores & Landscape Artwork System
 
-### 2.1 Hero Trailer Player & Debounce Controls (Exact Nuvio 1:1 Parity)
+### 2.1 Hero Trailer Player & Trailers Section (Exact Nuvio 1:1 Parity)
+- [x] **Port Nuvio's Trailers & Bonus Material Section (`DetailTrailersSection.kt`)**:
+  - Eliminated the awkward red "Watch Trailer" button.
+  - Replaced with categorized dropdown selector: Trailers, Behind the Scenes, Clips, Featurettes, and Teasers.
+  - 16:9 widescreen thumbnail cards with Amoled depth, play icon badge, video title, and category filter chips.
 - [ ] **Port Nuvio's `HeroTrailerPlayerSurface` with ExoPlayer**:
   - Exact 1:1 port of Nuvio / Nuvio Enhanced implementation (`HeroTrailerPlayerSurface.android.kt` using `androidx.media3.exoplayer.ExoPlayer`).
   - Whatever Nuvio uses, exactly that: `TextureView` container with `MergingMediaSource` (separate progressive video stream + separate adaptive audio stream from InnerTube/YouTube cipher extractor), hardware-accelerated surface rendering, video-matrix aspect fill cropping, and zero external redirects.
@@ -254,7 +257,11 @@ flowchart LR
   - Tapping trailer button opens internal popup bottom sheet with embedded ExoPlayer surface, scrub bar, and fullscreen landscape lock—never redirects to external YouTube or browser app.
 
 ### 2.2 Accurate Tracker Scores Normalization (AniList, MAL, Bangumi 1:1 Nuvio Parity)
-- [ ] **Fix Tracker Scores (AniList, MAL, Bangumi, Steam, VNDB)**:
+- [x] **Fix Tracker Scores (MDBList TV Collision, IMDb, TMDb, Trakt, RT Audience)**:
+  - Fixed MDBList TV show vs movie ID collision (*The Mentalist* was showing movie 6.7 IMDb instead of 8.2 TV series).
+  - Added dedicated `traktScore` (83) and `audienceScore` (🍿 90%) to `MediaItemEntity` and Room migration 8->9.
+  - Display exact Nuvio 1:1 pure stack: IMDb (8.2), TMDb (84), Trakt (83), Rotten Tomatoes Popcorn (90%), Metacritic (65).
+- [ ] **Fix Anime & Niche Tracker Scale Normalization (AniList, MAL, Bangumi, Steam, VNDB)**:
   - AniList, MAL, etc. tracker scores show up wrong: Replicate exact rating computation, normalization, and display formatting from Nuvio and Nuvio Enhanced (`DetailMetaInfo.kt` / `NuvioRatingsRow.kt`).
   - **MyAnimeList (MAL)**: 10-point decimal scale formatted to 2 decimals or 1 decimal (e.g. `8.45` or `8.5`) with MAL brand blue (`#2E51A2`).
   - **AniList**: 100-point percentage scale (e.g. `84%`) normalized with `%` badge, or 10-point decimal, matching AniList user preferred format with brand cyan (`#02A9FF`).

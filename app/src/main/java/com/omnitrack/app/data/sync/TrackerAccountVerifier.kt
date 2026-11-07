@@ -47,6 +47,12 @@ object TrackerAccountVerifier {
     // Comick Client ID
     const val COMICK_CLIENT_ID = "SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH"
 
+    @Volatile
+    var pendingMalVerifier: String? = null
+
+    @Volatile
+    var pendingComickVerifier: String? = null
+
     suspend fun verifyAnilist(token: String): VerificationState = withContext(Dispatchers.IO) {
         if (token.isBlank()) return@withContext VerificationState.Idle
         try {

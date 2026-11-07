@@ -41,6 +41,7 @@ private data class RatingBadgeData(
 /**
  * 1:1 Nuvio Unboxed Ratings Row:
  * Zero pills, zero emojis, exact official brand vector/raster logos with bold typography.
+ * Follows Nuvio's exact hierarchy: IMDb -> TMDb -> Trakt -> Rotten Tomatoes / Audience -> Metacritic
  */
 @Composable
 fun NuvioRatingsRow(
@@ -67,16 +68,75 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 2. Rotten Tomatoes (Critic)
+        // 2. TMDb Score (Shows & Movies) - rendered as integer (e.g. 84)
+        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    val tmdbVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
+                    list.add(
+                        RatingBadgeData(
+                            source = "tmdb",
+                            displayName = "TMDB",
+                            iconRes = R.drawable.rating_tmdb,
+                            iconWidth = 16.dp,
+                            iconHeight = 16.dp,
+                            valueText = "$tmdbVal",
+                            valueColor = Color(0xFF01B4E4)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 3. Trakt Community Score (e.g. 83)
+        item.traktScore?.let { trakt ->
+            if (trakt > 0) {
+                list.add(
+                    RatingBadgeData(
+                        source = "trakt",
+                        displayName = "Trakt",
+                        iconRes = R.drawable.rating_trakt,
+                        iconWidth = 16.dp,
+                        iconHeight = 16.dp,
+                        valueText = "$trakt",
+                        valueColor = Color(0xFFED1C24)
+                    )
+                )
+            }
+        }
+
+        // 4. Rotten Tomatoes Audience (Popcorn bucket 🍿, e.g. 90%)
+        item.audienceScore?.let { aud ->
+            if (aud > 0) {
+                val iconRes = when {
+                    aud >= 75 -> R.drawable.rating_audience_verified_hot
+                    aud >= 60 -> R.drawable.rating_audience_score
+                    else -> R.drawable.rating_audience_stale
+                }
+                list.add(
+                    RatingBadgeData(
+                        source = "audience",
+                        displayName = "Audience Score",
+                        iconRes = iconRes,
+                        iconWidth = 16.dp,
+                        iconHeight = 16.dp,
+                        valueText = "$aud%",
+                        valueColor = Color(0xFFFA320A)
+                    )
+                )
+            }
+        }
+
+        // 5. Rotten Tomatoes Critic (Tomato 🍅)
         item.rtScore?.let { rt ->
-            if (rt > 0) {
+            if (rt > 0 && item.audienceScore == null) {
                 val iconRes = when {
                     rt >= 75 -> R.drawable.rating_rotten_tomatoes_certified
                     rt >= 60 -> R.drawable.rating_rotten_tomatoes
                     else -> R.drawable.rating_rotten_tomatoes_rotten
                 }
-                val iconHeight = if (rt >= 75) 24.dp else 16.dp
-                val iconWidth = if (rt >= 75) 24.dp else 16.dp
+                val iconHeight = if (rt >= 75) 20.dp else 16.dp
+                val iconWidth = if (rt >= 75) 20.dp else 16.dp
                 list.add(
                     RatingBadgeData(
                         source = "tomatoes",
@@ -91,7 +151,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 3. Metacritic
+        // 6. Metacritic (e.g. 65)
         item.metacriticScore?.let { meta ->
             if (meta > 0) {
                 val metaColor = when {
@@ -104,6 +164,8 @@ fun NuvioRatingsRow(
                         source = "metacritic",
                         displayName = "Metacritic",
                         iconRes = R.drawable.rating_metacritic,
+                        iconWidth = 16.dp,
+                        iconHeight = 16.dp,
                         valueText = "$meta",
                         valueColor = metaColor
                     )
@@ -111,41 +173,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 4. TMDb Score (Shows & Movies)
-        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    list.add(
-                        RatingBadgeData(
-                            source = "tmdb",
-                            displayName = "TMDB",
-                            iconRes = R.drawable.rating_tmdb,
-                            valueText = "${(score * 10).roundToInt()}",
-                            valueColor = Color(0xFF01B4E4)
-                        )
-                    )
-                }
-            }
-        }
-
-        // 5. Trakt Community (when traktId is bound)
-        if (item.traktId != null) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    list.add(
-                        RatingBadgeData(
-                            source = "trakt",
-                            displayName = "Trakt",
-                            iconRes = R.drawable.rating_trakt,
-                            valueText = "${(score * 10).roundToInt()}",
-                            valueColor = Color(0xFFED1C24)
-                        )
-                    )
-                }
-            }
-        }
-
-        // 6. AniList Community Score
+        // 7. AniList Community Score
         if (item.anilistId != null || (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL)) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -162,7 +190,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 7. MyAnimeList Score
+        // 8. MyAnimeList Score
         if (item.malId != null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -180,7 +208,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 8. Steam Positive % (Games)
+        // 9. Steam Positive % (Games)
         if (item.mediaType == MediaType.GAME) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -197,7 +225,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 9. VNDB Rating (Visual Novels)
+        // 10. VNDB Rating (Visual Novels)
         if (item.mediaType == MediaType.VISUAL_NOVEL) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -225,7 +253,7 @@ fun NuvioRatingsRow(
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val ratingTextStyle = MaterialTheme.typography.titleSmall.copy(
@@ -242,7 +270,7 @@ fun NuvioRatingsRow(
                     contentDescription = badge.displayName,
                     modifier = Modifier.size(width = badge.iconWidth, height = badge.iconHeight)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = badge.valueText,
                     style = ratingTextStyle,

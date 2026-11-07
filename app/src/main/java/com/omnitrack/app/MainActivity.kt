@@ -144,7 +144,8 @@ class MainActivity : ComponentActivity() {
                     }
                     "comick" -> {
                         try {
-                            val verifier = tokenManager.getComickVerifier().orEmpty()
+                            val verifier = TrackerAccountVerifier.pendingComickVerifier?.takeIf { it.isNotBlank() }
+                                ?: tokenManager.getComickVerifier().orEmpty()
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", TrackerAccountVerifier.COMICK_CLIENT_ID)
@@ -168,9 +169,8 @@ class MainActivity : ComponentActivity() {
                     }
                     "mal", "myanimelist" -> {
                         try {
-                            val verifier = tokenManager.getMalVerifier().orEmpty().ifBlank {
-                                "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-                            }
+                            val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
+                                ?: tokenManager.getMalVerifier().orEmpty()
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", TrackerAccountVerifier.MAL_CLIENT_ID)

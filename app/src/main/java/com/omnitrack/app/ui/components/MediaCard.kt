@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -7,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -23,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -99,6 +102,9 @@ fun MediaCard(
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
         item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
     }
+
+    val isInitiallyInLibrary = badgeText == "IN LIBRARY" || (item.id != 0L && badgeText != null)
+    var isAddedToLibrary by remember(item.id, badgeText) { mutableStateOf(isInitiallyInLibrary) }
 
     val shape = RoundedCornerShape(cornerRadiusDp.dp)
 
@@ -185,7 +191,7 @@ fun MediaCard(
                 )
             }
 
-            // Tactile +1 Quick Action floating pill
+            // Tactile +1 / Add to Library Quick Action floating pill
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -197,6 +203,7 @@ fun MediaCard(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {
+                            isAddedToLibrary = true
                             scope.launch {
                                 showPlusOne = true
                                 bounceScale.animateTo(
@@ -219,12 +226,30 @@ fun MediaCard(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "+1 Progress",
-                    tint = AccentJade,
-                    modifier = Modifier.size(16.dp)
-                )
+                AnimatedContent(
+                    targetState = isAddedToLibrary,
+                    transitionSpec = {
+                        (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith
+                            (scaleOut(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeOut())
+                    },
+                    label = "addOrCheckAnimation"
+                ) { added ->
+                    if (added) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "In Library",
+                            tint = AccentJade,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "+1 Progress",
+                            tint = AccentJade,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
 
             // Animated "+1" particle feedback
