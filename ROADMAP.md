@@ -181,6 +181,9 @@ The following 7 technical guardrails are binding constraints across all implemen
 7. **Guardrail 7: Direct Login Only for OAuth-Supported Trackers**
    - Completely remove manual text API key input boxes from SIMKL, MAL, AniList, Bangumi, Trakt, and Comick.
    - Keep API key input fields strictly for services requiring user keys (Steam Web API, VNDB token, TMDb, Fanart.tv, MDBList, Gemini, OpenRouter).
+8. **Guardrail 8: Build Monitoring & Token Conservation Invariant**
+   - NEVER poll or check build/task status in short loops (10s, 15s, 30s), which wastes model tokens and context window.
+   - When executing builds or long tasks, set a minimum 3-minute schedule timer (180s) or wait for asynchronous task completion signals without intermediate polling.
 
 ---
 

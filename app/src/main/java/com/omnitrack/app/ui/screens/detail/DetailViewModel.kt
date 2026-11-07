@@ -771,7 +771,21 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
-            repository.setEpisodeWatched(mediaId, episode.seasonNumber, episode.episodeNumber, !isCurrentlyWatched)
+            if (!isCurrentlyWatched) {
+                // When marking as watched: if user taps Ep 4, mark all prior episodes in this season (1..4) as watched
+                val epsToMark = _realEpisodes.value.filter {
+                    it.seasonNumber == episode.seasonNumber && it.episodeNumber <= episode.episodeNumber
+                }
+                val pairs = if (epsToMark.isNotEmpty()) {
+                    epsToMark.map { it.seasonNumber to it.episodeNumber }
+                } else {
+                    listOf(episode.seasonNumber to episode.episodeNumber)
+                }
+                repository.setMultipleEpisodesWatched(mediaId, pairs, true)
+            } else {
+                // When tapping an already watched episode: unmark only this episode
+                repository.setEpisodeWatched(mediaId, episode.seasonNumber, episode.episodeNumber, false)
+            }
             val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val watchedCount = updatedProgress.count { it.isWatched }
             repository.updateProgress(mediaId, watchedCount.toDouble())

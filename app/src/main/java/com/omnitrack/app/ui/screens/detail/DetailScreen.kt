@@ -690,17 +690,6 @@ fun DetailScreen(
                 ) {
                     when (item.mediaType) {
                         MediaType.ANIME, MediaType.SHOW -> {
-                            if (uiState.realSeasons.isEmpty() && uiState.seasons.isNotEmpty()) {
-                                SeasonEpisodesSection(
-                                    seasons = uiState.seasons,
-                                    currentProgress = item.currentProgress,
-                                    onToggleEpisodeWatched = { ep, isWatched ->
-                                        viewModel.updateProgress(if (isWatched) ep.toDouble() else (ep - 1).toDouble().coerceAtLeast(0.0))
-                                    }
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                            }
-
                             ChapterStepper(
                                 unitLabel = item.mediaType.unitLabel,
                                 currentProgress = item.currentProgress,
