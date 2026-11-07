@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
+import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.BannerSizing
@@ -1061,17 +1062,21 @@ private fun EnrichmentRatingsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        item.communityScore?.let { score ->
-            RatingBadge(label = "COMMUNITY", value = String.format("%.1f", score), color = AccentArctic)
+        val community = item.communityScore
+        if (community != null) {
+            RatingBadge(label = "COMMUNITY", value = String.format("%.1f", community), color = AccentArctic)
         }
-        item.imdbScore?.let { imdb ->
+        val imdb = item.imdbScore
+        if (imdb != null) {
             RatingBadge(label = "IMDb", value = String.format("%.1f", imdb), color = AccentGold)
         }
-        item.rtScore?.let { rt ->
+        val rt = item.rtScore
+        if (rt != null) {
             RatingBadge(label = "TOMATOES", value = "$rt%", color = if (rt >= 60) Color(0xFFEF4444) else Color(0xFF10B981))
         }
-        item.metacriticScore?.let { mc ->
-            RatingBadge(label = "METACRITIC", value = "$mc", color = if (mc >= 60) Color(0xFF10B981) else Color(0xFFF59E0B))
+        val meta = item.metacriticScore
+        if (meta != null) {
+            RatingBadge(label = "METACRITIC", value = "$meta", color = if (meta >= 60) Color(0xFF10B981) else Color(0xFFF59E0B))
         }
     }
 }
