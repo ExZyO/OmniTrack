@@ -173,21 +173,7 @@ fun DetailScreen(
             onBack = { selectedPerson = null },
             onOpenMediaPreview = { recItem ->
                 selectedPerson = null
-                viewModel.openPreview(
-                    MediaItemEntity(
-                        id = 0,
-                        title = recItem.title,
-                        coverUrl = recItem.coverUrl,
-                        bannerUrl = recItem.bannerUrl,
-                        mediaType = recItem.mediaType,
-                        releaseYear = recItem.releaseYear?.toIntOrNull(),
-                        communityScore = recItem.rating,
-                        synopsis = recItem.synopsis,
-                        tmdbId = recItem.tmdbId,
-                        anilistId = recItem.anilistId,
-                        malId = recItem.malId
-                    )
-                )
+                viewModel.openPreview(recItem)
             }
         )
         return
@@ -198,26 +184,12 @@ fun DetailScreen(
         TmdbEntityBrowseScreen(
             entityId = selectedCompany!!.id!!,
             entityName = selectedCompany!!.name,
-            entityType = selectedCompany!!.kind,
+            entityKind = selectedCompany!!.kind,
             apiKey = tmdbKey,
             onBack = { selectedCompany = null },
             onOpenMediaPreview = { recItem ->
                 selectedCompany = null
-                viewModel.openPreview(
-                    MediaItemEntity(
-                        id = 0,
-                        title = recItem.title,
-                        coverUrl = recItem.coverUrl,
-                        bannerUrl = recItem.bannerUrl,
-                        mediaType = recItem.mediaType,
-                        releaseYear = recItem.releaseYear?.toIntOrNull(),
-                        communityScore = recItem.rating,
-                        synopsis = recItem.synopsis,
-                        tmdbId = recItem.tmdbId,
-                        anilistId = recItem.anilistId,
-                        malId = recItem.malId
-                    )
-                )
+                viewModel.openPreview(recItem)
             }
         )
         return
@@ -1395,14 +1367,13 @@ private fun UnboxedStatsRow(
 
 @Composable
 private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemEntity) {
-    val releaseYear = item.releaseYear?.toString()
-    val genres = item.genres?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.take(2)?.joinToString(", ")
-    val releaseLine = when {
-        releaseYear != null && !genres.isNullOrBlank() -> "$releaseYear • $genres"
-        releaseYear != null -> releaseYear
-        !genres.isNullOrBlank() -> genres
-        else -> null
-    }
+    val genres = item.categoryNames.split(",")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .take(2)
+        .joinToString(", ")
+        .takeIf { it.isNotBlank() }
+    val releaseLine = genres
 
     val runtimeText = item.runtimeMinutes?.let { minutes ->
         val h = minutes / 60

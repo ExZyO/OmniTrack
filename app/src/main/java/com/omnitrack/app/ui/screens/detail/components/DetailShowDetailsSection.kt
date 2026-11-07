@@ -44,14 +44,6 @@ fun DetailShowDetailsSection(
     if (!item.airStatus.isNullOrBlank()) {
         rows.add("Status" to item.airStatus)
     }
-    if (item.startYear != null) {
-        val releaseStr = if (item.endYear != null && item.endYear != item.startYear) {
-            "${item.startYear} - ${item.endYear}"
-        } else {
-            "${item.startYear}"
-        }
-        rows.add("Release Date" to releaseStr)
-    }
     if (item.runtimeMinutes != null && item.runtimeMinutes > 0) {
         val hrs = item.runtimeMinutes / 60
         val mins = item.runtimeMinutes % 60

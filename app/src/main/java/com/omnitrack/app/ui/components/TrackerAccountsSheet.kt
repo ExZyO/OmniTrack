@@ -389,16 +389,25 @@ fun TrackerAccountsSheet(
             )
 
             // 9. TMDb
-            VerifiedTrackerCard(
+            ManualTokenTrackerCard(
                 title = "TMDb",
                 subtitle = "Movies & TV Shows metadata and ratings API",
                 accentColor = Color(0xFF01D277),
                 initialToken = tokens.tmdbToken.orEmpty(),
-                oauthUrl = "https://www.themoviedb.org/settings/api",
-                oauthButtonLabel = "Get API Key",
+                tokenCreationUrl = "https://www.themoviedb.org/settings/api",
                 verifyFn = { TrackerAccountVerifier.verifyTmdb(it) },
-                onSave = { scope.launch { tokenManager.saveTmdbToken(it); Toast.makeText(context, "TMDb token saved", Toast.LENGTH_SHORT).show() } },
-                onDisconnect = { scope.launch { tokenManager.saveTmdbToken(null); Toast.makeText(context, "TMDb disconnected", Toast.LENGTH_SHORT).show() } }
+                onSave = { token ->
+                    scope.launch {
+                        tokenManager.saveTmdbToken(token)
+                        Toast.makeText(context, "TMDb token saved", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDisconnect = {
+                    scope.launch {
+                        tokenManager.saveTmdbToken(null)
+                        Toast.makeText(context, "TMDb disconnected", Toast.LENGTH_SHORT).show()
+                    }
+                }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
