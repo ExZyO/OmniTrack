@@ -70,10 +70,10 @@ import kotlin.math.sqrt
 fun TrackingStatus.statusColor(): Color = when (this) {
     TrackingStatus.IN_PROGRESS -> AccentArctic
     TrackingStatus.COMPLETED -> AccentJade
-    TrackingStatus.ON_HOLD -> AccentGold
+    TrackingStatus.PLAN_TO_TRACK -> AccentGold
+    TrackingStatus.ON_HOLD -> Color(0xFFF59E0B)
     TrackingStatus.DROPPED -> Color(0xFFEF4444)
-    TrackingStatus.PLAN_TO_TRACK -> Color(0xFFA855F7)
-    else -> AccentArctic
+    else -> AccentGold
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -116,6 +116,7 @@ import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
 import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
+import com.omnitrack.app.ui.screens.detail.components.statusColor
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -1248,14 +1249,7 @@ private fun UnboxedStatsRow(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(
-                        when (item.status) {
-                            TrackingStatus.COMPLETED -> AccentJade
-                            TrackingStatus.IN_PROGRESS -> AccentArctic
-                            TrackingStatus.DROPPED -> Color(0xFFEF4444)
-                            else -> AccentGold
-                        }
-                    )
+                    .background(item.status.statusColor())
             )
             Column {
                 Text(

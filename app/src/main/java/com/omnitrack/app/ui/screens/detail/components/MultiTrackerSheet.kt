@@ -621,16 +621,7 @@ private fun UniversalSyncControlsBar(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(
-                                when (item.status) {
-                                    TrackingStatus.COMPLETED -> AccentJade
-                                    TrackingStatus.IN_PROGRESS -> AccentArctic
-                                    TrackingStatus.PLAN_TO_TRACK -> AccentGold
-                                    TrackingStatus.ON_HOLD -> Color(0xFFF59E0B)
-                                    TrackingStatus.DROPPED -> Color(0xFFEF4444)
-                                    else -> AccentGold
-                                }
-                            )
+                            .background(item.status.statusColor())
                     )
                     Text(
                         text = item.status.displayName,

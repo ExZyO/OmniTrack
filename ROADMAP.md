@@ -288,6 +288,23 @@ flowchart LR
   - `Blur Unwatched Episodes`: Toggle on/off for spoiler protection.
   - `Auto-sync on Mark`: Pushes episode progress to Trakt and Simkl instantly.
 
+### 🧪 On-Device Verification Checklist (Scheduled for Later Testing by Exile)
+- [ ] **Trakt.tv Authentication Test**:
+  - Test Trakt Device Code flow (`trakt.tv/activate` PIN code).
+  - Confirm connection status, user profile hydration, and scrobble synchronization using personal `TRAKT_CLIENT_ID` injected via GitHub Secrets.
+- [ ] **SIMKL Authentication Test**:
+  - Test SIMKL PIN flow (`simkl.com/pin` PIN code).
+  - Confirm connection status, list sync, and profile resolution using personal `SIMKL_CLIENT_ID` injected via GitHub Secrets.
+- [ ] **MyAnimeList (MAL) Authentication Test**:
+  - Test MAL PKCE OAuth flow (`omnitrack://auth/mal`).
+  - Confirm deep-link return, token exchange without secret, and anime list retrieval using personal `MAL_CLIENT_ID` injected via GitHub Secrets.
+- [ ] **Muted Metadata Row AMOLED Verification**:
+  - Inspect detail screen header on Galaxy S24 Ultra Pure AMOLED (`#000000`).
+  - Verify that the rating next to runtime and age certification badge render cleanly in muted `TextSecondary` (`#9CA3AF`) with 45% alpha border, eliminating high-contrast pills and matching Nuvio 1:1.
+- [ ] **Seasons & 16:9 Episode Tracking Grid Verification**:
+  - Verify season poster / chip selector.
+  - Verify 16:9 episode thumbnail cards, watched checkmark badge, and long-press watched action sheet (`Mark Episode`, `Mark Previous`, `Mark Season`).
+
 ---
 
 ## 📌 Phase 2: In-Line Hero Trailers, Accurate Tracker Scores & Landscape Artwork System
