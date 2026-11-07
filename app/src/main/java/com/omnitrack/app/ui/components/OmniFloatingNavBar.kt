@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -41,19 +42,27 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.ui.components.glass.GlassBarSurface
+import com.omnitrack.app.ui.components.jelly.JellyMotion
+import com.omnitrack.app.ui.components.jelly.drawJellyGlow
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.TextMuted
 import dev.chrisbanes.haze.HazeState
@@ -139,6 +148,28 @@ fun OmniFloatingNavBar(
     hazeState: HazeState? = null,
     onActiveTabReSelected: ((NavDestination) -> Unit)? = null
 ) {
+    val density = LocalDensity.current.density
+    val items = remember { NavDestination.entries }
+    val selectedIndex = remember(selectedDestination) { items.indexOf(selectedDestination) }
+
+    val motion = remember { JellyMotion(selectedIndex, items.size) }
+
+    LaunchedEffect(selectedDestination) {
+        motion.select(selectedIndex)
+    }
+
+    LaunchedEffect(motion.running) {
+        if (!motion.running) return@LaunchedEffect
+        var lastNanos = 0L
+        while (motion.running) {
+            withFrameNanos { now ->
+                val delta = if (lastNanos == 0L) 0.016 else (now - lastNanos) / 1_000_000_000.0
+                lastNanos = now
+                motion.advance(delta)
+            }
+        }
+    }
+
     val labelFraction by animateFloatAsState(
         targetValue = scrollState.labelVisibility,
         animationSpec = spring(stiffness = 350f),
@@ -161,13 +192,28 @@ fun OmniFloatingNavBar(
             .padding(bottom = 12.dp, start = 16.dp, end = 16.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
-        // Liquid Glass Pill Surface with Haze & AGSL Refraction
+        // Liquid Glass Pill Surface with Haze, AGSL Refraction, & Mass-Spring Physics
         Box(
             modifier = Modifier
                 .wrapContentWidth()
                 .height(pillHeight)
+                .graphicsLayer {
+                    val frame = motion.frame
+                    val scale = frame.trackScale
+                    scaleX = scale * frame.trackScaleX
+                    scaleY = scale
+                    translationY = frame.trackOffsetY
+                    transformOrigin = TransformOrigin(frame.originX / size.width.coerceAtLeast(1f), 0.5f)
+                }
+                .onSizeChanged {
+                    motion.resize(it.width / density, it.height / density, items.size)
+                }
                 .shadow(elevation = 20.dp, shape = CircleShape, ambientColor = Color.Black, spotColor = Color.Black)
-                .clip(CircleShape),
+                .clip(CircleShape)
+                .drawWithContent {
+                    drawContent()
+                    drawJellyGlow(motion.frame, AccentArctic.copy(alpha = 0.85f))
+                },
             contentAlignment = Alignment.Center
         ) {
             GlassBarSurface(hazeState = hazeState, modifier = Modifier.matchParentSize())
@@ -176,7 +222,7 @@ fun OmniFloatingNavBar(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NavDestination.entries.forEach { destination ->
+                items.forEachIndexed { index, destination ->
                     val isSelected = destination == selectedDestination
                     val showLabel = isSelected && labelFraction > 0.5f
 
@@ -193,6 +239,13 @@ fun OmniFloatingNavBar(
                     Row(
                         modifier = Modifier
                             .height(44.dp)
+                            .graphicsLayer {
+                                if (isSelected) {
+                                    val scale = motion.frame.contentScale
+                                    scaleX = scale * motion.frame.pillScaleX
+                                    scaleY = scale * motion.frame.pillScaleY
+                                }
+                            }
                             .clip(CircleShape)
                             .background(pillBg)
                             .clickable(
@@ -205,6 +258,9 @@ fun OmniFloatingNavBar(
 
                                     lastTapTime = now
                                     lastTappedDest = destination
+
+                                    motion.begin(0f, 0f)
+                                    motion.select(index)
 
                                     if (isReTapOnActive || isDoubleTap) {
                                         scrollState.expand()

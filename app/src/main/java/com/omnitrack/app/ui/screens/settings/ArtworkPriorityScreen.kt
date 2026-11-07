@@ -2,7 +2,6 @@ package com.omnitrack.app.ui.screens.settings
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -82,7 +81,6 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 @Composable
 fun ArtworkPriorityScreen(
@@ -275,16 +273,6 @@ private fun CategoryWaterfallList(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var itemHeightPx by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
 
-    fun computeTargetSlot(startIdx: Int, offsetY: Float): Int {
-        if (itemHeightPx <= 0f) return startIdx
-        val step = (offsetY / itemHeightPx).roundToInt()
-        return (startIdx + step).coerceIn(0, currentSources.lastIndex)
-    }
-
-    val currentTargetSlot = activeDragIdx?.let { startIdx ->
-        computeTargetSlot(startIdx, dragOffsetY)
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -296,39 +284,11 @@ private fun CategoryWaterfallList(
             val isDragging = activeDragIdx == idx
             val isEnabled = source !in disabledSources
 
-            val shift = when {
-                activeDragIdx == null || currentTargetSlot == null -> 0f
-                isDragging -> 0f
-                // When dragging downward: items between start+1 and target shift UP
-                currentTargetSlot > activeDragIdx!! && idx > activeDragIdx!! && idx <= currentTargetSlot -> -itemHeightPx
-                // When dragging upward: items between target and start-1 shift DOWN
-                currentTargetSlot < activeDragIdx!! && idx < activeDragIdx!! && idx >= currentTargetSlot -> itemHeightPx
-                else -> 0f
-            }
-
-            val animatedShift by animateFloatAsState(
-                targetValue = shift,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
-                ),
-                label = "slotShift"
-            )
-
-            val translationY = if (isDragging) dragOffsetY else animatedShift
+            val translationY = if (isDragging) dragOffsetY else 0f
             val zIndexVal = if (isDragging) 10f else 1f
 
             val displayRank = when {
                 !isEnabled -> "OFF"
-                isDragging -> currentTargetSlot?.let { "#${it + 1}" } ?: "#${idx + 1}"
-                activeDragIdx != null && currentTargetSlot != null -> {
-                    val provisionalIdx = when {
-                        currentTargetSlot > activeDragIdx!! && idx > activeDragIdx!! && idx <= currentTargetSlot -> idx - 1
-                        currentTargetSlot < activeDragIdx!! && idx < activeDragIdx!! && idx >= currentTargetSlot -> idx + 1
-                        else -> idx
-                    }
-                    if (provisionalIdx == 0) "#1 PRI" else "#${provisionalIdx + 1}"
-                }
                 idx == 0 -> "#1 PRI"
                 else -> "#${idx + 1}"
             }
@@ -471,22 +431,31 @@ private fun CategoryWaterfallList(
                                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                         change.consume()
                                         if (!change.pressed) {
-                                            // Pointer lifted (Drag ended)
-                                            val start = activeDragIdx
-                                            if (start != null && itemHeightPx > 0f) {
-                                                val step = (dragOffsetY / itemHeightPx).roundToInt()
-                                                val target = (start + step).coerceIn(0, currentSources.lastIndex)
-                                                if (start != target && start in currentSources.indices && target in currentSources.indices) {
-                                                    val movedItem = currentSources.removeAt(start)
-                                                    currentSources.add(target, movedItem)
-                                                    coroutineScope.launch {
-                                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
-                                                    }
-                                                }
+                                            // Pointer lifted: save final order directly
+                                            coroutineScope.launch {
+                                                prefManager.updateArtSourcePriority(category, currentSources.toList())
                                             }
                                             break
                                         }
-                                        dragOffsetY += (change.position.y - change.previousPosition.y)
+                                        val deltaY = change.position.y - change.previousPosition.y
+                                        dragOffsetY += deltaY
+
+                                        // Real-time slot swap: when dragged past threshold, swap immediately!
+                                        val currentIdx = activeDragIdx
+                                        if (currentIdx != null && itemHeightPx > 0f) {
+                                            val threshold = itemHeightPx * 0.50f
+                                            if (dragOffsetY > threshold && currentIdx < currentSources.lastIndex) {
+                                                val moved = currentSources.removeAt(currentIdx)
+                                                currentSources.add(currentIdx + 1, moved)
+                                                activeDragIdx = currentIdx + 1
+                                                dragOffsetY -= itemHeightPx
+                                            } else if (dragOffsetY < -threshold && currentIdx > 0) {
+                                                val moved = currentSources.removeAt(currentIdx)
+                                                currentSources.add(currentIdx - 1, moved)
+                                                activeDragIdx = currentIdx - 1
+                                                dragOffsetY += itemHeightPx
+                                            }
+                                        }
                                     }
                                 } finally {
                                     activeDragIdx = null
