@@ -11,7 +11,6 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import com.omnitrack.app.data.cache.CoverCache
 import com.omnitrack.app.data.coil.CoverCacheMapper
-import com.omnitrack.app.data.coil.CoverCacheNetworkInterceptor
 import com.omnitrack.app.data.db.OmniTrackDatabase
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.util.AppLogger
@@ -46,7 +45,6 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
                     .build()
                 chain.proceed(request)
             }
-            .addNetworkInterceptor(CoverCacheNetworkInterceptor(coverCache))
             .build()
 
         return ImageLoader.Builder(context)

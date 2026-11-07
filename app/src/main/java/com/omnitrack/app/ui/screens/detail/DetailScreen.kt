@@ -191,6 +191,19 @@ fun DetailScreen(
                 }
             }
 
+            val customCoverFile = remember(item.customCoverPath) { item.customCoverPath?.let { java.io.File(it) } }
+            val coverImageModel = remember(effectiveCover, customCoverFile?.lastModified()) {
+                if (customCoverFile != null && customCoverFile.exists()) {
+                    coil3.request.ImageRequest.Builder(context)
+                        .data(customCoverFile)
+                        .memoryCacheKey("${customCoverFile.absolutePath}_${customCoverFile.lastModified()}")
+                        .diskCacheKey("${customCoverFile.absolutePath}_${customCoverFile.lastModified()}")
+                        .build()
+                } else {
+                    LosslessCoverMapper.toLosslessUrl(effectiveCover)
+                }
+            }
+
             val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
             val dominantAccent = rememberCoverDominantColor(losslessCover)
             val backdropTargetUrl = effectiveBanner
@@ -348,7 +361,7 @@ fun DetailScreen(
                                 .clickable { showArtworkPicker = true }
                         ) {
                             AsyncImage(
-                                model = losslessCover,
+                                model = coverImageModel,
                                 contentDescription = item.title,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

@@ -55,6 +55,26 @@ class CoverCache(private val context: Context) {
     }
 
     /**
+     * Promotes an image from Coil's DiskCache snapshot into permanent CoverCache.
+     */
+    fun promoteFromDiskCache(thumbnailUrl: String, snapshotFile: File): File? {
+        val targetFile = getCoverFile(thumbnailUrl) ?: return null
+        if (targetFile.exists() && targetFile.length() > 0) return targetFile
+        return try {
+            targetFile.parentFile?.mkdirs()
+            snapshotFile.inputStream().use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            targetFile
+        } catch (_: Exception) {
+            targetFile.delete()
+            null
+        }
+    }
+
+    /**
      * Saves raw image bytes for a thumbnail URL into the permanent cache directory.
      */
     fun saveCover(thumbnailUrl: String, inputStream: InputStream): File? {
@@ -84,6 +104,27 @@ class CoverCache(private val context: Context) {
     fun deleteCustomCover(mediaId: Long): Boolean {
         val file = getCustomCoverFile(mediaId)
         return if (file.exists()) file.delete() else false
+    }
+
+    /**
+     * Prunes orphaned cover files that are no longer referenced by any item in the library.
+     * Prevents unbounded storage growth over time.
+     */
+    fun pruneOrphans(activeCoverUrls: Set<String>, activeMediaIds: Set<Long>) {
+        val activeHashes = activeCoverUrls.map { hashKey(it) }.toSet()
+        // Clean covers/
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name !in activeHashes) {
+                file.delete()
+            }
+        }
+        // Clean covers/custom/
+        val activeCustomFileNames = activeMediaIds.map { "$it.jpg" }.toSet()
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name !in activeCustomFileNames) {
+                file.delete()
+            }
+        }
     }
 
     /**

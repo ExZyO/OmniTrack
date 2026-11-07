@@ -84,10 +84,21 @@ fun MediaCard(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val bounceScale = remember { Animatable(1f) }
     var showPlusOne by remember { mutableStateOf(false) }
-    val coverModel = remember(item.customCoverPath, item.coverUrl) {
-        item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+
+    val customFile = remember(item.customCoverPath) { item.customCoverPath?.let { java.io.File(it) } }
+    val coverModel = remember(item.customCoverPath, item.coverUrl, customFile?.lastModified()) {
+        if (customFile != null && customFile.exists()) {
+            coil3.request.ImageRequest.Builder(context)
+                .data(customFile)
+                .memoryCacheKey("${customFile.absolutePath}_${customFile.lastModified()}")
+                .diskCacheKey("${customFile.absolutePath}_${customFile.lastModified()}")
+                .build()
+        } else {
+            LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+        }
     }
 
     Column(

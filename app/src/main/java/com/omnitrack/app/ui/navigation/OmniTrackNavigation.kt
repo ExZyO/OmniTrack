@@ -56,8 +56,10 @@ fun OmniTrackNavigation(
                 )
             }
         ) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val coverCache = androidx.compose.runtime.remember { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).coverCache }
             val homeViewModel: HomeViewModel = viewModel(
-                factory = HomeViewModel.factory(repository)
+                factory = HomeViewModel.factory(repository, coverCache)
             )
 
             HomeScreen(

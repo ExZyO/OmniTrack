@@ -26,7 +26,10 @@ data class HomeUiState(
     val isSeeded: Boolean = false
 )
 
-class HomeViewModel(private val repository: MediaRepository) : ViewModel() {
+class HomeViewModel(
+    private val repository: MediaRepository,
+    private val coverCache: com.omnitrack.app.data.cache.CoverCache? = null
+) : ViewModel() {
 
     private val _selectedMediaType = MutableStateFlow(MediaType.ALL)
     private val _selectedStatus = MutableStateFlow(TrackingStatus.ALL)
@@ -66,6 +69,10 @@ class HomeViewModel(private val repository: MediaRepository) : ViewModel() {
                 if (items.isEmpty()) {
                     repository.insertAllMedia(MockData.sampleMedia)
                     repository.insertAllCategories(MockData.categories)
+                } else if (coverCache != null) {
+                    val activeUrls = items.map { it.coverUrl }.toSet()
+                    val activeIds = items.map { it.id }.toSet()
+                    coverCache.pruneOrphans(activeUrls, activeIds)
                 }
                 _isLoading.value = false
                 return@collect
@@ -103,11 +110,14 @@ class HomeViewModel(private val repository: MediaRepository) : ViewModel() {
     }
 
     companion object {
-        fun factory(repository: MediaRepository): ViewModelProvider.Factory {
+        fun factory(
+            repository: MediaRepository,
+            coverCache: com.omnitrack.app.data.cache.CoverCache? = null
+        ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return HomeViewModel(repository) as T
+                    return HomeViewModel(repository, coverCache) as T
                 }
             }
         }

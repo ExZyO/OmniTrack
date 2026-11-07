@@ -98,9 +98,15 @@ class DetailViewModel(
         }
     }
 
-    fun updateCustomCoverPath(path: String?) {
+    fun updateCustomCoverPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
             repository.updateCustomCover(_mediaId.value, path)
+            if (context != null && path != null) {
+                val file = java.io.File(path)
+                val loader = coil3.SingletonImageLoader.get(context)
+                loader.memoryCache?.remove(coil3.memory.MemoryCache.Key(file.absolutePath))
+                loader.diskCache?.remove(file.absolutePath)
+            }
         }
     }
 
