@@ -68,10 +68,12 @@ data class MediaTrailer(
 @Composable
 fun DetailTrailersSection(
     trailers: List<MediaTrailer>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentTitle: String = ""
 ) {
     if (trailers.isEmpty()) return
     val context = LocalContext.current
+    var activeTrailerForPopup by remember { mutableStateOf<MediaTrailer?>(null) }
 
     // Group videos by category (Trailers, Behind the Scenes, Clips, Featurettes, Teasers)
     val grouped = remember(trailers) {
@@ -189,11 +191,7 @@ fun DetailTrailersSection(
                     modifier = Modifier
                         .width(220.dp)
                         .clickable {
-                            val intent = Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse("https://www.youtube.com/watch?v=${trailer.youtubeKey}")
-                            )
-                            context.startActivity(intent)
+                            activeTrailerForPopup = trailer
                         },
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
@@ -251,5 +249,16 @@ fun DetailTrailersSection(
                 }
             }
         }
+    }
+
+    activeTrailerForPopup?.let { activeTrailer ->
+        TrailerPlayerPopup(
+            visible = true,
+            trailerTitle = activeTrailer.title,
+            trailerType = selectedCategory,
+            contentTitle = contentTitle,
+            youtubeKey = activeTrailer.youtubeKey,
+            onDismiss = { activeTrailerForPopup = null }
+        )
     }
 }

@@ -314,7 +314,7 @@ flowchart LR
   - Eliminated the awkward red "Watch Trailer" button.
   - Replaced with categorized dropdown selector: Trailers, Behind the Scenes, Clips, Featurettes, and Teasers.
   - 16:9 widescreen thumbnail cards with Amoled depth, play icon badge, video title, and category filter chips.
-- [ ] **In-App Video Playback Popup (`TrailerPlayerPopup.kt`)**:
+- [x] **In-App Video Playback Popup (`TrailerPlayerPopup.kt`)**:
   - Stop opening external YouTube application when tapping trailers or bonus videos.
   - Port Nuvio's in-app `TrailerPlayerPopup.kt` bottom sheet modal player with embedded video surface, scrub bar, and fullscreen orientation lock.
 - [ ] **Port Nuvio's `HeroTrailerPlayerSurface` with ExoPlayer**:

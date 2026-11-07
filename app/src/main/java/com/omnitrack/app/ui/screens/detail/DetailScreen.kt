@@ -837,7 +837,10 @@ fun DetailScreen(
 
                 // Detail Trailers Section (Trailer video cards)
                 if (uiState.trailers.isNotEmpty()) {
-                    DetailTrailersSection(trailers = uiState.trailers)
+                    DetailTrailersSection(
+                        trailers = uiState.trailers,
+                        contentTitle = item.title
+                    )
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
