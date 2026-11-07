@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -97,6 +98,13 @@ fun TrackerAccountsSheet(
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
     var isSyncing by remember { mutableStateOf(false) }
 
+    val customTraktClientId by app.preferenceManager.customTraktClientId.collectAsState(initial = "")
+    val customTraktClientSecret by app.preferenceManager.customTraktClientSecret.collectAsState(initial = "")
+    val customMalClientId by app.preferenceManager.customMalClientId.collectAsState(initial = "")
+    val customSimklClientId by app.preferenceManager.customSimklClientId.collectAsState(initial = "")
+    val customSimklClientSecret by app.preferenceManager.customSimklClientSecret.collectAsState(initial = "")
+    var showApiKeyConfigSheet by remember { mutableStateOf(false) }
+
     // SIMKL PIN Code State
     var showSimklPinDialog by remember { mutableStateOf(false) }
     var simklPinInfo by remember { mutableStateOf<TrackerAccountVerifier.SimklPinCode?>(null) }
@@ -160,46 +168,66 @@ fun TrackerAccountsSheet(
                     )
                 }
 
-                Button(
-                    onClick = {
-                        if (!isSyncing) {
-                            isSyncing = true
-                            scope.launch {
-                                try {
-                                    syncEngine.drainQueue()
-                                    Toast.makeText(context, "Full tracker synchronization complete", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                } finally {
-                                    isSyncing = false
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(
+                        onClick = { showApiKeyConfigSheet = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Key,
+                            contentDescription = "API Keys & Developer Credentials",
+                            tint = AccentGold,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            if (!isSyncing) {
+                                isSyncing = true
+                                scope.launch {
+                                    try {
+                                        syncEngine.drainQueue()
+                                        Toast.makeText(context, "Full tracker synchronization complete", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        isSyncing = false
+                                    }
                                 }
                             }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentJade),
+                        shape = RoundedCornerShape(999.dp),
+                        enabled = !isSyncing
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                color = AmoledBlack,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = AmoledBlack,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Sync All",
+                                color = AmoledBlack,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentJade),
-                    shape = RoundedCornerShape(999.dp),
-                    enabled = !isSyncing
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            color = AmoledBlack,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.CloudDownload,
-                            contentDescription = null,
-                            tint = AmoledBlack,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Sync All",
-                            color = AmoledBlack,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
                     }
                 }
             }
@@ -231,7 +259,8 @@ fun TrackerAccountsSheet(
                                 val verifier = com.omnitrack.app.data.sync.PkceUtil.generateCodeVerifier()
                                 TrackerAccountVerifier.pendingMalVerifier = verifier
                                 tokenManager.saveMalVerifier(verifier)
-                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${TrackerAccountVerifier.MAL_CLIENT_ID}&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=omnitrack://auth/mal"
+                                val effectiveClientId = customMalClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.MAL_CLIENT_ID
+                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=omnitrack://auth/mal"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             }
                         },
@@ -242,6 +271,66 @@ fun TrackerAccountsSheet(
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
+                },
+                developerSettingsContent = {
+                    var tempMalId by remember(customMalClientId) { mutableStateOf(customMalClientId) }
+                    var malSaved by remember { mutableStateOf(false) }
+
+                    Text("Custom Client ID (optional override):", fontSize = 11.sp, color = TextMuted)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurfaceElevated)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = tempMalId,
+                            onValueChange = {
+                                tempMalId = it
+                                malSaved = false
+                            },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                            cursorBrush = SolidColor(Color(0xFF2E51A2)),
+                            decorationBox = { inner ->
+                                if (tempMalId.isEmpty()) {
+                                    Text("32-character MAL Client ID", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
+                                }
+                                inner()
+                            }
+                        )
+                    }
+
+                    val isMalUnchanged = malSaved || (tempMalId.trim() == customMalClientId.trim())
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                app.preferenceManager.updateCustomTrackerCredentials(
+                                    traktClientId = customTraktClientId,
+                                    traktClientSecret = customTraktClientSecret,
+                                    malClientId = tempMalId.trim(),
+                                    simklClientId = customSimklClientId,
+                                    simklClientSecret = customSimklClientSecret
+                                )
+                                TrackerAccountVerifier.customMalClientId = tempMalId.trim()
+                                malSaved = true
+                                Toast.makeText(context, "MAL Client ID updated", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !isMalUnchanged && tempMalId.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2E51A2),
+                            contentColor = Color.White,
+                            disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                            disabledContentColor = TextMuted
+                        ),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Text(if (isMalUnchanged && tempMalId.isNotBlank()) "Saved" else "Save Key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             )
 
@@ -251,20 +340,21 @@ fun TrackerAccountsSheet(
                 subtitle = "TV Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifyTrakt(it) },
+                verifyFn = { TrackerAccountVerifier.verifyTrakt(it, customTraktClientId) },
                 onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
                     Button(
                         onClick = {
                             scope.launch {
-                                val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode()
+                                val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode(customTraktClientId)
                                 if (codeInfo != null) {
                                     traktDeviceInfo = codeInfo
                                     showTraktDeviceDialog = true
                                 } else {
+                                    val effectiveClientId = customTraktClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
                                     val intent = Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://trakt.tv/oauth/authorize?response_type=code&client_id=${TrackerAccountVerifier.TRAKT_CLIENT_ID}&redirect_uri=omnitrack://auth/trakt")
+                                        Uri.parse("https://trakt.tv/oauth/authorize?response_type=code&client_id=$effectiveClientId&redirect_uri=omnitrack://auth/trakt")
                                     )
                                     context.startActivity(intent)
                                 }
@@ -276,6 +366,96 @@ fun TrackerAccountsSheet(
                         Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                developerSettingsContent = {
+                    var tempTraktId by remember(customTraktClientId) { mutableStateOf(customTraktClientId) }
+                    var tempTraktSecret by remember(customTraktClientSecret) { mutableStateOf(customTraktClientSecret) }
+                    var traktSaved by remember { mutableStateOf(false) }
+
+                    Text("Trakt Client ID:", fontSize = 11.sp, color = TextMuted)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurfaceElevated)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = tempTraktId,
+                            onValueChange = {
+                                tempTraktId = it
+                                traktSaved = false
+                            },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                            cursorBrush = SolidColor(Color(0xFFED1C24)),
+                            decorationBox = { inner ->
+                                if (tempTraktId.isEmpty()) {
+                                    Text("Developer App Client ID", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
+                                }
+                                inner()
+                            }
+                        )
+                    }
+
+                    Text("Trakt Client Secret:", fontSize = 11.sp, color = TextMuted)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkSurfaceElevated)
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        BasicTextField(
+                            value = tempTraktSecret,
+                            onValueChange = {
+                                tempTraktSecret = it
+                                traktSaved = false
+                            },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                            cursorBrush = SolidColor(Color(0xFFED1C24)),
+                            decorationBox = { inner ->
+                                if (tempTraktSecret.isEmpty()) {
+                                    Text("Developer App Client Secret", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
+                                }
+                                inner()
+                            }
+                        )
+                    }
+
+                    val isTraktUnchanged = traktSaved || (tempTraktId.trim() == customTraktClientId.trim() && tempTraktSecret.trim() == customTraktClientSecret.trim())
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                app.preferenceManager.updateCustomTrackerCredentials(
+                                    traktClientId = tempTraktId.trim(),
+                                    traktClientSecret = tempTraktSecret.trim(),
+                                    malClientId = customMalClientId,
+                                    simklClientId = customSimklClientId,
+                                    simklClientSecret = customSimklClientSecret
+                                )
+                                TrackerAccountVerifier.customTraktClientId = tempTraktId.trim()
+                                TrackerAccountVerifier.customTraktClientSecret = tempTraktSecret.trim()
+                                traktSaved = true
+                                Toast.makeText(context, "Trakt credentials updated", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !isTraktUnchanged && tempTraktId.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFED1C24),
+                            contentColor = Color.White,
+                            disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                            disabledContentColor = TextMuted
+                        ),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Text(if (isTraktUnchanged && tempTraktId.isNotBlank()) "Saved" else "Save Keys", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )
@@ -548,7 +728,11 @@ fun TrackerAccountsSheet(
             isPollingTrakt = true
             while (isPollingTrakt) {
                 delay(info.intervalSeconds * 1000L)
-                val token = TrackerAccountVerifier.pollTraktDeviceToken(info.deviceCode)
+                val token = TrackerAccountVerifier.pollTraktDeviceToken(
+                    deviceCode = info.deviceCode,
+                    customClientId = customTraktClientId,
+                    customClientSecret = customTraktClientSecret
+                )
                 if (!token.isNullOrBlank()) {
                     tokenManager.saveTraktToken(token)
                     Toast.makeText(context, "Trakt.tv connected successfully!", Toast.LENGTH_LONG).show()
@@ -657,6 +841,13 @@ fun TrackerAccountsSheet(
             }
         }
     }
+
+    if (showApiKeyConfigSheet) {
+        ApiKeyConfigSheet(
+            preferenceManager = app.preferenceManager,
+            onDismiss = { showApiKeyConfigSheet = false }
+        )
+    }
 }
 
 @Composable
@@ -669,7 +860,8 @@ private fun OAuthDirectTrackerCard(
     oauthButtonLabel: String = "1-Tap Log In",
     verifyFn: suspend (String) -> VerificationState,
     onDisconnect: () -> Unit,
-    customActionButton: (@Composable () -> Unit)? = null
+    customActionButton: (@Composable () -> Unit)? = null,
+    developerSettingsContent: (@Composable () -> Unit)? = null
 ) {
     val context = LocalContext.current
     var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
@@ -835,6 +1027,46 @@ private fun OAuthDirectTrackerCard(
                     shape = RoundedCornerShape(999.dp)
                 ) {
                     Text(text = "Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (developerSettingsContent != null) {
+            var showDevKeys by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { showDevKeys = !showDevKeys }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = if (showDevKeys) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = "Custom Developer Credentials",
+                    fontSize = 11.5.sp,
+                    color = TextMuted,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            if (showDevKeys) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(AmoledBlack.copy(alpha = 0.5f))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    developerSettingsContent()
                 }
             }
         }
