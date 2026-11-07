@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.settings
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -8,7 +9,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,14 +22,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListItemInfo
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,9 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,9 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,12 +70,13 @@ import androidx.compose.ui.zIndex
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 @Composable
@@ -252,40 +249,191 @@ fun ArtworkPriorityScreen(
     }
 }
 
+/**
+ * State manager for smooth, multi-row drag and drop reordering inside LazyColumn.
+ * Tracks pointer displacement continuously, swaps logical items in real-time,
+ * neutralizes layout shifts to keep the dragged item pinned under the finger,
+ * and settles smoothly with zero bounce on neighboring rows upon release.
+ */
+private class DragDropState(
+    val lazyListState: LazyListState,
+    private val coroutineScope: CoroutineScope,
+    private val onMove: (Int, Int) -> Unit,
+    private val onDragFinished: () -> Unit
+) {
+    var draggedDistance by mutableFloatStateOf(0f)
+        private set
+
+    var draggingItemKey by mutableStateOf<String?>(null)
+        private set
+
+    var draggingItemIndex by mutableStateOf<Int?>(null)
+        private set
+
+    val settleAnimatable = Animatable(0f)
+    var isSettling by mutableStateOf(false)
+        private set
+
+    val isDragging: Boolean
+        get() = draggingItemKey != null || isSettling
+
+    private val currentElement: LazyListItemInfo?
+        get() = draggingItemKey?.let { key ->
+            lazyListState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
+        }
+
+    fun onStartDrag(key: String, initialIndex: Int) {
+        if (isSettling) return
+        draggingItemKey = key
+        draggingItemIndex = initialIndex
+        draggedDistance = 0f
+    }
+
+    fun onDrag(changeAmount: Float) {
+        if (isSettling) return
+        val currentKey = draggingItemKey ?: return
+        val currentDraggingIdx = draggingItemIndex ?: return
+        draggedDistance += changeAmount
+
+        val currentElem = currentElement ?: return
+
+        // Compute current center position of the dragged item on screen
+        val startOffset = currentElem.offset + draggedDistance
+        val itemCenter = startOffset + currentElem.size / 2f
+
+        // Find target item whose bounds contain this center
+        val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
+        val firstItem = visibleItems.firstOrNull()
+        val lastItem = visibleItems.lastOrNull()
+
+        val targetElement = when {
+            firstItem != null && itemCenter < firstItem.offset + firstItem.size / 2f -> {
+                if (currentDraggingIdx > firstItem.index) firstItem else null
+            }
+            lastItem != null && itemCenter > lastItem.offset + lastItem.size / 2f -> {
+                if (currentDraggingIdx < lastItem.index) lastItem else null
+            }
+            else -> {
+                visibleItems.find { item ->
+                    item.key != currentKey &&
+                    item.index != currentDraggingIdx &&
+                    item.offset <= itemCenter &&
+                    (item.offset + item.size) >= itemCenter
+                }
+            }
+        }
+
+        if (targetElement != null) {
+            val fromIndex = currentDraggingIdx
+            val toIndex = targetElement.index
+            if (fromIndex != toIndex) {
+                onMove(fromIndex, toIndex)
+                draggingItemIndex = toIndex
+                // Adjust dragged distance to neutralize layout jump
+                draggedDistance += currentElem.offset - targetElement.offset
+            }
+        }
+    }
+
+    fun onStopDrag() {
+        if (draggingItemKey == null || isSettling) return
+
+        val currentDistance = draggedDistance
+        if (currentDistance != 0f) {
+            isSettling = true
+            coroutineScope.launch {
+                try {
+                    settleAnimatable.snapTo(currentDistance)
+                    settleAnimatable.animateTo(
+                        targetValue = 0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                } finally {
+                    draggedDistance = 0f
+                    draggingItemKey = null
+                    draggingItemIndex = null
+                    isSettling = false
+                    onDragFinished()
+                }
+            }
+        } else {
+            draggingItemKey = null
+            draggingItemIndex = null
+            onDragFinished()
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryWaterfallList(
     category: MediaType,
     prefManager: PreferenceManager
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val density = LocalDensity.current
 
     val initialSources by prefManager.getArtSourcePriority(category)
         .collectAsState(initial = PreferenceManager.getDefaultSourcesFor(category))
     val disabledSources by prefManager.getDisabledArtSources(category)
         .collectAsState(initial = emptySet())
 
-    val currentSources = remember(initialSources) {
+    val currentSources = remember(category) {
         mutableStateListOf<String>().apply { addAll(initialSources) }
     }
 
-    var activeDragIdx by remember { mutableStateOf<Int?>(null) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var itemHeightPx by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
+    val lazyListState = rememberLazyListState()
 
-    Column(
+    val dragDropState = remember(category, lazyListState) {
+        DragDropState(
+            lazyListState = lazyListState,
+            coroutineScope = coroutineScope,
+            onMove = { fromIndex, toIndex ->
+                if (fromIndex in currentSources.indices && toIndex in currentSources.indices && fromIndex != toIndex) {
+                    val moved = currentSources.removeAt(fromIndex)
+                    currentSources.add(toIndex, moved)
+                }
+            },
+            onDragFinished = {
+                coroutineScope.launch {
+                    prefManager.updateArtSourcePriority(category, currentSources.toList())
+                }
+            }
+        )
+    }
+
+    LaunchedEffect(initialSources) {
+        if (!dragDropState.isDragging && currentSources.toList() != initialSources) {
+            currentSources.clear()
+            currentSources.addAll(initialSources)
+        }
+    }
+
+    LazyColumn(
+        state = lazyListState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        currentSources.forEachIndexed { idx, source ->
-            key(source) {
-            val isDragging = activeDragIdx == idx
+        itemsIndexed(
+            items = currentSources,
+            key = { _, source -> source }
+        ) { idx, source ->
+            val isDragging = dragDropState.draggingItemKey == source
             val isEnabled = source !in disabledSources
 
-            val translationY = if (isDragging) dragOffsetY else 0f
-            val zIndexVal = if (isDragging) 10f else 1f
+            val translationY = if (isDragging) {
+                if (dragDropState.isSettling) {
+                    dragDropState.settleAnimatable.value
+                } else {
+                    dragDropState.draggedDistance
+                }
+            } else {
+                0f
+            }
 
             val displayRank = when {
                 !isEnabled -> "OFF"
@@ -293,21 +441,28 @@ private fun CategoryWaterfallList(
                 else -> "#${idx + 1}"
             }
 
+            val itemModifier = if (isDragging) {
+                Modifier
+            } else {
+                Modifier.animateItem(
+                    placementSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+
             Row(
                 modifier = Modifier
+                    .then(itemModifier)
                     .fillMaxWidth()
-                    .zIndex(zIndexVal)
+                    .zIndex(if (isDragging) 10f else 1f)
                     .graphicsLayer {
                         this.translationY = translationY
                         if (isDragging) {
                             scaleX = 1.03f
                             scaleY = 1.03f
                             shadowElevation = 18f
-                        }
-                    }
-                    .onGloballyPositioned { coords ->
-                        if (coords.size.height > 0 && !isDragging) {
-                            itemHeightPx = coords.size.height.toFloat()
                         }
                     }
                     .clip(RoundedCornerShape(12.dp))
@@ -419,47 +574,29 @@ private fun CategoryWaterfallList(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .pointerInput(idx, currentSources) {
+                        .pointerInput(source) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                                 down.consume()
-                                activeDragIdx = idx
-                                dragOffsetY = 0f
+                                val currentIdx = currentSources.indexOf(source)
+                                if (currentIdx >= 0) {
+                                    dragDropState.onStartDrag(source, currentIdx)
+                                }
                                 try {
                                     while (true) {
                                         val event = awaitPointerEvent(PointerEventPass.Initial)
                                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                         change.consume()
                                         if (!change.pressed) {
-                                            // Pointer lifted: save final order directly
-                                            coroutineScope.launch {
-                                                prefManager.updateArtSourcePriority(category, currentSources.toList())
-                                            }
+                                            dragDropState.onStopDrag()
                                             break
                                         }
                                         val deltaY = change.position.y - change.previousPosition.y
-                                        dragOffsetY += deltaY
-
-                                        // Real-time slot swap: when dragged past threshold, swap immediately!
-                                        val currentIdx = activeDragIdx
-                                        if (currentIdx != null && itemHeightPx > 0f) {
-                                            val threshold = itemHeightPx * 0.50f
-                                            if (dragOffsetY > threshold && currentIdx < currentSources.lastIndex) {
-                                                val moved = currentSources.removeAt(currentIdx)
-                                                currentSources.add(currentIdx + 1, moved)
-                                                activeDragIdx = currentIdx + 1
-                                                dragOffsetY -= itemHeightPx
-                                            } else if (dragOffsetY < -threshold && currentIdx > 0) {
-                                                val moved = currentSources.removeAt(currentIdx)
-                                                currentSources.add(currentIdx - 1, moved)
-                                                activeDragIdx = currentIdx - 1
-                                                dragOffsetY += itemHeightPx
-                                            }
-                                        }
+                                        dragDropState.onDrag(deltaY)
                                     }
-                                } finally {
-                                    activeDragIdx = null
-                                    dragOffsetY = 0f
+                                } catch (e: CancellationException) {
+                                    dragDropState.onStopDrag()
+                                    throw e
                                 }
                             }
                         },
@@ -472,7 +609,6 @@ private fun CategoryWaterfallList(
                         modifier = Modifier.size(24.dp)
                     )
                 }
-            }
             }
         }
     }
