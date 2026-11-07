@@ -2035,3 +2035,5 @@ private fun VndbSpecificControls(
         Text("VNDB Visual Novel Tracking", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
         Text("Status: ${item.status.displayName} • Vote: ${item.userRating?.let { String.format("%.1f", it) } ?: "Not Voted"}", fontSize = 11.5.sp, color = TextMuted)
     }
+
+}
