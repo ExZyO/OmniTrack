@@ -419,10 +419,15 @@ fun HomeScreen(
                                             }
                                         }
                                     } else {
-                                        // Adaptive poster grid with 96dp bottom padding for liquid floating nav
+                                        // Adaptive poster grid with 96dp bottom padding for liquid floating nav (1.636x width scaling in landscape mode for full-bleed banners)
+                                        val effectiveCardWidth = if (posterStyle.isLandscape) {
+                                            (posterStyle.widthDp * (180f / 110f)).dp
+                                        } else {
+                                            posterStyle.widthDp.dp
+                                        }
                                         LazyVerticalGrid(
                                             state = gridStates[pageIndex],
-                                            columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
+                                            columns = GridCells.Adaptive(minSize = effectiveCardWidth),
                                             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 96.dp),
                                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                                             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -437,6 +442,9 @@ fun HomeScreen(
                                                     cornerRadiusDp = posterStyle.cornerRadiusDp,
                                                     isLandscape = posterStyle.isLandscape,
                                                     hideLabels = posterStyle.hideLabels,
+                                                    cardDepthEnabled = posterStyle.cardDepthEnabled,
+                                                    cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                                                    cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
                                                     onCardClick = {
                                                         AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
                                                         onItemClick(item.id)

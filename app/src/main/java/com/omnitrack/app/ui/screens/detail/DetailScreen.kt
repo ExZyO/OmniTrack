@@ -689,15 +689,6 @@ fun DetailScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     when (item.mediaType) {
-                        MediaType.ANIME, MediaType.SHOW -> {
-                            ChapterStepper(
-                                unitLabel = item.mediaType.unitLabel,
-                                currentProgress = item.currentProgress,
-                                totalProgress = item.totalProgress,
-                                onProgressChanged = { viewModel.updateProgress(it) }
-                            )
-                        }
-
                         MediaType.MANGA, MediaType.NOVEL -> {
                             ChapterStepper(
                                 unitLabel = item.mediaType.unitLabel,

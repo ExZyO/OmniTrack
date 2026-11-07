@@ -331,8 +331,14 @@ fun DiscoverView(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
+            val effectiveDiscoverCardWidth = if (posterStyle.isLandscape) {
+                (posterStyle.widthDp * (180f / 110f)).dp
+            } else {
+                posterStyle.widthDp.dp
+            }
+
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
+                columns = GridCells.Adaptive(minSize = effectiveDiscoverCardWidth),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(bottom = 110.dp),
@@ -406,8 +412,14 @@ fun DiscoverView(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             val spotlight = allMedia.take(12)
+            val effectiveDiscoverCardWidth = if (posterStyle.isLandscape) {
+                (posterStyle.widthDp * (180f / 110f)).dp
+            } else {
+                posterStyle.widthDp.dp
+            }
+
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = posterStyle.widthDp.dp),
+                columns = GridCells.Adaptive(minSize = effectiveDiscoverCardWidth),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(bottom = 110.dp),

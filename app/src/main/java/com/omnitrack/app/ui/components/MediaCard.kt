@@ -91,6 +91,8 @@ fun MediaCard(
     isLandscape: Boolean = false,
     hideLabels: Boolean = false,
     cardDepthEnabled: Boolean = true,
+    cardDepthEdgeStrength: Float = 50f,
+    cardDepthSheenStrength: Float = 35f,
     badgeText: String? = null,
     badgeColor: Color = AccentArctic
 ) {
@@ -143,7 +145,12 @@ fun MediaCard(
                 .aspectRatio(if (isLandscape) 16f / 9f else 0.68f)
                 .shadow(10.dp, shape)
                 .clip(shape)
-                .glassCardDepth(shape = shape, enabled = cardDepthEnabled)
+                .glassCardDepth(
+                    shape = shape,
+                    edgeStrength = cardDepthEdgeStrength,
+                    sheenStrength = cardDepthSheenStrength,
+                    enabled = cardDepthEnabled
+                )
         ) {
             AsyncImage(
                 model = activeModel,

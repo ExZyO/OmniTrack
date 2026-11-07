@@ -34,7 +34,10 @@ data class EnrichmentData(
     val releaseDate: String? = null,
     val lastAirDate: String? = null,
     val releaseYear: String? = null,
-    val videos: List<MediaTrailer> = emptyList()
+    val tmdbId: Long? = null,
+    val videos: List<MediaTrailer> = emptyList(),
+    val resolvedTmdbId: Long? = null,
+    val resolvedImdbId: String? = null
 )
 
 /**
@@ -72,22 +75,33 @@ class EnrichmentRepository(
         var audienceScore: Int? = item.audienceScore
         val effectiveTmdbKey = tmdbApiKey?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
 
-        // 1. Resolve Transparent Clearart Logo
-        if (clearart.isNullOrBlank()) {
-            if (!fanartApiKey.isNullOrBlank() && item.tmdbId != null) {
-                clearart = fetchFanartClearart(item.tmdbId, item.mediaType == MediaType.MOVIE, fanartApiKey)
-            }
-            if (clearart.isNullOrBlank() && !tmdbApiKey.isNullOrBlank() && item.tmdbId != null) {
-                clearart = fetchTmdbClearart(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
+        var effectiveTmdbId = item.tmdbId
+        var isMovie = item.mediaType == MediaType.MOVIE
+        var isShow = item.mediaType == MediaType.SHOW
+
+        // Auto-resolve TMDb ID for Anime if missing so Anime receives Clearart, Trailers, and MDBList scores
+        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
+            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey)
+            if (animeTmdb != null) {
+                effectiveTmdbId = animeTmdb.first
+                isMovie = animeTmdb.second
+                isShow = !animeTmdb.second
             }
         }
 
-        val isMovie = item.mediaType == MediaType.MOVIE
-        val isShow = item.mediaType == MediaType.SHOW
+        // 1. Resolve Transparent Clearart Logo
+        if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
+            if (!fanartApiKey.isNullOrBlank()) {
+                clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+            }
+            if (clearart.isNullOrBlank() && !tmdbApiKey.isNullOrBlank()) {
+                clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+            }
+        }
 
         var resolvedImdbId: String? = null
-        if ((isMovie || isShow) && item.tmdbId != null) {
-            resolvedImdbId = fetchTmdbImdbId(item.tmdbId, isMovie, effectiveTmdbKey)
+        if (effectiveTmdbId != null) {
+            resolvedImdbId = fetchTmdbImdbId(effectiveTmdbId, isMovie, effectiveTmdbKey)
         }
 
         // 2. Resolve Multi-Score Aggregation (IMDb, Rotten Tomatoes, Metacritic, Trakt, Audience)
@@ -95,8 +109,8 @@ class EnrichmentRepository(
         val hasStaleScores = imdbScore == 6.7f || (imdbScore != null && rtScore != null && traktScore == null)
         val needsRatings = imdbScore == null || rtScore == null || metacriticScore == null || traktScore == null || audienceScore == null || hasStaleScores
 
-        if (!mdblistApiKey.isNullOrBlank() && needsRatings && (resolvedImdbId != null || item.tmdbId != null || item.title.isNotBlank())) {
-            val mdbRatings = fetchMdbListRatings(resolvedImdbId, item.tmdbId, isMovie, item.title, mdblistApiKey)
+        if (!mdblistApiKey.isNullOrBlank() && needsRatings && (resolvedImdbId != null || effectiveTmdbId != null || item.title.isNotBlank())) {
+            val mdbRatings = fetchMdbListRatings(resolvedImdbId, effectiveTmdbId, isMovie, item.title, mdblistApiKey)
             if (mdbRatings != null) {
                 if (mdbRatings.imdbScore != null) imdbScore = mdbRatings.imdbScore
                 if (mdbRatings.rtScore != null) rtScore = mdbRatings.rtScore
@@ -108,8 +122,8 @@ class EnrichmentRepository(
         }
 
         // Zero-Key Fallback for IMDb (Cinemeta public Stremio endpoint)
-        if (imdbScore == null && (resolvedImdbId != null || item.tmdbId != null)) {
-            val finalImdbId = resolvedImdbId ?: item.tmdbId?.let { fetchTmdbImdbId(it, isMovie, effectiveTmdbKey) }
+        if (imdbScore == null && (resolvedImdbId != null || effectiveTmdbId != null)) {
+            val finalImdbId = resolvedImdbId ?: effectiveTmdbId?.let { fetchTmdbImdbId(it, isMovie, effectiveTmdbKey) }
             if (finalImdbId != null) {
                 imdbScore = fetchCinemetaImdbById(finalImdbId, isMovie)
             }
@@ -161,8 +175,8 @@ class EnrichmentRepository(
         var releaseYear: String? = item.releaseYear
         var videoList: List<MediaTrailer> = emptyList()
 
-        if (item.tmdbId != null) {
-            val details = fetchTmdbDetails(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
+        if (effectiveTmdbId != null) {
+            val details = fetchTmdbDetails(effectiveTmdbId, isMovie, effectiveTmdbKey)
             if (details != null) {
                 if (trailerKey == null) trailerKey = details.trailerKey
                 if (studio == null) studio = details.studio
@@ -198,7 +212,9 @@ class EnrichmentRepository(
             releaseDate = releaseDate,
             lastAirDate = lastAirDate,
             releaseYear = releaseYear,
-            videos = videoList
+            videos = videoList,
+            resolvedTmdbId = effectiveTmdbId,
+            resolvedImdbId = resolvedImdbId
         )
     }
 
@@ -279,6 +295,47 @@ class EnrichmentRepository(
         val tmdbScore: Float? = null
     )
 
+    private suspend fun searchTmdbForAnime(title: String, apiKey: String): Pair<Long, Boolean>? =
+        NetworkPacer.withTmdbPacing {
+            try {
+                val cleanTitle = title
+                    .replace(Regex("(?i)\\b(season|part|cour|act)\\s*\\d+.*$"), "")
+                    .replace(Regex("(?i)\\s*-\\s*(season|part|cour)\\s*\\d+.*$"), "")
+                    .trim()
+                val queryTitle = cleanTitle.ifBlank { title }
+
+                // 1. Search TV (most anime are series)
+                val tvUrl = "https://api.themoviedb.org/3/search/tv?api_key=$apiKey&query=${URLEncoder.encode(queryTitle, "UTF-8")}"
+                val tvReq = Request.Builder().url(tvUrl).get().build()
+                val tvId = client.newCall(tvReq).execute().use { resp ->
+                    if (!resp.isSuccessful) null
+                    else {
+                        val body = resp.body?.string() ?: return@use null
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
+                        first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                    }
+                }
+                if (tvId != null) return@withTmdbPacing Pair(tvId, false) // false = isMovie (is TV)
+
+                // 2. Search Movie (for anime movies)
+                val movieUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=${URLEncoder.encode(queryTitle, "UTF-8")}"
+                val movieReq = Request.Builder().url(movieUrl).get().build()
+                val movieId = client.newCall(movieReq).execute().use { resp ->
+                    if (!resp.isSuccessful) null
+                    else {
+                        val body = resp.body?.string() ?: return@use null
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
+                        first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                    }
+                }
+                if (movieId != null) Pair(movieId, true) else null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
     private suspend fun fetchMdbListRatings(
         imdbId: String?,
         tmdbId: Long?,
@@ -293,47 +350,64 @@ class EnrichmentRepository(
             } else if (tmdbId != null) {
                 "tm=$tmdbId&m=$mediaType"
             } else {
-                "m=${URLEncoder.encode(title, "UTF-8")}&s=$mediaType"
+                "s=${URLEncoder.encode(title, "UTF-8")}&m=$mediaType"
             }
-            val url = "https://mdblist.com/api/?apikey=$apiKey&$queryParam"
-            val request = Request.Builder().url(url).get().build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withGeneralPacing null
-                val body = response.body?.string() ?: return@withGeneralPacing null
-                val root = json.parseToJsonElement(body).jsonObject
-                val ratings = root["ratings"]?.jsonArray ?: return@withGeneralPacing null
-
-                var imdb: Float? = null
-                var rt: Int? = null
-                var meta: Int? = null
-                var trakt: Int? = null
-                var audience: Int? = null
-                var tmdb: Float? = null
-
-                for (node in ratings) {
-                    val obj = node.jsonObject
-                    val source = obj["source"]?.jsonPrimitive?.content?.lowercase() ?: continue
-                    val value = obj["value"]?.jsonPrimitive?.content?.toFloatOrNull() ?: continue
-                    when (source) {
-                        "imdb" -> imdb = value
-                        "tomatoes" -> rt = value.toInt()
-                        "metacritic" -> meta = value.toInt()
-                        "trakt" -> trakt = value.toInt()
-                        "tomatoesaudience", "audience", "popcorn" -> audience = value.toInt()
-                        "tmdb" -> tmdb = if (value > 10f) value / 10f else value
-                    }
-                }
-                MdbRatings(
-                    imdbScore = imdb,
-                    rtScore = rt,
-                    metacriticScore = meta,
-                    traktScore = trakt,
-                    audienceScore = audience,
-                    tmdbScore = tmdb
-                )
+            var res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&$queryParam")
+            if (res == null && imdbId.isNullOrBlank() && tmdbId == null) {
+                // Fallback to title search without media type constraint
+                res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&s=${URLEncoder.encode(title, "UTF-8")}")
             }
+            res
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun parseMdbListUrl(url: String): MdbRatings? {
+        val request = Request.Builder().url(url).get().build()
+        return client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return null
+            val body = response.body?.string() ?: return null
+            val parsed = json.parseToJsonElement(body)
+            val root = if (parsed is JsonObject) parsed else return null
+
+            // Support both direct item response and search result wrappers {"search": [...]}
+            val itemObj = if (root.containsKey("search")) {
+                root["search"]?.jsonArray?.firstOrNull()?.jsonObject ?: root
+            } else {
+                root
+            }
+
+            val ratings = itemObj["ratings"]?.jsonArray ?: root["ratings"]?.jsonArray ?: return null
+
+            var imdb: Float? = null
+            var rt: Int? = null
+            var meta: Int? = null
+            var trakt: Int? = null
+            var audience: Int? = null
+            var tmdb: Float? = null
+
+            for (node in ratings) {
+                val obj = node.jsonObject
+                val source = obj["source"]?.jsonPrimitive?.content?.lowercase() ?: continue
+                val value = obj["value"]?.jsonPrimitive?.content?.toFloatOrNull() ?: continue
+                when (source) {
+                    "imdb" -> imdb = value
+                    "tomatoes" -> rt = value.toInt()
+                    "metacritic" -> meta = value.toInt()
+                    "trakt" -> trakt = value.toInt()
+                    "tomatoesaudience", "audience", "popcorn" -> audience = value.toInt()
+                    "tmdb" -> tmdb = if (value > 10f) value / 10f else value
+                }
+            }
+            MdbRatings(
+                imdbScore = imdb,
+                rtScore = rt,
+                metacriticScore = meta,
+                traktScore = trakt,
+                audienceScore = audience,
+                tmdbScore = tmdb
+            )
         }
     }
 
@@ -449,7 +523,7 @@ class EnrichmentRepository(
             val apiKey = tmdbKey
             val type = if (isMovie) "movie" else "tv"
             val append = if (isMovie) "videos,release_dates" else "videos,content_ratings"
-            val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey&append_to_response=$append"
+            val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey&append_to_response=$append&include_video_language=en,ja,null"
             val req = Request.Builder().url(url).get().build()
             client.newCall(req).execute().use { response ->
                 if (!response.isSuccessful) return null

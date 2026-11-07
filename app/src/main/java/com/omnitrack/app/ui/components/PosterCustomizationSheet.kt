@@ -1,9 +1,12 @@
 package com.omnitrack.app.ui.components
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,16 +42,23 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentArctic
@@ -183,14 +193,22 @@ fun PosterCustomizationSheet(
                     label = "previewCornerRadius"
                 )
 
+                val effectivePreviewWidth = if (style.isLandscape) {
+                    (style.widthDp * (180f / 110f)).dp
+                } else {
+                    style.widthDp.dp
+                }
+
                 Box(
                     modifier = Modifier
-                        .width(style.widthDp.dp)
+                        .width(effectivePreviewWidth)
                         .aspectRatio(if (style.isLandscape) 16f / 9f else 0.68f)
                         .shadow(12.dp, RoundedCornerShape(previewCornerRadius))
                         .clip(RoundedCornerShape(previewCornerRadius))
                         .glassCardDepth(
                             shape = RoundedCornerShape(previewCornerRadius),
+                            edgeStrength = style.cardDepthEdgeStrength.toFloat(),
+                            sheenStrength = style.cardDepthSheenStrength.toFloat(),
                             enabled = style.cardDepthEnabled
                         )
                         .background(
@@ -501,9 +519,212 @@ fun PosterCustomizationSheet(
                         )
                     )
                 }
+
+                if (style.cardDepthEnabled) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Depth & Sheen 2D Canvas Pad",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccentArctic
+                            )
+                            Text(
+                                text = "Edge: ${style.cardDepthEdgeStrength}% • Sheen: ${style.cardDepthSheenStrength}%",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+
+                        CardDepthTuningPad(
+                            edgeStrength = style.cardDepthEdgeStrength.toFloat(),
+                            sheenStrength = style.cardDepthSheenStrength.toFloat(),
+                            onChange = { edge, sheen ->
+                                scope.launch {
+                                    preferenceManager.updateCardDepthSettings(
+                                        edge.roundToInt(),
+                                        sheen.roundToInt()
+                                    )
+                                }
+                            }
+                        )
+
+                        // Quick Presets
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                "Default" to (50 to 35),
+                                "Subtle" to (30 to 20),
+                                "Vivid" to (65 to 50),
+                                "Glassy" to (80 to 60)
+                            ).forEach { (label, values) ->
+                                val isSelected = style.cardDepthEdgeStrength == values.first && style.cardDepthSheenStrength == values.second
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) AccentJade.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) AccentJade else GlassBorder,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            scope.launch {
+                                                preferenceManager.updateCardDepthSettings(values.first, values.second)
+                                            }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) AccentJade else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
         }
+    }
+}
+
+/**
+ * Interactive 2D Graph Tuning Pad:
+ * Lets the user slide across X (Edge Light Strength 0..100) and Y (Specular Sheen Strength 0..100)
+ * with live crosshairs, glow thumb, and real-time haptic/visual feedback.
+ */
+@Composable
+fun CardDepthTuningPad(
+    edgeStrength: Float,
+    sheenStrength: Float,
+    onChange: (edge: Float, sheen: Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var padWidth by remember { mutableFloatStateOf(1f) }
+    var padHeight by remember { mutableFloatStateOf(1f) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(150.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF090D14))
+            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+            .onSizeChanged {
+                padWidth = it.width.toFloat().coerceAtLeast(1f)
+                padHeight = it.height.toFloat().coerceAtLeast(1f)
+            }
+            .pointerInput(padWidth, padHeight) {
+                detectTapGestures { offset ->
+                    val edge = (offset.x / padWidth * 100f).coerceIn(0f, 100f)
+                    val sheen = ((padHeight - offset.y) / padHeight * 100f).coerceIn(0f, 100f)
+                    onChange(edge, sheen)
+                }
+            }
+            .pointerInput(padWidth, padHeight) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    val edge = (change.position.x / padWidth * 100f).coerceIn(0f, 100f)
+                    val sheen = ((padHeight - change.position.y) / padHeight * 100f).coerceIn(0f, 100f)
+                    onChange(edge, sheen)
+                }
+            }
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+
+            // Grid lines (25%, 50%, 75%)
+            val gridColor = Color.White.copy(alpha = 0.05f)
+            listOf(0.25f, 0.5f, 0.75f).forEach { fraction ->
+                drawLine(
+                    color = gridColor,
+                    start = Offset(w * fraction, 0f),
+                    end = Offset(w * fraction, h),
+                    strokeWidth = 1.dp.toPx()
+                )
+                drawLine(
+                    color = gridColor,
+                    start = Offset(0f, h * fraction),
+                    end = Offset(w, h * fraction),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+
+            // Crosshair guidelines to thumb
+            val thumbX = (edgeStrength / 100f) * w
+            val thumbY = ((100f - sheenStrength) / 100f) * h
+
+            val guideColor = AccentJade.copy(alpha = 0.35f)
+            drawLine(
+                color = guideColor,
+                start = Offset(thumbX, 0f),
+                end = Offset(thumbX, h),
+                strokeWidth = 1.5.dp.toPx()
+            )
+            drawLine(
+                color = guideColor,
+                start = Offset(0f, thumbY),
+                end = Offset(w, thumbY),
+                strokeWidth = 1.5.dp.toPx()
+            )
+
+            // Thumb Outer Glow
+            drawCircle(
+                color = AccentJade.copy(alpha = 0.25f),
+                radius = 16.dp.toPx(),
+                center = Offset(thumbX, thumbY)
+            )
+            // Thumb Accent Ring
+            drawCircle(
+                color = AccentJade,
+                radius = 9.dp.toPx(),
+                center = Offset(thumbX, thumbY)
+            )
+            // Thumb Center Core
+            drawCircle(
+                color = Color.White,
+                radius = 4.dp.toPx(),
+                center = Offset(thumbX, thumbY)
+            )
+        }
+
+        // Top Left: Sheen Y-axis indicator
+        Text(
+            text = "Sheen: ${sheenStrength.roundToInt()}% ↑",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextMuted.copy(alpha = 0.8f),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 10.dp, top = 8.dp)
+        )
+
+        // Bottom Right: Edge Light X-axis indicator
+        Text(
+            text = "Edge Light: ${edgeStrength.roundToInt()}% →",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextMuted.copy(alpha = 0.8f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 10.dp, bottom = 8.dp)
+        )
     }
 }

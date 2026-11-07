@@ -5,6 +5,9 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
+import android.content.Intent
+import android.net.Uri
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -29,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -102,6 +106,16 @@ fun TrailerPlayerPopup(
         if (contentTitle.isNotBlank()) add(contentTitle)
     }.joinToString(" • ")
 
+    val openInYouTubeApp = {
+        try {
+            val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$youtubeKey"))
+            context.startActivity(appIntent)
+        } catch (_: Exception) {
+            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$youtubeKey"))
+            context.startActivity(webIntent)
+        }
+    }
+
     if (isFullscreen) {
         // Fullscreen Mode Dialog
         Dialog(
@@ -153,6 +167,21 @@ fun TrailerPlayerPopup(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(
+                            onClick = openInYouTubeApp,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.65f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Open in YouTube",
+                                tint = Color.Red,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
                         IconButton(
                             onClick = { isFullscreen = false },
                             modifier = Modifier
@@ -230,6 +259,17 @@ fun TrailerPlayerPopup(
 
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         IconButton(
+                            onClick = openInYouTubeApp,
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Open in YouTube",
+                                tint = Color(0xFFFF0000),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        IconButton(
                             onClick = { isFullscreen = true },
                             modifier = Modifier.size(34.dp)
                         ) {
@@ -300,16 +340,16 @@ private fun EmbeddedYouTubePlayer(
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
                 * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000000; }
-                html, body { width: 100%; height: 100%; overflow: hidden; }
+                html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
                 .iframe-container { position: relative; width: 100%; height: 100%; }
-                iframe { width: 100%; height: 100%; border: none; }
+                iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
             </style>
         </head>
         <body>
             <div class="iframe-container">
                 <iframe
-                    src="https://www.youtube-nocookie.com/embed/$youtubeKey?autoplay=1&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3&color=white"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    src="https://www.youtube.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com&rel=0&modestbranding=1"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowfullscreen>
                 </iframe>
             </div>
@@ -327,22 +367,31 @@ private fun EmbeddedYouTubePlayer(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 setBackgroundColor(android.graphics.Color.BLACK)
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     mediaPlaybackRequiresUserGesture = false
                     cacheMode = WebSettings.LOAD_DEFAULT
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    userAgentString = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
+                    allowFileAccess = false
+                    allowContentAccess = true
                 }
-                webChromeClient = WebChromeClient()
+                webChromeClient = object : WebChromeClient() {
+                    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                        super.onShowCustomView(view, callback)
+                    }
+                    override fun onHideCustomView() {
+                        super.onHideCustomView()
+                    }
+                }
                 webViewClient = WebViewClient()
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", "https://www.youtube.com")
                 webViewRef = this
             }
         },
-        update = { webView ->
-            webView.loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", null)
-        }
+        update = { /* Preserves playback state; does not reload page on recomposition */ }
     )
 }
 

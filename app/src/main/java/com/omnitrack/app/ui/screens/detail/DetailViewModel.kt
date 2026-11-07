@@ -116,6 +116,7 @@ class DetailViewModel(
                 mdblistApiKey = mdbKey
             )
             val updated = item.copy(
+                tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
                 clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
                 communityScore = enrichment.communityScore ?: item.communityScore,
                 imdbScore = enrichment.imdbScore ?: item.imdbScore,
@@ -352,9 +353,9 @@ class DetailViewModel(
                     }
                 } catch (_: Exception) {}
 
-                // Videos (Trailers)
+                // Videos (Trailers, Teasers, Behind the scenes, Clips)
                 try {
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/videos?api_key=$tmdbKey"
+                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/videos?api_key=$tmdbKey&include_video_language=en,ja,null"
                     val req = Request.Builder().url(url).get().build()
                     client.newCall(req).execute().use { response ->
                         if (response.isSuccessful) {
@@ -394,7 +395,7 @@ class DetailViewModel(
                                         ?.filter { it > 0 }?.take(8) ?: emptyList()
                                     for (sNum in sNumbers) {
                                         try {
-                                            val svUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}/season/$sNum/videos?api_key=$tmdbKey"
+                                            val svUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}/season/$sNum/videos?api_key=$tmdbKey&include_video_language=en,ja,null"
                                             val svReq = Request.Builder().url(svUrl).get().build()
                                             client.newCall(svReq).execute().use { svResp ->
                                                 if (svResp.isSuccessful) {

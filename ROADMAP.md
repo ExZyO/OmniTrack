@@ -132,6 +132,14 @@ also me adding the client id of simkl, mal, anilist in github didnt work for sim
 comick says session expired in setting but i think it probably connected, if i click open, it opens https://comick.dev/search?q=Nano%20Machine (nano machine manhwa) idk if its correct
 add nuvio poster card style properly, it is missing features like me moving the graph to properly customize cover sheen"
 
+### 9. Trakt Smooth Height Animation, Anime MDBList & Trailer Error 152 Directives (Verbatim)
+> "when i swipe between comments in trakt, copy the smooth animation when it is big because of a big message and becomes small, like in nuvio
+anime doesnt show mdblist
+when i try to play trailer:
+This video is unavailable
+Error code 152 - 4
+when i click the fullscreen button it doesnt open the video, probably cuz it wont play? idk"
+
 ---
 
 ## 🏆 Gold-Standard Category Benchmarks & Reference Strategy
@@ -337,10 +345,18 @@ flowchart LR
   - Verify 16:9 episode thumbnail cards, watched checkmark badge, and long-press watched action sheet (`Mark Episode`, `Mark Previous`, `Mark Season`).
   - Verify fill-forward progress behavior: e.g. at ep 2, clicking ep 4 marks 2, 3, and 4 as watched and records 4 in external trackers.
   - Verify elimination of layout flash on screen open.
-- [ ] **Cover Art, Clearart Contrast & Sheen 2D Pad**:
-  - Verify landscape banner max sizing matching Nuvio.
-  - Ensure clearart title logo is positioned above/independent of bottom progress data so it remains legible.
-  - Test interactive 2D graph pad for adjusting sheen and depth gradient.
+- [x] **Cover Art, Clearart Contrast & Sheen 2D Pad**:
+  - Landscape banner 1.636x sizing matching Nuvio in adaptive grid.
+  - Clearart title logo is positioned above/independent of bottom progress data so it remains legible.
+  - Interactive 2D graph pad (`CardDepthTuningPad`) for adjusting sheen (Y-axis 0..100) and edge light (X-axis 0..100) with quick presets.
+- [x] **Comment Detail Sheet Fluid Spring Height Animation**:
+  - Swiping or navigating between comments of different lengths dynamically resizes the bottom sheet using Nuvio's exact spring curve (`dampingRatio = 0.9f, stiffness = 500f`), gliding smoothly from tall comments to short comments without layout collision.
+- [x] **Anime MDBList & Multi-Tracker Score Aggregation**:
+  - Fixed MDBList title search parameter swap (`s=TITLE&m=$mediaType`).
+  - Added auto-resolution of TMDb TV/Movie IDs for Anime from title, resolving TMDb details, trailers, ClearArt logos, and MDBList multi-tracker scores (IMDb, Trakt, RT, Metacritic) for Anime.
+- [x] **In-App Trailer Playback & Fullscreen Resolution**:
+  - Resolved Error 152 - 4 by applying modern Chrome mobile user-agent and standard YouTube embed URL with origin.
+  - Added WebChromeClient fullscreen callback and native YouTube app launch intent fallback.
 
 ---
 
