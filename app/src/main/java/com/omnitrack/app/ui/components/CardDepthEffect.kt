@@ -71,3 +71,10 @@ fun Modifier.glassCardDepth(
         withEdge
     }
 }
+
+private fun androidx.compose.ui.graphics.Outline.toPath(): androidx.compose.ui.graphics.Path = when (this) {
+    is androidx.compose.ui.graphics.Outline.Rectangle -> androidx.compose.ui.graphics.Path().apply { addRect(rect) }
+    is androidx.compose.ui.graphics.Outline.Rounded -> androidx.compose.ui.graphics.Path().apply { addRoundRect(roundRect) }
+    is androidx.compose.ui.graphics.Outline.Generic -> path
+}
+
