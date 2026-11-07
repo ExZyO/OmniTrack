@@ -100,6 +100,11 @@ fun TrackerAccountsSheet(
     var traktDeviceCodeInfo by remember { mutableStateOf<TrackerAccountVerifier.TraktDeviceCode?>(null) }
     var isPollingTrakt by remember { mutableStateOf(false) }
 
+    // SIMKL PIN Code State
+    var showSimklPinDialog by remember { mutableStateOf(false) }
+    var simklPinInfo by remember { mutableStateOf<TrackerAccountVerifier.SimklPinCode?>(null) }
+    var isPollingSimkl by remember { mutableStateOf(false) }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -255,43 +260,94 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 4. SIMKL
+            // 4. SIMKL (1-Tap OAuth with nuvio:// AND PIN Code Flow)
             VerifiedTrackerCard(
                 title = "SIMKL",
                 subtitle = "Unified Anime, Shows & Movies tracker",
                 accentColor = Color(0xFF00E676),
                 initialToken = tokens.simklToken.orEmpty(),
-                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a&redirect_uri=aniyomi://simkl-auth",
+                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a&redirect_uri=nuvio://auth/simkl",
                 oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifySimkl(it) },
                 onSave = { scope.launch { tokenManager.saveSimklToken(it); Toast.makeText(context, "SIMKL token saved", Toast.LENGTH_SHORT).show() } },
-                onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } }
+                onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } },
+                customActionButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
+                                if (codeInfo != null) {
+                                    simklPinInfo = codeInfo
+                                    showSimklPinDialog = true
+                                } else {
+                                    Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Connect with PIN", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
-            // 5. Bangumi (With 1-click personal access token link)
+            // 5. Bangumi (Direct Token Link + 1-Tap OAuth)
             VerifiedTrackerCard(
                 title = "Bangumi",
-                subtitle = "bgm.tv API – Anime, Manga & Games collection",
+                subtitle = "bgm.tv API - Anime, Manga & Games collection",
                 accentColor = Color(0xFFF09199),
                 initialToken = tokens.bangumiToken.orEmpty(),
-                oauthUrl = "https://next.bgm.tv/demo/access-token",
-                oauthButtonLabel = "1-Click Get Token",
+                oauthUrl = "https://next.bgm.tv/demo/access-token/create",
+                oauthButtonLabel = "Get Token",
                 verifyFn = { TrackerAccountVerifier.verifyBangumi(it) },
                 onSave = { scope.launch { tokenManager.saveBangumiToken(it); Toast.makeText(context, "Bangumi token saved", Toast.LENGTH_SHORT).show() } },
-                onDisconnect = { scope.launch { tokenManager.saveBangumiToken(null); Toast.makeText(context, "Bangumi disconnected", Toast.LENGTH_SHORT).show() } }
+                onDisconnect = { scope.launch { tokenManager.saveBangumiToken(null); Toast.makeText(context, "Bangumi disconnected", Toast.LENGTH_SHORT).show() } },
+                customActionButton = {
+                    Button(
+                        onClick = {
+                            val oauthUri = Uri.parse("https://bgm.tv/oauth/authorize?client_id=bgm31586666817a5d03b&response_type=code&redirect_uri=komikku://bangumi-auth")
+                            context.startActivity(Intent(Intent.ACTION_VIEW, oauthUri))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF09199)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
-            // 6. Comick
+            // 6. Comick (PKCE S256 OAuth)
             VerifiedTrackerCard(
                 title = "Comick",
                 subtitle = "Manga & Webtoon chapter progress bridge",
                 accentColor = Color(0xFFF43F5E),
                 initialToken = tokens.comickToken.orEmpty(),
-                oauthUrl = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1",
-                oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifyComick(it) },
                 onSave = { scope.launch { tokenManager.saveComickToken(it); Toast.makeText(context, "Comick token saved", Toast.LENGTH_SHORT).show() } },
-                onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } }
+                onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } },
+                customActionButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val pkce = com.omnitrack.app.data.sync.PkceUtil.generateS256Codes()
+                                tokenManager.saveComickVerifier(pkce.codeVerifier)
+                                val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=" + pkce.codeChallenge + "&code_challenge_method=S256"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF43F5E)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
             // 7. VNDB (Kana REST API with GET /kana/authinfo verification)
@@ -313,9 +369,10 @@ fun TrackerAccountsSheet(
                 initialSteamId64 = tokens.steamId64.orEmpty(),
                 onSave = { key, id ->
                     scope.launch {
+                        val resolvedId = TrackerAccountVerifier.resolveSteamId(id, key) ?: id.trim()
                         tokenManager.saveSteamApiKey(key)
-                        tokenManager.saveSteamId64(id)
-                        Toast.makeText(context, "Steam credentials saved", Toast.LENGTH_SHORT).show()
+                        tokenManager.saveSteamId64(resolvedId)
+                        Toast.makeText(context, "Steam credentials verified & saved!", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onDisconnect = {
@@ -341,6 +398,124 @@ fun TrackerAccountsSheet(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+
+
+    // SIMKL PIN Code Dialog
+    if (showSimklPinDialog && simklPinInfo != null) {
+        val info = simklPinInfo!!
+        LaunchedEffect(info) {
+            isPollingSimkl = true
+            while (isPollingSimkl) {
+                delay(info.intervalSeconds * 1000L)
+                val token = TrackerAccountVerifier.pollSimklPinToken(info.userCode)
+                if (!token.isNullOrBlank()) {
+                    tokenManager.saveSimklToken(token)
+                    Toast.makeText(context, "SIMKL connected successfully!", Toast.LENGTH_LONG).show()
+                    isPollingSimkl = false
+                    showSimklPinDialog = false
+                    break
+                }
+            }
+        }
+
+        androidx.compose.ui.window.Dialog(onDismissRequest = {
+            isPollingSimkl = false
+            showSimklPinDialog = false
+        }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF00E676).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tv,
+                        contentDescription = null,
+                        tint = Color(0xFF00E676),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Text(
+                    text = "Authorize on SIMKL",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Text(
+                    text = "Enter this 5-digit PIN code at simkl.com/pin:",
+                    fontSize = 12.sp,
+                    color = TextMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(AmoledBlack)
+                        .border(1.dp, Color(0xFF00E676).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                        .padding(vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = info.userCode,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF00E676),
+                        letterSpacing = 6.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("SIMKL PIN", info.userCode))
+                            Toast.makeText(context, "Code copied!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Copy", color = TextPrimary, fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Open Link", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 
@@ -844,7 +1019,7 @@ private fun SteamTrackerCard(
 
         // Field 1: SteamID64
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Steam 64-Bit ID (e.g. 76561198...)", fontSize = 11.sp, color = TextMuted)
+            Text("Steam Username, Profile URL, or 17-digit SteamID64", fontSize = 11.sp, color = TextMuted)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -865,7 +1040,7 @@ private fun SteamTrackerCard(
                     cursorBrush = SolidColor(Color(0xFF66C0F4)),
                     modifier = Modifier.weight(1f),
                     decorationBox = { inner ->
-                        if (steamIdText.isEmpty()) Text("Paste 17-digit SteamID64...", color = TextMuted, fontSize = 12.sp)
+                        if (steamIdText.isEmpty()) Text("Username, profile link, or 76561198...", color = TextMuted, fontSize = 12.sp)
                         inner()
                     }
                 )
@@ -874,7 +1049,7 @@ private fun SteamTrackerCard(
 
         // Field 2: Steam Web API Key
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Steam Web API Key (Enter 'localhost' as Domain Name)", fontSize = 11.sp, color = TextMuted)
+            Text("32-Character Steam Web API Key", fontSize = 11.sp, color = TextMuted)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

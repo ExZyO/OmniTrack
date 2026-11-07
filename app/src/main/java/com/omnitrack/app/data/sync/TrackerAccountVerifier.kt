@@ -33,11 +33,13 @@ object TrackerAccountVerifier {
     const val TRAKT_CLIENT_ID = "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U"
     const val TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
 
-    // SIMKL Client ID
+    // SIMKL Client Credentials
     const val SIMKL_CLIENT_ID = "6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a"
+    const val SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
 
-    // Bangumi Client ID
+    // Bangumi Client Credentials
     const val BANGUMI_CLIENT_ID = "bgm31586666817a5d03b"
+    const val BANGUMI_CLIENT_SECRET = "3dad27cf8edcac6f55361d7971d219e1"
 
     // Comick Client ID
     const val COMICK_CLIENT_ID = "SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH"
@@ -232,10 +234,40 @@ object TrackerAccountVerifier {
         }
     }
 
+    suspend fun resolveSteamId(rawInput: String, apiKey: String): String? = withContext(Dispatchers.IO) {
+        val trimmed = rawInput.trim()
+        if (trimmed.all { it.isDigit() } && trimmed.length == 17) return@withContext trimmed
+
+        val vanity = when {
+            trimmed.contains("/id/") -> trimmed.substringAfter("/id/").trimEnd('/')
+            trimmed.contains("/profiles/") -> trimmed.substringAfter("/profiles/").trimEnd('/')
+            else -> trimmed
+        }
+        if (vanity.all { it.isDigit() } && vanity.length == 17) return@withContext vanity
+
+        try {
+            val url = "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=$apiKey&vanityurl=$vanity"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val bodyStr = response.body?.string().orEmpty()
+                val parsed = json.parseToJsonElement(bodyStr).jsonObject
+                val respObj = parsed["response"]?.jsonObject
+                val success = respObj?.get("success")?.jsonPrimitive?.content?.toIntOrNull()
+                if (success == 1) {
+                    respObj["steamid"]?.jsonPrimitive?.content
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun verifySteam(apiKey: String, steamId64: String): VerificationState = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || steamId64.isBlank()) return@withContext VerificationState.Idle
         try {
-            val url = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=$apiKey&steamids=$steamId64"
+            val resolvedId = resolveSteamId(steamId64, apiKey) ?: steamId64.trim()
+            val url = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=$apiKey&steamids=$resolvedId"
             val request = Request.Builder().url(url).get().build()
 
             client.newCall(request).execute().use { response ->
@@ -248,7 +280,7 @@ object TrackerAccountVerifier {
                 if (!personaName.isNullOrBlank()) {
                     VerificationState.Verified(personaName)
                 } else {
-                    VerificationState.Failed("No player found for SteamID")
+                    VerificationState.Failed("No player found for SteamID/Username")
                 }
             }
         } catch (e: Exception) {
@@ -327,6 +359,64 @@ object TrackerAccountVerifier {
                 } else {
                     null
                 }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // SIMKL PIN Code Request & Poll
+    data class SimklPinCode(
+        val userCode: String,
+        val verificationUrl: String,
+        val expiresIn: Int,
+        val intervalSeconds: Int
+    )
+
+    suspend fun requestSimklPinCode(): SimklPinCode? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://api.simkl.com/oauth/pin?client_id=$SIMKL_CLIENT_ID"
+            val request = Request.Builder()
+                .url(url)
+                .header("Content-Type", "application/json")
+                .header("simkl-api-key", SIMKL_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body?.string().orEmpty()
+                val obj = json.parseToJsonElement(body).jsonObject
+                val userCode = obj["user_code"]?.jsonPrimitive?.content ?: return@withContext null
+                val verificationUrl = obj["verification_url"]?.jsonPrimitive?.content ?: "https://simkl.com/pin"
+                val interval = obj["interval"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5
+                val expires = obj["expires_in"]?.jsonPrimitive?.content?.toIntOrNull() ?: 900
+                SimklPinCode(userCode, verificationUrl, expires, interval)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun pollSimklPinToken(userCode: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://api.simkl.com/oauth/pin/$userCode?client_id=$SIMKL_CLIENT_ID"
+            val request = Request.Builder()
+                .url(url)
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string().orEmpty()
+                    val obj = json.parseToJsonElement(body).jsonObject
+                    if (obj["result"]?.jsonPrimitive?.content == "OK") {
+                        obj["access_token"]?.jsonPrimitive?.content
+                    } else null
+                } else null
             }
         } catch (_: Exception) {
             null

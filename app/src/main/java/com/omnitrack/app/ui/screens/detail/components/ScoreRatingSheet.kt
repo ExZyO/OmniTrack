@@ -79,8 +79,8 @@ fun ScoreRatingSheet(
     onScoreConfirmed: (Float?) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var scoreValue by remember { mutableFloatStateOf(initialScore ?: 7.5f) }
-    var textInput by remember { mutableStateOf(String.format("%.1f", scoreValue)) }
+    var scoreValue by remember(initialScore) { mutableFloatStateOf(initialScore ?: 7.5f) }
+    var textInput by remember(initialScore) { mutableStateOf(String.format("%.1f", scoreValue)) }
 
     fun updateScore(newScore: Float) {
         val clamped = ((newScore.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f

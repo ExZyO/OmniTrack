@@ -44,6 +44,8 @@
                 <data android:scheme="chimahon" />
                 <data android:scheme="mihon" />
                 <data android:scheme="app.mihon" />
+                <data android:scheme="nuvio" />
+                <data android:scheme="komikku" />
             </intent-filter>
         </activity>
     </application>

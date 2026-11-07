@@ -52,6 +52,8 @@ class TrackerTokenManager(private val context: Context) {
         val BANGUMI_TOKEN = stringPreferencesKey("token_bangumi")
         val TMDB_TOKEN = stringPreferencesKey("token_tmdb")
         val IGDB_TOKEN = stringPreferencesKey("token_igdb")
+        val COMICK_VERIFIER = stringPreferencesKey("pkce_comick_verifier")
+        val MAL_VERIFIER = stringPreferencesKey("pkce_mal_verifier")
     }
 
     val tokens: Flow<TrackerTokens> = context.dataStore.data
@@ -83,6 +85,10 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun saveBangumiToken(token: String?) = saveToken(Keys.BANGUMI_TOKEN, token)
     suspend fun saveTmdbToken(token: String?) = saveToken(Keys.TMDB_TOKEN, token)
     suspend fun saveIgdbToken(token: String?) = saveToken(Keys.IGDB_TOKEN, token)
+    suspend fun saveComickVerifier(verifier: String?) = saveToken(Keys.COMICK_VERIFIER, verifier)
+    suspend fun getComickVerifier(): String? = kotlinx.coroutines.flow.firstOrNull(context.dataStore.data)?.get(Keys.COMICK_VERIFIER)?.let { decrypt(it) }
+    suspend fun saveMalVerifier(verifier: String?) = saveToken(Keys.MAL_VERIFIER, verifier)
+    suspend fun getMalVerifier(): String? = kotlinx.coroutines.flow.firstOrNull(context.dataStore.data)?.get(Keys.MAL_VERIFIER)?.let { decrypt(it) }
 
     private suspend fun saveToken(key: androidx.datastore.preferences.core.Preferences.Key<String>, token: String?) {
         context.dataStore.edit { prefs ->

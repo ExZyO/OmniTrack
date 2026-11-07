@@ -103,6 +103,9 @@ import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
 import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
+import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
+import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
+import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
@@ -727,10 +730,18 @@ fun DetailScreen(
 
                         MediaType.GAME -> {
                             GameProgressCard(
-                                hoursPlayed = item.currentProgress,
-                                selectedPlatform = item.platform,
-                                onHoursChanged = { viewModel.updateProgress(it) },
-                                onPlatformSelected = { viewModel.updatePlatform(it) }
+                                hoursPlayed = item.playtimeHours,
+                                storyProgress = item.currentProgress,
+                                totalStoryChapters = item.totalProgress,
+                                achievementsUnlocked = item.steamAchievementsUnlocked,
+                                achievementsTotal = item.steamAchievementsTotal,
+                                selectedPlatforms = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+                                    ?: item.platform?.let { setOf(it) }
+                                    ?: emptySet(),
+                                steamAppId = item.steamAppId,
+                                onHoursChanged = { viewModel.updatePlaytime(it) },
+                                onStoryProgressChanged = { viewModel.updateProgress(it) },
+                                onPlatformToggled = { viewModel.togglePlatform(it) }
                             )
                         }
 
@@ -796,11 +807,27 @@ fun DetailScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                // Detail Cast Section (Avatars + character names)
+                if (uiState.cast.isNotEmpty()) {
+                    DetailCastSection(cast = uiState.cast)
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // Detail Trailers Section (Trailer video cards)
+                if (uiState.trailers.isNotEmpty()) {
+                    DetailTrailersSection(trailers = uiState.trailers)
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
                 // Trakt & Jikan Community Reviews Carousel
                 if (uiState.reviews.isNotEmpty()) {
                     ReviewsSection(reviews = uiState.reviews)
                     Spacer(modifier = Modifier.height(20.dp))
                 }
+
+                // Detail Show & Production Details Section
+                DetailShowDetailsSection(item = item)
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // "More Like This" & Franchise Relations Carousel (Preview Mode)
                 if (uiState.recommendations.isNotEmpty()) {

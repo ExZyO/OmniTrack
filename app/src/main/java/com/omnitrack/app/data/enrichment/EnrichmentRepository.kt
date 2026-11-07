@@ -58,6 +58,7 @@ class EnrichmentRepository(
         var imdbScore: Float? = item.imdbScore
         var rtScore: Int? = item.rtScore
         var metacriticScore: Int? = item.metacriticScore
+        val effectiveTmdbKey = tmdbApiKey?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
 
         // 1. Resolve Transparent Clearart Logo
         if (clearart.isNullOrBlank()) {
@@ -65,7 +66,7 @@ class EnrichmentRepository(
                 clearart = fetchFanartClearart(item.tmdbId, item.mediaType == MediaType.MOVIE, fanartApiKey)
             }
             if (clearart.isNullOrBlank() && !tmdbApiKey.isNullOrBlank() && item.tmdbId != null) {
-                clearart = fetchTmdbClearart(item.tmdbId, item.mediaType == MediaType.MOVIE, tmdbApiKey)
+                clearart = fetchTmdbClearart(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
             }
         }
 
@@ -83,7 +84,7 @@ class EnrichmentRepository(
 
         // Zero-Key Fallback for IMDb (Cinemeta public Stremio endpoint)
         if (imdbScore == null && item.tmdbId != null) {
-            imdbScore = fetchCinemetaImdb(item.tmdbId, item.mediaType == MediaType.MOVIE)
+            imdbScore = fetchCinemetaImdb(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
         }
 
         // 3. Fallback / Native vertical rating enrichment
@@ -112,7 +113,7 @@ class EnrichmentRepository(
                 }
                 MediaType.SHOW, MediaType.MOVIE -> {
                     if (item.tmdbId != null) {
-                        communityScore = fetchTmdbVote(item.tmdbId, item.mediaType == MediaType.MOVIE)
+                        communityScore = fetchTmdbVote(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
                     }
                 }
                 else -> {}
@@ -125,7 +126,7 @@ class EnrichmentRepository(
         var airStatus = item.airStatus
 
         if (item.tmdbId != null && (trailerKey == null || studio == null)) {
-            val details = fetchTmdbDetails(item.tmdbId, item.mediaType == MediaType.MOVIE)
+            val details = fetchTmdbDetails(item.tmdbId, item.mediaType == MediaType.MOVIE, effectiveTmdbKey)
             if (details != null) {
                 if (trailerKey == null) trailerKey = details.trailerKey
                 if (studio == null) studio = details.studio
@@ -284,9 +285,9 @@ class EnrichmentRepository(
         }
     }
 
-    private suspend fun fetchCinemetaImdb(tmdbId: Long, isMovie: Boolean): Float? {
+    private suspend fun fetchCinemetaImdb(tmdbId: Long, isMovie: Boolean, tmdbKey: String): Float? {
         return try {
-            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val apiKey = tmdbKey
             val type = if (isMovie) "movie" else "tv"
             val extUrl = "https://api.themoviedb.org/3/$type/$tmdbId/external_ids?api_key=$apiKey"
             val req1 = Request.Builder().url(extUrl).get().build()
@@ -327,9 +328,9 @@ class EnrichmentRepository(
         }
     }
 
-    private suspend fun fetchTmdbVote(tmdbId: Long, isMovie: Boolean): Float? {
+    private suspend fun fetchTmdbVote(tmdbId: Long, isMovie: Boolean, tmdbKey: String): Float? {
         return try {
-            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val apiKey = tmdbKey
             val type = if (isMovie) "movie" else "tv"
             val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey"
             val req = Request.Builder().url(url).get().build()
@@ -351,9 +352,9 @@ class EnrichmentRepository(
         val status: String? = null
     )
 
-    private suspend fun fetchTmdbDetails(tmdbId: Long, isMovie: Boolean): ExtraDetails? {
+    private suspend fun fetchTmdbDetails(tmdbId: Long, isMovie: Boolean, tmdbKey: String): ExtraDetails? {
         return try {
-            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val apiKey = tmdbKey
             val type = if (isMovie) "movie" else "tv"
             val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey&append_to_response=videos"
             val req = Request.Builder().url(url).get().build()

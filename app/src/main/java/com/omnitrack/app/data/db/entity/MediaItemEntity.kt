@@ -80,5 +80,10 @@ data class MediaItemEntity(
     val traktStatus: TrackingStatus? = null,
     val isComickStatusLocked: Boolean = false,
     val comickStatus: TrackingStatus? = null,
+    val playtimeHours: Double = 0.0,
+    val steamAchievementsUnlocked: Int? = null,
+    val steamAchievementsTotal: Int? = null,
+    val platforms: String? = null,
+    val trackerProgressOverrides: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

@@ -1055,17 +1055,19 @@ private fun CollapsibleTrackerCard(
                     }
                 }
 
-                // Dedicated Per-Tracker Status Lock Pill (Exile Choice)
-                TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
+                if (tracker.key != "TMDB" && tracker.key != "STEAM") {
+                    TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
+                }
 
-                // Tracker Specific Fields
                 when (tracker.key) {
                     "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
                     "MAL" -> MalSpecificControls(item, onUpdateItem)
                     "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
                     "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
+                    "TMDB" -> TmdbSpecificControls(item, onUpdateItem)
+                    "STEAM" -> SteamSpecificControls(item, onUpdateItem)
+                    "VNDB" -> VndbSpecificControls(item, onUpdateItem)
                     else -> {
-                        // Standard generic info
                         Text(
                             text = "Scale: ${tracker.scoreFormat} • Auto-Sync on playback",
                             fontSize = 11.5.sp,
@@ -1159,9 +1161,6 @@ private fun SingleTrackerFocusedView(
             }
         }
 
-        // Dedicated Per-Tracker Status Lock Pill (Exile Choice)
-        TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
-
         // Translation pill
         if (item.userRating != null) {
             Row(
@@ -1183,12 +1182,19 @@ private fun SingleTrackerFocusedView(
             }
         }
 
+        if (tracker.key != "TMDB" && tracker.key != "STEAM") {
+            TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
+        }
+
         // Specific controls per tracker
         when (tracker.key) {
             "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
             "MAL" -> MalSpecificControls(item, onUpdateItem)
             "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
             "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
+            "TMDB" -> TmdbSpecificControls(item, onUpdateItem)
+            "STEAM" -> SteamSpecificControls(item, onUpdateItem)
+            "VNDB" -> VndbSpecificControls(item, onUpdateItem)
             else -> {
                 Text(
                     text = "Status & progress automatically scrobble to ${tracker.name} on playback.",
@@ -1907,3 +1913,125 @@ private fun getRemoteConvertedScore(format: String, localRating: Float?): String
         else -> "${localRating.roundToInt()} / 10"
     }
 }
+
+@Composable
+private fun TmdbSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(AmoledBlack)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("TMDb Remote Actions", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text("TMDb API tracks Watchlist, Favorites & Ratings without episode counters.", fontSize = 11.sp, color = TextMuted)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val inWatchlist = item.status == TrackingStatus.PLAN_TO_TRACK
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (inWatchlist) Color(0xFF01D277).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                    .border(1.dp, if (inWatchlist) Color(0xFF01D277) else GlassBorder, RoundedCornerShape(999.dp))
+                    .clickable {
+                        val next = if (inWatchlist) TrackingStatus.IN_PROGRESS else TrackingStatus.PLAN_TO_TRACK
+                        onUpdateItem(item.copy(status = next))
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = if (inWatchlist) "✓ In Watchlist" else "+ Add to Watchlist",
+                    color = if (inWatchlist) Color(0xFF01D277) else TextPrimary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (item.isFavorite) Color(0xFFEF4444).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                    .border(1.dp, if (item.isFavorite) Color(0xFFEF4444) else GlassBorder, RoundedCornerShape(999.dp))
+                    .clickable {
+                        onUpdateItem(item.copy(isFavorite = !item.isFavorite))
+                    }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = if (item.isFavorite) "♥ Favorited" else "♡ Favorite",
+                    color = if (item.isFavorite) Color(0xFFEF4444) else TextPrimary,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SteamSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(AmoledBlack)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Steam Playtime & Stats", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Text("${String.format("%.1f", item.playtimeHours)} hrs", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66C0F4))
+        }
+
+        if (item.steamAchievementsTotal != null && item.steamAchievementsTotal > 0) {
+            val unlocked = item.steamAchievementsUnlocked ?: 0
+            val total = item.steamAchievementsTotal
+            val pct = (unlocked.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Steam Achievements", fontSize = 11.sp, color = TextMuted)
+                    Text("$unlocked / $total (${(pct * 100).toInt()}%)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                }
+                LinearProgressIndicator(
+                    progress = { pct },
+                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
+                    color = AccentGold,
+                    trackColor = Color.White.copy(alpha = 0.08f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VndbSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(AmoledBlack)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("VNDB Visual Novel Tracking", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        Text("Status: ${item.status.displayName} • Vote: ${item.userRating?.let { String.format("%.1f", it) } ?: "Not Voted"}", fontSize = 11.5.sp, color = TextMuted)
+    }

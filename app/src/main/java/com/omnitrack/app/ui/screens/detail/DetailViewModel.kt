@@ -14,15 +14,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.CommunityReview
+import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -30,8 +32,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -40,10 +40,20 @@ data class DetailUiState(
     val seasons: List<Season> = emptyList(),
     val recommendations: List<RecommendationItem> = emptyList(),
     val reviews: List<CommunityReview> = emptyList(),
+    val cast: List<CastMember> = emptyList(),
+    val trailers: List<MediaTrailer> = emptyList(),
     val isPreviewMode: Boolean = false,
     val isLoading: Boolean = true,
     val hasPreviousEntry: Boolean = false,
     val hasNextEntry: Boolean = false
+)
+
+private data class PreviewAndAux(
+    val previewItem: MediaItemEntity?,
+    val recommendations: List<RecommendationItem>,
+    val reviews: List<CommunityReview>,
+    val cast: List<CastMember>,
+    val trailers: List<MediaTrailer>
 )
 
 class DetailViewModel(
@@ -57,13 +67,15 @@ class DetailViewModel(
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _recommendations = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
+    private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
+    private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
     private fun maybeEnrich(item: MediaItemEntity) {
         if (!enrichedIds.add(item.id)) return
         viewModelScope.launch(Dispatchers.IO) {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
-            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val mdbKey = preferenceManager?.mdblistApiKey?.firstOrNull()?.ifBlank { null }
 
             val enrichment = enrichmentRepository.enrich(
@@ -90,42 +102,58 @@ class DetailViewModel(
         }
     }
 
-    val uiState: StateFlow<DetailUiState> = kotlinx.coroutines.flow.combine(
-        _mediaId,
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val uiState: StateFlow<DetailUiState> = combine(
         _previewItem,
         _recommendations,
-        _reviews
-    ) { currentId, previewItem, recs, reviews ->
-        if (previewItem != null) {
-            DetailUiState(
-                item = previewItem,
-                seasons = emptyList(),
-                recommendations = recs,
-                reviews = reviews,
-                isPreviewMode = true,
-                isLoading = false,
-                hasPreviousEntry = false,
-                hasNextEntry = false
+        _reviews,
+        _cast,
+        _trailers
+    ) { preview, recs, revs, castList, trailerList ->
+        PreviewAndAux(preview, recs, revs, castList, trailerList)
+    }.flatMapLatest { aux ->
+        if (aux.previewItem != null) {
+            flowOf(
+                DetailUiState(
+                    item = aux.previewItem,
+                    seasons = emptyList(),
+                    recommendations = aux.recommendations,
+                    reviews = aux.reviews,
+                    cast = aux.cast,
+                    trailers = aux.trailers,
+                    isPreviewMode = true,
+                    isLoading = false,
+                    hasPreviousEntry = false,
+                    hasNextEntry = false
+                )
             )
         } else {
-            val currentItem = repository.getMediaById(currentId).firstOrNull()
-            if (currentItem != null) {
-                maybeEnrich(currentItem)
-                val allItems = repository.getAllMedia().firstOrNull() ?: emptyList()
-                val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-                val siblings = if (sameType.size > 1) sameType else allItems
-                DetailUiState(
-                    item = currentItem,
-                    seasons = generateMockSeasons(currentItem),
-                    recommendations = recs,
-                    reviews = reviews,
-                    isPreviewMode = false,
-                    isLoading = false,
-                    hasPreviousEntry = siblings.size > 1,
-                    hasNextEntry = siblings.size > 1
-                )
-            } else {
-                DetailUiState(isLoading = false)
+            _mediaId.flatMapLatest { currentId ->
+                repository.getMediaById(currentId).flatMapLatest { currentItem ->
+                    if (currentItem != null) {
+                        maybeEnrich(currentItem)
+                        repository.getAllMedia().map { allItems ->
+                            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+                            val siblings = if (sameType.size > 1) sameType else allItems
+                            DetailUiState(
+                                item = currentItem,
+                                seasons = generateMockSeasons(currentItem),
+                                recommendations = aux.recommendations,
+                                reviews = aux.reviews,
+                                cast = aux.cast,
+                                trailers = if (aux.trailers.isEmpty() && currentItem.trailerYoutubeKey != null) {
+                                    listOf(MediaTrailer("Official Trailer", currentItem.trailerYoutubeKey))
+                                } else aux.trailers,
+                                isPreviewMode = false,
+                                isLoading = false,
+                                hasPreviousEntry = siblings.size > 1,
+                                hasNextEntry = siblings.size > 1
+                            )
+                        }
+                    } else {
+                        flowOf(DetailUiState(isLoading = false))
+                    }
+                }
             }
         }
     }.stateIn(
@@ -168,14 +196,19 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()
+            val castMembers = mutableListOf<CastMember>()
+            val trailerList = mutableListOf<MediaTrailer>()
+
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
 
             if (item.tmdbId != null) {
+                val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
+                val client = OkHttpClient()
+
+                // Recommendations
                 try {
-                    val apiKey = "2c823019808d98d415f33cf2382e70e3"
-                    val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/recommendations?api_key=$apiKey"
+                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/recommendations?api_key=$tmdbKey"
                     val req = Request.Builder().url(url).get().build()
-                    val client = OkHttpClient()
                     client.newCall(req).execute().use { response ->
                         if (response.isSuccessful) {
                             val body = response.body?.string()
@@ -212,12 +245,40 @@ class DetailViewModel(
                     }
                 } catch (_: Exception) {}
 
+                // Credits (Cast)
                 try {
-                    val apiKey = "2c823019808d98d415f33cf2382e70e3"
-                    val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$apiKey"
+                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/credits?api_key=$tmdbKey"
                     val req = Request.Builder().url(url).get().build()
-                    val client = OkHttpClient()
+                    client.newCall(req).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string()
+                            if (body != null) {
+                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                val castArray = root["cast"]?.jsonArray
+                                if (castArray != null) {
+                                    for (elem in castArray.take(15)) {
+                                        val obj = elem.jsonObject
+                                        val name = obj["name"]?.jsonPrimitive?.content ?: continue
+                                        val character = obj["character"]?.jsonPrimitive?.content
+                                        val profilePath = obj["profile_path"]?.jsonPrimitive?.content
+                                        castMembers.add(
+                                            CastMember(
+                                                name = name,
+                                                character = character,
+                                                avatarUrl = profilePath?.let { "https://image.tmdb.org/t/p/w185$it" }
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // Videos (Trailers)
+                try {
+                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/videos?api_key=$tmdbKey"
+                    val req = Request.Builder().url(url).get().build()
                     client.newCall(req).execute().use { response ->
                         if (response.isSuccessful) {
                             val body = response.body?.string()
@@ -225,17 +286,46 @@ class DetailViewModel(
                                 val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                                 val results = root["results"]?.jsonArray
                                 if (results != null) {
-                                    for (elem in results.take(6)) {
+                                    for (elem in results) {
+                                        val obj = elem.jsonObject
+                                        val site = obj["site"]?.jsonPrimitive?.content ?: ""
+                                        val key = obj["key"]?.jsonPrimitive?.content ?: continue
+                                        val title = obj["name"]?.jsonPrimitive?.content ?: "Official Trailer"
+                                        if (site.equals("YouTube", ignoreCase = true)) {
+                                            trailerList.add(MediaTrailer(title = title, youtubeKey = key))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                // TMDb Community Reviews
+                try {
+                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$tmdbKey"
+                    val req = Request.Builder().url(url).get().build()
+                    client.newCall(req).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string()
+                            if (body != null) {
+                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                val results = root["results"]?.jsonArray
+                                if (results != null) {
+                                    for (elem in results.take(8)) {
                                         val obj = elem.jsonObject
                                         val author = obj["author"]?.jsonPrimitive?.content ?: "Community Member"
                                         val content = obj["content"]?.jsonPrimitive?.content ?: continue
                                         val rating = obj["author_details"]?.jsonObject?.get("rating")?.jsonPrimitive?.content?.toFloatOrNull()
+                                        val hasSpoiler = content.contains("[spoiler]", ignoreCase = true) || content.contains("spoiler alert", ignoreCase = true)
                                         revs.add(
                                             CommunityReview(
                                                 author = author,
                                                 source = "TMDb Community",
                                                 rating = rating,
-                                                comment = content
+                                                comment = content,
+                                                hasSpoiler = hasSpoiler,
+                                                isReview = true
                                             )
                                         )
                                     }
@@ -246,7 +336,7 @@ class DetailViewModel(
                 } catch (_: Exception) {}
             }
 
-            // Keyless AniList / Jikan Recommendations & Reviews for Anime / Manga
+            // Keyless AniList / Jikan Recommendations, Cast & Reviews for Anime / Manga
             if (item.anilistId != null || item.malId != null) {
                 if (item.anilistId != null) {
                     try {
@@ -258,37 +348,58 @@ class DetailViewModel(
                                             mediaRecommendation {
                                                 id
                                                 idMal
-                                                title { english romaji }
-                                                coverImage { large }
+                                                title {
+                                                    userPreferred
+                                                }
+                                                coverImage {
+                                                    extraLarge
+                                                    large
+                                                }
                                                 bannerImage
-                                                averageScore
                                                 description
-                                                startDate { year }
+                                                averageScore
+                                                startDate {
+                                                    year
+                                                }
+                                            }
+                                        }
+                                    }
+                                    characters(sort: ROLE, perPage: 12) {
+                                        edges {
+                                            role
+                                            node {
+                                                name { userPreferred }
+                                                image { medium }
                                             }
                                         }
                                     }
                                     reviews(perPage: 6, sort: RATING_DESC) {
                                         nodes {
-                                            user { name }
-                                            score
+                                            user {
+                                                name
+                                            }
                                             summary
                                             body
+                                            score
                                         }
                                     }
                                 }
                             }
                         """.trimIndent()
 
-                        val payload = kotlinx.serialization.json.buildJsonObject {
-                            put("query", query)
-                            putJsonObject("variables") {
-                                put("id", item.anilistId.toInt())
+                        val bodyJson = Json.encodeToString(
+                            kotlinx.serialization.json.JsonObject.serializer(),
+                            kotlinx.serialization.json.buildJsonObject {
+                                put("query", query)
+                                putJsonObject("variables") {
+                                    put("id", item.anilistId)
+                                }
                             }
-                        }
+                        )
 
                         val req = Request.Builder()
                             .url("https://graphql.anilist.co")
-                            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                            .post(bodyJson.toRequestBody("application/json".toMediaType()))
                             .build()
 
                         val client = OkHttpClient()
@@ -298,20 +409,40 @@ class DetailViewModel(
                                 if (body != null) {
                                     val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                                     val mediaObj = root["data"]?.jsonObject?.get("Media")?.jsonObject
+
+                                    // AniList Characters (Cast)
+                                    val charEdges = mediaObj?.get("characters")?.jsonObject?.get("edges")?.jsonArray
+                                    if (charEdges != null && castMembers.isEmpty()) {
+                                        for (elem in charEdges) {
+                                            val edgeObj = elem.jsonObject
+                                            val node = edgeObj["node"]?.jsonObject
+                                            val charName = node?.get("name")?.jsonObject?.get("userPreferred")?.jsonPrimitive?.content ?: continue
+                                            val charImg = node["image"]?.jsonObject?.get("medium")?.jsonPrimitive?.content
+                                            val role = edgeObj["role"]?.jsonPrimitive?.content
+                                            castMembers.add(
+                                                CastMember(
+                                                    name = charName,
+                                                    character = role,
+                                                    avatarUrl = charImg
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    // AniList Recs
                                     val recNodes = mediaObj?.get("recommendations")?.jsonObject?.get("nodes")?.jsonArray
                                     if (recNodes != null) {
                                         for (elem in recNodes) {
                                             val recMedia = elem.jsonObject["mediaRecommendation"]?.jsonObject ?: continue
-                                            val tObj = recMedia["title"]?.jsonObject
-                                            val title = tObj?.get("english")?.jsonPrimitive?.content
-                                                ?: tObj?.get("romaji")?.jsonPrimitive?.content ?: continue
-                                            val cover = recMedia["coverImage"]?.jsonObject?.get("large")?.jsonPrimitive?.content ?: continue
+                                            val title = recMedia["title"]?.jsonObject?.get("userPreferred")?.jsonPrimitive?.content ?: continue
+                                            val cover = recMedia["coverImage"]?.jsonObject?.get("extraLarge")?.jsonPrimitive?.content
+                                                ?: recMedia["coverImage"]?.jsonObject?.get("large")?.jsonPrimitive?.content ?: continue
                                             val banner = recMedia["bannerImage"]?.jsonPrimitive?.content
-                                            val score = recMedia["averageScore"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it / 10f }
+                                            val synopsis = recMedia["description"]?.jsonPrimitive?.content?.replace(Regex("<[^>]*>"), "")
+                                            val rating = recMedia["averageScore"]?.jsonPrimitive?.content?.toFloatOrNull()?.div(10f)
                                             val year = recMedia["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.content
-                                            val desc = recMedia["description"]?.jsonPrimitive?.content?.replace(Regex("<[^>]*>"), "")
-                                            val recAlId = recMedia["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                                            val recMalId = recMedia["idMal"]?.jsonPrimitive?.content?.toLongOrNull()
+                                            val alId = recMedia["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                            val mId = recMedia["idMal"]?.jsonPrimitive?.content?.toLongOrNull()
 
                                             recs.add(
                                                 RecommendationItem(
@@ -319,33 +450,37 @@ class DetailViewModel(
                                                     coverUrl = cover,
                                                     bannerUrl = banner,
                                                     releaseYear = year,
-                                                    rating = score,
+                                                    rating = rating,
                                                     mediaType = item.mediaType,
-                                                    synopsis = desc,
-                                                    anilistId = recAlId,
-                                                    malId = recMalId
+                                                    synopsis = synopsis,
+                                                    anilistId = alId,
+                                                    malId = mId
                                                 )
                                             )
                                         }
                                     }
 
-                                    val revNodes = mediaObj?.get("reviews")?.jsonObject?.get("nodes")?.jsonArray
-                                    if (revNodes != null) {
-                                        for (elem in revNodes) {
-                                            val rObj = elem.jsonObject
-                                            val author = rObj["user"]?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "AniList Reviewer"
-                                            val summary = rObj["summary"]?.jsonPrimitive?.content
-                                            val bodyText = rObj["body"]?.jsonPrimitive?.content?.replace(Regex("<[^>]*>"), "") ?: summary ?: continue
-                                            val score = rObj["score"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it / 10f }
-
-                                            revs.add(
-                                                CommunityReview(
-                                                    author = author,
-                                                    source = "AniList",
-                                                    rating = score,
-                                                    comment = summary?.let { "$it\n\n$bodyText" } ?: bodyText
+                                    // AniList Reviews
+                                    val reviewNodes = mediaObj?.get("reviews")?.jsonObject?.get("nodes")?.jsonArray
+                                    if (reviewNodes != null) {
+                                        for (elem in reviewNodes) {
+                                            val revObj = elem.jsonObject
+                                            val author = revObj["user"]?.jsonObject?.get("name")?.jsonPrimitive?.content ?: "AniList User"
+                                            val summary = revObj["summary"]?.jsonPrimitive?.content ?: ""
+                                            val reviewBody = revObj["body"]?.jsonPrimitive?.content ?: ""
+                                            val score = revObj["score"]?.jsonPrimitive?.content?.toFloatOrNull()?.div(10f)
+                                            val text = if (summary.isNotBlank()) "$summary\n\n$reviewBody" else reviewBody
+                                            if (text.isNotBlank()) {
+                                                revs.add(
+                                                    CommunityReview(
+                                                        author = author,
+                                                        source = "AniList",
+                                                        rating = score,
+                                                        comment = text.replace(Regex("<[^>]*>"), ""),
+                                                        isReview = true
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
                                 }
@@ -355,118 +490,152 @@ class DetailViewModel(
                 }
             }
 
-            _recommendations.value = recs
-            _reviews.value = revs
+            _recommendations.value = recs.distinctBy { it.title }
+            _reviews.value = revs.distinctBy { it.author + it.source }
+            _cast.value = castMembers.distinctBy { it.name }
+            _trailers.value = trailerList.distinctBy { it.youtubeKey }
         }
     }
 
     fun navigateToPrevious(): Boolean {
         val currentId = _mediaId.value
-        viewModelScope.launch {
-            val allItems = repository.getAllMedia().first()
-            val currentItem = allItems.firstOrNull { it.id == currentId } ?: return@launch
-            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-            val siblings = if (sameType.size > 1) sameType else allItems
-            if (siblings.size <= 1) return@launch
-            val currentIndex = siblings.indexOfFirst { it.id == currentId }
-            val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
-            _mediaId.value = siblings[prevIndex].id
-        }
+        val allItems = repository.getAllMediaSync()
+        val currentItem = allItems.find { it.id == currentId } ?: return false
+        val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+        val pool = if (sameType.size > 1) sameType else allItems
+        val currentIndex = pool.indexOfFirst { it.id == currentId }
+        if (currentIndex <= 0) return false
+        val prevItem = pool[currentIndex - 1]
+        _mediaId.value = prevItem.id
+        _previewItem.value = null
+        loadRecommendationsAndReviews(prevItem)
         return true
     }
 
     fun navigateToNext(): Boolean {
         val currentId = _mediaId.value
-        viewModelScope.launch {
-            val allItems = repository.getAllMedia().first()
-            val currentItem = allItems.firstOrNull { it.id == currentId } ?: return@launch
-            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-            val siblings = if (sameType.size > 1) sameType else allItems
-            if (siblings.size <= 1) return@launch
-            val currentIndex = siblings.indexOfFirst { it.id == currentId }
-            val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
-            _mediaId.value = siblings[nextIndex].id
-        }
+        val allItems = repository.getAllMediaSync()
+        val currentItem = allItems.find { it.id == currentId } ?: return false
+        val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+        val pool = if (sameType.size > 1) sameType else allItems
+        val currentIndex = pool.indexOfFirst { it.id == currentId }
+        if (currentIndex < 0 || currentIndex >= pool.size - 1) return false
+        val nextItem = pool[currentIndex + 1]
+        _mediaId.value = nextItem.id
+        _previewItem.value = null
+        loadRecommendationsAndReviews(nextItem)
         return true
     }
 
     fun updateProgress(newProgress: Double) {
         viewModelScope.launch {
-            repository.updateProgress(_mediaId.value, newProgress)
+            val item = uiState.value.item ?: return@launch
+            val max = item.totalProgress ?: Double.MAX_VALUE
+            val clamped = newProgress.coerceIn(0.0, max)
+            val updated = item.copy(currentProgress = clamped)
+            repository.updateMedia(updated)
+        }
+    }
+
+    fun updatePlaytime(hours: Double) {
+        viewModelScope.launch {
+            val item = uiState.value.item ?: return@launch
+            repository.updateMedia(item.copy(playtimeHours = hours.coerceAtLeast(0.0)))
+        }
+    }
+
+    fun togglePlatform(platform: String) {
+        viewModelScope.launch {
+            val item = uiState.value.item ?: return@launch
+            val current = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toMutableSet()
+                ?: item.platform?.let { mutableSetOf(it) }
+                ?: mutableSetOf()
+            if (current.contains(platform)) {
+                current.remove(platform)
+            } else {
+                current.add(platform)
+            }
+            val joined = current.joinToString(",")
+            repository.updateMedia(item.copy(platforms = joined, platform = current.firstOrNull()))
         }
     }
 
     fun updateCover(newCoverUrl: String) {
         viewModelScope.launch {
-            repository.updateCover(_mediaId.value, newCoverUrl)
+            val item = uiState.value.item ?: return@launch
+            repository.updateMedia(
+                item.copy(
+                    coverUrl = newCoverUrl,
+                    customCoverPath = null
+                )
+            )
         }
     }
 
     fun updateBanner(newBannerUrl: String) {
         viewModelScope.launch {
-            repository.updateBanner(_mediaId.value, newBannerUrl)
+            val item = uiState.value.item ?: return@launch
+            repository.updateMedia(
+                item.copy(
+                    bannerUrl = newBannerUrl,
+                    customBannerPath = null
+                )
+            )
         }
     }
 
     fun updateCustomCoverPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
-            repository.updateCustomCover(_mediaId.value, path)
-            if (context != null && path != null) {
-                val file = java.io.File(path)
-                val loader = coil3.SingletonImageLoader.get(context)
-                loader.memoryCache?.remove(coil3.memory.MemoryCache.Key(file.absolutePath))
-                loader.diskCache?.remove(file.absolutePath)
+            val item = uiState.value.item ?: return@launch
+            if (context != null && !item.customCoverPath.isNullOrBlank() && item.customCoverPath != path) {
+                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customCoverPath)
             }
+            repository.updateMedia(item.copy(customCoverPath = path))
         }
     }
 
     fun updateCustomBannerPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
-            repository.updateCustomBanner(_mediaId.value, path)
-            if (context != null && path != null && path != "NONE") {
-                val file = java.io.File(path)
-                val loader = coil3.SingletonImageLoader.get(context)
-                loader.memoryCache?.remove(coil3.memory.MemoryCache.Key(file.absolutePath))
-                loader.diskCache?.remove(file.absolutePath)
+            val item = uiState.value.item ?: return@launch
+            if (context != null && !item.customBannerPath.isNullOrBlank() && item.customBannerPath != path) {
+                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customBannerPath)
             }
+            repository.updateMedia(item.copy(customBannerPath = path))
         }
     }
 
     fun resetCover(context: android.content.Context? = null) {
         viewModelScope.launch {
-            val mediaId = _mediaId.value
-            if (context != null) {
-                val coverCache = (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache
-                    ?: com.omnitrack.app.data.cache.CoverCache(context)
-                coverCache.deleteCustomCover(mediaId)
+            val item = uiState.value.item ?: return@launch
+            if (context != null && !item.customCoverPath.isNullOrBlank()) {
+                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customCoverPath)
             }
-            repository.updateCustomCover(mediaId, null)
+            repository.updateMedia(item.copy(coverUrl = null, customCoverPath = null))
         }
     }
 
     fun resetBanner(context: android.content.Context? = null) {
         viewModelScope.launch {
-            val mediaId = _mediaId.value
-            if (context != null) {
-                val coverCache = (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache
-                    ?: com.omnitrack.app.data.cache.CoverCache(context)
-                coverCache.deleteCustomBanner(mediaId)
+            val item = uiState.value.item ?: return@launch
+            if (context != null && !item.customBannerPath.isNullOrBlank()) {
+                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customBannerPath)
             }
-            repository.updateCustomBanner(mediaId, null)
+            repository.updateMedia(item.copy(bannerUrl = null, customBannerPath = null))
         }
     }
 
     fun toggleDisableBanner() {
         viewModelScope.launch {
-            val currentItem = uiState.value.item ?: return@launch
-            val nextPath = if (currentItem.customBannerPath == "NONE") null else "NONE"
-            repository.updateCustomBanner(_mediaId.value, nextPath)
+            val item = uiState.value.item ?: return@launch
+            val newRole = if (item.artworkRole == "DISABLE_BANNER") "DEFAULT" else "DISABLE_BANNER"
+            repository.updateMedia(item.copy(artworkRole = newRole))
         }
     }
 
     fun updateArtworkRole(role: String) {
         viewModelScope.launch {
-            repository.updateArtworkRole(_mediaId.value, role)
+            val item = uiState.value.item ?: return@launch
+            repository.updateMedia(item.copy(artworkRole = role))
         }
     }
 

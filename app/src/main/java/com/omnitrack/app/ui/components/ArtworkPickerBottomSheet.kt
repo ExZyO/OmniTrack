@@ -124,10 +124,12 @@ fun ArtworkPickerBottomSheet(
     onResetCover: () -> Unit = {},
     onResetBanner: () -> Unit = {},
     onRoleSelected: ((String) -> Unit)? = null,
-    repository: ArtworkWaterfallRepository = remember { ArtworkWaterfallRepository() },
+    repository: ArtworkWaterfallRepository? = null,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
     val context = LocalContext.current
+    val prefManager = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.preferenceManager }
+    val effectiveRepository = repository ?: remember(prefManager) { ArtworkWaterfallRepository(preferenceManager = prefManager) }
     val scope = rememberCoroutineScope()
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
@@ -175,7 +177,7 @@ fun ArtworkPickerBottomSheet(
     val fetchCandidates = {
         scope.launch {
             isLoading = true
-            allCandidates = repository.searchArtworkCandidates(title, mediaType)
+            allCandidates = effectiveRepository.searchArtworkCandidates(title, mediaType)
             isLoading = false
         }
     }

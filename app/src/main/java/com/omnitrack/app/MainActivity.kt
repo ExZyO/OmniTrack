@@ -11,9 +11,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.ui.navigation.OmniTrackNavigation
 import com.omnitrack.app.ui.theme.OmniTrackTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,7 +53,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleAuthDeepLink(data: Uri?, app: OmniTrackApplication) {
         if (data == null) return
-        val validSchemes = setOf("omnitrack", "aniyomi", "chimahon", "mihon", "app.mihon")
+        val validSchemes = setOf("omnitrack", "aniyomi", "chimahon", "mihon", "app.mihon", "nuvio", "komikku")
         val scheme = data.scheme?.lowercase() ?: return
         if (scheme !in validSchemes) return
 
@@ -65,7 +75,6 @@ class MainActivity : ComponentActivity() {
         if (service.isBlank()) return
         val tokenManager = app.trackerTokenManager
 
-        // Parse token from URL fragment (e.g. #access_token=... for AniList implicit grant)
         var token: String? = null
         val fragment = data.fragment
         if (!fragment.isNullOrBlank()) {
@@ -76,50 +85,156 @@ class MainActivity : ComponentActivity() {
             token = params["access_token"]
         }
 
-        // If not in fragment, check query parameters (?code=... or ?access_token=...)
-        if (token == null) {
-            token = data.getQueryParameter("access_token") ?: data.getQueryParameter("code")
+        val code = data.getQueryParameter("code")
+        if (token == null && code == null) {
+            token = data.getQueryParameter("access_token")
         }
 
-        if (!token.isNullOrBlank()) {
-            lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val client = OkHttpClient()
+            var finalAccessToken: String? = token
+
+            if (finalAccessToken.isNullOrBlank() && !code.isNullOrBlank()) {
                 when (service) {
-                    "anilist" -> {
-                        tokenManager.saveAnilistToken(token)
-                        Toast.makeText(this@MainActivity, "AniList connected successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                    "mal", "myanimelist" -> {
-                        tokenManager.saveMalToken(token)
-                        Toast.makeText(this@MainActivity, "MyAnimeList connected successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                    "trakt" -> {
-                        tokenManager.saveTraktToken(token)
-                        Toast.makeText(this@MainActivity, "Trakt.tv connected successfully!", Toast.LENGTH_SHORT).show()
-                    }
                     "simkl" -> {
-                        tokenManager.saveSimklToken(token)
-                        Toast.makeText(this@MainActivity, "SIMKL connected successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                    "comick" -> {
-                        tokenManager.saveComickToken(token)
-                        Toast.makeText(this@MainActivity, "Comick connected successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                    "vndb" -> {
-                        tokenManager.saveVndbToken(token)
-                        Toast.makeText(this@MainActivity, "VNDB connected successfully!", Toast.LENGTH_SHORT).show()
+                        try {
+                            val payload = """
+                                {
+                                    "code": "$code",
+                                    "client_id": "${TrackerAccountVerifier.SIMKL_CLIENT_ID}",
+                                    "client_secret": "${TrackerAccountVerifier.SIMKL_CLIENT_SECRET}",
+                                    "redirect_uri": "nuvio://auth/simkl",
+                                    "grant_type": "authorization_code"
+                                }
+                            """.trimIndent()
+                            val req = Request.Builder()
+                                .url("https://api.simkl.com/oauth/token")
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
                     "bangumi", "bgm" -> {
-                        tokenManager.saveBangumiToken(token)
-                        Toast.makeText(this@MainActivity, "Bangumi connected successfully!", Toast.LENGTH_SHORT).show()
+                        try {
+                            val form = FormBody.Builder()
+                                .add("grant_type", "authorization_code")
+                                .add("client_id", TrackerAccountVerifier.BANGUMI_CLIENT_ID)
+                                .add("client_secret", TrackerAccountVerifier.BANGUMI_CLIENT_SECRET)
+                                .add("code", code)
+                                .add("redirect_uri", "komikku://bangumi-auth")
+                                .build()
+                            val req = Request.Builder()
+                                .url("https://bgm.tv/oauth/access_token")
+                                .post(form)
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
-                    "tmdb" -> {
-                        tokenManager.saveTmdbToken(token)
-                        Toast.makeText(this@MainActivity, "TMDb connected successfully!", Toast.LENGTH_SHORT).show()
+                    "comick" -> {
+                        try {
+                            val verifier = tokenManager.getComickVerifier().orEmpty()
+                            val form = FormBody.Builder()
+                                .add("grant_type", "authorization_code")
+                                .add("client_id", TrackerAccountVerifier.COMICK_CLIENT_ID)
+                                .add("code", code)
+                                .add("redirect_uri", "app.mihon://comick-auth")
+                                .add("code_verifier", verifier)
+                                .add("resource", "https://api.comick.dev/integrations/v1")
+                                .build()
+                            val req = Request.Builder()
+                                .url("https://comick.dev/api/auth/oauth2/token")
+                                .post(form)
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
-                    "igdb" -> {
-                        tokenManager.saveIgdbToken(token)
-                        Toast.makeText(this@MainActivity, "IGDB connected successfully!", Toast.LENGTH_SHORT).show()
+                    "mal", "myanimelist" -> {
+                        try {
+                            val verifier = tokenManager.getMalVerifier().orEmpty()
+                            val form = FormBody.Builder()
+                                .add("grant_type", "authorization_code")
+                                .add("client_id", "043566b44e1077e78676bcc7acc098d8")
+                                .add("code", code)
+                                .add("code_verifier", verifier)
+                                .build()
+                            val req = Request.Builder()
+                                .url("https://myanimelist.net/v1/oauth2/token")
+                                .post(form)
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
+                    "trakt" -> {
+                        try {
+                            val payload = """
+                                {
+                                    "code": "$code",
+                                    "client_id": "${TrackerAccountVerifier.TRAKT_CLIENT_ID}",
+                                    "client_secret": "${TrackerAccountVerifier.TRAKT_CLIENT_SECRET}",
+                                    "redirect_uri": "nuvio://auth/trakt",
+                                    "grant_type": "authorization_code"
+                                }
+                            """.trimIndent()
+                            val req = Request.Builder()
+                                .url("https://api.trakt.tv/oauth/token")
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string().orEmpty()
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+
+            if (!finalAccessToken.isNullOrBlank()) {
+                val tokenToSave = finalAccessToken!!
+                when (service) {
+                    "anilist" -> tokenManager.saveAnilistToken(tokenToSave)
+                    "mal", "myanimelist" -> tokenManager.saveMalToken(tokenToSave)
+                    "trakt" -> tokenManager.saveTraktToken(tokenToSave)
+                    "simkl" -> tokenManager.saveSimklToken(tokenToSave)
+                    "comick" -> tokenManager.saveComickToken(tokenToSave)
+                    "vndb" -> tokenManager.saveVndbToken(tokenToSave)
+                    "bangumi", "bgm" -> tokenManager.saveBangumiToken(tokenToSave)
+                    "tmdb" -> tokenManager.saveTmdbToken(tokenToSave)
+                    "igdb" -> tokenManager.saveIgdbToken(tokenToSave)
+                }
+
+                launch(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "${service.uppercase()} connected successfully!", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                launch(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Failed to complete ${service.uppercase()} login", Toast.LENGTH_SHORT).show()
                 }
             }
         }

@@ -1,6 +1,8 @@
 package com.omnitrack.app.data.artwork
 
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.preferences.PreferenceManager
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -23,6 +25,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 class ArtworkWaterfallRepository(
+    private val preferenceManager: PreferenceManager? = null,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -362,47 +365,45 @@ class ArtworkWaterfallRepository(
                 val items = parsed["items"]?.jsonArray ?: return emptyList()
 
                 val candidates = mutableListOf<ArtworkCandidate>()
-                items.forEach { elem ->
-                    val id = elem.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
+                for (elem in items.take(4)) {
+                    val id = elem.jsonObject["id"]?.jsonPrimitive?.content ?: continue
                     val name = elem.jsonObject["name"]?.jsonPrimitive?.content ?: title
-                    // Steam high-res 600x900 library capsule (cover)
-                    val verticalCapsule2xUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
-                    val verticalCapsuleUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg"
-                    val headerBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
-                    val heroBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
 
-                    candidates.add(
-                        ArtworkCandidate(
-                            url = verticalCapsule2xUrl,
-                            sourceName = "Steam",
-                            description = "$name (2x HD)",
-                            isBanner = false
-                        )
-                    )
-                    candidates.add(
-                        ArtworkCandidate(
-                            url = verticalCapsuleUrl,
-                            sourceName = "Steam",
-                            description = name,
-                            isBanner = false
-                        )
-                    )
-                    candidates.add(
-                        ArtworkCandidate(
-                            url = heroBannerUrl,
-                            sourceName = "Steam",
-                            description = "$name (Hero Banner)",
-                            isBanner = true
-                        )
-                    )
-                    candidates.add(
-                        ArtworkCandidate(
-                            url = headerBannerUrl,
-                            sourceName = "Steam",
-                            description = "$name (Store Header)",
-                            isBanner = true
-                        )
-                    )
+                    // Akamai modern CDN endpoints
+                    val akamai2x = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
+                    val akamai1x = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg"
+                    val heroBanner = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
+                    val headerBanner = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
+
+                    candidates.add(ArtworkCandidate(url = akamai2x, sourceName = "Steam", description = "$name (Library 2x)", isBanner = false))
+                    candidates.add(ArtworkCandidate(url = akamai1x, sourceName = "Steam", description = name, isBanner = false))
+                    candidates.add(ArtworkCandidate(url = heroBanner, sourceName = "Steam", description = "$name (Hero Banner)", isBanner = true))
+                    candidates.add(ArtworkCandidate(url = headerBanner, sourceName = "Steam", description = "$name (Header)", isBanner = true))
+
+                    // Also fetch appdetails for in-game screenshots and alternative banners
+                    try {
+                        val dReq = Request.Builder().url("https://store.steampowered.com/api/appdetails?appids=$id").get().build()
+                        client.newCall(dReq).execute().use { dResp ->
+                            if (dResp.isSuccessful) {
+                                val dBody = dResp.body?.string().orEmpty()
+                                val dParsed = json.parseToJsonElement(dBody).jsonObject
+                                val appData = dParsed[id]?.jsonObject?.get("data")?.jsonObject
+                                if (appData != null) {
+                                    val headerImg = appData["header_image"]?.jsonPrimitive?.content
+                                    if (!headerImg.isNullOrBlank()) {
+                                        candidates.add(ArtworkCandidate(url = headerImg, sourceName = "Steam", description = "$name (Store Header)", isBanner = true))
+                                    }
+                                    val screenshots = appData["screenshots"]?.jsonArray
+                                    screenshots?.take(3)?.forEachIndexed { idx, s ->
+                                        val sUrl = s.jsonObject["path_full"]?.jsonPrimitive?.content
+                                        if (!sUrl.isNullOrBlank()) {
+                                            candidates.add(ArtworkCandidate(url = sUrl, sourceName = "Steam", description = "$name (Screenshot ${idx + 1})", isBanner = true))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
                 candidates
             }
@@ -447,9 +448,9 @@ class ArtworkWaterfallRepository(
         }
     }
 
-    private fun fetchTmdbArtwork(title: String, isMovie: Boolean): List<ArtworkCandidate> {
+    private suspend fun fetchTmdbArtwork(title: String, isMovie: Boolean): List<ArtworkCandidate> {
         return try {
-            val apiKey = "2c823019808d98d415f33cf2382e70e3" // Standard public TMDb v3 client key
+            val apiKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val cleanTitle = title.replace(Regex("[:\\-_–—]"), " ").replace(Regex("\\s+"), " ").trim()
             val encoded = URLEncoder.encode(cleanTitle.ifBlank { title }, "UTF-8")
             val endpoint = if (isMovie) "movie" else "tv"
