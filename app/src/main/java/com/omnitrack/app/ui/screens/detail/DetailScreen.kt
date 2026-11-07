@@ -160,7 +160,7 @@ fun DetailScreen(
         selectedCompany = null
     }
     BackHandler(enabled = uiState.isPreviewMode && selectedPerson == null && selectedCompany == null) {
-        val isDirectPreview = item.id == -1L
+        val isDirectPreview = item?.id == -1L
         viewModel.closePreview()
         if (isDirectPreview) onBack()
     }
@@ -923,7 +923,7 @@ fun DetailScreen(
                 IconButton(
                     onClick = {
                         if (uiState.isPreviewMode) {
-                            val isDirectPreview = item.id == -1L
+                            val isDirectPreview = item?.id == -1L
                             viewModel.closePreview()
                             if (isDirectPreview) onBack()
                         } else {

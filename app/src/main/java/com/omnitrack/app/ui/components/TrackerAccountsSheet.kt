@@ -235,7 +235,7 @@ fun TrackerAccountsSheet(
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E51A2)),
                         shape = RoundedCornerShape(999.dp)
                     ) {
-                        Icon(imageVector = Icons.Default.LockOpen, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
