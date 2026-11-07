@@ -1,10 +1,12 @@
 package com.omnitrack.app.data.repository
 
 import com.omnitrack.app.data.db.dao.CategoryDao
+import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
+import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.model.MediaType
@@ -15,8 +17,38 @@ import kotlinx.coroutines.flow.emptyFlow
 class MediaRepository(
     private val mediaDao: MediaDao,
     private val categoryDao: CategoryDao,
-    private val syncQueueDao: SyncQueueDao? = null
+    private val syncQueueDao: SyncQueueDao? = null,
+    private val episodeProgressDao: EpisodeProgressDao? = null
 ) {
+    fun getEpisodeProgress(mediaId: Long): Flow<List<EpisodeProgressEntity>> =
+        episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()
+
+    suspend fun setEpisodeWatched(mediaId: Long, seasonNumber: Int, episodeNumber: Int, isWatched: Boolean) {
+        if (episodeProgressDao == null) return
+        val entity = EpisodeProgressEntity(
+            mediaId = mediaId,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+            isWatched = isWatched,
+            watchedAtMs = if (isWatched) System.currentTimeMillis() else null
+        )
+        episodeProgressDao.insertOrUpdate(entity)
+    }
+
+    suspend fun setMultipleEpisodesWatched(mediaId: Long, episodes: List<Pair<Int, Int>>, isWatched: Boolean) {
+        if (episodeProgressDao == null) return
+        val now = System.currentTimeMillis()
+        val list = episodes.map { (s, e) ->
+            EpisodeProgressEntity(
+                mediaId = mediaId,
+                seasonNumber = s,
+                episodeNumber = e,
+                isWatched = isWatched,
+                watchedAtMs = if (isWatched) now else null
+            )
+        }
+        episodeProgressDao.insertOrUpdateAll(list)
+    }
     fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia()
 
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>> = mediaDao.getAllMediaSummaries()

@@ -546,4 +546,71 @@ class EnrichmentRepository(
             null
         }
     }
+
+    suspend fun fetchTvSeasons(tmdbId: Long, apiKey: String): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
+        try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return@withTmdbPacing emptyList()
+                val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val seasons = root["seasons"]?.jsonArray ?: return@withTmdbPacing emptyList()
+                seasons.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val seasonNumber = obj["season_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                    val name = obj["name"]?.jsonPrimitive?.content ?: "Season $seasonNumber"
+                    val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                    val posterPath = obj["poster_path"]?.jsonPrimitive?.content
+                    val airDate = obj["air_date"]?.jsonPrimitive?.content
+                    com.omnitrack.app.data.model.MediaSeason(
+                        seasonNumber = seasonNumber,
+                        name = name,
+                        episodeCount = epCount,
+                        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                        airDate = airDate
+                    )
+                }.sortedBy { it.seasonNumber }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    suspend fun fetchTvSeasonEpisodes(tmdbId: Long, seasonNumber: Int, apiKey: String): List<com.omnitrack.app.data.model.MediaEpisode> = NetworkPacer.withTmdbPacing {
+        try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNumber?api_key=$apiKey"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return@withTmdbPacing emptyList()
+                val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val episodes = root["episodes"]?.jsonArray ?: return@withTmdbPacing emptyList()
+                episodes.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val epNumber = obj["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                    val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: (seasonNumber * 1000L + epNumber)
+                    val name = obj["name"]?.jsonPrimitive?.content ?: "Episode $epNumber"
+                    val overview = obj["overview"]?.jsonPrimitive?.content
+                    val stillPath = obj["still_path"]?.jsonPrimitive?.content
+                    val airDate = obj["air_date"]?.jsonPrimitive?.content
+                    val runtime = obj["runtime"]?.jsonPrimitive?.content?.toIntOrNull()
+                    val voteAverage = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
+                    com.omnitrack.app.data.model.MediaEpisode(
+                        id = id,
+                        episodeNumber = epNumber,
+                        seasonNumber = seasonNumber,
+                        title = name,
+                        overview = overview,
+                        stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                        airDate = airDate,
+                        runtimeMinutes = runtime,
+                        voteAverage = voteAverage
+                    )
+                }.sortedBy { it.episodeNumber }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 }

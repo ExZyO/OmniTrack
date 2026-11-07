@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
+import com.omnitrack.app.data.model.MediaEpisode
+import com.omnitrack.app.data.model.MediaSeason
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
@@ -38,6 +40,10 @@ import okhttp3.Request
 data class DetailUiState(
     val item: MediaItemEntity? = null,
     val seasons: List<Season> = emptyList(),
+    val realSeasons: List<MediaSeason> = emptyList(),
+    val realEpisodes: List<MediaEpisode> = emptyList(),
+    val selectedSeasonNumber: Int = 1,
+    val watchedEpisodes: Set<Pair<Int, Int>> = emptySet(),
     val recommendations: List<RecommendationItem> = emptyList(),
     val reviews: List<CommunityReview> = emptyList(),
     val cast: List<CastMember> = emptyList(),
@@ -53,7 +59,10 @@ private data class PreviewAndAux(
     val recommendations: List<RecommendationItem>,
     val reviews: List<CommunityReview>,
     val cast: List<CastMember>,
-    val trailers: List<MediaTrailer>
+    val trailers: List<MediaTrailer>,
+    val realSeasons: List<MediaSeason>,
+    val realEpisodes: List<MediaEpisode>,
+    val selectedSeasonNumber: Int
 )
 
 class DetailViewModel(
@@ -69,6 +78,9 @@ class DetailViewModel(
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
     private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
+    private val _realSeasons = MutableStateFlow<List<MediaSeason>>(emptyList())
+    private val _realEpisodes = MutableStateFlow<List<MediaEpisode>>(emptyList())
+    private val _selectedSeasonNumber = MutableStateFlow(1)
     private val enrichedIds = mutableSetOf<Long>()
 
     init {
@@ -122,19 +134,38 @@ class DetailViewModel(
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val uiState: StateFlow<DetailUiState> = combine(
-        _previewItem,
-        _recommendations,
-        _reviews,
-        _cast,
-        _trailers
-    ) { preview, recs, revs, castList, trailerList ->
-        PreviewAndAux(preview, recs, revs, castList, trailerList)
+        listOf(
+            _previewItem,
+            _recommendations,
+            _reviews,
+            _cast,
+            _trailers,
+            _realSeasons,
+            _realEpisodes,
+            _selectedSeasonNumber
+        )
+    ) { args: Array<Any?> ->
+        @Suppress("UNCHECKED_CAST")
+        PreviewAndAux(
+            previewItem = args[0] as? MediaItemEntity,
+            recommendations = args[1] as List<RecommendationItem>,
+            reviews = args[2] as List<CommunityReview>,
+            cast = args[3] as List<CastMember>,
+            trailers = args[4] as List<MediaTrailer>,
+            realSeasons = args[5] as List<MediaSeason>,
+            realEpisodes = args[6] as List<MediaEpisode>,
+            selectedSeasonNumber = args[7] as Int
+        )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
             flowOf(
                 DetailUiState(
                     item = aux.previewItem,
                     seasons = emptyList(),
+                    realSeasons = aux.realSeasons,
+                    realEpisodes = aux.realEpisodes,
+                    selectedSeasonNumber = aux.selectedSeasonNumber,
+                    watchedEpisodes = emptySet(),
                     recommendations = aux.recommendations,
                     reviews = aux.reviews,
                     cast = aux.cast,
@@ -150,12 +181,21 @@ class DetailViewModel(
                 repository.getMediaById(currentId).flatMapLatest { currentItem ->
                     if (currentItem != null) {
                         maybeEnrich(currentItem)
-                        repository.getAllMedia().map { allItems ->
+                        combine(
+                            repository.getAllMedia(),
+                            repository.getEpisodeProgress(currentItem.id)
+                        ) { allItems, progressList ->
                             val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
                             val siblings = if (sameType.size > 1) sameType else allItems
+                            val watchedSet = progressList.filter { it.isWatched }
+                                .map { it.seasonNumber to it.episodeNumber }.toSet()
                             DetailUiState(
                                 item = currentItem,
                                 seasons = generateMockSeasons(currentItem),
+                                realSeasons = aux.realSeasons,
+                                realEpisodes = aux.realEpisodes,
+                                selectedSeasonNumber = aux.selectedSeasonNumber,
+                                watchedEpisodes = watchedSet,
                                 recommendations = aux.recommendations,
                                 reviews = aux.reviews,
                                 cast = aux.cast,
@@ -589,6 +629,73 @@ class DetailViewModel(
             _reviews.value = revs.distinctBy { it.author + it.source }
             _cast.value = castMembers.distinctBy { it.name }
             _trailers.value = trailerList.distinctBy { it.youtubeKey }
+
+            if (item.tmdbId != null && (item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW || item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME)) {
+                try {
+                    val seasons = enrichmentRepository.fetchTvSeasons(item.tmdbId, tmdbKey)
+                    if (seasons.isNotEmpty()) {
+                        _realSeasons.value = seasons
+                        val firstSeason = seasons.firstOrNull { it.seasonNumber > 0 } ?: seasons.first()
+                        _selectedSeasonNumber.value = firstSeason.seasonNumber
+                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(item.tmdbId, firstSeason.seasonNumber, tmdbKey)
+                        _realEpisodes.value = eps
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    fun selectSeason(seasonNumber: Int) {
+        _selectedSeasonNumber.value = seasonNumber
+        viewModelScope.launch(Dispatchers.IO) {
+            val item = _previewItem.value ?: repository.getMediaById(_mediaId.value).firstOrNull()
+            val tmdbId = item?.tmdbId ?: return@launch
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonNumber, tmdbKey)
+            _realEpisodes.value = eps
+        }
+    }
+
+    fun toggleEpisodeWatched(episode: MediaEpisode) {
+        val mediaId = _mediaId.value
+        if (mediaId <= 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
+            val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
+            repository.setEpisodeWatched(mediaId, episode.seasonNumber, episode.episodeNumber, !isCurrentlyWatched)
+            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
+            val watchedCount = updatedProgress.count { it.isWatched }
+            repository.updateProgress(mediaId, watchedCount.toDouble())
+        }
+    }
+
+    fun markPreviousEpisodesWatched(episode: MediaEpisode) {
+        val mediaId = _mediaId.value
+        if (mediaId <= 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val epsToMark = _realEpisodes.value.filter { it.episodeNumber <= episode.episodeNumber }
+            val pairs = epsToMark.map { it.seasonNumber to it.episodeNumber }
+            repository.setMultipleEpisodesWatched(mediaId, pairs, true)
+            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
+            val watchedCount = updatedProgress.count { it.isWatched }
+            repository.updateProgress(mediaId, watchedCount.toDouble())
+        }
+    }
+
+    fun toggleSeasonWatched(seasonNumber: Int) {
+        val mediaId = _mediaId.value
+        if (mediaId <= 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
+            val seasonEps = _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
+            val allWatched = seasonEps.isNotEmpty() && seasonEps.all { ep ->
+                currentProgress.any { it.seasonNumber == ep.seasonNumber && it.episodeNumber == ep.episodeNumber && it.isWatched }
+            }
+            val pairs = seasonEps.map { it.seasonNumber to it.episodeNumber }
+            repository.setMultipleEpisodesWatched(mediaId, pairs, !allWatched)
+            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
+            val watchedCount = updatedProgress.count { it.isWatched }
+            repository.updateProgress(mediaId, watchedCount.toDouble())
         }
     }
 

@@ -106,6 +106,7 @@ import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomShee
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
+import com.omnitrack.app.ui.screens.detail.components.DetailSeriesContent
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
@@ -692,7 +693,7 @@ fun DetailScreen(
                 ) {
                     when (item.mediaType) {
                         MediaType.ANIME, MediaType.SHOW -> {
-                            if (uiState.seasons.isNotEmpty()) {
+                            if (uiState.realSeasons.isEmpty() && uiState.seasons.isNotEmpty()) {
                                 SeasonEpisodesSection(
                                     seasons = uiState.seasons,
                                     currentProgress = item.currentProgress,
@@ -794,6 +795,24 @@ fun DetailScreen(
                         }
 
                         else -> {}
+                    }
+                }
+
+                // 1:1 Nuvio Seasons & Episode Tracking Grid
+                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                    if (uiState.realSeasons.isNotEmpty() || uiState.realEpisodes.isNotEmpty()) {
+                        DetailSeriesContent(
+                            seasons = uiState.realSeasons,
+                            episodes = uiState.realEpisodes,
+                            watchedEpisodes = uiState.watchedEpisodes,
+                            selectedSeasonNumber = uiState.selectedSeasonNumber,
+                            fallbackBackdropUrl = item.backdropUrl ?: item.bannerUrl,
+                            onSelectSeason = { viewModel.selectSeason(it) },
+                            onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
+                            onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
+                            onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
                     }
                 }
 

@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit
 class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
-    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao()) }
+    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao()) }
     val coverCache by lazy { CoverCache(this) }
     val preferenceManager by lazy { PreferenceManager(this) }
     val omniSearchRepository by lazy { OmniSearchRepository() }
