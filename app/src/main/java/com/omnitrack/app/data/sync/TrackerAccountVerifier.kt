@@ -29,16 +29,39 @@ object TrackerAccountVerifier {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    // Trakt Device Code and Client Constants from local verified config
-    const val TRAKT_CLIENT_ID = "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U"
-    const val TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
+    // Custom Override Credentials from private local DataStore
+    @Volatile
+    var customTraktClientId: String? = null
+    @Volatile
+    var customTraktClientSecret: String? = null
+    @Volatile
+    var customMalClientId: String? = null
+    @Volatile
+    var customSimklClientId: String? = null
+    @Volatile
+    var customSimklClientSecret: String? = null
 
-    // MyAnimeList Client ID
-    const val MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
+    // Default Fallback Credentials
+    private const val DEFAULT_TRAKT_CLIENT_ID = "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U"
+    private const val DEFAULT_TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
+    private const val DEFAULT_MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
+    private const val DEFAULT_SIMKL_CLIENT_ID = "6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a"
+    private const val DEFAULT_SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
 
-    // SIMKL Client Credentials
-    const val SIMKL_CLIENT_ID = "6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a"
-    const val SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
+    val TRAKT_CLIENT_ID: String
+        get() = customTraktClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_TRAKT_CLIENT_ID
+
+    val TRAKT_CLIENT_SECRET: String
+        get() = customTraktClientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_TRAKT_CLIENT_SECRET
+
+    val MAL_CLIENT_ID: String
+        get() = customMalClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_MAL_CLIENT_ID
+
+    val SIMKL_CLIENT_ID: String
+        get() = customSimklClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_SIMKL_CLIENT_ID
+
+    val SIMKL_CLIENT_SECRET: String
+        get() = customSimklClientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_SIMKL_CLIENT_SECRET
 
     // Bangumi Client Credentials
     const val BANGUMI_CLIENT_ID = "bgm31586666817a5d03b"

@@ -75,6 +75,12 @@ class PreferenceManager(private val context: Context) {
         val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
         val AI_SEMANTIC_SEARCH_ENABLED = booleanPreferencesKey("ai_semantic_search_enabled")
 
+        val CUSTOM_TRAKT_CLIENT_ID = stringPreferencesKey("custom_trakt_client_id")
+        val CUSTOM_TRAKT_CLIENT_SECRET = stringPreferencesKey("custom_trakt_client_secret")
+        val CUSTOM_MAL_CLIENT_ID = stringPreferencesKey("custom_mal_client_id")
+        val CUSTOM_SIMKL_CLIENT_ID = stringPreferencesKey("custom_simkl_client_id")
+        val CUSTOM_SIMKL_CLIENT_SECRET = stringPreferencesKey("custom_simkl_client_secret")
+
         val POSTER_WIDTH_DP = intPreferencesKey("poster_card_width_dp")
         val POSTER_CORNER_RADIUS_DP = intPreferencesKey("poster_card_corner_radius_dp")
         val POSTER_LANDSCAPE = booleanPreferencesKey("poster_card_landscape")
@@ -179,6 +185,42 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun updateAiSemanticSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] = enabled }
+    }
+
+    val customTraktClientId: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_TRAKT_CLIENT_ID] ?: "" }
+
+    val customTraktClientSecret: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_TRAKT_CLIENT_SECRET] ?: "" }
+
+    val customMalClientId: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_MAL_CLIENT_ID] ?: "" }
+
+    val customSimklClientId: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_SIMKL_CLIENT_ID] ?: "" }
+
+    val customSimklClientSecret: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_SIMKL_CLIENT_SECRET] ?: "" }
+
+    suspend fun updateCustomTrackerCredentials(
+        traktClientId: String,
+        traktClientSecret: String,
+        malClientId: String,
+        simklClientId: String,
+        simklClientSecret: String
+    ) {
+        context.dataStore.edit {
+            it[PreferencesKeys.CUSTOM_TRAKT_CLIENT_ID] = traktClientId.trim()
+            it[PreferencesKeys.CUSTOM_TRAKT_CLIENT_SECRET] = traktClientSecret.trim()
+            it[PreferencesKeys.CUSTOM_MAL_CLIENT_ID] = malClientId.trim()
+            it[PreferencesKeys.CUSTOM_SIMKL_CLIENT_ID] = simklClientId.trim()
+            it[PreferencesKeys.CUSTOM_SIMKL_CLIENT_SECRET] = simklClientSecret.trim()
+        }
     }
 
     val posterCardStyle: Flow<PosterCardStyle> = context.dataStore.data

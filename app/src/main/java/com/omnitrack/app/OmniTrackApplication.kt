@@ -17,9 +17,14 @@ import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.search.OmniSearchRepository
+import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.util.AppLogger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import java.io.File
@@ -41,6 +46,16 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         AppLogger.init(this)
         com.omnitrack.app.updater.AppUpdateNotifier.createNotificationChannel(this)
+
+        val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        appScope.launch {
+            launch { preferenceManager.customTraktClientId.collect { TrackerAccountVerifier.customTraktClientId = it } }
+            launch { preferenceManager.customTraktClientSecret.collect { TrackerAccountVerifier.customTraktClientSecret = it } }
+            launch { preferenceManager.customMalClientId.collect { TrackerAccountVerifier.customMalClientId = it } }
+            launch { preferenceManager.customSimklClientId.collect { TrackerAccountVerifier.customSimklClientId = it } }
+            launch { preferenceManager.customSimklClientSecret.collect { TrackerAccountVerifier.customSimklClientSecret = it } }
+        }
+
         AppLogger.i("Application", "OmniTrack launched successfully.")
     }
 

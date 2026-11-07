@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -70,11 +72,23 @@ fun ApiKeyConfigSheet(
     val currentMdblist by preferenceManager.mdblistApiKey.collectAsState(initial = "")
     val aiSearchEnabled by preferenceManager.aiSemanticSearchEnabled.collectAsState(initial = false)
 
+    val currentTraktClientId by preferenceManager.customTraktClientId.collectAsState(initial = "")
+    val currentTraktClientSecret by preferenceManager.customTraktClientSecret.collectAsState(initial = "")
+    val currentMalClientId by preferenceManager.customMalClientId.collectAsState(initial = "")
+    val currentSimklClientId by preferenceManager.customSimklClientId.collectAsState(initial = "")
+    val currentSimklClientSecret by preferenceManager.customSimklClientSecret.collectAsState(initial = "")
+
     var geminiKey by remember(currentGemini) { mutableStateOf(currentGemini) }
     var openRouterKey by remember(currentOpenRouter) { mutableStateOf(currentOpenRouter) }
     var tmdbKey by remember(currentTmdb) { mutableStateOf(currentTmdb) }
     var fanartKey by remember(currentFanart) { mutableStateOf(currentFanart) }
     var mdblistKey by remember(currentMdblist) { mutableStateOf(currentMdblist) }
+
+    var traktClientId by remember(currentTraktClientId) { mutableStateOf(currentTraktClientId) }
+    var traktClientSecret by remember(currentTraktClientSecret) { mutableStateOf(currentTraktClientSecret) }
+    var malClientId by remember(currentMalClientId) { mutableStateOf(currentMalClientId) }
+    var simklClientId by remember(currentSimklClientId) { mutableStateOf(currentSimklClientId) }
+    var simklClientSecret by remember(currentSimklClientSecret) { mutableStateOf(currentSimklClientSecret) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -206,6 +220,79 @@ fun ApiKeyConfigSheet(
                 accentColor = Color(0xFFEF4444)
             )
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Section 2: Tracker Developer Credentials
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CloudSync,
+                    contentDescription = null,
+                    tint = AccentJade,
+                    modifier = Modifier.size(24.dp)
+                )
+                Column {
+                    Text(
+                        text = "Tracker App Credentials",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    Text(
+                        text = "Private local credentials for Trakt, MyAnimeList & SIMKL",
+                        fontSize = 12.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+
+            // Trakt Client ID
+            ApiKeyField(
+                label = "Trakt Client ID",
+                placeholder = "Developer App Client ID",
+                value = traktClientId,
+                onValueChange = { traktClientId = it },
+                accentColor = Color(0xFFED1C24)
+            )
+
+            // Trakt Client Secret
+            ApiKeyField(
+                label = "Trakt Client Secret",
+                placeholder = "Developer App Client Secret",
+                value = traktClientSecret,
+                onValueChange = { traktClientSecret = it },
+                accentColor = Color(0xFFED1C24)
+            )
+
+            // MyAnimeList Client ID
+            ApiKeyField(
+                label = "MyAnimeList Client ID",
+                placeholder = "32-character Client ID from MAL API Config",
+                value = malClientId,
+                onValueChange = { malClientId = it },
+                accentColor = Color(0xFF2E51A2)
+            )
+
+            // SIMKL Client ID
+            ApiKeyField(
+                label = "SIMKL Client ID",
+                placeholder = "Client ID from SIMKL TV/Device App",
+                value = simklClientId,
+                onValueChange = { simklClientId = it },
+                accentColor = Color(0xFF00B4D8)
+            )
+
+            // SIMKL Client Secret (Optional)
+            ApiKeyField(
+                label = "SIMKL Client Secret (Optional)",
+                placeholder = "Leave blank if using TV / PIN flow",
+                value = simklClientSecret,
+                onValueChange = { simklClientSecret = it },
+                accentColor = Color(0xFF00B4D8)
+            )
+
             Spacer(modifier = Modifier.height(6.dp))
 
             // Save Button
@@ -217,6 +304,20 @@ fun ApiKeyConfigSheet(
                         preferenceManager.updateTmdbApiKey(tmdbKey.trim())
                         preferenceManager.updateFanartApiKey(fanartKey.trim())
                         preferenceManager.updateMdblistApiKey(mdblistKey.trim())
+
+                        preferenceManager.updateCustomTrackerCredentials(
+                            traktClientId = traktClientId.trim(),
+                            traktClientSecret = traktClientSecret.trim(),
+                            malClientId = malClientId.trim(),
+                            simklClientId = simklClientId.trim(),
+                            simklClientSecret = simklClientSecret.trim()
+                        )
+                        TrackerAccountVerifier.customTraktClientId = traktClientId.trim()
+                        TrackerAccountVerifier.customTraktClientSecret = traktClientSecret.trim()
+                        TrackerAccountVerifier.customMalClientId = malClientId.trim()
+                        TrackerAccountVerifier.customSimklClientId = simklClientId.trim()
+                        TrackerAccountVerifier.customSimklClientSecret = simklClientSecret.trim()
+
                         onDismiss()
                     }
                 },
