@@ -93,6 +93,66 @@ class CoverCache(private val context: Context) {
     }
 
     /**
+     * Imports a user-selected local banner Uri into covers/custom/ as a widescreen WebP.
+     */
+    suspend fun saveCustomBannerUri(mediaId: Long, uri: android.net.Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            }
+            val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream, null, options) ?: return@withContext null
+            inputStream.close()
+
+            // Clean up previous custom banner versions
+            customCoverDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name.startsWith("${mediaId}_banner_")) {
+                    file.delete()
+                }
+            }
+
+            val timestampedFile = File(customCoverDir, "${mediaId}_banner_${System.currentTimeMillis()}.webp")
+            timestampedFile.parentFile?.mkdirs()
+            java.io.FileOutputStream(timestampedFile).use { out ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP_LOSSY, 95, out)
+                } else {
+                    @Suppress("DEPRECATION")
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP, 95, out)
+                }
+            }
+            bitmap.recycle()
+            com.omnitrack.app.util.AppLogger.i("CoverCache", "Saved custom banner for media $mediaId -> ${timestampedFile.absolutePath}")
+            timestampedFile.absolutePath
+        } catch (e: Exception) {
+            com.omnitrack.app.util.AppLogger.e("CoverCache", "Failed to save custom banner for $mediaId", e)
+            null
+        }
+    }
+
+    /**
+     * Deletes all local custom cover files for the given media ID.
+     */
+    fun deleteCustomCover(mediaId: Long) {
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.startsWith("${mediaId}_cover_") || file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg") && !file.name.startsWith("${mediaId}_banner_")) {
+                file.delete()
+            }
+        }
+    }
+
+    /**
+     * Deletes all local custom banner files for the given media ID.
+     */
+    fun deleteCustomBanner(mediaId: Long) {
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith("${mediaId}_banner_")) {
+                file.delete()
+            }
+        }
+    }
+
+    /**
      * Copies an input stream to a new timestamped custom cover file (${mediaId}_${timestamp}.jpg).
      * Deletes previous custom cover files for this media item so old files don't accumulate.
      */

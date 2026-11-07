@@ -8,11 +8,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,31 +26,45 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -73,6 +86,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,24 +114,32 @@ fun ArtworkPickerBottomSheet(
     title: String,
     mediaType: MediaType,
     currentCoverUrl: String,
+    currentBannerUrl: String? = null,
+    currentCustomBannerPath: String? = null,
     mediaId: Long = 0,
     currentRole: String = "DEFAULT",
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
+    onBannerSelected: (String) -> Unit = {},
+    onResetCover: () -> Unit = {},
+    onResetBanner: () -> Unit = {},
     onRoleSelected: ((String) -> Unit)? = null,
     repository: ArtworkWaterfallRepository = remember { ArtworkWaterfallRepository() },
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var candidates by remember { mutableStateOf<List<ArtworkCandidate>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(false) }
-    var customUrlInput by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
-    // Activity result launcher for picking image from device gallery
-    val photoPickerLauncher = rememberLauncherForActivityResult(
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var allCandidates by remember { mutableStateOf<List<ArtworkCandidate>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    var excludedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showDirectUrlInput by remember { mutableStateOf(false) }
+    var customUrlInput by remember { mutableStateOf("") }
+
+    // Cover custom picker launcher
+    val coverPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
@@ -133,11 +155,45 @@ fun ArtworkPickerBottomSheet(
         }
     }
 
-    LaunchedEffect(title, mediaType) {
-        isLoading = true
-        candidates = repository.searchArtworkCandidates(title, mediaType)
-        isLoading = false
+    // Banner custom picker launcher
+    val bannerPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                val savedPath = coverCache.saveCustomBannerUri(mediaId, uri)
+                if (savedPath != null) {
+                    onBannerSelected(savedPath)
+                } else {
+                    onBannerSelected(uri.toString())
+                }
+                sheetState.hide()
+            }.invokeOnCompletion { onDismiss() }
+        }
     }
+
+    val fetchCandidates = {
+        scope.launch {
+            isLoading = true
+            allCandidates = repository.searchArtworkCandidates(title, mediaType)
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(title, mediaType) {
+        fetchCandidates()
+    }
+
+    // Filter covers and banners according to exclusions
+    val displayedCovers = remember(allCandidates, excludedSources) {
+        allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources }
+    }
+
+    val displayedBanners = remember(allCandidates, excludedSources) {
+        allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources }
+    }
+
+    val isBannerDisabled = currentCustomBannerPath == "NONE"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -157,16 +213,18 @@ fun ArtworkPickerBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(0.88f)
                 .padding(horizontal = 16.dp)
         ) {
-            // Header
+            // Header Row
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Customize Artwork",
                         color = TextPrimary,
@@ -182,410 +240,598 @@ fun ArtworkPickerBottomSheet(
                     )
                 }
 
-                IconButton(
-                    onClick = {
-                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = TextSecondary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Mode Selector Tabs (Live Search / Direct URL / Gallery / Roles)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkSurfaceElevated)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                val tabs = listOf(
-                    Triple(0, "Search", Icons.Default.Search),
-                    Triple(1, "URL", Icons.Default.Link),
-                    Triple(2, "Gallery", Icons.Default.PhotoLibrary),
-                    Triple(3, "Roles", Icons.Default.Tune)
-                )
-
-                tabs.forEach { (index, label, icon) ->
-                    val isSelected = selectedTab == index
-                    val tabBg by animateColorAsState(
-                        targetValue = if (isSelected) AccentArctic.copy(alpha = 0.16f) else Color.Transparent,
-                        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                        label = "tabBg"
-                    )
-                    val tabColor by animateColorAsState(
-                        targetValue = if (isSelected) AccentArctic else TextMuted,
-                        label = "tabColor"
-                    )
-
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(tabBg)
-                            .clickable {
-                                selectedTab = index
-                                if (index == 2) {
-                                    photoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                }
-                            }
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = { fetchCandidates() },
+                        enabled = !isLoading
                     ) {
                         Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = tabColor,
-                            modifier = Modifier.size(13.dp)
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh Candidates",
+                            tint = if (isLoading) TextMuted else AccentArctic
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = label,
-                            color = tabColor,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                    }
+                    IconButton(
+                        onClick = {
+                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextSecondary
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-            // Tab 0: Live Search Grid
-            if (selectedTab == 0) {
-                if (isLoading) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
+            // 3 Tabs: Covers, Banners, Exclusions
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = Color.Transparent,
+                contentColor = AccentArctic,
+                indicator = { tabPositions ->
+                    if (selectedTab < tabPositions.size) {
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                            color = AccentArctic
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
+                        Text(
+                            text = if (displayedCovers.isNotEmpty()) "Covers (${displayedCovers.size})" else "Covers",
+                            fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 13.5.sp,
+                            color = if (selectedTab == 0) AccentArctic else TextMuted
+                        )
+                    }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Text(
+                            text = if (displayedBanners.isNotEmpty()) "Banners (${displayedBanners.size})" else "Banners",
+                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 13.5.sp,
+                            color = if (selectedTab == 1) AccentArctic else TextMuted
+                        )
+                    }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = {
+                        Text(
+                            text = "Exclusions",
+                            fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 13.5.sp,
+                            color = if (selectedTab == 2) AccentArctic else TextMuted
+                        )
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        CircularProgressIndicator(
+                            color = AccentArctic,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "Querying AniList, MangaDex, Bangumi & Steam...",
+                            color = TextMuted,
+                            fontSize = 12.5.sp
+                        )
+                    }
+                }
+            } else {
+                when (selectedTab) {
+                    // TAB 0: COVERS
+                    0 -> {
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Quick Action Chips
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        coverPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = DarkSurfaceElevated,
+                                        contentColor = AccentArctic
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Pick File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        onResetCover()
+                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reset Auto", fontSize = 12.sp, color = TextSecondary)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showDirectUrlInput = !showDirectUrlInput },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (showDirectUrlInput) AccentArctic else GlassBorder
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                }
+                            }
+
+                            // Optional Direct URL input
+                            AnimatedVisibility(visible = showDirectUrlInput) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = customUrlInput,
+                                        onValueChange = { customUrlInput = it },
+                                        placeholder = { Text("https://.../cover.jpg", color = TextMuted, fontSize = 12.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = AccentArctic,
+                                            unfocusedBorderColor = GlassBorder,
+                                            focusedTextColor = TextPrimary,
+                                            unfocusedTextColor = TextPrimary
+                                        )
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (customUrlInput.isNotBlank()) {
+                                                onCoverSelected(customUrlInput.trim())
+                                                scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                            }
+                                        },
+                                        enabled = customUrlInput.isNotBlank(),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentArctic)
+                                    ) {
+                                        Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (displayedCovers.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "No candidate covers found online.\nUse 'Pick File' to choose custom artwork.",
+                                        color = TextMuted,
+                                        fontSize = 13.sp,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            } else {
+                                LazyVerticalGrid(
+                                    columns = GridCells.Adaptive(minSize = 104.dp),
+                                    contentPadding = PaddingValues(bottom = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    items(displayedCovers, key = { it.url }) { candidate ->
+                                        val isCurrent = candidate.url == currentCoverUrl
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(2f / 3f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .border(
+                                                    width = if (isCurrent) 2.5.dp else 1.dp,
+                                                    color = if (isCurrent) AccentJade else GlassBorder,
+                                                    shape = RoundedCornerShape(10.dp)
+                                                )
+                                                .clickable {
+                                                    onCoverSelected(candidate.url)
+                                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                                }
+                                        ) {
+                                            AsyncImage(
+                                                model = candidate.url,
+                                                contentDescription = candidate.description,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+
+                                            // Top pill source badge
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(6.dp)
+                                                    .align(Alignment.TopStart)
+                                                    .background(
+                                                        color = AmoledBlack.copy(alpha = 0.76f),
+                                                        shape = RoundedCornerShape(999.dp)
+                                                    )
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = candidate.sourceName,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimary
+                                                )
+                                            }
+
+                                            if (isCurrent) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(6.dp)
+                                                        .size(20.dp)
+                                                        .clip(CircleShape)
+                                                        .background(AccentJade),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = AmoledBlack,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // TAB 1: BANNERS
+                    1 -> {
+                        Column(modifier = Modifier.weight(1f)) {
+                            // Quick Action Chips for Banners
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        bannerPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = DarkSurfaceElevated,
+                                        contentColor = AccentArctic
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Pick File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        onBannerSelected(currentCoverUrl)
+                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                ) {
+                                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Use Cover", fontSize = 12.sp, color = TextSecondary)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        onBannerSelected("NONE")
+                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (isBannerDisabled) AccentGold else GlassBorder
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Block,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                        tint = if (isBannerDisabled) AccentGold else TextSecondary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = if (isBannerDisabled) "Banner Disabled" else "Disable Banner",
+                                        fontSize = 12.sp,
+                                        color = if (isBannerDisabled) AccentGold else TextSecondary
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        onResetBanner()
+                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reset Auto", fontSize = 12.sp, color = TextSecondary)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showDirectUrlInput = !showDirectUrlInput },
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        if (showDirectUrlInput) AccentArctic else GlassBorder
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                }
+                            }
+
+                            // Optional Direct URL input
+                            AnimatedVisibility(visible = showDirectUrlInput) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedTextField(
+                                        value = customUrlInput,
+                                        onValueChange = { customUrlInput = it },
+                                        placeholder = { Text("https://.../banner.jpg", color = TextMuted, fontSize = 12.sp) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = AccentArctic,
+                                            unfocusedBorderColor = GlassBorder,
+                                            focusedTextColor = TextPrimary,
+                                            unfocusedTextColor = TextPrimary
+                                        )
+                                    )
+                                    Button(
+                                        onClick = {
+                                            if (customUrlInput.isNotBlank()) {
+                                                onBannerSelected(customUrlInput.trim())
+                                                scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                            }
+                                        },
+                                        enabled = customUrlInput.isNotBlank(),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentArctic)
+                                    ) {
+                                        Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (displayedBanners.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "No dedicated widescreen banners found online.",
+                                            color = TextMuted,
+                                            fontSize = 13.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                        Text(
+                                            text = "You can tap 'Use Cover' to generate a banner or 'Pick File' for custom fanart.",
+                                            color = TextSecondary,
+                                            fontSize = 11.5.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                LazyColumn(
+                                    contentPadding = PaddingValues(bottom = 24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    items(displayedBanners, key = { it.url }) { candidate ->
+                                        val isCurrent = candidate.url == currentBannerUrl
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(16f / 7f)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .border(
+                                                    width = if (isCurrent) 2.5.dp else 1.dp,
+                                                    color = if (isCurrent) AccentArctic else GlassBorder,
+                                                    shape = RoundedCornerShape(12.dp)
+                                                )
+                                                .clickable {
+                                                    onBannerSelected(candidate.url)
+                                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                                }
+                                        ) {
+                                            AsyncImage(
+                                                model = candidate.url,
+                                                contentDescription = candidate.description,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+
+                                            // Top pill source badge
+                                            Box(
+                                                modifier = Modifier
+                                                    .padding(8.dp)
+                                                    .align(Alignment.TopStart)
+                                                    .background(
+                                                        color = AmoledBlack.copy(alpha = 0.76f),
+                                                        shape = RoundedCornerShape(999.dp)
+                                                    )
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${candidate.sourceName} Banner",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = TextPrimary
+                                                )
+                                            }
+
+                                            if (isCurrent) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(8.dp)
+                                                        .size(22.dp)
+                                                        .clip(CircleShape)
+                                                        .background(AccentArctic),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = AmoledBlack,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // TAB 2: EXCLUSIONS
+                    2 -> {
+                        val availableSources = listOf("AniList", "MangaDex", "Bangumi", "Kitsu", "Steam", "TVMaze", "VNDB")
                         Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            CircularProgressIndicator(
-                                color = AccentArctic,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(28.dp)
+                            Text(
+                                text = "Artwork Sources for this entry",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Querying AniList, MangaDex & Bangumi...",
+                                text = "Toggle off any provider to hide its covers and banners from discovery.",
                                 color = TextMuted,
                                 fontSize = 12.sp
                             )
-                        }
-                    }
-                } else if (candidates.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No candidate covers found online.\nTry Direct URL or Gallery.",
-                            color = TextMuted,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(candidates) { candidate ->
-                            val isCurrent = candidate.url == currentCoverUrl
 
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(0.68f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(
-                                        width = if (isCurrent) 2.dp else 1.dp,
-                                        color = if (isCurrent) AccentJade else GlassBorder,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable {
-                                        onCoverSelected(candidate.url)
-                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                    }
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                AsyncImage(
-                                    model = candidate.url,
-                                    contentDescription = candidate.description,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                                items(availableSources) { source ->
+                                    val isExcluded = source.uppercase() in excludedSources
 
-                                // Provider badge
-                                Box(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .fillMaxWidth()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                colors = listOf(Color.Transparent, AmoledBlack.copy(0.85f))
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(DarkSurfaceElevated)
+                                            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = source,
+                                            color = if (isExcluded) TextMuted else TextPrimary,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+
+                                        Switch(
+                                            checked = !isExcluded,
+                                            onCheckedChange = { isEnabled ->
+                                                val next = excludedSources.toMutableSet()
+                                                if (isEnabled) {
+                                                    next.remove(source.uppercase())
+                                                } else {
+                                                    next.add(source.uppercase())
+                                                }
+                                                excludedSources = next
+                                            },
+                                            colors = SwitchDefaults.colors(
+                                                checkedThumbColor = AmoledBlack,
+                                                checkedTrackColor = AccentArctic,
+                                                uncheckedThumbColor = TextMuted,
+                                                uncheckedTrackColor = DarkSurfaceCard
                                             )
                                         )
-                                        .padding(4.dp)
-                                ) {
-                                    Text(
-                                        text = candidate.sourceName,
-                                        color = TextSecondary,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.align(Alignment.Center)
-                                    )
-                                }
-
-                                if (isCurrent) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(6.dp)
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .background(AccentJade),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = AmoledBlack,
-                                            modifier = Modifier.size(12.dp)
-                                        )
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Tab 1: Paste Direct URL
-            if (selectedTab == 1) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(top = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Text(
-                        text = "Paste any direct image link (.jpg, .png, .webp):",
-                        color = TextSecondary,
-                        fontSize = 13.sp
-                    )
-
-                    OutlinedTextField(
-                        value = customUrlInput,
-                        onValueChange = { customUrlInput = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("https://example.com/artwork.jpg", color = TextMuted) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Uri,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (customUrlInput.isNotBlank()) {
-                                    onCoverSelected(customUrlInput.trim())
-                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                }
-                            }
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentArctic,
-                            unfocusedBorderColor = GlassBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary,
-                            cursorColor = AccentArctic
-                        )
-                    )
-
-                    if (customUrlInput.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .width(120.dp)
-                                .aspectRatio(0.68f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
-                                .align(Alignment.CenterHorizontally)
-                        ) {
-                            AsyncImage(
-                                model = customUrlInput,
-                                contentDescription = "Preview",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.weight(1f))
-
-                    TextButton(
-                        onClick = {
-                            if (customUrlInput.isNotBlank()) {
-                                onCoverSelected(customUrlInput.trim())
-                                scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                            }
-                        },
-                        enabled = customUrlInput.isNotBlank(),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (customUrlInput.isNotBlank()) AccentArctic else DarkSurfaceCard)
-                            .padding(vertical = 4.dp),
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = AmoledBlack,
-                            disabledContentColor = TextMuted
-                        )
-                    ) {
-                        Text("Apply Custom Artwork", fontWeight = FontWeight.SemiBold)
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-            }
-
-            // Tab 2: Gallery Picker
-            if (selectedTab == 2) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(top = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PhotoLibrary,
-                        contentDescription = null,
-                        tint = AccentArctic,
-                        modifier = Modifier.size(56.dp)
-                    )
-                    Text(
-                        text = "Pick from Device Storage",
-                        color = TextPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "Select any local artwork, screenshot, or fanart. It will be losslessly encoded as WebP in private storage.",
-                        color = TextMuted,
-                        fontSize = 13.sp,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    TextButton(
-                        onClick = {
-                            photoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(AccentArctic)
-                            .padding(horizontal = 24.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = "Open Photo Picker",
-                            color = AmoledBlack,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            // Tab 3: Artwork Role Assignment
-            if (selectedTab == 3) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(top = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "Artwork Role Assignment",
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Customize how cover and banner artworks are paired and displayed for this entry.",
-                        color = TextMuted,
-                        fontSize = 12.5.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    val roleOptions = listOf(
-                        Triple("DEFAULT", "Default Roles", "Cover as Poster, Banner as Backdrop"),
-                        Triple("COVER_AS_BANNER", "Cover as Banner", "Crop and ambient-fill cover across widescreen banner"),
-                        Triple("BANNER_AS_COVER", "Banner as Cover", "Frame horizontal banner into 2:3 vertical poster"),
-                        Triple("SYNCHRONIZED", "Synchronized Art", "Use a single unified image across both slots")
-                    )
-
-                    roleOptions.forEach { (roleKey, roleTitle, roleDesc) ->
-                        val isSelected = currentRole == roleKey
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) AccentArctic.copy(alpha = 0.14f) else DarkSurfaceElevated)
-                                .border(
-                                    width = if (isSelected) 1.5.dp else 1.dp,
-                                    color = if (isSelected) AccentArctic else GlassBorder,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .clickable {
-                                    onRoleSelected?.invoke(roleKey)
-                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = roleTitle,
-                                    color = if (isSelected) AccentArctic else TextPrimary,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = roleDesc,
-                                    color = TextMuted,
-                                    fontSize = 11.5.sp
-                                )
-                            }
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = AccentArctic,
-                                    modifier = Modifier.size(18.dp)
-                                )
                             }
                         }
                     }

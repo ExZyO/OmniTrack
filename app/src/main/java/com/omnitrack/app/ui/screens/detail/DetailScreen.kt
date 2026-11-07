@@ -265,9 +265,11 @@ fun DetailScreen(
                 }
             }
             val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
-                item.customBannerPath ?: when (item.artworkRole) {
-                    "COVER_AS_BANNER" -> item.coverUrl
-                    "SYNCHRONIZED" -> item.coverUrl
+                when {
+                    item.customBannerPath == "NONE" -> null
+                    item.customBannerPath != null -> item.customBannerPath
+                    item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
+                    item.artworkRole == "SYNCHRONIZED" -> item.coverUrl
                     else -> item.bannerUrl ?: item.coverUrl
                 }
             }
@@ -313,20 +315,24 @@ fun DetailScreen(
             ) {
                 // PRESENTATION MODE 1: Hero Layout (Hero Banner + Zero-Box Flowing Metadata & Stats)
                 if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                    // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(350.dp)
-                    ) {
-                        AsyncImage(
-                            model = backdropTargetUrl,
-                            contentDescription = item.title,
+                    if (backdropTargetUrl != null) {
+                        // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
+                        Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .featherArtwork(startYRatio = 0.50f),
-                            contentScale = ContentScale.Crop
-                        )
+                                .fillMaxWidth()
+                                .height(350.dp)
+                        ) {
+                            AsyncImage(
+                                model = backdropTargetUrl,
+                                contentDescription = item.title,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .featherArtwork(startYRatio = 0.50f),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(72.dp))
                     }
 
                     // Content Section directly beneath the banner: 100% ZERO BOXES!
@@ -419,19 +425,23 @@ fun DetailScreen(
                     }
                 } else {
                     // PRESENTATION MODE 2: Classic Overlapping Poster
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(350.dp)
-                    ) {
-                        AsyncImage(
-                            model = backdropTargetUrl,
-                            contentDescription = null,
+                    if (backdropTargetUrl != null) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .featherArtwork(startYRatio = 0.50f),
-                            contentScale = ContentScale.Crop
-                        )
+                                .fillMaxWidth()
+                                .height(350.dp)
+                        ) {
+                            AsyncImage(
+                                model = backdropTargetUrl,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .featherArtwork(startYRatio = 0.50f),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(72.dp))
                     }
 
                     // Overlapping Poster Row (Clean, no buttons over banner!)
@@ -866,12 +876,14 @@ fun DetailScreen(
                 }
             }
 
-            // Cover discovery & role customization bottom sheet
+            // Cover & Banner artwork customization bottom sheet (Option A multi-tab)
             if (showArtworkPicker) {
                 ArtworkPickerBottomSheet(
                     title = item.title,
                     mediaType = item.mediaType,
                     currentCoverUrl = losslessCover,
+                    currentBannerUrl = item.bannerUrl,
+                    currentCustomBannerPath = item.customBannerPath,
                     mediaId = item.id,
                     currentRole = item.artworkRole,
                     onDismiss = { showArtworkPicker = false },
@@ -881,7 +893,21 @@ fun DetailScreen(
                         } else {
                             viewModel.updateCover(newUrl)
                         }
-                        showArtworkPicker = false
+                    },
+                    onBannerSelected = { newBanner ->
+                        if (newBanner == "NONE") {
+                            viewModel.toggleDisableBanner()
+                        } else if (newBanner.startsWith("/") || newBanner.startsWith("file:")) {
+                            viewModel.updateCustomBannerPath(newBanner, context)
+                        } else {
+                            viewModel.updateBanner(newBanner)
+                        }
+                    },
+                    onResetCover = {
+                        viewModel.resetCover(context)
+                    },
+                    onResetBanner = {
+                        viewModel.resetBanner(context)
                     },
                     onRoleSelected = { newRole ->
                         viewModel.updateArtworkRole(newRole)

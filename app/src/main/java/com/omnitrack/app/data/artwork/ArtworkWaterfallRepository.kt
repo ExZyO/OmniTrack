@@ -123,21 +123,38 @@ class ArtworkWaterfallRepository(
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
                 val mediaList = parsed["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray ?: return emptyList()
 
-                mediaList.mapNotNull { item ->
-                    val cover = item.jsonObject["coverImage"]?.jsonObject
+                val candidates = mutableListOf<ArtworkCandidate>()
+                mediaList.forEach { elem ->
+                    val item = elem.jsonObject
+                    val cover = item["coverImage"]?.jsonObject
                     val url = cover?.get("extraLarge")?.jsonPrimitive?.content
                         ?: cover?.get("large")?.jsonPrimitive?.content
-                    val itemTitle = item.jsonObject["title"]?.jsonObject?.get("romaji")?.jsonPrimitive?.content
-                        ?: item.jsonObject["title"]?.jsonObject?.get("english")?.jsonPrimitive?.content
+                    val itemTitle = item["title"]?.jsonObject?.get("romaji")?.jsonPrimitive?.content
+                        ?: item["title"]?.jsonObject?.get("english")?.jsonPrimitive?.content
                         ?: title
                     if (url != null) {
-                        ArtworkCandidate(
-                            url = url,
-                            sourceName = "AniList",
-                            description = itemTitle
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = url,
+                                sourceName = "AniList",
+                                description = itemTitle,
+                                isBanner = false
+                            )
                         )
-                    } else null
+                    }
+                    val banner = item["bannerImage"]?.jsonPrimitive?.content
+                    if (banner != null) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = banner,
+                                sourceName = "AniList",
+                                description = "$itemTitle (Banner)",
+                                isBanner = true
+                            )
+                        )
+                    }
                 }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()
@@ -234,20 +251,37 @@ class ArtworkWaterfallRepository(
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
                 val data = parsed["data"]?.jsonArray ?: return emptyList()
 
-                data.mapNotNull { item ->
-                    val attrs = item.jsonObject["attributes"]?.jsonObject
+                val candidates = mutableListOf<ArtworkCandidate>()
+                data.forEach { elem ->
+                    val attrs = elem.jsonObject["attributes"]?.jsonObject
                     val posterImage = attrs?.get("posterImage")?.jsonObject
                     val url = posterImage?.get("original")?.jsonPrimitive?.content
                         ?: posterImage?.get("large")?.jsonPrimitive?.content
                     val canonicalTitle = attrs?.get("canonicalTitle")?.jsonPrimitive?.content ?: title
                     if (url != null) {
-                        ArtworkCandidate(
-                            url = url,
-                            sourceName = "Kitsu",
-                            description = canonicalTitle
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = url,
+                                sourceName = "Kitsu",
+                                description = canonicalTitle,
+                                isBanner = false
+                            )
                         )
-                    } else null
+                    }
+                    val coverImage = attrs?.get("coverImage")?.jsonObject?.get("original")?.jsonPrimitive?.content
+                        ?: attrs?.get("coverImage")?.jsonObject?.get("large")?.jsonPrimitive?.content
+                    if (coverImage != null) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = coverImage,
+                                sourceName = "Kitsu",
+                                description = "$canonicalTitle (Banner)",
+                                isBanner = true
+                            )
+                        )
+                    }
                 }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()
@@ -302,17 +336,32 @@ class ArtworkWaterfallRepository(
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
                 val items = parsed["items"]?.jsonArray ?: return emptyList()
 
-                items.mapNotNull { item ->
-                    val id = item.jsonObject["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val name = item.jsonObject["name"]?.jsonPrimitive?.content ?: title
-                    // Steam high-res 600x900 library capsule
+                val candidates = mutableListOf<ArtworkCandidate>()
+                items.forEach { elem ->
+                    val id = elem.jsonObject["id"]?.jsonPrimitive?.content ?: return@forEach
+                    val name = elem.jsonObject["name"]?.jsonPrimitive?.content ?: title
+                    // Steam high-res 600x900 library capsule (cover)
                     val verticalCapsuleUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
-                    ArtworkCandidate(
-                        url = verticalCapsuleUrl,
-                        sourceName = "Steam",
-                        description = name
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = verticalCapsuleUrl,
+                            sourceName = "Steam",
+                            description = name,
+                            isBanner = false
+                        )
+                    )
+                    // Steam hero widescreen banner
+                    val heroBannerUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = heroBannerUrl,
+                            sourceName = "Steam",
+                            description = "$name (Hero Banner)",
+                            isBanner = true
+                        )
                     )
                 }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()

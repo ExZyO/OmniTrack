@@ -44,7 +44,11 @@ class MediaRepository(
 
     suspend fun updateCover(id: Long, coverUrl: String) = mediaDao.updateCover(id, coverUrl)
 
+    suspend fun updateBanner(id: Long, bannerUrl: String?) = mediaDao.updateBanner(id, bannerUrl)
+
     suspend fun updateCustomCover(id: Long, path: String?) = mediaDao.updateCustomCoverPath(id, path)
+
+    suspend fun updateCustomBanner(id: Long, path: String?) = mediaDao.updateCustomBannerPath(id, path)
 
     suspend fun updateArtworkRole(id: Long, role: String) = mediaDao.updateArtworkRole(id, role)
 

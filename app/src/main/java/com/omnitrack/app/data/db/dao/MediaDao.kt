@@ -39,8 +39,14 @@ interface MediaDao {
     @Query("UPDATE media_items SET coverUrl = :coverUrl, lastUpdated = :updated WHERE id = :id")
     suspend fun updateCover(id: Long, coverUrl: String, updated: Long = System.currentTimeMillis())
 
+    @Query("UPDATE media_items SET bannerUrl = :bannerUrl, lastUpdated = :updated WHERE id = :id")
+    suspend fun updateBanner(id: Long, bannerUrl: String?, updated: Long = System.currentTimeMillis())
+
     @Query("UPDATE media_items SET customCoverPath = :path, lastUpdated = :updated WHERE id = :id")
     suspend fun updateCustomCoverPath(id: Long, path: String?, updated: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET customBannerPath = :path, lastUpdated = :updated WHERE id = :id")
+    suspend fun updateCustomBannerPath(id: Long, path: String?, updated: Long = System.currentTimeMillis())
 
     @Query("UPDATE media_items SET artworkRole = :role, lastUpdated = :updated WHERE id = :id")
     suspend fun updateArtworkRole(id: Long, role: String, updated: Long = System.currentTimeMillis())

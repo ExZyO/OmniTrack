@@ -131,6 +131,12 @@ class DetailViewModel(
         }
     }
 
+    fun updateBanner(newBannerUrl: String) {
+        viewModelScope.launch {
+            repository.updateBanner(_mediaId.value, newBannerUrl)
+        }
+    }
+
     fun updateCustomCoverPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
             repository.updateCustomCover(_mediaId.value, path)
@@ -140,6 +146,50 @@ class DetailViewModel(
                 loader.memoryCache?.remove(coil3.memory.MemoryCache.Key(file.absolutePath))
                 loader.diskCache?.remove(file.absolutePath)
             }
+        }
+    }
+
+    fun updateCustomBannerPath(path: String?, context: android.content.Context? = null) {
+        viewModelScope.launch {
+            repository.updateCustomBanner(_mediaId.value, path)
+            if (context != null && path != null && path != "NONE") {
+                val file = java.io.File(path)
+                val loader = coil3.SingletonImageLoader.get(context)
+                loader.memoryCache?.remove(coil3.memory.MemoryCache.Key(file.absolutePath))
+                loader.diskCache?.remove(file.absolutePath)
+            }
+        }
+    }
+
+    fun resetCover(context: android.content.Context? = null) {
+        viewModelScope.launch {
+            val mediaId = _mediaId.value
+            if (context != null) {
+                val coverCache = (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache
+                    ?: com.omnitrack.app.data.cache.CoverCache(context)
+                coverCache.deleteCustomCover(mediaId)
+            }
+            repository.updateCustomCover(mediaId, null)
+        }
+    }
+
+    fun resetBanner(context: android.content.Context? = null) {
+        viewModelScope.launch {
+            val mediaId = _mediaId.value
+            if (context != null) {
+                val coverCache = (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache
+                    ?: com.omnitrack.app.data.cache.CoverCache(context)
+                coverCache.deleteCustomBanner(mediaId)
+            }
+            repository.updateCustomBanner(mediaId, null)
+        }
+    }
+
+    fun toggleDisableBanner() {
+        viewModelScope.launch {
+            val currentItem = uiState.value.item ?: return@launch
+            val nextPath = if (currentItem.customBannerPath == "NONE") null else "NONE"
+            repository.updateCustomBanner(_mediaId.value, nextPath)
         }
     }
 
