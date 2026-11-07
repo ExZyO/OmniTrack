@@ -498,32 +498,38 @@ class DetailViewModel(
     }
 
     fun navigateToPrevious(): Boolean {
-        val currentId = _mediaId.value
-        val allItems = repository.getAllMediaSync()
-        val currentItem = allItems.find { it.id == currentId } ?: return false
-        val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-        val pool = if (sameType.size > 1) sameType else allItems
-        val currentIndex = pool.indexOfFirst { it.id == currentId }
-        if (currentIndex <= 0) return false
-        val prevItem = pool[currentIndex - 1]
-        _mediaId.value = prevItem.id
-        _previewItem.value = null
-        loadRecommendationsAndReviews(prevItem)
+        viewModelScope.launch {
+            val currentId = _mediaId.value
+            val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
+            val currentItem = allItems.find { it.id == currentId } ?: return@launch
+            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+            val pool = if (sameType.size > 1) sameType else allItems
+            val currentIndex = pool.indexOfFirst { it.id == currentId }
+            if (currentIndex > 0) {
+                val prevItem = pool[currentIndex - 1]
+                _mediaId.value = prevItem.id
+                _previewItem.value = null
+                loadRecommendationsAndReviews(prevItem)
+            }
+        }
         return true
     }
 
     fun navigateToNext(): Boolean {
-        val currentId = _mediaId.value
-        val allItems = repository.getAllMediaSync()
-        val currentItem = allItems.find { it.id == currentId } ?: return false
-        val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-        val pool = if (sameType.size > 1) sameType else allItems
-        val currentIndex = pool.indexOfFirst { it.id == currentId }
-        if (currentIndex < 0 || currentIndex >= pool.size - 1) return false
-        val nextItem = pool[currentIndex + 1]
-        _mediaId.value = nextItem.id
-        _previewItem.value = null
-        loadRecommendationsAndReviews(nextItem)
+        viewModelScope.launch {
+            val currentId = _mediaId.value
+            val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
+            val currentItem = allItems.find { it.id == currentId } ?: return@launch
+            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+            val pool = if (sameType.size > 1) sameType else allItems
+            val currentIndex = pool.indexOfFirst { it.id == currentId }
+            if (currentIndex >= 0 && currentIndex < pool.size - 1) {
+                val nextItem = pool[currentIndex + 1]
+                _mediaId.value = nextItem.id
+                _previewItem.value = null
+                loadRecommendationsAndReviews(nextItem)
+            }
+        }
         return true
     }
 
@@ -587,8 +593,8 @@ class DetailViewModel(
     fun updateCustomCoverPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            if (context != null && !item.customCoverPath.isNullOrBlank() && item.customCoverPath != path) {
-                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customCoverPath)
+            if (!item.customCoverPath.isNullOrBlank() && item.customCoverPath != path) {
+                try { java.io.File(item.customCoverPath).delete() } catch (_: Exception) {}
             }
             repository.updateMedia(item.copy(customCoverPath = path))
         }
@@ -597,8 +603,8 @@ class DetailViewModel(
     fun updateCustomBannerPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            if (context != null && !item.customBannerPath.isNullOrBlank() && item.customBannerPath != path) {
-                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customBannerPath)
+            if (!item.customBannerPath.isNullOrBlank() && item.customBannerPath != path) {
+                try { java.io.File(item.customBannerPath).delete() } catch (_: Exception) {}
             }
             repository.updateMedia(item.copy(customBannerPath = path))
         }
@@ -607,18 +613,18 @@ class DetailViewModel(
     fun resetCover(context: android.content.Context? = null) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            if (context != null && !item.customCoverPath.isNullOrBlank()) {
-                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customCoverPath)
+            if (!item.customCoverPath.isNullOrBlank()) {
+                try { java.io.File(item.customCoverPath).delete() } catch (_: Exception) {}
             }
-            repository.updateMedia(item.copy(coverUrl = null, customCoverPath = null))
+            repository.updateMedia(item.copy(customCoverPath = null))
         }
     }
 
     fun resetBanner(context: android.content.Context? = null) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            if (context != null && !item.customBannerPath.isNullOrBlank()) {
-                com.omnitrack.app.data.artwork.CustomArtworkStorage.deleteArtworkFile(context, item.customBannerPath)
+            if (!item.customBannerPath.isNullOrBlank()) {
+                try { java.io.File(item.customBannerPath).delete() } catch (_: Exception) {}
             }
             repository.updateMedia(item.copy(bannerUrl = null, customBannerPath = null))
         }
