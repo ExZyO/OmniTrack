@@ -313,8 +313,9 @@ class DetailViewModel(
                                         val site = obj["site"]?.jsonPrimitive?.content ?: ""
                                         val key = obj["key"]?.jsonPrimitive?.content ?: continue
                                         val title = obj["name"]?.jsonPrimitive?.content ?: "Official Trailer"
+                                        val typeStr = obj["type"]?.jsonPrimitive?.content ?: "Trailer"
                                         if (site.equals("YouTube", ignoreCase = true)) {
-                                            trailerList.add(MediaTrailer(title = title, youtubeKey = key))
+                                            trailerList.add(MediaTrailer(title = title, youtubeKey = key, type = typeStr))
                                         }
                                     }
                                 }
