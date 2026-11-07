@@ -131,12 +131,12 @@ fun DetailScreen(
     var dragOffsetY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     val animatedDragOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "horizontalSwipe"
     )
     val animatedDragOffsetY by animateFloatAsState(
         targetValue = dragOffsetY,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "verticalDismiss"
     )
 
@@ -203,31 +203,6 @@ fun DetailScreen(
         }
     }
 
-    // Hero-scoped horizontal swipe modifier (isolates gestures to artwork canvas so chapter slider is never intercepted)
-    val heroSwipeModifier = Modifier.pointerInput(uiState.hasPreviousEntry, uiState.hasNextEntry) {
-        detectHorizontalDragGestures(
-            onDragEnd = {
-                when {
-                    // Swiping right: navigate to previous sibling entry
-                    dragOffsetX > 100f && uiState.hasPreviousEntry -> {
-                        dragOffsetX = 0f
-                        viewModel.navigateToPrevious()
-                    }
-                    // Swiping left: navigate to next sibling entry
-                    dragOffsetX < -100f && uiState.hasNextEntry -> {
-                        dragOffsetX = 0f
-                        viewModel.navigateToNext()
-                    }
-                    else -> dragOffsetX = 0f
-                }
-            },
-            onHorizontalDrag = { change, dragAmount ->
-                dragOffsetX += dragAmount
-                change.consume()
-            }
-        )
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -244,6 +219,37 @@ fun DetailScreen(
                 alpha = (1f - (totalOffset / 1000f * 0.35f)).coerceIn(0.65f, 1f)
             }
             .nestedScroll(nestedScrollConnection)
+            .pointerInput(item?.id) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        when {
+                            // Swiping right: navigate to previous sibling entry
+                            dragOffsetX > 80f && uiState.hasPreviousEntry -> {
+                                dragOffsetX = 0f
+                                viewModel.navigateToPrevious()
+                            }
+                            // Swiping left: navigate to next sibling entry
+                            dragOffsetX < -80f && uiState.hasNextEntry -> {
+                                dragOffsetX = 0f
+                                viewModel.navigateToNext()
+                            }
+                            // Swiping right past threshold when at start of single-entry list: return to library
+                            dragOffsetX > 180f && !uiState.hasPreviousEntry -> {
+                                dragOffsetX = 0f
+                                onBack()
+                            }
+                            else -> dragOffsetX = 0f
+                        }
+                    },
+                    onDragCancel = {
+                        dragOffsetX = 0f
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        dragOffsetX += dragAmount
+                        change.consume()
+                    }
+                )
+            }
     ) {
         if (uiState.isLoading || item == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -312,7 +318,6 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(350.dp)
-                            .then(heroSwipeModifier)
                     ) {
                         AsyncImage(
                             model = backdropTargetUrl,
@@ -418,7 +423,6 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(350.dp)
-                            .then(heroSwipeModifier)
                     ) {
                         AsyncImage(
                             model = backdropTargetUrl,

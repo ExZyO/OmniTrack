@@ -73,13 +73,12 @@ class DetailViewModel(
                 repository.getAllMedia().map { allItems ->
                     val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
                     val siblings = if (sameType.size > 1) sameType else allItems
-                    val currentIndex = siblings.indexOfFirst { it.id == currentItem.id }
                     DetailUiState(
                         item = currentItem,
                         seasons = generateMockSeasons(currentItem),
                         isLoading = false,
-                        hasPreviousEntry = currentIndex > 0,
-                        hasNextEntry = currentIndex in 0 until siblings.size - 1
+                        hasPreviousEntry = siblings.size > 1,
+                        hasNextEntry = siblings.size > 1
                     )
                 }
             }
@@ -91,31 +90,31 @@ class DetailViewModel(
         )
 
     fun navigateToPrevious(): Boolean {
-        val currentItem = uiState.value.item ?: return false
         val currentId = _mediaId.value
         viewModelScope.launch {
             val allItems = repository.getAllMedia().first()
+            val currentItem = allItems.firstOrNull { it.id == currentId } ?: return@launch
             val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
             val siblings = if (sameType.size > 1) sameType else allItems
+            if (siblings.size <= 1) return@launch
             val currentIndex = siblings.indexOfFirst { it.id == currentId }
-            if (currentIndex > 0) {
-                _mediaId.value = siblings[currentIndex - 1].id
-            }
+            val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
+            _mediaId.value = siblings[prevIndex].id
         }
         return true
     }
 
     fun navigateToNext(): Boolean {
-        val currentItem = uiState.value.item ?: return false
         val currentId = _mediaId.value
         viewModelScope.launch {
             val allItems = repository.getAllMedia().first()
+            val currentItem = allItems.firstOrNull { it.id == currentId } ?: return@launch
             val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
             val siblings = if (sameType.size > 1) sameType else allItems
+            if (siblings.size <= 1) return@launch
             val currentIndex = siblings.indexOfFirst { it.id == currentId }
-            if (currentIndex in 0 until siblings.size - 1) {
-                _mediaId.value = siblings[currentIndex + 1].id
-            }
+            val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
+            _mediaId.value = siblings[nextIndex].id
         }
         return true
     }
