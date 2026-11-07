@@ -1567,11 +1567,6 @@ private fun BangumiSpecificControls(
         }
     }
 }
-                color = if (bgmComment.length >= 360) Color(0xFFEF4444) else TextMuted
-            )
-        }
-    }
-}
 
 /**
  * Chimanew-Style Search & Rebind Modal Bottom Sheet
