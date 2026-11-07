@@ -551,7 +551,7 @@ class OmniSearchRepository(
         try {
             val payload = buildJsonObject {
                 put("filters", json.parseToJsonElement("[\"search\", \"=\", \"$query\"]"))
-                put("fields", "id, title, alttitle, rating, description, image.url")
+                put("fields", "id, title, alttitle, rating, description, image.url, screenshots.url")
             }
 
             val request = Request.Builder()
@@ -572,6 +572,8 @@ class OmniSearchRepository(
                     val altTitle = obj["alttitle"]?.jsonPrimitive?.content
                     val imageObj = obj["image"]?.jsonObject
                     val cover = imageObj?.get("url")?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val screenshots = obj["screenshots"]?.jsonArray
+                    val firstScreenshot = screenshots?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content
 
                     val rating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it / 10f }
                     val desc = obj["description"]?.jsonPrimitive?.content
@@ -583,6 +585,7 @@ class OmniSearchRepository(
                         nativeTitle = altTitle,
                         synopsis = desc,
                         coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                        bannerUrl = firstScreenshot?.let { LosslessCoverMapper.toLosslessUrl(it) },
                         mediaType = MediaType.VISUAL_NOVEL,
                         communityScore = rating,
                         sourceProvider = "VNDB",

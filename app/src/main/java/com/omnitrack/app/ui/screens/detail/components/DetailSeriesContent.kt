@@ -259,44 +259,50 @@ fun DetailSeriesContent(
             }
         }
 
-        // 4. Render Active Episode Layout Mode
-        AnimatedContent(
-            targetState = selectedSeasonNumber to currentLayoutMode,
-            transitionSpec = { fadeIn(spring(stiffness = Spring.StiffnessLow)) togetherWith fadeOut() },
-            label = "episode_layout_transition"
-        ) { (_, mode) ->
-            when (mode) {
-                EpisodeLayoutMode.HORIZONTAL -> {
-                    EpisodeHorizontalRow(
-                        episodes = seasonEpisodes,
-                        watchedEpisodes = watchedEpisodes,
-                        fallbackImageUrl = fallbackBackdropUrl,
-                        scale = layoutScale,
-                        onToggleWatched = onToggleEpisodeWatched,
-                        onLongPress = { activeActionSheetEpisode = it }
-                    )
-                }
+        // 4. Render Active Episode Layout Mode with Smooth Nuvio Glide
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(tween(250))
+        ) {
+            Crossfade(
+                targetState = selectedSeasonNumber to currentLayoutMode,
+                animationSpec = tween(220),
+                label = "episode_layout_transition"
+            ) { (_, mode) ->
+                when (mode) {
+                    EpisodeLayoutMode.HORIZONTAL -> {
+                        EpisodeHorizontalRow(
+                            episodes = seasonEpisodes,
+                            watchedEpisodes = watchedEpisodes,
+                            fallbackImageUrl = fallbackBackdropUrl,
+                            scale = layoutScale,
+                            onToggleWatched = onToggleEpisodeWatched,
+                            onLongPress = { activeActionSheetEpisode = it }
+                        )
+                    }
 
-                EpisodeLayoutMode.LIST -> {
-                    EpisodeListColumn(
-                        episodes = seasonEpisodes,
-                        watchedEpisodes = watchedEpisodes,
-                        fallbackImageUrl = fallbackBackdropUrl,
-                        scale = layoutScale,
-                        onToggleWatched = onToggleEpisodeWatched,
-                        onLongPress = { activeActionSheetEpisode = it }
-                    )
-                }
+                    EpisodeLayoutMode.LIST -> {
+                        EpisodeListColumn(
+                            episodes = seasonEpisodes,
+                            watchedEpisodes = watchedEpisodes,
+                            fallbackImageUrl = fallbackBackdropUrl,
+                            scale = layoutScale,
+                            onToggleWatched = onToggleEpisodeWatched,
+                            onLongPress = { activeActionSheetEpisode = it }
+                        )
+                    }
 
-                EpisodeLayoutMode.VERTICAL_CARD -> {
-                    EpisodeVerticalCardColumn(
-                        episodes = seasonEpisodes,
-                        watchedEpisodes = watchedEpisodes,
-                        fallbackImageUrl = fallbackBackdropUrl,
-                        scale = layoutScale,
-                        onToggleWatched = onToggleEpisodeWatched,
-                        onLongPress = { activeActionSheetEpisode = it }
-                    )
+                    EpisodeLayoutMode.VERTICAL_CARD -> {
+                        EpisodeVerticalCardColumn(
+                            episodes = seasonEpisodes,
+                            watchedEpisodes = watchedEpisodes,
+                            fallbackImageUrl = fallbackBackdropUrl,
+                            scale = layoutScale,
+                            onToggleWatched = onToggleEpisodeWatched,
+                            onLongPress = { activeActionSheetEpisode = it }
+                        )
+                    }
                 }
             }
         }
@@ -494,8 +500,14 @@ private fun EpisodeHorizontalCard(
                 .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            val epNumStr = "Episode ${episode.episodeNumber}"
+            val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
+                episode.title.ifBlank { epNumStr }
+            } else {
+                "$epNumStr • ${episode.title}"
+            }
             Text(
-                text = episode.title,
+                text = titleText,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
@@ -641,8 +653,14 @@ private fun EpisodeListCardItem(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    val epNumStr = "Episode ${episode.episodeNumber}"
+                    val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
+                        episode.title.ifBlank { epNumStr }
+                    } else {
+                        "$epNumStr • ${episode.title}"
+                    }
                     Text(
-                        text = episode.title,
+                        text = titleText,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -785,8 +803,14 @@ private fun EpisodeVerticalCardItem(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            val epNumStr = "Episode ${episode.episodeNumber}"
+            val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
+                episode.title.ifBlank { epNumStr }
+            } else {
+                "$epNumStr • ${episode.title}"
+            }
             Text(
-                text = episode.title,
+                text = titleText,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,

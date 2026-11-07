@@ -84,8 +84,8 @@ class ArtworkWaterfallRepository(
                 }
                 MediaType.VISUAL_NOVEL -> {
                     deferreds.add(async { fetchVndbCovers(title) })
+                    deferreds.add(async { fetchSteamCovers(title) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 4) })
-                    deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
                 }
                 MediaType.ALL -> {
                     deferreds.add(async { fetchAniListCovers(title, isAnime = true) })
@@ -420,7 +420,7 @@ class ArtworkWaterfallRepository(
         return try {
             val payload = buildJsonObject {
                 put("filters", json.parseToJsonElement("[\"search\", \"=\", \"$title\"]"))
-                put("fields", "title, image.url")
+                put("fields", "title, image.url, screenshots.url")
             }
 
             val request = Request.Builder()
@@ -434,18 +434,39 @@ class ArtworkWaterfallRepository(
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
                 val results = parsed["results"]?.jsonArray ?: return emptyList()
 
-                results.mapNotNull { item ->
-                    val imageObj = item.jsonObject["image"]?.jsonObject
-                    val url = imageObj?.get("url")?.jsonPrimitive?.content
-                    val vnTitle = item.jsonObject["title"]?.jsonPrimitive?.content ?: title
-                    if (url != null) {
-                        ArtworkCandidate(
-                            url = url,
-                            sourceName = "VNDB",
-                            description = vnTitle
+                val candidates = mutableListOf<ArtworkCandidate>()
+                results.forEach { item ->
+                    val obj = item.jsonObject
+                    val vnTitle = obj["title"]?.jsonPrimitive?.content ?: title
+                    val imageObj = obj["image"]?.jsonObject
+                    val coverUrl = imageObj?.get("url")?.jsonPrimitive?.content
+                    if (!coverUrl.isNullOrBlank()) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = coverUrl,
+                                sourceName = "VNDB",
+                                description = vnTitle,
+                                isBanner = false
+                            )
                         )
-                    } else null
+                    }
+
+                    val screenshots = obj["screenshots"]?.jsonArray
+                    screenshots?.forEachIndexed { idx, shot ->
+                        val shotUrl = shot.jsonObject["url"]?.jsonPrimitive?.content
+                        if (!shotUrl.isNullOrBlank()) {
+                            candidates.add(
+                                ArtworkCandidate(
+                                    url = shotUrl,
+                                    sourceName = "VNDB Screenshot",
+                                    description = "$vnTitle (Visual Novel Screenshot ${idx + 1})",
+                                    isBanner = true
+                                )
+                            )
+                        }
+                    }
                 }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()

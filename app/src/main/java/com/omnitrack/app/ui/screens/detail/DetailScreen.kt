@@ -148,8 +148,6 @@ fun DetailScreen(
     val coroutineScope = rememberCoroutineScope()
     var showArtworkPicker by remember { mutableStateOf(false) }
     var showOptionsMenu by remember { mutableStateOf(false) }
-    var synopsisExpanded by remember(item?.id) { mutableStateOf(false) }
-    var canExpandSynopsis by remember(item?.id) { mutableStateOf(false) }
 
     var showProgressEditSheet by remember { mutableStateOf(false) }
     var showStatusPickerSheet by remember { mutableStateOf(false) }
@@ -324,11 +322,11 @@ fun DetailScreen(
                 )
             }
     ) {
-        if (uiState.isLoading || item == null) {
+        if (uiState.isLoading && item == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
-        } else {
+        } else if (item != null) {
             // Dynamic Artwork Role Resolution
             val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
                 item.customCoverPath ?: when (item.artworkRole) {
@@ -385,397 +383,58 @@ fun DetailScreen(
                     .fillMaxSize()
                     .verticalScroll(scrollState)
             ) {
-                // PRESENTATION MODE 1: Hero Layout (Hero Banner + Zero-Box Flowing Metadata & Stats)
+                // PRESENTATION MODE 1 or 2
                 if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                    if (backdropTargetUrl != null) {
-                        // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(350.dp)
-                        ) {
-                            AsyncImage(
-                                model = backdropTargetUrl,
-                                contentDescription = item.title,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .featherArtwork(startYRatio = 0.50f),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.height(72.dp))
-                    }
-
-                    // Content Section directly beneath the banner: 100% ZERO BOXES!
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .offset(y = (-8).dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Title Row with '...' button cleanly beside the title
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
-                                val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
-
-                                if (hasClearart) {
-                                    AsyncImage(
-                                        model = item.clearartUrl,
-                                        contentDescription = item.title,
-                                        modifier = Modifier
-                                            .height(52.dp)
-                                            .padding(bottom = 6.dp),
-                                        contentScale = ContentScale.Fit,
-                                        alignment = Alignment.CenterStart,
-                                        onError = { clearartFailed = true }
-                                    )
-                                }
-                                Text(
-                                    text = item.title,
-                                    color = TextPrimary,
-                                    fontSize = if (hasClearart) 20.sp else 24.sp,
-                                    fontWeight = FontWeight.Black,
-                                    lineHeight = if (hasClearart) 25.sp else 29.sp
-                                )
-                                if (item.nativeTitle != null) {
-                                    Text(
-                                        text = item.nativeTitle,
-                                        color = Color.White.copy(alpha = 0.85f),
-                                        fontSize = 12.5.sp
-                                    )
-                                }
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                ) {
-                                    Text(
-                                        text = item.mediaType.displayName.uppercase(),
-                                        color = AccentArctic,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Black,
-                                        letterSpacing = 1.sp
-                                    )
-                                    if (item.platform != null) {
-                                        Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
-                                        Text(text = item.platform, color = Color.White, fontSize = 11.5.sp)
-                                    }
-                                }
-                            }
-
-                            // '...' Button (Cleanly beside the title, completely off the banner!)
-                            IconButton(
-                                onClick = { showOptionsMenu = true },
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .padding(start = 8.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Options",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-
-                        // 1:1 Nuvio Unboxed Metadata Line (Year, Genres, Runtime, Age Rating)
-                        DetailNuvioMetaRow(item = item)
-
-                        // 1:1 Nuvio Pure Stack: Ratings sit directly underneath metadata row (tight 6.dp spacing)
-                        NuvioRatingsRow(item = item)
-
-                        // 100% UNBOXED Inline Stats Row with Hairline Dividers (Option A Clean EP Counter)
-                        UnboxedStatsRow(
-                            item = item,
-                            onEditProgress = { showProgressEditSheet = true },
-                            onEditStatus = { showStatusPickerSheet = true },
-                            onEditScore = { showScoreRatingSheet = true },
-                            onOpenTrackers = { showMultiTrackerSheet = true }
-                        )
-                    }
+                    DetailHeroHeaderSection(
+                        item = item,
+                        backdropTargetUrl = backdropTargetUrl,
+                        onOptionsClick = { showOptionsMenu = true },
+                        onEditProgress = { showProgressEditSheet = true },
+                        onEditStatus = { showStatusPickerSheet = true },
+                        onEditScore = { showScoreRatingSheet = true },
+                        onOpenTrackers = { showMultiTrackerSheet = true }
+                    )
                 } else {
-                    // PRESENTATION MODE 2: Classic Overlapping Poster
-                    val hasBackdrop = backdropTargetUrl != null
-                    val posterOffset = if (hasBackdrop) (-50).dp else 0.dp
-                    val statsOffset = if (hasBackdrop) (-30).dp else 0.dp
-
-                    if (hasBackdrop) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(350.dp)
-                        ) {
-                            AsyncImage(
-                                model = backdropTargetUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .featherArtwork(startYRatio = 0.50f),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-                    } else {
-                        // Chimanew-style natural breathing room below top action bar
-                        Spacer(
-                            modifier = Modifier
-                                .statusBarsPadding()
-                                .height(56.dp + 16.dp)
-                        )
-                    }
-
-                    // Overlapping Poster Row (Clean, no buttons over banner!)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .offset(y = posterOffset),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(120.dp)
-                                .aspectRatio(0.68f)
-                                .shadow(18.dp, RoundedCornerShape(14.dp))
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable { showArtworkPicker = true }
-                        ) {
-                            AsyncImage(
-                                model = coverImageModel,
-                                contentDescription = item.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                onSuccess = {
-                                    if (coverImageModel is String && coverCache != null) {
-                                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                            coverCache.promoteFromDiskCache(coverImageModel, diskCache)
-                                        }
-                                    }
-                                }
-                            )
-                        }
-
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(bottom = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = item.title,
-                                        color = TextPrimary,
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        lineHeight = 27.sp
-                                    )
-                                    if (item.nativeTitle != null) {
-                                        Text(
-                                            text = item.nativeTitle,
-                                            color = Color.White.copy(alpha = 0.85f),
-                                            fontSize = 12.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = { showOptionsMenu = true },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = "Options",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                    DetailClassicHeaderSection(
+                        item = item,
+                        coverImageModel = coverImageModel,
+                        backdropTargetUrl = backdropTargetUrl,
+                        onCoverClick = { showArtworkPicker = true },
+                        onCoverLoaded = { url ->
+                            if (coverCache != null) {
+                                val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    coverCache.promoteFromDiskCache(url, diskCache)
                                 }
                             }
-                            Text(
-                                text = item.mediaType.displayName.uppercase(),
-                                color = AccentArctic,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .offset(y = statsOffset)
-                    ) {
-                        Column {
-                            DetailNuvioMetaRow(item = item)
-                            NuvioRatingsRow(item = item)
-                            UnboxedStatsRow(
-                                item = item,
-                                onEditProgress = { showProgressEditSheet = true },
-                                onEditStatus = { showStatusPickerSheet = true },
-                                onEditScore = { showScoreRatingSheet = true },
-                                onOpenTrackers = { showMultiTrackerSheet = true }
-                            )
-                        }
-                    }
+                        },
+                        onOptionsClick = { showOptionsMenu = true },
+                        onEditProgress = { showProgressEditSheet = true },
+                        onEditStatus = { showStatusPickerSheet = true },
+                        onEditScore = { showScoreRatingSheet = true },
+                        onOpenTrackers = { showMultiTrackerSheet = true }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Seamless Synopsis with bidirectional overflow-aware toggle
                 if (!item.synopsis.isNullOrBlank()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .animateContentSize()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                enabled = canExpandSynopsis,
-                                onClick = { synopsisExpanded = !synopsisExpanded }
-                            )
-                    ) {
-                        Text(
-                            text = item.synopsis,
-                            color = Color.White.copy(alpha = 0.90f),
-                            fontSize = 13.5.sp,
-                            lineHeight = 20.sp,
-                            maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
-                            overflow = TextOverflow.Ellipsis,
-                            onTextLayout = { textLayoutResult ->
-                                if (!synopsisExpanded) {
-                                    canExpandSynopsis = textLayoutResult.hasVisualOverflow || textLayoutResult.lineCount > 3
-                                }
-                            }
-                        )
-                        if (canExpandSynopsis) {
-                            Text(
-                                text = if (synopsisExpanded) "Show less" else "Read more",
-                                color = dominantAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                    }
-
+                    DetailSynopsisSection(
+                        synopsis = item.synopsis,
+                        dominantAccent = dominantAccent
+                    )
                     Spacer(modifier = Modifier.height(14.dp))
                 }
 
-
-
                 // Progress Section (100% Unboxed flowing controls)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    when (item.mediaType) {
-                        MediaType.MANGA, MediaType.NOVEL -> {
-                            ChapterStepper(
-                                unitLabel = item.mediaType.unitLabel,
-                                currentProgress = item.currentProgress,
-                                totalProgress = item.totalProgress,
-                                onProgressChanged = { viewModel.updateProgress(it) }
-                            )
-                        }
-
-                        MediaType.GAME -> {
-                            GameProgressCard(
-                                hoursPlayed = item.playtimeHours,
-                                storyProgress = item.currentProgress,
-                                totalStoryChapters = item.totalProgress,
-                                achievementsUnlocked = item.steamAchievementsUnlocked,
-                                achievementsTotal = item.steamAchievementsTotal,
-                                selectedPlatforms = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
-                                    ?: item.platform?.let { setOf(it) }
-                                    ?: emptySet(),
-                                steamAppId = null,
-                                onHoursChanged = { viewModel.updatePlaytime(it) },
-                                onStoryProgressChanged = { viewModel.updateProgress(it) },
-                                onPlatformToggled = { viewModel.togglePlatform(it) }
-                            )
-                        }
-
-                        MediaType.VISUAL_NOVEL -> {
-                            ChapterStepper(
-                                unitLabel = item.mediaType.unitLabel,
-                                currentProgress = item.currentProgress,
-                                totalProgress = item.totalProgress,
-                                onProgressChanged = { viewModel.updateProgress(it) },
-                                isDecimal = true,
-                                step = 0.5
-                            )
-                        }
-
-                        MediaType.MOVIE -> {
-                            val isWatched = item.status == TrackingStatus.COMPLETED
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        viewModel.updateStatus(
-                                            if (isWatched) TrackingStatus.PLAN_TO_TRACK else TrackingStatus.COMPLETED
-                                        )
-                                    }
-                                    .padding(vertical = 12.dp, horizontal = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isWatched) AccentJade else Color(0x22FFFFFF)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isWatched) {
-                                            Text("✓", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Text(
-                                        text = if (isWatched) "Watched" else "Mark as Watched",
-                                        color = if (isWatched) AccentJade else TextPrimary,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 16.sp
-                                    )
-                                }
-
-                                Text(
-                                    text = if (isWatched) "Completed" else "Plan to Watch",
-                                    color = if (isWatched) AccentJade else TextMuted,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        }
-
-                        else -> {}
-                    }
-                }
+                DetailProgressSection(
+                    item = item,
+                    onUpdateProgress = { viewModel.updateProgress(it) },
+                    onUpdatePlaytime = { viewModel.updatePlaytime(it) },
+                    onTogglePlatform = { viewModel.togglePlatform(it) },
+                    onUpdateStatus = { viewModel.updateStatus(it) }
+                )
 
                 // 1:1 Nuvio Seasons & Episode Tracking Grid
                 if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
@@ -927,150 +586,30 @@ fun DetailScreen(
 
             // Entry Options Bottom Sheet (Triggered by '...' button beside Title)
             if (showOptionsMenu) {
-                ModalBottomSheet(
-                    onDismissRequest = { showOptionsMenu = false },
-                    containerColor = AmoledBlack,
-                    dragHandle = {
-                        Box(
-                            modifier = Modifier
-                                .padding(vertical = 10.dp)
-                                .width(36.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f))
-                        )
+                DetailOptionsMenuBottomSheet(
+                    presentationSettings = presentationSettings,
+                    onDismiss = { showOptionsMenu = false },
+                    onChangeArtwork = {
+                        showOptionsMenu = false
+                        showArtworkPicker = true
+                    },
+                    onToggleLayout = {
+                        val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                            DetailsPagePresentation.CLASSIC
+                        } else {
+                            DetailsPagePresentation.HERO
+                        }
+                        coroutineScope.launch {
+                            prefManager.updateDetailsPagePresentation(newMode)
+                        }
+                        showOptionsMenu = false
+                    },
+                    onRemoveFromLibrary = {
+                        showOptionsMenu = false
+                        viewModel.deleteItem()
+                        onBack()
                     }
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 8.dp)
-                            .navigationBarsPadding(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "Entry Options",
-                            color = TextPrimary,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-
-                        // 1. Change Artwork
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    showOptionsMenu = false
-                                    showArtworkPicker = true
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Palette,
-                                contentDescription = null,
-                                tint = AccentArctic,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Change Artwork & Roles",
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Search online covers, pick custom image, swap roles",
-                                    color = TextMuted,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        // 2. Toggle Layout (Hero vs Classic Poster)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                                        DetailsPagePresentation.CLASSIC
-                                    } else {
-                                        DetailsPagePresentation.HERO
-                                    }
-                                    coroutineScope.launch {
-                                        prefManager.updateDetailsPagePresentation(newMode)
-                                    }
-                                    showOptionsMenu = false
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ViewCarousel,
-                                contentDescription = null,
-                                tint = AccentGold,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Toggle Layout",
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                                        "Current: Hero Layout (Tap for Classic Poster)"
-                                    } else {
-                                        "Current: Classic Poster (Tap for Hero Layout)"
-                                    },
-                                    color = TextMuted,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-
-                        // 3. Remove from Library
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    showOptionsMenu = false
-                                    viewModel.deleteItem()
-                                    onBack()
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                                tint = Color(0xFFEF4444),
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = "Remove from Library",
-                                    color = Color(0xFFEF4444),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = "Delete this media entry and its local cache",
-                                    color = Color(0xFFEF4444).copy(alpha = 0.7f),
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
+                )
             }
 
             // Cover & Banner artwork customization bottom sheet (Option A multi-tab)
@@ -1370,12 +909,8 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
     }
 
     val ageBadge = item.contentRating?.trim()?.takeIf { it.isNotBlank() }
-    val scoreVal = item.imdbScore ?: item.communityScore
-    val displayScore = scoreVal?.let { s ->
-        if (s <= 10f) String.format(java.util.Locale.US, "%.1f", s) else String.format(java.util.Locale.US, "%.1f", s / 10f)
-    }
 
-    if (releaseLine != null || runtimeText != null || ageBadge != null || displayScore != null) {
+    if (releaseLine != null || runtimeText != null || ageBadge != null) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1415,21 +950,548 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                     )
                 }
             }
-            displayScore?.let { scoreText ->
+        }
+    }
+}
+
+@Composable
+private fun DetailHeroHeaderSection(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    backdropTargetUrl: String?,
+    onOptionsClick: () -> Unit,
+    onEditProgress: () -> Unit,
+    onEditStatus: () -> Unit,
+    onEditScore: () -> Unit,
+    onOpenTrackers: () -> Unit
+) {
+    if (backdropTargetUrl != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(350.dp)
+        ) {
+            AsyncImage(
+                model = backdropTargetUrl,
+                contentDescription = item.title,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .featherArtwork(startYRatio = 0.50f),
+                contentScale = ContentScale.Crop
+            )
+        }
+    } else {
+        Spacer(modifier = Modifier.height(72.dp))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .offset(y = (-8).dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
+                val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+
+                if (hasClearart) {
+                    AsyncImage(
+                        model = item.clearartUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier
+                            .height(52.dp)
+                            .padding(bottom = 6.dp),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart,
+                        onError = { clearartFailed = true }
+                    )
+                }
+                Text(
+                    text = item.title,
+                    color = TextPrimary,
+                    fontSize = if (hasClearart) 20.sp else 24.sp,
+                    fontWeight = FontWeight.Black,
+                    lineHeight = if (hasClearart) 25.sp else 29.sp
+                )
+                if (item.nativeTitle != null) {
+                    Text(
+                        text = item.nativeTitle,
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.5.sp
+                    )
+                }
                 Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.padding(top = 2.dp)
                 ) {
                     Text(
-                        text = "★",
-                        fontSize = 13.sp,
-                        color = AccentGold
+                        text = item.mediaType.displayName.uppercase(),
+                        color = AccentArctic,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 1.sp
+                    )
+                    if (item.platform != null) {
+                        Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                        Text(text = item.platform, color = Color.White, fontSize = 11.5.sp)
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onOptionsClick,
+                modifier = Modifier
+                    .size(40.dp)
+                    .padding(start = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        DetailNuvioMetaRow(item = item)
+        NuvioRatingsRow(item = item)
+        UnboxedStatsRow(
+            item = item,
+            onEditProgress = onEditProgress,
+            onEditStatus = onEditStatus,
+            onEditScore = onEditScore,
+            onOpenTrackers = onOpenTrackers
+        )
+    }
+}
+
+@Composable
+private fun DetailClassicHeaderSection(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    coverImageModel: Any?,
+    backdropTargetUrl: String?,
+    onCoverClick: () -> Unit,
+    onCoverLoaded: (String) -> Unit,
+    onOptionsClick: () -> Unit,
+    onEditProgress: () -> Unit,
+    onEditStatus: () -> Unit,
+    onEditScore: () -> Unit,
+    onOpenTrackers: () -> Unit
+) {
+    val hasBackdrop = backdropTargetUrl != null
+    val posterOffset = if (hasBackdrop) (-50).dp else 0.dp
+    val statsOffset = if (hasBackdrop) (-30).dp else 0.dp
+
+    if (hasBackdrop) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(350.dp)
+        ) {
+            AsyncImage(
+                model = backdropTargetUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .featherArtwork(startYRatio = 0.50f),
+                contentScale = ContentScale.Crop
+            )
+        }
+    } else {
+        Spacer(
+            modifier = Modifier
+                .statusBarsPadding()
+                .height(56.dp + 16.dp)
+        )
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .offset(y = posterOffset),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        Box(
+            modifier = Modifier
+                .width(120.dp)
+                .aspectRatio(0.68f)
+                .shadow(18.dp, RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp))
+                .clickable { onCoverClick() }
+        ) {
+            AsyncImage(
+                model = coverImageModel,
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                onSuccess = {
+                    if (coverImageModel is String) {
+                        onCoverLoaded(coverImageModel)
+                    }
+                }
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(bottom = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        color = TextPrimary,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 27.sp
+                    )
+                    if (item.nativeTitle != null) {
+                        Text(
+                            text = item.nativeTitle,
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onOptionsClick,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+            Text(
+                text = item.mediaType.displayName.uppercase(),
+                color = AccentArctic,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 20.dp)
+            .offset(y = statsOffset)
+    ) {
+        Column {
+            DetailNuvioMetaRow(item = item)
+            NuvioRatingsRow(item = item)
+            UnboxedStatsRow(
+                item = item,
+                onEditProgress = onEditProgress,
+                onEditStatus = onEditStatus,
+                onEditScore = onEditScore,
+                onOpenTrackers = onOpenTrackers
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailSynopsisSection(
+    synopsis: String,
+    dominantAccent: Color
+) {
+    var synopsisExpanded by remember { mutableStateOf(false) }
+    var canExpandSynopsis by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp)
+            .animateContentSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = canExpandSynopsis,
+                onClick = { synopsisExpanded = !synopsisExpanded }
+            )
+    ) {
+        Text(
+            text = synopsis,
+            color = Color.White.copy(alpha = 0.90f),
+            fontSize = 13.5.sp,
+            lineHeight = 20.sp,
+            maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { textLayoutResult ->
+                if (!synopsisExpanded) {
+                    canExpandSynopsis = textLayoutResult.hasVisualOverflow || textLayoutResult.lineCount > 3
+                }
+            }
+        )
+        if (canExpandSynopsis) {
+            Text(
+                text = if (synopsisExpanded) "Show less" else "Read more",
+                color = dominantAccent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailProgressSection(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    onUpdateProgress: (Double) -> Unit,
+    onUpdatePlaytime: (Double) -> Unit,
+    onTogglePlatform: (String) -> Unit,
+    onUpdateStatus: (TrackingStatus) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        when (item.mediaType) {
+            MediaType.MANGA, MediaType.NOVEL -> {
+                ChapterStepper(
+                    unitLabel = item.mediaType.unitLabel,
+                    currentProgress = item.currentProgress,
+                    totalProgress = item.totalProgress,
+                    onProgressChanged = onUpdateProgress
+                )
+            }
+
+            MediaType.GAME -> {
+                GameProgressCard(
+                    hoursPlayed = item.playtimeHours,
+                    storyProgress = item.currentProgress,
+                    totalStoryChapters = item.totalProgress,
+                    achievementsUnlocked = item.steamAchievementsUnlocked,
+                    achievementsTotal = item.steamAchievementsTotal,
+                    selectedPlatforms = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+                        ?: item.platform?.let { setOf(it) }
+                        ?: emptySet(),
+                    steamAppId = null,
+                    onHoursChanged = onUpdatePlaytime,
+                    onStoryProgressChanged = onUpdateProgress,
+                    onPlatformToggled = onTogglePlatform
+                )
+            }
+
+            MediaType.VISUAL_NOVEL -> {
+                ChapterStepper(
+                    unitLabel = item.mediaType.unitLabel,
+                    currentProgress = item.currentProgress,
+                    totalProgress = item.totalProgress,
+                    onProgressChanged = onUpdateProgress,
+                    isDecimal = true,
+                    step = 0.5
+                )
+            }
+
+            MediaType.MOVIE -> {
+                val isWatched = item.status == TrackingStatus.COMPLETED
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onUpdateStatus(
+                                if (isWatched) TrackingStatus.PLAN_TO_TRACK else TrackingStatus.COMPLETED
+                            )
+                        }
+                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(if (isWatched) AccentJade else Color(0x22FFFFFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isWatched) {
+                                Text("✓", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text(
+                            text = if (isWatched) "Watched" else "Mark as Watched",
+                            color = if (isWatched) AccentJade else TextPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Text(
+                        text = if (isWatched) "Completed" else "Plan to Watch",
+                        color = if (isWatched) AccentJade else TextMuted,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            else -> {}
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DetailOptionsMenuBottomSheet(
+    presentationSettings: PresentationSettings,
+    onDismiss: () -> Unit,
+    onChangeArtwork: () -> Unit,
+    onToggleLayout: () -> Unit,
+    onRemoveFromLibrary: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = AmoledBlack,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.2f))
+            )
+        }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Entry Options",
+                color = TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // 1. Change Artwork
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onChangeArtwork() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Palette,
+                    contentDescription = null,
+                    tint = AccentArctic,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Change Artwork & Roles",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = scoreText,
+                        text = "Search online covers, pick custom image, swap roles",
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // 2. Toggle Layout (Hero vs Classic Poster)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onToggleLayout() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ViewCarousel,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Toggle Layout",
+                        color = TextPrimary,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                            "Current: Hero Layout (Tap for Classic Poster)"
+                        } else {
+                            "Current: Classic Poster (Tap for Hero Layout)"
+                        },
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // 3. Remove from Library
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onRemoveFromLibrary() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = Color(0xFFEF4444),
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Remove from Library",
+                        color = Color(0xFFEF4444),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Delete this media entry and its local cache",
+                        color = Color(0xFFEF4444).copy(alpha = 0.7f),
+                        fontSize = 12.sp
                     )
                 }
             }

@@ -656,7 +656,7 @@ class EnrichmentRepository(
         }
     }
 
-    suspend fun fetchTvSeasons(tmdbId: Long, apiKey: String): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
+    suspend fun fetchTvSeasons(tmdbId: Long, apiKey: String, showTitle: String? = null): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
         try {
             val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
             val req = Request.Builder().url(url).get().build()
@@ -679,7 +679,39 @@ class EnrichmentRepository(
                         posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
                         airDate = airDate
                     )
-                }.sortedBy { it.seasonNumber }
+                }.toMutableList().also { list ->
+                    if (!showTitle.isNullOrBlank()) {
+                        try {
+                            val encodedTitle = java.net.URLEncoder.encode(showTitle.trim(), "UTF-8")
+                            val tvmUrl = "https://api.tvmaze.com/singlesearch/shows?q=$encodedTitle&embed=seasons"
+                            val tvmReq = Request.Builder().url(tvmUrl).get().build()
+                            client.newCall(tvmReq).execute().use { tvmResp ->
+                                if (tvmResp.isSuccessful) {
+                                    val tvmBody = tvmResp.body?.string().orEmpty()
+                                    val tvmRoot = json.parseToJsonElement(tvmBody).jsonObject
+                                    val tvmSeasons = tvmRoot["_embedded"]?.jsonObject?.get("seasons")?.jsonArray
+                                    tvmSeasons?.forEach { sNode ->
+                                        val sObj = sNode.jsonObject
+                                        val sNum = sObj["number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@forEach
+                                        if (sNum > 0 && list.none { it.seasonNumber == sNum }) {
+                                            val sName = sObj["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: "Season $sNum"
+                                            val sEpCount = sObj["episodeOrder"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                            list.add(
+                                                com.omnitrack.app.data.model.MediaSeason(
+                                                    seasonNumber = sNum,
+                                                    name = sName,
+                                                    episodeCount = sEpCount,
+                                                    posterUrl = null,
+                                                    airDate = null
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }.sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
             }
         } catch (_: Exception) {
             emptyList()

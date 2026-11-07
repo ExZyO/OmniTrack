@@ -183,49 +183,36 @@ class MainActivity : ComponentActivity() {
                             val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
                             val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
                                 ?: tokenManager.getMalVerifier().orEmpty()
+                            
+                            android.util.Log.d("OmniTrack-MAL", "Starting MAL token exchange: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$effectiveRedirectUri, codeLen=${code.length}")
+                            
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", effectiveClientId)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
-                            if (customMal?.isNotBlank() == true) {
-                                form.add("redirect_uri", effectiveRedirectUri)
-                            }
+                                .add("redirect_uri", effectiveRedirectUri)
+                                .build()
+
                             val req = Request.Builder()
                                 .url("https://myanimelist.net/v1/oauth2/token")
                                 .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
-                                .post(form.build())
+                                .post(form)
                                 .build()
+
                             client.newCall(req).execute().use { resp ->
+                                val body = resp.body?.string().orEmpty()
+                                android.util.Log.d("OmniTrack-MAL", "MAL token response code=${resp.code}, body=$body")
                                 if (resp.isSuccessful) {
-                                    val body = resp.body?.string().orEmpty()
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                                     finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
                                 } else {
-                                    // Fallback retry with/without redirect_uri
-                                    val fallbackForm = FormBody.Builder()
-                                        .add("grant_type", "authorization_code")
-                                        .add("client_id", effectiveClientId)
-                                        .add("code", code)
-                                        .add("code_verifier", verifier)
-                                    if (customMal?.isNotBlank() != true) {
-                                        fallbackForm.add("redirect_uri", effectiveRedirectUri)
-                                    }
-                                    val fallbackReq = Request.Builder()
-                                        .url("https://myanimelist.net/v1/oauth2/token")
-                                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
-                                        .post(fallbackForm.build())
-                                        .build()
-                                    client.newCall(fallbackReq).execute().use { fbResp ->
-                                        if (fbResp.isSuccessful) {
-                                            val fbBody = fbResp.body?.string().orEmpty()
-                                            val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(fbBody).jsonObject
-                                            finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
-                                        }
-                                    }
+                                    android.util.Log.e("OmniTrack-MAL", "MAL token exchange failed with code ${resp.code}: $body")
                                 }
                             }
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) {
+                            android.util.Log.e("OmniTrack-MAL", "Exception during MAL token exchange", e)
+                        }
                     }
                     "trakt" -> {
                         try {

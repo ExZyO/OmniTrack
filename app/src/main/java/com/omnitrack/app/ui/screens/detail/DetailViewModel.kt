@@ -313,8 +313,11 @@ class DetailViewModel(
         }
     }
 
+    private var recommendationFetchJob: kotlinx.coroutines.Job? = null
+
     private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
-        viewModelScope.launch(Dispatchers.IO) {
+        recommendationFetchJob?.cancel()
+        recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()
             val castMembers = mutableListOf<CastMember>()
@@ -787,7 +790,7 @@ class DetailViewModel(
 
             if (item.tmdbId != null && (item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW || item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME)) {
                 try {
-                    val seasons = enrichmentRepository.fetchTvSeasons(item.tmdbId, tmdbKey)
+                    val seasons = enrichmentRepository.fetchTvSeasons(item.tmdbId, tmdbKey, item.title)
                     if (seasons.isNotEmpty()) {
                         _realSeasons.value = seasons
                         val currentSelected = _selectedSeasonNumber.value
@@ -806,9 +809,12 @@ class DetailViewModel(
         }
     }
 
+    private var seasonEpisodesJob: kotlinx.coroutines.Job? = null
+
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
-        viewModelScope.launch(Dispatchers.IO) {
+        seasonEpisodesJob?.cancel()
+        seasonEpisodesJob = viewModelScope.launch(Dispatchers.IO) {
             val item = _previewItem.value ?: repository.getMediaById(_mediaId.value).firstOrNull()
             val tmdbId = item?.tmdbId ?: return@launch
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"

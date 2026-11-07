@@ -260,8 +260,9 @@ fun TrackerAccountsSheet(
                                 TrackerAccountVerifier.pendingMalVerifier = verifier
                                 tokenManager.saveMalVerifier(verifier)
                                 val effectiveClientId = customMalClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.MAL_CLIENT_ID
-                                val redirectParam = if (customMalClientId.isNotBlank()) "&redirect_uri=omnitrack://auth/mal" else ""
-                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain$redirectParam"
+                                val redirectUri = "omnitrack://auth/mal"
+                                android.util.Log.d("OmniTrack-MAL", "Launching MAL authorize: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$redirectUri")
+                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri"
                                 context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                             }
                         },
