@@ -28,7 +28,8 @@ data class HomeUiState(
 
 class HomeViewModel(
     private val repository: MediaRepository,
-    private val coverCache: com.omnitrack.app.data.cache.CoverCache? = null
+    private val coverCache: com.omnitrack.app.data.cache.CoverCache? = null,
+    private val diskCache: coil3.disk.DiskCache? = null
 ) : ViewModel() {
 
     private val _selectedMediaType = MutableStateFlow(MediaType.ALL)
@@ -73,6 +74,11 @@ class HomeViewModel(
                     val activeUrls = items.map { it.coverUrl }.toSet()
                     val activeIds = items.map { it.id }.toSet()
                     coverCache.pruneOrphans(activeUrls, activeIds)
+                    if (diskCache != null) {
+                        for (url in activeUrls) {
+                            coverCache.promoteFromDiskCache(url, diskCache)
+                        }
+                    }
                 }
                 _isLoading.value = false
                 return@collect
@@ -112,12 +118,13 @@ class HomeViewModel(
     companion object {
         fun factory(
             repository: MediaRepository,
-            coverCache: com.omnitrack.app.data.cache.CoverCache? = null
+            coverCache: com.omnitrack.app.data.cache.CoverCache? = null,
+            diskCache: coil3.disk.DiskCache? = null
         ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return HomeViewModel(repository, coverCache) as T
+                    return HomeViewModel(repository, coverCache, diskCache) as T
                 }
             }
         }

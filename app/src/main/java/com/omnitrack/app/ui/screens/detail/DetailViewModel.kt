@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -36,7 +37,8 @@ class DetailViewModel(
         .flatMapLatest { id ->
             repository.getMediaById(id).filterNotNull().flatMapLatest { currentItem ->
                 repository.getAllMedia().map { allItems ->
-                    val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
+                    val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+                    val siblings = if (sameType.size > 1) sameType else allItems
                     val currentIndex = siblings.indexOfFirst { it.id == currentItem.id }
                     DetailUiState(
                         item = currentItem,
@@ -58,13 +60,12 @@ class DetailViewModel(
         val currentItem = uiState.value.item ?: return false
         val currentId = _mediaId.value
         viewModelScope.launch {
-            repository.getAllMedia().collect { allItems ->
-                val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
-                val currentIndex = siblings.indexOfFirst { it.id == currentId }
-                if (currentIndex > 0) {
-                    _mediaId.value = siblings[currentIndex - 1].id
-                }
-                return@collect
+            val allItems = repository.getAllMedia().first()
+            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+            val siblings = if (sameType.size > 1) sameType else allItems
+            val currentIndex = siblings.indexOfFirst { it.id == currentId }
+            if (currentIndex > 0) {
+                _mediaId.value = siblings[currentIndex - 1].id
             }
         }
         return true
@@ -74,13 +75,12 @@ class DetailViewModel(
         val currentItem = uiState.value.item ?: return false
         val currentId = _mediaId.value
         viewModelScope.launch {
-            repository.getAllMedia().collect { allItems ->
-                val siblings = allItems.filter { it.mediaType == currentItem.mediaType }
-                val currentIndex = siblings.indexOfFirst { it.id == currentId }
-                if (currentIndex in 0 until siblings.size - 1) {
-                    _mediaId.value = siblings[currentIndex + 1].id
-                }
-                return@collect
+            val allItems = repository.getAllMedia().first()
+            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
+            val siblings = if (sameType.size > 1) sameType else allItems
+            val currentIndex = siblings.indexOfFirst { it.id == currentId }
+            if (currentIndex in 0 until siblings.size - 1) {
+                _mediaId.value = siblings[currentIndex + 1].id
             }
         }
         return true

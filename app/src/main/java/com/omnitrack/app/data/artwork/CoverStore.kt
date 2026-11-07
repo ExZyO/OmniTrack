@@ -39,7 +39,15 @@ class CoverStore(
             val bitmap = BitmapFactory.decodeStream(inputStream, null, options) ?: return@withContext null
             inputStream.close()
 
-            val targetFile = File(customArtDir, "${mediaId}_cover.webp")
+            // Clean up previous custom cover versions for this item
+            customArtDir.listFiles()?.forEach { file ->
+                if (file.isFile && (file.name.startsWith("${mediaId}_cover") || file.name == "${mediaId}_cover.webp")) {
+                    file.delete()
+                }
+            }
+
+            // Save with fresh timestamp in filename for zero-cost cache busting
+            val targetFile = File(customArtDir, "${mediaId}_cover_${System.currentTimeMillis()}.webp")
             FileOutputStream(targetFile).use { out ->
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                     bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 95, out)

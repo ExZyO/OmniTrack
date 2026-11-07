@@ -84,21 +84,15 @@ fun MediaCard(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val bounceScale = remember { Animatable(1f) }
     var showPlusOne by remember { mutableStateOf(false) }
 
-    val customFile = remember(item.customCoverPath) { item.customCoverPath?.let { java.io.File(it) } }
-    val coverModel = remember(item.customCoverPath, item.coverUrl, customFile?.lastModified()) {
-        if (customFile != null && customFile.exists()) {
-            coil3.request.ImageRequest.Builder(context)
-                .data(customFile)
-                .memoryCacheKey("${customFile.absolutePath}_${customFile.lastModified()}")
-                .diskCacheKey("${customFile.absolutePath}_${customFile.lastModified()}")
-                .build()
-        } else {
-            LosslessCoverMapper.toLosslessUrl(item.coverUrl)
-        }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
+
+    // Zero-syscall model: customCoverPath is timestamped on write, avoiding disk stat() on 120Hz scroll
+    val coverModel = remember(item.customCoverPath, item.coverUrl) {
+        item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
     }
 
     Column(
@@ -126,7 +120,15 @@ fun MediaCard(
                 model = coverModel,
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                onSuccess = {
+                    if (coverModel is String && coverCache != null) {
+                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            coverCache.promoteFromDiskCache(coverModel, diskCache)
+                        }
+                    }
+                }
             )
 
             // Bottom glass scrim for readable progress overlay

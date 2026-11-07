@@ -122,15 +122,53 @@ fun DetailScreen(
     var synopsisExpanded by remember(item?.id) { mutableStateOf(false) }
     var canExpandSynopsis by remember(item?.id) { mutableStateOf(false) }
 
-    // Kinematic horizontal swipe physics (swipe between entries & swipe-to-back)
-    var dragOffsetX by remember { mutableStateOf(0f) }
+    val scrollState = rememberScrollState()
+
+    // Kinematic horizontal & vertical swipe physics (bilateral entry switching & Poweramp pull-down to dismiss)
+    var dragOffsetX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     val animatedDragOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
         label = "horizontalSwipe"
     )
+    val animatedDragOffsetY by animateFloatAsState(
+        targetValue = dragOffsetY,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "verticalDismiss"
+    )
+
+    val nestedScrollConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): Offset {
+                // When pulling down at the very top of the screen (scrollState == 0)
+                if (available.y > 0 && scrollState.value == 0) {
+                    dragOffsetY += available.y * 0.5f
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                if (dragOffsetY > 160f) {
+                    dragOffsetY = 0f
+                    onBack()
+                } else {
+                    dragOffsetY = 0f
+                }
+                return androidx.compose.ui.unit.Velocity.Zero
+            }
+        }
+    }
 
     LaunchedEffect(item?.id) {
+        dragOffsetX = 0f
+        dragOffsetY = 0f
+        scrollState.scrollTo(0)
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
         }
@@ -142,23 +180,34 @@ fun DetailScreen(
             .background(AmoledBlack)
             .graphicsLayer {
                 translationX = animatedDragOffsetX
-                val scale = (1f - (kotlin.math.abs(animatedDragOffsetX) / 1000f * 0.08f)).coerceIn(0.92f, 1f)
+                translationY = animatedDragOffsetY.coerceAtLeast(0f)
+                val absX = kotlin.math.abs(animatedDragOffsetX)
+                val absY = animatedDragOffsetY.coerceAtLeast(0f)
+                val totalOffset = kotlin.math.sqrt(absX * absX + absY * absY)
+                val scale = (1f - (totalOffset / 1200f * 0.08f)).coerceIn(0.92f, 1f)
                 scaleX = scale
                 scaleY = scale
-                alpha = (1f - (kotlin.math.abs(animatedDragOffsetX) / 1000f * 0.4f)).coerceIn(0.6f, 1f)
+                alpha = (1f - (totalOffset / 1000f * 0.35f)).coerceIn(0.65f, 1f)
             }
+            .androidx.compose.ui.input.nestedscroll.nestedScroll(nestedScrollConnection)
             .pointerInput(uiState.hasPreviousEntry, uiState.hasNextEntry) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         when {
-                            dragOffsetX > 240f -> onBack()
-                            dragOffsetX > 140f && uiState.hasPreviousEntry -> {
+                            // Swiping right: navigate to previous sibling entry
+                            dragOffsetX > 100f && uiState.hasPreviousEntry -> {
                                 dragOffsetX = 0f
                                 viewModel.navigateToPrevious()
                             }
-                            dragOffsetX < -140f && uiState.hasNextEntry -> {
+                            // Swiping left: navigate to next sibling entry
+                            dragOffsetX < -100f && uiState.hasNextEntry -> {
                                 dragOffsetX = 0f
                                 viewModel.navigateToNext()
+                            }
+                            // Swiping right past threshold when at start of category: return to library
+                            dragOffsetX > 200f && !uiState.hasPreviousEntry -> {
+                                dragOffsetX = 0f
+                                onBack()
                             }
                             else -> dragOffsetX = 0f
                         }
@@ -191,17 +240,9 @@ fun DetailScreen(
                 }
             }
 
-            val customCoverFile = remember(item.customCoverPath) { item.customCoverPath?.let { java.io.File(it) } }
-            val coverImageModel = remember(effectiveCover, customCoverFile?.lastModified()) {
-                if (customCoverFile != null && customCoverFile.exists()) {
-                    coil3.request.ImageRequest.Builder(context)
-                        .data(customCoverFile)
-                        .memoryCacheKey("${customCoverFile.absolutePath}_${customCoverFile.lastModified()}")
-                        .diskCacheKey("${customCoverFile.absolutePath}_${customCoverFile.lastModified()}")
-                        .build()
-                } else {
-                    LosslessCoverMapper.toLosslessUrl(effectiveCover)
-                }
+            val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
+            val coverImageModel = remember(effectiveCover, item.customCoverPath) {
+                item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
             }
 
             val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
@@ -236,7 +277,7 @@ fun DetailScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
             ) {
                 // PRESENTATION MODE 1: Hero Layout (Hero Banner + Zero-Box Flowing Metadata & Stats)
                 if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
@@ -364,7 +405,15 @@ fun DetailScreen(
                                 model = coverImageModel,
                                 contentDescription = item.title,
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
+                                contentScale = ContentScale.Crop,
+                                onSuccess = {
+                                    if (coverImageModel is String && coverCache != null) {
+                                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            coverCache.promoteFromDiskCache(coverImageModel, diskCache)
+                                        }
+                                    }
+                                }
                             )
                         }
 
@@ -774,7 +823,11 @@ fun DetailScreen(
                     currentRole = item.artworkRole,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
-                        viewModel.updateCover(newUrl)
+                        if (newUrl.startsWith("/") || newUrl.startsWith("file:")) {
+                            viewModel.updateCustomCoverPath(newUrl, context)
+                        } else {
+                            viewModel.updateCover(newUrl)
+                        }
                         showArtworkPicker = false
                     },
                     onRoleSelected = { newRole ->

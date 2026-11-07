@@ -58,8 +58,9 @@ fun OmniTrackNavigation(
         ) {
             val context = androidx.compose.ui.platform.LocalContext.current
             val coverCache = androidx.compose.runtime.remember { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).coverCache }
+            val diskCache = androidx.compose.runtime.remember { coil3.SingletonImageLoader.get(context).diskCache }
             val homeViewModel: HomeViewModel = viewModel(
-                factory = HomeViewModel.factory(repository, coverCache)
+                factory = HomeViewModel.factory(repository, coverCache, diskCache)
             )
 
             HomeScreen(

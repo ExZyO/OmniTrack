@@ -1,6 +1,9 @@
 package com.omnitrack.app.data.cache
 
 import android.content.Context
+import coil3.disk.DiskCache
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
@@ -30,28 +33,71 @@ class CoverCache(private val context: Context) {
 
     /**
      * Returns the custom cover file for a specific media item.
+     * Looks for timestamped files first (${mediaId}_*.jpg).
      */
     fun getCustomCoverFile(mediaId: Long): File {
-        return File(customCoverDir, "$mediaId.jpg")
+        val matching = customCoverDir.listFiles()?.filter {
+            it.isFile && (it.name.startsWith("${mediaId}_") || it.name == "$mediaId.jpg")
+        }?.maxByOrNull { it.lastModified() }
+
+        return matching ?: File(customCoverDir, "${mediaId}_${System.currentTimeMillis()}.jpg")
     }
 
     /**
      * Checks if a custom cover override exists for this media item.
      */
     fun hasCustomCover(mediaId: Long): Boolean {
-        return getCustomCoverFile(mediaId).exists()
+        return customCoverDir.listFiles()?.any {
+            it.isFile && (it.name.startsWith("${mediaId}_") || it.name == "$mediaId.jpg")
+        } == true
     }
 
     /**
-     * Copies an input stream to the custom cover file for this media item.
+     * Copies an input stream to a new timestamped custom cover file (${mediaId}_${timestamp}.jpg).
+     * Deletes previous custom cover files for this media item so old files don't accumulate.
      */
     fun setCustomCover(mediaId: Long, inputStream: InputStream): File {
-        val file = getCustomCoverFile(mediaId)
-        file.parentFile?.mkdirs()
-        file.outputStream().use { out ->
+        // Clean up previous custom cover versions for this item
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg")) {
+                file.delete()
+            }
+        }
+
+        // Save with fresh timestamp in filename for zero-cost cache busting
+        val timestampedFile = File(customCoverDir, "${mediaId}_${System.currentTimeMillis()}.jpg")
+        timestampedFile.parentFile?.mkdirs()
+        timestampedFile.outputStream().use { out ->
             inputStream.copyTo(out)
         }
-        return file
+        return timestampedFile
+    }
+
+    /**
+     * Promotes an image from Coil's DiskCache snapshot into permanent CoverCache.
+     */
+    fun promoteFromDiskCache(thumbnailUrl: String, diskCache: DiskCache?): File? {
+        if (diskCache == null || thumbnailUrl.isBlank()) return null
+        val targetFile = getCoverFile(thumbnailUrl) ?: return null
+        if (targetFile.exists() && targetFile.length() > 0) return targetFile
+        val snapshot = diskCache.openSnapshot(thumbnailUrl) ?: return null
+        return try {
+            snapshot.use { snap ->
+                val sourceFile = snap.data.toFile()
+                if (sourceFile.exists() && sourceFile.length() > 0) {
+                    targetFile.parentFile?.mkdirs()
+                    sourceFile.inputStream().use { input ->
+                        targetFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    targetFile
+                } else null
+            }
+        } catch (_: Exception) {
+            targetFile.delete()
+            null
+        }
     }
 
     /**
@@ -102,15 +148,20 @@ class CoverCache(private val context: Context) {
      * Deletes a custom cover from disk.
      */
     fun deleteCustomCover(mediaId: Long): Boolean {
-        val file = getCustomCoverFile(mediaId)
-        return if (file.exists()) file.delete() else false
+        var deleted = false
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && (file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg")) {
+                if (file.delete()) deleted = true
+            }
+        }
+        return deleted
     }
 
     /**
      * Prunes orphaned cover files that are no longer referenced by any item in the library.
-     * Prevents unbounded storage growth over time.
+     * Prevents unbounded storage growth over time. Runs strictly on Dispatchers.IO.
      */
-    fun pruneOrphans(activeCoverUrls: Set<String>, activeMediaIds: Set<Long>) {
+    suspend fun pruneOrphans(activeCoverUrls: Set<String>, activeMediaIds: Set<Long>) = withContext(Dispatchers.IO) {
         val activeHashes = activeCoverUrls.map { hashKey(it) }.toSet()
         // Clean covers/
         cacheDir.listFiles()?.forEach { file ->
@@ -119,10 +170,13 @@ class CoverCache(private val context: Context) {
             }
         }
         // Clean covers/custom/
-        val activeCustomFileNames = activeMediaIds.map { "$it.jpg" }.toSet()
         customCoverDir.listFiles()?.forEach { file ->
-            if (file.isFile && file.name !in activeCustomFileNames) {
-                file.delete()
+            if (file.isFile) {
+                val idStr = file.name.substringBefore("_").substringBefore(".jpg")
+                val id = idStr.toLongOrNull()
+                if (id == null || id !in activeMediaIds) {
+                    file.delete()
+                }
             }
         }
     }
