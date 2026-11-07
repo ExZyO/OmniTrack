@@ -115,6 +115,29 @@ The following directives are transcribed directly from Exile's requirements and 
 
 ---
 
+## 🏆 Gold-Standard Category Benchmarks & Reference Strategy
+
+### Reverse Engineering Gold-Standard Category Apps: What’s the Best Strategy?
+
+Reverse engineering the single best app for each vertical is an excellent strategy, but there is a massive distinction between open-source apps vs. closed-source apps:
+
+- **Closed-Source Apps (like Cinexplore)**: Cinexplore is a beautiful Android Trakt client, but it is closed-source. Decompiling it with `jadx` yields ProGuard-obfuscated code (`a.b.c()`, renamed variables, and stripped Compose metadata). While it can be useful for extracting raw vector assets or inspecting specific API request payloads, writing code from it is slow and error-prone.
+- **Open-Source Kotlin + Jetpack Compose Apps (The Real Gold Standard)**: When an app is 100% open source and written in modern Jetpack Compose, we can inspect and port idiomatic, clean code directly with zero guessing.
+
+#### Gold-Standard Benchmarks by Media Vertical
+
+| Media Category | Gold-Standard App | Source Type | Why It's the Best Benchmark |
+| :--- | :--- | :--- | :--- |
+| **TV Shows & Movies** | **Nuvio Mobile / Enhanced + Showly 2.0** | Open Source (Kotlin Compose) | You already have Nuvio locally in `NuvioMobile-Official`. For pure Trakt/TMDb tracking without streaming, Showly 2.0 (`michaldrabik/showly-2.0` on GitHub) is the cleanest open-source Kotlin Compose Trakt app in existence (stats, calendars, collections). |
+| **Anime & Manga** | **Chimanew + Dantotsu** | Open Source (Kotlin Compose) | You have Chimanew locally (`C:\Users\M7 Surface\Documents\Chimanew`). For anime tracking and AniList voice actors/seiyuu, Dantotsu is the benchmark. |
+| **Books & Literature** | **OpenReads + Hardcover** | Open Source (Kotlin Compose) | OpenReads (`mateusz-bak/openreads-android` on GitHub) is a 100% open-source Jetpack Compose book tracking app. It handles reading logs, pages/chapters, reading speed, and Open Library integration. |
+| **Video Games** | **Playnite (Desktop) / OpenTrack** | Open Source | Playnite has the most complete multi-source game library architecture (Steam, Epic, GOG, IGDB), while OpenTrack provides clean mobile models. |
+| **Visual Novels** | **VNDB Kana v2** | Canonical Open API | VNDB's Kana REST API is the gold standard; we already communicate directly with it. |
+
+**Verdict**: Whenever we need a feature that Nuvio or Chimanew doesn't have, we benchmark against the open-source Kotlin Compose leader in that category (e.g., Showly for deep Trakt stats/calendar, OpenReads for advanced book progress).
+
+---
+
 ## 🛡️ Architectural Traps & Quality Guardrails
 
 The following 7 technical guardrails are binding constraints across all implementation phases:
