@@ -6,6 +6,8 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.spring
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.firstOrNull
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -220,19 +222,37 @@ fun MultiTrackerSheet(
         )
         fun addComick() = list.add(
             TrackerDef("COMICK", "Comick", Color(0xFFF43F5E), item.comickId, "Chapters",
-                browserUrlTemplate = { "https://comick.io/comic/$it" }) {
+                browserUrlTemplate = {
+                    if (it.contains(" ") || !it.contains("-")) {
+                        "https://comick.dev/search?q=${Uri.encode(it)}"
+                    } else {
+                        "https://comick.dev/comic/$it"
+                    }
+                }) {
                 onUpdateItem(item.copy(comickId = it))
             }
         )
         fun addSteam() = list.add(
-            TrackerDef("STEAM", "Steam", Color(0xFF66C0F4), item.platform, "Playtime Sync",
-                browserUrlTemplate = { "https://store.steampowered.com/app/$it" }) {
+            TrackerDef("STEAM", "Steam", Color(0xFF66C0F4), item.steamAchievementsTotal?.let { "Synced" } ?: item.platform, "Playtime Sync",
+                browserUrlTemplate = {
+                    if (it.all { c -> c.isDigit() }) {
+                        "https://store.steampowered.com/app/$it"
+                    } else {
+                        "https://store.steampowered.com/search/?term=${Uri.encode(item.title)}"
+                    }
+                }) {
                 onUpdateItem(item.copy(platform = it))
             }
         )
         fun addIgdb() = list.add(
             TrackerDef("IGDB", "IGDB", Color(0xFF9146FF), item.igdbId?.toString(), "100-Point",
-                browserUrlTemplate = { "https://www.igdb.com/games/$it" }) {
+                browserUrlTemplate = {
+                    if (it.all { c -> c.isDigit() }) {
+                        "https://www.igdb.com/search?type=1&q=${Uri.encode(item.title)}"
+                    } else {
+                        "https://www.igdb.com/games/$it"
+                    }
+                }) {
                 onUpdateItem(item.copy(igdbId = it?.toLongOrNull()))
             }
         )
@@ -1746,7 +1766,8 @@ private fun SearchAndRebindBottomSheet(
         isSearching = true
         scope.launch {
             try {
-                val results = app.omniSearchRepository.searchAll(query, item.mediaType)
+                val tmdbKey = app.preferenceManager.tmdbApiKey.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+                val results = app.omniSearchRepository.searchAll(query, item.mediaType, tmdbApiKey = tmdbKey)
                 searchResults = results
             } catch (_: Exception) {
                 searchResults = emptyList()
@@ -1758,6 +1779,14 @@ private fun SearchAndRebindBottomSheet(
 
     LaunchedEffect(Unit) {
         runSearch(item.title)
+    }
+
+    LaunchedEffect(searchQuery) {
+        val trimmed = searchQuery.trim()
+        if (trimmed.length >= 2 && trimmed != item.title) {
+            delay(350)
+            runSearch(trimmed)
+        }
     }
 
     ModalBottomSheet(
@@ -1849,7 +1878,7 @@ private fun SearchAndRebindBottomSheet(
                             "STEAM" -> res.igdbId?.toString()
                             "COMICK" -> res.title
                             else -> res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.bangumiId?.toString()
-                        } ?: return@forEach
+                        } ?: res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.title
 
                         Row(
                             modifier = Modifier
