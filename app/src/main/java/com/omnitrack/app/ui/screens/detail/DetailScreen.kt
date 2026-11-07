@@ -101,12 +101,15 @@ import com.omnitrack.app.ui.components.GameProgressCard
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
+import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
+import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
+import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
@@ -147,9 +150,77 @@ fun DetailScreen(
     var showStatusPickerSheet by remember { mutableStateOf(false) }
     var showScoreRatingSheet by remember { mutableStateOf(false) }
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
+    var selectedPerson by remember { mutableStateOf<CastMember?>(null) }
+    var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
 
-    BackHandler(enabled = uiState.isPreviewMode) {
+    BackHandler(enabled = selectedPerson != null) {
+        selectedPerson = null
+    }
+    BackHandler(enabled = selectedCompany != null) {
+        selectedCompany = null
+    }
+    BackHandler(enabled = uiState.isPreviewMode && selectedPerson == null && selectedCompany == null) {
         viewModel.closePreview()
+    }
+
+    if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
+        val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+        PersonDetailScreen(
+            personId = selectedPerson!!.tmdbPersonId!!,
+            personName = selectedPerson!!.name,
+            initialAvatarUrl = selectedPerson!!.avatarUrl,
+            apiKey = tmdbKey,
+            onBack = { selectedPerson = null },
+            onOpenMediaPreview = { recItem ->
+                selectedPerson = null
+                viewModel.openPreview(
+                    MediaItemEntity(
+                        id = 0,
+                        title = recItem.title,
+                        coverUrl = recItem.coverUrl,
+                        bannerUrl = recItem.bannerUrl,
+                        mediaType = recItem.mediaType,
+                        releaseYear = recItem.releaseYear?.toIntOrNull(),
+                        communityScore = recItem.rating,
+                        synopsis = recItem.synopsis,
+                        tmdbId = recItem.tmdbId,
+                        anilistId = recItem.anilistId,
+                        malId = recItem.malId
+                    )
+                )
+            }
+        )
+        return
+    }
+
+    if (selectedCompany != null && selectedCompany!!.id != null) {
+        val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+        TmdbEntityBrowseScreen(
+            entityId = selectedCompany!!.id!!,
+            entityName = selectedCompany!!.name,
+            entityType = selectedCompany!!.kind,
+            apiKey = tmdbKey,
+            onBack = { selectedCompany = null },
+            onOpenMediaPreview = { recItem ->
+                selectedCompany = null
+                viewModel.openPreview(
+                    MediaItemEntity(
+                        id = 0,
+                        title = recItem.title,
+                        coverUrl = recItem.coverUrl,
+                        bannerUrl = recItem.bannerUrl,
+                        mediaType = recItem.mediaType,
+                        releaseYear = recItem.releaseYear?.toIntOrNull(),
+                        communityScore = recItem.rating,
+                        synopsis = recItem.synopsis,
+                        tmdbId = recItem.tmdbId,
+                        anilistId = recItem.anilistId,
+                        malId = recItem.malId
+                    )
+                )
+            }
+        )
+        return
     }
 
     val scrollState = rememberScrollState()
@@ -445,13 +516,13 @@ fun DetailScreen(
                             }
                         }
 
-                        // 100% UNBOXED Inline Stats Row with Hairline Dividers
+                        // 1:1 Nuvio Unboxed Metadata Line (Year, Genres, Runtime, Age Rating)
+                        DetailNuvioMetaRow(item = item)
+
+                        // 100% UNBOXED Inline Stats Row with Hairline Dividers (Option A Clean EP Counter)
                         UnboxedStatsRow(
                             item = item,
                             onEditProgress = { showProgressEditSheet = true },
-                            onQuickIncrementProgress = {
-                                viewModel.updateProgress(item.currentProgress + 1.0)
-                            },
                             onEditStatus = { showStatusPickerSheet = true },
                             onEditScore = { showScoreRatingSheet = true },
                             onOpenTrackers = { showMultiTrackerSheet = true }
@@ -581,12 +652,10 @@ fun DetailScreen(
                             .offset(y = statsOffset)
                     ) {
                         Column {
+                            DetailNuvioMetaRow(item = item)
                             UnboxedStatsRow(
                                 item = item,
                                 onEditProgress = { showProgressEditSheet = true },
-                                onQuickIncrementProgress = {
-                                    viewModel.updateProgress(item.currentProgress + 1.0)
-                                },
                                 onEditStatus = { showStatusPickerSheet = true },
                                 onEditScore = { showScoreRatingSheet = true },
                                 onOpenTrackers = { showMultiTrackerSheet = true }
@@ -639,55 +708,29 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(14.dp))
                 }
 
-                // Show Details & Watch Trailer Pills
-                val hasTrailer = !item.trailerYoutubeKey.isNullOrBlank()
-                val hasMetadata = item.studioOrNetwork != null || item.airStatus != null || item.runtimeMinutes != null || item.contentRating != null
-                if (hasTrailer || hasMetadata) {
-                    Row(
+                // Watch Trailer Action (Clean unboxed pill, zero metadata boxes)
+                if (!item.trailerYoutubeKey.isNullOrBlank()) {
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (hasTrailer) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFFFF0000).copy(alpha = 0.18f))
-                                    .border(1.dp, Color(0xFFFF0000).copy(alpha = 0.5f), RoundedCornerShape(999.dp))
-                                    .clickable {
-                                        val key = item.trailerYoutubeKey
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key"))
-                                        context.startActivity(intent)
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 7.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("▶", fontSize = 11.sp, color = Color(0xFFFF0000), fontWeight = FontWeight.Black)
-                                    Text("Watch Trailer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                }
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFFFF0000).copy(alpha = 0.18f))
+                            .border(1.dp, Color(0xFFFF0000).copy(alpha = 0.5f), RoundedCornerShape(999.dp))
+                            .clickable {
+                                val key = item.trailerYoutubeKey
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key"))
+                                context.startActivity(intent)
                             }
-                        }
-
-                        item.studioOrNetwork?.let { studio ->
-                            MetadataBadge(label = "STUDIO", value = studio)
-                        }
-                        item.airStatus?.let { air ->
-                            MetadataBadge(label = "STATUS", value = air)
-                        }
-                        item.runtimeMinutes?.let { runtime ->
-                            MetadataBadge(label = "RUNTIME", value = "${runtime}m")
-                        }
-                        item.contentRating?.let { rating ->
-                            MetadataBadge(label = "AGE", value = rating)
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("▶", fontSize = 11.sp, color = Color(0xFFFF0000), fontWeight = FontWeight.Black)
+                            Text("Watch Trailer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
-
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
@@ -807,9 +850,23 @@ fun DetailScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                // Detail Networks & Production Companies Section (Clickable)
+                DetailNetworksSection(
+                    item = item,
+                    onCompanyClick = { company ->
+                        selectedCompany = company
+                    }
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
                 // Detail Cast Section (Avatars + character names)
                 if (uiState.cast.isNotEmpty()) {
-                    DetailCastSection(cast = uiState.cast)
+                    DetailCastSection(
+                        cast = uiState.cast,
+                        onCastMemberClick = { member ->
+                            selectedPerson = member
+                        }
+                    )
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
@@ -1146,7 +1203,6 @@ fun DetailScreen(
 private fun UnboxedStatsRow(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     onEditProgress: () -> Unit,
-    onQuickIncrementProgress: () -> Unit,
     onEditStatus: () -> Unit,
     onEditScore: () -> Unit,
     onOpenTrackers: () -> Unit,
@@ -1179,65 +1235,33 @@ private fun UnboxedStatsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Section 1: Progress Stepper & Fast +1 Increment
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        // Section 1: Option A - Clean Minimalist Counter (Zero pencil icon, Zero +1 badge)
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .clickable { onEditProgress() }
+                .padding(vertical = 4.dp, horizontal = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable { onEditProgress() }
-                    .padding(vertical = 4.dp, horizontal = 2.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(AccentArctic.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = null,
-                        tint = AccentArctic,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-                            String.format("%.1f", item.currentProgress)
-                        } else {
-                            "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
-                        },
-                        color = TextPrimary,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                    Text(
-                        text = item.mediaType.unitLabel.uppercase(),
-                        color = TextMuted,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.5.sp
-                    )
-                }
+            val progressNumber = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
+                String.format("%.1f hrs", item.playtimeHours)
+            } else {
+                "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
             }
-
-            // Fast +1 increment button with instant optimistic feedback
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(AccentArctic)
-                    .clickable { onQuickIncrementProgress() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text("+1", color = AmoledBlack, fontSize = 10.sp, fontWeight = FontWeight.Black)
-            }
+            Text(
+                text = progressNumber,
+                color = TextPrimary,
+                fontSize = 15.5.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = (-0.2).sp
+            )
+            Text(
+                text = item.mediaType.unitLabel.uppercase(),
+                color = AccentArctic,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp
+            )
         }
 
         // Vertical hairline
@@ -1370,17 +1394,68 @@ private fun UnboxedStatsRow(
 }
 
 @Composable
-private fun MetadataBadge(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(text = label, fontSize = 9.sp, fontWeight = FontWeight.Black, color = TextMuted)
-        Text(text = value, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemEntity) {
+    val releaseYear = item.releaseYear?.toString()
+    val genres = item.genres?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.take(2)?.joinToString(", ")
+    val releaseLine = when {
+        releaseYear != null && !genres.isNullOrBlank() -> "$releaseYear • $genres"
+        releaseYear != null -> releaseYear
+        !genres.isNullOrBlank() -> genres
+        else -> null
+    }
+
+    val runtimeText = item.runtimeMinutes?.let { minutes ->
+        val h = minutes / 60
+        val m = minutes % 60
+        when {
+            h > 0 && m > 0 -> "${h}h ${m}m"
+            h > 0 -> "${h}h"
+            else -> "${m}m"
+        }
+    }
+
+    val ageBadge = item.contentRating?.trim()?.takeIf { it.isNotBlank() }
+
+    if (releaseLine != null || runtimeText != null || ageBadge != null) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(vertical = 4.dp)
+        ) {
+            releaseLine?.let { line ->
+                Text(
+                    text = line,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+            runtimeText?.let { rt ->
+                Text(
+                    text = rt,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+            ageBadge?.let { badge ->
+                Box(
+                    modifier = Modifier
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.55f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = badge,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White.copy(alpha = 0.9f)
+                    )
+                }
+            }
+        }
     }
 }

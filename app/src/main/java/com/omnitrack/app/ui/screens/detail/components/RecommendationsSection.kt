@@ -96,77 +96,16 @@ fun RecommendationsSection(
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             recommendations.forEach { item ->
-                RecommendationCard(
-                    item = item,
-                    onClick = { onSelectRecommendation(item) }
+                com.omnitrack.app.ui.components.NuvioRailPosterCard(
+                    title = item.title,
+                    coverUrl = item.coverUrl,
+                    subtitle = item.releaseYear,
+                    rating = item.rating,
+                    onClick = { onSelectRecommendation(item) },
+                    cardWidth = 135.dp,
+                    cardHeight = 202.dp
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun RecommendationCard(
-    item: RecommendationItem,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(125.dp)
-            .clickable(onClick = onClick),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(125.dp)
-                .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(20.dp))
-                .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
-        ) {
-            AsyncImage(
-                model = item.coverUrl,
-                contentDescription = item.title,
-                modifier = Modifier.matchParentSize(),
-                contentScale = ContentScale.Crop
-            )
-
-            // Rating pill badge (if available)
-            if (item.rating != null && item.rating > 0f) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(AmoledBlack.copy(alpha = 0.8f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "★ ${String.format("%.1f", item.rating)}",
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentGold
-                    )
-                }
-            }
-        }
-
-        // Title and Year
-        Text(
-            text = item.title,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        if (item.releaseYear != null) {
-            Text(
-                text = item.releaseYear,
-                fontSize = 11.sp,
-                color = TextMuted
-            )
         }
     }
 }

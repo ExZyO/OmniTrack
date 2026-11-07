@@ -15,6 +15,7 @@ data class MediaCardSummary(
     val nativeTitle: String? = null,
     val coverUrl: String,
     val bannerUrl: String? = null,
+    val clearartUrl: String? = null,
     val mediaType: MediaType,
     val status: TrackingStatus = TrackingStatus.IN_PROGRESS,
     val currentProgress: Double = 0.0,

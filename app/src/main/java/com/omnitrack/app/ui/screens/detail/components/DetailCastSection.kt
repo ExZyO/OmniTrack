@@ -35,16 +35,20 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
+import androidx.compose.foundation.clickable
+
 data class CastMember(
     val name: String,
     val character: String? = null,
-    val avatarUrl: String? = null
+    val avatarUrl: String? = null,
+    val tmdbPersonId: Long? = null
 )
 
 @Composable
 fun DetailCastSection(
     cast: List<CastMember>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onCastMemberClick: ((CastMember) -> Unit)? = null
 ) {
     if (cast.isEmpty()) return
     val context = LocalContext.current
@@ -77,7 +81,9 @@ fun DetailCastSection(
             items(cast) { member ->
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(76.dp),
+                    modifier = Modifier
+                        .width(76.dp)
+                        .then(if (onCastMemberClick != null) Modifier.clickable { onCastMemberClick(member) } else Modifier),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Box(

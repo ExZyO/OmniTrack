@@ -202,8 +202,8 @@ fun TrackerAccountsSheet(
                 }
             }
 
-            // 1. AniList (Implicit OAuth, NO &redirect_uri= to avoid Invalid redirect_uri)
-            VerifiedTrackerCard(
+            // 1. AniList (1-Tap OAuth)
+            OAuthDirectTrackerCard(
                 title = "AniList",
                 subtitle = "Anime, Manga & Japanese Light Novels",
                 accentColor = Color(0xFF02A9FF),
@@ -211,12 +211,11 @@ fun TrackerAccountsSheet(
                 oauthUrl = "https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token",
                 oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifyAnilist(it) },
-                onSave = { scope.launch { tokenManager.saveAnilistToken(it); Toast.makeText(context, "AniList token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveAnilistToken(null); Toast.makeText(context, "AniList disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
-            // 2. MyAnimeList
-            VerifiedTrackerCard(
+            // 2. MyAnimeList (1-Tap PKCE OAuth)
+            OAuthDirectTrackerCard(
                 title = "MyAnimeList",
                 subtitle = "Anime & Manga status tracking",
                 accentColor = Color(0xFF2E51A2),
@@ -224,18 +223,16 @@ fun TrackerAccountsSheet(
                 oauthUrl = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=3342466cfb744b714350df413002f5ef&code_challenge=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&code_challenge_method=plain",
                 oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifyMal(it) },
-                onSave = { scope.launch { tokenManager.saveMalToken(it); Toast.makeText(context, "MAL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
-            // 3. Trakt.tv (With Device Code Flow & activate link)
-            VerifiedTrackerCard(
+            // 3. Trakt.tv (8-Char Device Code Flow)
+            OAuthDirectTrackerCard(
                 title = "Trakt.tv",
                 subtitle = "TV Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
                 verifyFn = { TrackerAccountVerifier.verifyTrakt(it) },
-                onSave = { scope.launch { tokenManager.saveTraktToken(it); Toast.makeText(context, "Trakt token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
                     Button(
@@ -260,50 +257,59 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 4. SIMKL (1-Tap OAuth with nuvio:// AND PIN Code Flow)
-            VerifiedTrackerCard(
+            // 4. SIMKL (1-Tap OAuth with nuvio:// & PIN Code Flow)
+            OAuthDirectTrackerCard(
                 title = "SIMKL",
                 subtitle = "Unified Anime, Shows & Movies tracker",
                 accentColor = Color(0xFF00E676),
                 initialToken = tokens.simklToken.orEmpty(),
-                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a&redirect_uri=nuvio://auth/simkl",
-                oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifySimkl(it) },
-                onSave = { scope.launch { tokenManager.saveSimklToken(it); Toast.makeText(context, "SIMKL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
-                                if (codeInfo != null) {
-                                    simklPinInfo = codeInfo
-                                    showSimklPinDialog = true
-                                } else {
-                                    Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                val url = "https://simkl.com/oauth/authorize?response_type=code&client_id=6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a&redirect_uri=nuvio://auth/simkl"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
+                                    if (codeInfo != null) {
+                                        simklPinInfo = codeInfo
+                                        showSimklPinDialog = true
+                                    } else {
+                                        Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Connect with PIN", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
+                            shape = RoundedCornerShape(999.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("PIN Code", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             )
 
-            // 5. Bangumi (Direct Token Link + 1-Tap OAuth)
-            VerifiedTrackerCard(
+            // 5. Bangumi (1-Tap OAuth via komikku://bangumi-auth with auto code-exchange)
+            OAuthDirectTrackerCard(
                 title = "Bangumi",
                 subtitle = "bgm.tv API - Anime, Manga & Games collection",
                 accentColor = Color(0xFFF09199),
                 initialToken = tokens.bangumiToken.orEmpty(),
-                oauthUrl = "https://next.bgm.tv/demo/access-token/create",
-                oauthButtonLabel = "Get Token",
                 verifyFn = { TrackerAccountVerifier.verifyBangumi(it) },
-                onSave = { scope.launch { tokenManager.saveBangumiToken(it); Toast.makeText(context, "Bangumi token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveBangumiToken(null); Toast.makeText(context, "Bangumi disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
                     Button(
@@ -321,14 +327,13 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 6. Comick (PKCE S256 OAuth)
-            VerifiedTrackerCard(
+            // 6. Comick (1-Tap PKCE S256 OAuth via app.mihon://comick-auth with auto code-exchange)
+            OAuthDirectTrackerCard(
                 title = "Comick",
                 subtitle = "Manga & Webtoon chapter progress bridge",
                 accentColor = Color(0xFFF43F5E),
                 initialToken = tokens.comickToken.orEmpty(),
                 verifyFn = { TrackerAccountVerifier.verifyComick(it) },
-                onSave = { scope.launch { tokenManager.saveComickToken(it); Toast.makeText(context, "Comick token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
                     Button(
@@ -350,14 +355,13 @@ fun TrackerAccountsSheet(
                 }
             )
 
-            // 7. VNDB (Kana REST API with GET /kana/authinfo verification)
-            VerifiedTrackerCard(
+            // 7. VNDB (User Personal Token)
+            ManualTokenTrackerCard(
                 title = "VNDB",
                 subtitle = "Kana REST API – Visual Novels tracking & votes",
                 accentColor = Color(0xFF3B82F6),
                 initialToken = tokens.vndbToken.orEmpty(),
-                oauthUrl = "https://vndb.org/u/tokens",
-                oauthButtonLabel = "Create Token",
+                tokenCreationUrl = "https://vndb.org/u/tokens",
                 verifyFn = { TrackerAccountVerifier.verifyVndb(it) },
                 onSave = { scope.launch { tokenManager.saveVndbToken(it); Toast.makeText(context, "VNDB token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveVndbToken(null); Toast.makeText(context, "VNDB disconnected", Toast.LENGTH_SHORT).show() } }
@@ -665,7 +669,7 @@ fun TrackerAccountsSheet(
 }
 
 @Composable
-private fun VerifiedTrackerCard(
+private fun OAuthDirectTrackerCard(
     title: String,
     subtitle: String,
     accentColor: Color,
@@ -673,9 +677,189 @@ private fun VerifiedTrackerCard(
     oauthUrl: String? = null,
     oauthButtonLabel: String = "1-Tap Log In",
     verifyFn: suspend (String) -> VerificationState,
-    onSave: (String) -> Unit,
     onDisconnect: () -> Unit,
     customActionButton: (@Composable () -> Unit)? = null
+) {
+    val context = LocalContext.current
+    var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
+
+    LaunchedEffect(initialToken) {
+        if (initialToken.isNotBlank()) {
+            verificationState = VerificationState.Checking
+            verificationState = verifyFn(initialToken.trim())
+        } else {
+            verificationState = VerificationState.Idle
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(DarkSurfaceElevated)
+            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 11.5.sp,
+                    color = TextMuted
+                )
+            }
+
+            // Real Live Verification Status Pill
+            when (val state = verificationState) {
+                is VerificationState.Checking -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentArctic,
+                            strokeWidth = 1.5.dp,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(text = "Verifying...", fontSize = 9.5.sp, color = TextMuted)
+                    }
+                }
+                is VerificationState.Verified -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(AccentJade.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(AccentJade)
+                        )
+                        Text(
+                            text = "Verified as ${state.username}",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentJade
+                        )
+                    }
+                }
+                is VerificationState.Failed -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFFEF4444).copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFEF4444))
+                        )
+                        Text(
+                            text = "Session expired",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFEF4444)
+                        )
+                    }
+                }
+                is VerificationState.Idle -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(TextMuted)
+                        )
+                        Text(
+                            text = "Not Connected",
+                            fontSize = 10.5.sp,
+                            color = TextMuted
+                        )
+                    }
+                }
+            }
+        }
+
+        // Direct Actions Only — ZERO TEXT FIELD!
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (initialToken.isBlank()) {
+                if (customActionButton != null) {
+                    customActionButton()
+                } else if (oauthUrl != null) {
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = oauthButtonLabel, color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                Button(
+                    onClick = onDisconnect,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    shape = RoundedCornerShape(999.dp)
+                ) {
+                    Text(text = "Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManualTokenTrackerCard(
+    title: String,
+    subtitle: String,
+    accentColor: Color,
+    initialToken: String,
+    tokenCreationUrl: String? = null,
+    verifyFn: suspend (String) -> VerificationState,
+    onSave: (String) -> Unit,
+    onDisconnect: () -> Unit
 ) {
     val context = LocalContext.current
     var textValue by remember(initialToken) { mutableStateOf(initialToken) }
@@ -705,7 +889,7 @@ private fun VerifiedTrackerCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     fontSize = 15.sp,
@@ -777,7 +961,7 @@ private fun VerifiedTrackerCard(
                                 .background(Color(0xFFEF4444))
                         )
                         Text(
-                            text = "Invalid credentials",
+                            text = "Invalid token",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFEF4444)
@@ -809,7 +993,7 @@ private fun VerifiedTrackerCard(
             }
         }
 
-        // Token Input Field
+        // Token Input Field for User-Supplied Token
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -861,25 +1045,22 @@ private fun VerifiedTrackerCard(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (customActionButton != null && initialToken.isBlank()) {
-                customActionButton()
-                Spacer(modifier = Modifier.width(8.dp))
-            } else if (oauthUrl != null && initialToken.isBlank()) {
+            if (tokenCreationUrl != null && initialToken.isBlank()) {
                 Button(
                     onClick = {
                         try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(tokenCreationUrl))
                             context.startActivity(intent)
                         } catch (e: Exception) {
                             Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
                     shape = RoundedCornerShape(999.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                    Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = oauthButtonLabel, color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Create Token", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
             }

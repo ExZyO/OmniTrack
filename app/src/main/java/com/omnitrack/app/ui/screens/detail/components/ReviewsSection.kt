@@ -27,7 +27,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,7 +39,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
@@ -48,7 +46,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 
 data class CommunityReview(
     val author: String,
-    val source: String, // "Trakt", "MyAnimeList", "Bangumi"
+    val source: String, // "Trakt", "TMDb Community", "MyAnimeList"
     val rating: Float? = null,
     val comment: String,
     val date: String? = null,
@@ -60,8 +58,8 @@ data class CommunityReview(
 
 /**
  * 1:1 Nuvio-Style Community & Trakt Reviews Carousel
- * Features subtle translucent AMOLED surface depth, spoiler warning masking,
- * review badge chips, and full CommentDetailSheet on tap.
+ * Dimensions: 280x190dp cards, AMOLED #121212 background, official green REVIEW chip,
+ * sanitized clean text (zero raw markdown), and warning-masked spoilers.
  */
 @Composable
 fun ReviewsSection(
@@ -74,9 +72,9 @@ fun ReviewsSection(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Section Header
+        // Section Header matching Nuvio
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -86,15 +84,14 @@ fun ReviewsSection(
         ) {
             Text(
                 text = "Community Reviews",
-                color = TextPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.3).sp
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = "${reviews.size} reviews",
                 color = TextMuted,
-                fontSize = 11.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -106,17 +103,17 @@ fun ReviewsSection(
         ) {
             itemsIndexed(reviews) { index, rev ->
                 val cardWidth = 280.dp
-                val cardHeight = 170.dp
+                val cardHeight = 190.dp
 
                 Box(
                     modifier = Modifier
                         .width(cardWidth)
                         .height(cardHeight)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xFF121212).copy(alpha = 0.75f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF121212))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
-                        .padding(14.dp)
+                        .padding(16.dp)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -136,7 +133,7 @@ fun ReviewsSection(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(26.dp)
+                                            .size(28.dp)
                                             .clip(CircleShape)
                                             .background(AccentArctic.copy(alpha = 0.15f)),
                                         contentAlignment = Alignment.Center
@@ -144,7 +141,7 @@ fun ReviewsSection(
                                         Text(
                                             text = rev.author.take(1).uppercase(),
                                             color = AccentArctic,
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -152,7 +149,7 @@ fun ReviewsSection(
                                     Text(
                                         text = rev.author,
                                         color = TextPrimary,
-                                        fontSize = 13.sp,
+                                        fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -166,31 +163,38 @@ fun ReviewsSection(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(999.dp))
                                             .background(AccentGold.copy(alpha = 0.15f))
-                                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
                                     ) {
-                                        Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(11.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(11.dp)
+                                        )
                                         Text(
                                             text = "${rev.rating.toInt()}/10",
                                             color = AccentGold,
-                                            fontSize = 10.sp,
+                                            fontSize = 10.5.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
                             }
 
+                            // 1:1 Nuvio Green REVIEW Badge
                             if (rev.isReview) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(AccentJade.copy(alpha = 0.15f))
-                                        .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color(0xFF1B3D2F))
+                                        .padding(horizontal = 10.dp, vertical = 3.dp)
                                 ) {
                                     Text(
                                         text = "REVIEW",
-                                        color = AccentJade,
-                                        fontSize = 8.5.sp,
-                                        fontWeight = FontWeight.Bold
+                                        color = Color(0xFF00E054),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp
                                     )
                                 }
                             }
@@ -198,35 +202,36 @@ fun ReviewsSection(
 
                         // Middle Body: Spoiler warning or formatted excerpt
                         Spacer(modifier = Modifier.height(6.dp))
+
                         if (rev.hasSpoiler) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Warning,
                                     contentDescription = null,
                                     tint = Color(0xFFF59E0B),
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = "Contains spoilers • Tap to read",
                                     color = Color(0xFFF59E0B),
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
                         } else {
                             Text(
-                                text = rev.comment.replace(Regex("\\[/?spoiler\\]", RegexOption.IGNORE_CASE), ""),
+                                text = rev.comment,
                                 color = TextSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 17.sp,
+                                fontSize = 12.5.sp,
+                                lineHeight = 18.sp,
                                 maxLines = 4,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -234,34 +239,47 @@ fun ReviewsSection(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Card Footer: Source & Likes
+                        // Card Footer: Source, Date & Likes
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = rev.source,
-                                color = TextMuted,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = rev.source,
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                rev.date?.let { d ->
+                                    Text(
+                                        text = "•  $d",
+                                        color = TextMuted.copy(alpha = 0.7f),
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                            }
 
                             if (rev.likes > 0) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Favorite,
                                         contentDescription = null,
-                                        tint = Color(0xFFEF4444).copy(alpha = 0.8f),
-                                        modifier = Modifier.size(10.dp)
+                                        tint = Color(0xFFED1C24).copy(alpha = 0.85f),
+                                        modifier = Modifier.size(11.dp)
                                     )
                                     Text(
                                         text = "${rev.likes}",
                                         color = TextMuted,
-                                        fontSize = 10.sp
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }

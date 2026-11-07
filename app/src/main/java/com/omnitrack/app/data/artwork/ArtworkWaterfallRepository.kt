@@ -70,6 +70,10 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchMangaDexCovers(title) })
                     deferreds.add(async { fetchComickCovers(title) })
                 }
+                MediaType.BOOK -> {
+                    deferreds.add(async { fetchGoogleBooksCovers(title) })
+                    deferreds.add(async { fetchOpenLibraryCovers(title) })
+                }
                 MediaType.SHOW, MediaType.MOVIE -> {
                     deferreds.add(async { fetchTvMazeCovers(title) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 2) })
@@ -537,6 +541,78 @@ class ArtworkWaterfallRepository(
                 }
             }
             candidates.distinctBy { it.url }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchGoogleBooksCovers(title: String): List<ArtworkCandidate> {
+        return try {
+            val encoded = URLEncoder.encode(title, "UTF-8")
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=8"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val bodyStr = response.body?.string() ?: return emptyList()
+                val root = json.parseToJsonElement(bodyStr).jsonObject
+                val items = root["items"]?.jsonArray ?: return emptyList()
+                val candidates = mutableListOf<ArtworkCandidate>()
+                for (item in items) {
+                    val volumeInfo = item.jsonObject["volumeInfo"]?.jsonObject ?: continue
+                    val bookTitle = volumeInfo["title"]?.jsonPrimitive?.content ?: title
+                    val imageLinks = volumeInfo["imageLinks"]?.jsonObject ?: continue
+                    val thumbnail = imageLinks["extraLarge"]?.jsonPrimitive?.content
+                        ?: imageLinks["large"]?.jsonPrimitive?.content
+                        ?: imageLinks["medium"]?.jsonPrimitive?.content
+                        ?: imageLinks["thumbnail"]?.jsonPrimitive?.content
+                    if (!thumbnail.isNullOrBlank()) {
+                        val highRes = thumbnail.replace("http://", "https://")
+                            .replace(Regex("&zoom=[1-5]"), "&zoom=0")
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = highRes,
+                                sourceName = "Google Books",
+                                description = bookTitle,
+                                isBanner = false
+                            )
+                        )
+                    }
+                }
+                candidates
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchOpenLibraryCovers(title: String): List<ArtworkCandidate> {
+        return try {
+            val encoded = URLEncoder.encode(title, "UTF-8")
+            val url = "https://openlibrary.org/search.json?title=$encoded&limit=8"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val bodyStr = response.body?.string() ?: return emptyList()
+                val root = json.parseToJsonElement(bodyStr).jsonObject
+                val docs = root["docs"]?.jsonArray ?: return emptyList()
+                val candidates = mutableListOf<ArtworkCandidate>()
+                for (doc in docs) {
+                    val docObj = doc.jsonObject
+                    val bookTitle = docObj["title"]?.jsonPrimitive?.content ?: title
+                    val coverId = docObj["cover_i"]?.jsonPrimitive?.content
+                    if (!coverId.isNullOrBlank()) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = "https://covers.openlibrary.org/b/id/$coverId-L.jpg",
+                                sourceName = "Open Library",
+                                description = bookTitle,
+                                isBanner = false
+                            )
+                        )
+                    }
+                }
+                candidates
+            }
         } catch (_: Exception) {
             emptyList()
         }

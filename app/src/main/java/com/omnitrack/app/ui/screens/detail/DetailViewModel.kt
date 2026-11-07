@@ -261,11 +261,13 @@ class DetailViewModel(
                                         val name = obj["name"]?.jsonPrimitive?.content ?: continue
                                         val character = obj["character"]?.jsonPrimitive?.content
                                         val profilePath = obj["profile_path"]?.jsonPrimitive?.content
+                                        val personId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
                                         castMembers.add(
                                             CastMember(
                                                 name = name,
                                                 character = character,
-                                                avatarUrl = profilePath?.let { "https://image.tmdb.org/t/p/w185$it" }
+                                                avatarUrl = profilePath?.let { "https://image.tmdb.org/t/p/w185$it" },
+                                                tmdbPersonId = personId
                                             )
                                         )
                                     }
@@ -301,31 +303,70 @@ class DetailViewModel(
                     }
                 } catch (_: Exception) {}
 
-                // TMDb Community Reviews
+                // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
                 try {
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$tmdbKey"
-                    val req = Request.Builder().url(url).get().build()
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string()
-                            if (body != null) {
-                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val results = root["results"]?.jsonArray
-                                if (results != null) {
-                                    for (elem in results.take(8)) {
-                                        val obj = elem.jsonObject
-                                        val author = obj["author"]?.jsonPrimitive?.content ?: "Community Member"
-                                        val content = obj["content"]?.jsonPrimitive?.content ?: continue
-                                        val rating = obj["author_details"]?.jsonObject?.get("rating")?.jsonPrimitive?.content?.toFloatOrNull()
-                                        val hasSpoiler = content.contains("[spoiler]", ignoreCase = true) || content.contains("spoiler alert", ignoreCase = true)
+                    val traktType = if (type == "movie") "movies" else "shows"
+                    val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$traktType"
+                    val traktSearchReq = Request.Builder()
+                        .url(traktSearchUrl)
+                        .header("Content-Type", "application/json")
+                        .header("trakt-api-version", "2")
+                        .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                        .get()
+                        .build()
+
+                    val traktSlug: String? = client.newCall(traktSearchReq).execute().use { searchResp ->
+                        if (searchResp.isSuccessful) {
+                            val searchBody = searchResp.body?.string().orEmpty()
+                            val searchJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(searchBody).jsonArray
+                            val firstItem = searchJson.firstOrNull()?.jsonObject
+                            val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
+                            val ids = mediaObj?.get("ids")?.jsonObject
+                            ids?.get("slug")?.jsonPrimitive?.content ?: ids?.get("trakt")?.jsonPrimitive?.content
+                        } else null
+                    }
+
+                    val targetSlug = traktSlug ?: item.tmdbId?.toString()
+                    if (targetSlug != null) {
+                        val commentsUrl = "https://api.trakt.tv/$traktType/$targetSlug/comments/likes?page=1&limit=100"
+                        val commentsReq = Request.Builder()
+                            .url(commentsUrl)
+                            .header("Content-Type", "application/json")
+                            .header("trakt-api-version", "2")
+                            .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                            .get()
+                            .build()
+
+                        client.newCall(commentsReq).execute().use { commentsResp ->
+                            if (commentsResp.isSuccessful) {
+                                val commentsBody = commentsResp.body?.string().orEmpty()
+                                val commentsArray = Json { ignoreUnknownKeys = true }.parseToJsonElement(commentsBody).jsonArray
+                                for (elem in commentsArray) {
+                                    val commentObj = elem.jsonObject
+                                    val commentText = commentObj["comment"]?.jsonPrimitive?.content ?: continue
+                                    val userObj = commentObj["user"]?.jsonObject
+                                    val authorName = userObj?.get("name")?.jsonPrimitive?.content
+                                        ?: userObj?.get("username")?.jsonPrimitive?.content
+                                        ?: "Trakt Member"
+                                    val userRating = commentObj["user_rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                                    val likes = commentObj["likes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                    val spoiler = commentObj["spoiler"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                                    val reviewFlag = commentObj["review"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
+                                        ?: (commentText.length > 200)
+                                    val date = commentObj["created_at"]?.jsonPrimitive?.content?.take(10)
+
+                                    val sanitized = sanitizeCommunityComment(commentText)
+                                    if (sanitized.isNotBlank()) {
                                         revs.add(
                                             CommunityReview(
-                                                author = author,
-                                                source = "TMDb Community",
-                                                rating = rating,
-                                                comment = content,
-                                                hasSpoiler = hasSpoiler,
-                                                isReview = true
+                                                author = authorName,
+                                                source = "Trakt",
+                                                rating = userRating,
+                                                comment = sanitized,
+                                                date = date,
+                                                hasSpoiler = spoiler,
+                                                isReview = reviewFlag,
+                                                likes = likes
                                             )
                                         )
                                     }
@@ -334,6 +375,42 @@ class DetailViewModel(
                         }
                     }
                 } catch (_: Exception) {}
+
+                // Fallback to TMDb Community Reviews if Trakt is empty
+                if (revs.isEmpty()) {
+                    try {
+                        val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$tmdbKey"
+                        val req = Request.Builder().url(url).get().build()
+                        client.newCall(req).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val body = response.body?.string()
+                                if (body != null) {
+                                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    val results = root["results"]?.jsonArray
+                                    if (results != null) {
+                                        for (elem in results.take(15)) {
+                                            val obj = elem.jsonObject
+                                            val author = obj["author"]?.jsonPrimitive?.content ?: "Community Member"
+                                            val content = obj["content"]?.jsonPrimitive?.content ?: continue
+                                            val rating = obj["author_details"]?.jsonObject?.get("rating")?.jsonPrimitive?.content?.toFloatOrNull()
+                                            val hasSpoiler = content.contains("[spoiler]", ignoreCase = true) || content.contains("spoiler alert", ignoreCase = true)
+                                            revs.add(
+                                                CommunityReview(
+                                                    author = author,
+                                                    source = "TMDb Community",
+                                                    rating = rating,
+                                                    comment = sanitizeCommunityComment(content),
+                                                    hasSpoiler = hasSpoiler,
+                                                    isReview = content.length > 150
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
             }
 
             // Keyless AniList / Jikan Recommendations, Cast & Reviews for Anime / Manga
@@ -726,4 +803,19 @@ class DetailViewModel(
             }
         }
     }
+}
+
+fun sanitizeCommunityComment(raw: String): String {
+    return raw
+        .replace(Regex("""\*\*(.*?)\*\*"""), "$1")
+        .replace(Regex("""\*(.*?)\*"""), "$1")
+        .replace(Regex("""__(.*?)__"""), "$1")
+        .replace(Regex("""_(.*?)_"""), "$1")
+        .replace(Regex("""(?m)^#{1,6}\s*"""), "")
+        .replace(Regex("""(?i)\[/?spoiler\]"""), "")
+        .replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1")
+        .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+        .replace(Regex("""<[^>]*>"""), "")
+        .replace(Regex("""\n{3,}"""), "\n\n")
+        .trim()
 }

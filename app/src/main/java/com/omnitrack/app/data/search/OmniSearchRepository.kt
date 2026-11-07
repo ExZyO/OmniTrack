@@ -64,6 +64,10 @@ class OmniSearchRepository(
                     deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey) })
                     deferreds.add(async { searchSteam(trimmed) })
                     deferreds.add(async { searchVndb(trimmed) })
+                    deferreds.add(async { searchBooks(trimmed) })
+                }
+                MediaType.BOOK -> {
+                    deferreds.add(async { searchBooks(trimmed) })
                 }
                 MediaType.ANIME -> {
                     deferreds.add(async { searchAniList(trimmed, isAnime = true) })
@@ -776,6 +780,97 @@ class OmniSearchRepository(
                         mediaType = MediaType.NOVEL,
                         totalProgress = volCount,
                         sourceProvider = "RanobeDB"
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun searchBooks(query: String): List<SearchResultItem> = coroutineScope {
+        val deferreds = listOf(
+            async { searchGoogleBooks(query) },
+            async { searchOpenLibraryBooks(query) }
+        )
+        deferreds.awaitAll().flatten()
+    }
+
+    private suspend fun searchGoogleBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://www.googleapis.com/books/v1/volumes?q=$encoded&maxResults=10"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val items = root["items"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                items.mapNotNull { item ->
+                    val volumeInfo = item.jsonObject["volumeInfo"]?.jsonObject ?: return@mapNotNull null
+                    val title = volumeInfo["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val authors = volumeInfo["authors"]?.jsonArray?.mapNotNull { it.jsonPrimitive.content }?.joinToString(", ")
+                    val desc = volumeInfo["description"]?.jsonPrimitive?.content?.take(400)
+                    val date = volumeInfo["publishedDate"]?.jsonPrimitive?.content
+                    val year = date?.split("-")?.firstOrNull()
+                    val pages = volumeInfo["pageCount"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                    val score = volumeInfo["averageRating"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it * 2f }
+
+                    val imageLinks = volumeInfo["imageLinks"]?.jsonObject
+                    val thumb = imageLinks?.get("extraLarge")?.jsonPrimitive?.content
+                        ?: imageLinks?.get("large")?.jsonPrimitive?.content
+                        ?: imageLinks?.get("medium")?.jsonPrimitive?.content
+                        ?: imageLinks?.get("thumbnail")?.jsonPrimitive?.content
+                        ?: return@mapNotNull null
+
+                    val highRes = thumb.replace("http://", "https://").replace(Regex("&zoom=[1-5]"), "&zoom=0")
+
+                    SearchResultItem(
+                        title = title,
+                        synopsis = if (!authors.isNullOrBlank()) "By $authors\n\n${desc.orEmpty()}" else desc,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(highRes),
+                        mediaType = MediaType.BOOK,
+                        releaseYear = year,
+                        communityScore = score,
+                        totalProgress = pages,
+                        sourceProvider = "Google Books"
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun searchOpenLibraryBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://openlibrary.org/search.json?q=$encoded&limit=8"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val docs = root["docs"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                docs.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val coverId = obj["cover_i"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val coverUrl = "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
+                    val year = obj["first_publish_year"]?.jsonPrimitive?.content
+                    val author = obj["author_name"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content
+                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.content?.toDoubleOrNull()
+
+                    SearchResultItem(
+                        title = title,
+                        synopsis = author?.let { "By $it" },
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        mediaType = MediaType.BOOK,
+                        releaseYear = year,
+                        totalProgress = pages,
+                        sourceProvider = "Open Library"
                     )
                 }
             }

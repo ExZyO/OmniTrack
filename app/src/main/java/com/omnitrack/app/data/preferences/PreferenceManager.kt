@@ -265,6 +265,7 @@ class PreferenceManager(private val context: Context) {
             MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")
             MediaType.MANGA -> listOf("MangaDex API", "AniList", "Comick")
             MediaType.NOVEL -> listOf("Bangumi", "AniList", "NovelUpdates")
+            MediaType.BOOK -> listOf("Google Books", "Open Library", "Hardcover")
             MediaType.SHOW -> listOf("TMDb", "TVMaze", "TheTVDB")
             MediaType.MOVIE -> listOf("TMDb", "RPDB")
             MediaType.GAME -> listOf("IGDB", "Steam")

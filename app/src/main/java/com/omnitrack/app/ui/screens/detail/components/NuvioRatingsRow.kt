@@ -1,13 +1,8 @@
 package com.omnitrack.app.ui.screens.detail.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,212 +10,252 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.R
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
-import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
-import com.omnitrack.app.ui.theme.TextPrimary
-import com.omnitrack.app.ui.theme.TextSecondary
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
+
+private data class RatingBadgeData(
+    val source: String,
+    val displayName: String,
+    val iconRes: Int,
+    val iconWidth: Dp = 16.dp,
+    val iconHeight: Dp = 16.dp,
+    val valueText: String,
+    val valueColor: Color
+)
 
 /**
- * Nuvio-style horizontal row of branded AMOLED glass rating badges:
- * - IMDb (Gold Star ⭐)
- * - Rotten Tomatoes (Critic 🍅 & Audience 🍿)
- * - Metacritic (Green/Yellow square)
- * - TMDb (Green percentage circle)
- * - Trakt (Red heart ❤️)
- * - AniList (Arctic Diamond 💠)
- * - MyAnimeList (Blue Star ★)
- * - Steam (Blue Thumbs Up 👍)
- * - VNDB (Visual Novel score)
+ * 1:1 Nuvio Unboxed Ratings Row:
+ * Zero pills, zero emojis, exact official brand vector/raster logos with bold typography.
  */
 @Composable
 fun NuvioRatingsRow(
     item: MediaItemEntity,
     modifier: Modifier = Modifier
 ) {
-    val hasAnyRatings = item.imdbScore != null ||
-            item.rtScore != null ||
-            item.metacriticScore != null ||
-            item.communityScore != null
+    val badges = remember(item) {
+        val list = mutableListOf<RatingBadgeData>()
 
-    if (!hasAnyRatings) return
+        // 1. IMDb (Gold Logo 30x16dp)
+        item.imdbScore?.let { score ->
+            if (score > 0) {
+                list.add(
+                    RatingBadgeData(
+                        source = "imdb",
+                        displayName = "IMDb",
+                        iconRes = R.drawable.rating_imdb,
+                        iconWidth = 30.dp,
+                        iconHeight = 16.dp,
+                        valueText = formatOneDecimal(score.toDouble()),
+                        valueColor = Color(0xFFF5C518)
+                    )
+                )
+            }
+        }
+
+        // 2. Rotten Tomatoes (Critic)
+        item.rtScore?.let { rt ->
+            if (rt > 0) {
+                val iconRes = when {
+                    rt >= 75 -> R.drawable.rating_rotten_tomatoes_certified
+                    rt >= 60 -> R.drawable.rating_rotten_tomatoes
+                    else -> R.drawable.rating_rotten_tomatoes_rotten
+                }
+                val iconHeight = if (rt >= 75) 24.dp else 16.dp
+                val iconWidth = if (rt >= 75) 24.dp else 16.dp
+                list.add(
+                    RatingBadgeData(
+                        source = "tomatoes",
+                        displayName = "Rotten Tomatoes",
+                        iconRes = iconRes,
+                        iconWidth = iconWidth,
+                        iconHeight = iconHeight,
+                        valueText = "$rt%",
+                        valueColor = Color(0xFFFA320A)
+                    )
+                )
+            }
+        }
+
+        // 3. Metacritic
+        item.metacriticScore?.let { meta ->
+            if (meta > 0) {
+                val metaColor = when {
+                    meta >= 61 -> Color(0xFF66CC33)
+                    meta >= 40 -> Color(0xFFFFCC33)
+                    else -> Color(0xFFFF0000)
+                }
+                list.add(
+                    RatingBadgeData(
+                        source = "metacritic",
+                        displayName = "Metacritic",
+                        iconRes = R.drawable.rating_metacritic,
+                        valueText = "$meta",
+                        valueColor = metaColor
+                    )
+                )
+            }
+        }
+
+        // 4. TMDb Score (Shows & Movies)
+        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    list.add(
+                        RatingBadgeData(
+                            source = "tmdb",
+                            displayName = "TMDB",
+                            iconRes = R.drawable.rating_tmdb,
+                            valueText = "${(score * 10).roundToInt()}%",
+                            valueColor = Color(0xFF01B4E4)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 5. Trakt Community (when traktId is bound)
+        if (item.traktId != null) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    list.add(
+                        RatingBadgeData(
+                            source = "trakt",
+                            displayName = "Trakt",
+                            iconRes = R.drawable.rating_trakt,
+                            valueText = "${(score * 10).roundToInt()}%",
+                            valueColor = Color(0xFFED1C24)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 6. AniList Community Score
+        if (item.anilistId != null || (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL)) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    list.add(
+                        RatingBadgeData(
+                            source = "anilist",
+                            displayName = "AniList",
+                            iconRes = R.drawable.brand_anilist,
+                            valueText = "${score.roundToInt()}%",
+                            valueColor = Color(0xFF02A9FF)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 7. MyAnimeList Score
+        if (item.malId != null) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    val malVal = if (score > 10f) score / 10.0 else score.toDouble()
+                    list.add(
+                        RatingBadgeData(
+                            source = "mal",
+                            displayName = "MyAnimeList",
+                            iconRes = R.drawable.rating_mal,
+                            valueText = formatOneDecimal(malVal),
+                            valueColor = Color(0xFF2E51A2)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 8. Steam Positive % (Games)
+        if (item.mediaType == MediaType.GAME) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    list.add(
+                        RatingBadgeData(
+                            source = "steam",
+                            displayName = "Steam",
+                            iconRes = R.drawable.brand_steam,
+                            valueText = "${score.roundToInt()}%",
+                            valueColor = Color(0xFF66C0F4)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 9. VNDB Rating (Visual Novels)
+        if (item.mediaType == MediaType.VISUAL_NOVEL) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    val vnVal = if (score > 10f) score / 10.0 else score.toDouble()
+                    list.add(
+                        RatingBadgeData(
+                            source = "vndb",
+                            displayName = "VNDB",
+                            iconRes = R.drawable.brand_vndb,
+                            valueText = formatOneDecimal(vnVal),
+                            valueColor = Color(0xFF3B82F6)
+                        )
+                    )
+                }
+            }
+        }
+
+        list
+    }
+
+    if (badges.isEmpty()) return
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. IMDb Pill (Gold)
-        item.imdbScore?.let { score ->
-            BrandedRatingPill(
-                icon = "⭐",
-                label = "IMDb",
-                value = String.format("%.1f", score),
-                accentColor = Color(0xFFF5C518),
-                badgeColor = Color(0xFFF5C518).copy(alpha = 0.16f)
-            )
-        }
+        val ratingTextStyle = MaterialTheme.typography.titleSmall.copy(
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.sp
+        )
 
-        // 2. Rotten Tomatoes (Critic)
-        item.rtScore?.let { rt ->
-            val isFresh = rt >= 60
-            BrandedRatingPill(
-                icon = if (isFresh) "🍅" else "🟢",
-                label = "Rotten Tomatoes",
-                value = "$rt%",
-                accentColor = if (isFresh) Color(0xFFFA320A) else Color(0xFF589741),
-                badgeColor = if (isFresh) Color(0xFFFA320A).copy(alpha = 0.16f) else Color(0xFF589741).copy(alpha = 0.16f)
-            )
-        }
-
-        // 3. Metacritic
-        item.metacriticScore?.let { meta ->
-            val metaColor = when {
-                meta >= 61 -> Color(0xFF66CC33)
-                meta >= 40 -> Color(0xFFFFCC33)
-                else -> Color(0xFFFF0000)
-            }
-            BrandedRatingPill(
-                icon = "M",
-                label = "Metacritic",
-                value = "$meta",
-                accentColor = metaColor,
-                badgeColor = metaColor.copy(alpha = 0.16f)
-            )
-        }
-
-        // 4. TMDb or Trakt Community Score
-        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE) {
-            item.communityScore?.let { score ->
-                BrandedRatingPill(
-                    icon = "TM",
-                    label = "TMDb",
-                    value = "${(score * 10).toInt()}%",
-                    accentColor = Color(0xFF01D277),
-                    badgeColor = Color(0xFF01D277).copy(alpha = 0.16f)
+        badges.forEach { badge ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(badge.iconRes),
+                    contentDescription = badge.displayName,
+                    modifier = Modifier.size(width = badge.iconWidth, height = badge.iconHeight)
                 )
-            }
-        }
-
-        // 5. AniList Community Score
-        if (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
-            item.communityScore?.let { score ->
-                BrandedRatingPill(
-                    icon = "AL",
-                    label = "AniList",
-                    value = "${score.toInt()}%",
-                    accentColor = Color(0xFF02A9FF),
-                    badgeColor = Color(0xFF02A9FF).copy(alpha = 0.16f)
-                )
-            }
-        }
-
-        // 6. MyAnimeList Score
-        if (item.malId != null && (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA)) {
-            item.communityScore?.let { score ->
-                BrandedRatingPill(
-                    icon = "★",
-                    label = "MAL",
-                    value = String.format("%.2f", if (score > 10f) score / 10f else score),
-                    accentColor = Color(0xFF2E51A2),
-                    badgeColor = Color(0xFF2E51A2).copy(alpha = 0.16f)
-                )
-            }
-        }
-
-        // 7. Steam Positive Review % (Games)
-        if (item.mediaType == MediaType.GAME) {
-            item.communityScore?.let { score ->
-                BrandedRatingPill(
-                    icon = "👍",
-                    label = "Steam",
-                    value = "${score.toInt()}%",
-                    accentColor = Color(0xFF66C0F4),
-                    badgeColor = Color(0xFF66C0F4).copy(alpha = 0.16f)
-                )
-            }
-        }
-
-        // 8. VNDB Rating (Visual Novels)
-        if (item.mediaType == MediaType.VISUAL_NOVEL) {
-            item.communityScore?.let { score ->
-                BrandedRatingPill(
-                    icon = "VN",
-                    label = "VNDB",
-                    value = String.format("%.2f", if (score > 10f) score / 10f else score),
-                    accentColor = Color(0xFF3B82F6),
-                    badgeColor = Color(0xFF3B82F6).copy(alpha = 0.16f)
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = badge.valueText,
+                    style = ratingTextStyle,
+                    color = badge.valueColor
                 )
             }
         }
     }
 }
 
-@Composable
-private fun BrandedRatingPill(
-    icon: String,
-    label: String,
-    value: String,
-    accentColor: Color,
-    badgeColor: Color
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        // Icon / Logo mark
-        Box(
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(badgeColor)
-                .padding(horizontal = 5.dp, vertical = 2.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = icon,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Black,
-                color = accentColor
-            )
-        }
-
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            color = TextSecondary
-        )
-
-        Text(
-            text = value,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = TextPrimary
-        )
-    }
+private fun formatOneDecimal(value: Double): String {
+    val rounded = (value * 10.0).roundToInt()
+    val whole = rounded / 10
+    val decimal = (rounded % 10).absoluteValue
+    return "$whole.$decimal"
 }

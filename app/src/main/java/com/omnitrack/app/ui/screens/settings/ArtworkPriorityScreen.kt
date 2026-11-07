@@ -93,6 +93,7 @@ fun ArtworkPriorityScreen(
             MediaType.ANIME,
             MediaType.MANGA,
             MediaType.NOVEL,
+            MediaType.BOOK,
             MediaType.SHOW,
             MediaType.MOVIE,
             MediaType.GAME,
