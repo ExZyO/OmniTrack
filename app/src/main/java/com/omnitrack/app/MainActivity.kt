@@ -15,6 +15,7 @@ import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.ui.navigation.OmniTrackNavigation
 import com.omnitrack.app.ui.theme.OmniTrackTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -175,11 +176,14 @@ class MainActivity : ComponentActivity() {
                     }
                     "mal", "myanimelist" -> {
                         try {
+                            val pref = (application as OmniTrackApplication).preferenceManager
+                            val customMal = pref.customMalClientId.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
                             val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
                                 ?: tokenManager.getMalVerifier().orEmpty()
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
-                                .add("client_id", TrackerAccountVerifier.MAL_CLIENT_ID)
+                                .add("client_id", effectiveClientId)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
                                 .add("redirect_uri", effectiveRedirectUri)
@@ -199,11 +203,17 @@ class MainActivity : ComponentActivity() {
                     }
                     "trakt" -> {
                         try {
+                            val pref = (application as OmniTrackApplication).preferenceManager
+                            val customTrakt = pref.customTraktClientId.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val customSecret = pref.customTraktClientSecret.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val effectiveClientId = customTrakt ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
+                            val effectiveSecret = customSecret ?: TrackerAccountVerifier.TRAKT_CLIENT_SECRET
+                            val secretLine = if (effectiveSecret.isNotBlank()) "\"client_secret\": \"$effectiveSecret\"," else ""
                             val payload = """
                                 {
                                     "code": "$code",
-                                    "client_id": "${TrackerAccountVerifier.TRAKT_CLIENT_ID}",
-                                    "client_secret": "${TrackerAccountVerifier.TRAKT_CLIENT_SECRET}",
+                                    "client_id": "$effectiveClientId",
+                                    $secretLine
                                     "redirect_uri": "$effectiveRedirectUri",
                                     "grant_type": "authorization_code"
                                 }

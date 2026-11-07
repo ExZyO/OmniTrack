@@ -1,5 +1,6 @@
 package com.omnitrack.app.data.sync
 
+import com.omnitrack.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -42,26 +43,34 @@ object TrackerAccountVerifier {
     var customSimklClientSecret: String? = null
 
     // Default Fallback Credentials
-    private const val DEFAULT_TRAKT_CLIENT_ID = "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U"
+    private const val DEFAULT_TRAKT_CLIENT_ID = "VqwWoA1jPRnMBEtn7fEV3Zlx4XeXYRNaipC7pAaWL4o"
     private const val DEFAULT_TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
-    private const val DEFAULT_MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
-    private const val DEFAULT_SIMKL_CLIENT_ID = "6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a"
+    private const val DEFAULT_MAL_CLIENT_ID = "2db7880d919b9231be3031ec80e77f15"
+    private const val DEFAULT_SIMKL_CLIENT_ID = "c9c006c049d34a887a0f744b29f09658e3dce579cf5db98665db4d96e35d036a"
     private const val DEFAULT_SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
 
     val TRAKT_CLIENT_ID: String
-        get() = customTraktClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_TRAKT_CLIENT_ID
+        get() = customTraktClientId?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.TRAKT_CLIENT_ID.takeIf { it.isNotBlank() }
+            ?: DEFAULT_TRAKT_CLIENT_ID
 
     val TRAKT_CLIENT_SECRET: String
-        get() = customTraktClientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_TRAKT_CLIENT_SECRET
+        get() = customTraktClientSecret?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.TRAKT_CLIENT_SECRET.takeIf { it.isNotBlank() }
+            ?: ""
 
     val MAL_CLIENT_ID: String
-        get() = customMalClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_MAL_CLIENT_ID
+        get() = customMalClientId?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.MAL_CLIENT_ID.takeIf { it.isNotBlank() }
+            ?: DEFAULT_MAL_CLIENT_ID
 
     val SIMKL_CLIENT_ID: String
-        get() = customSimklClientId?.takeIf { it.isNotBlank() } ?: DEFAULT_SIMKL_CLIENT_ID
+        get() = customSimklClientId?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.SIMKL_CLIENT_ID.takeIf { it.isNotBlank() }
+            ?: DEFAULT_SIMKL_CLIENT_ID
 
     val SIMKL_CLIENT_SECRET: String
-        get() = customSimklClientSecret?.takeIf { it.isNotBlank() } ?: DEFAULT_SIMKL_CLIENT_SECRET
+        get() = customSimklClientSecret?.takeIf { it.isNotBlank() } ?: ""
 
     // Bangumi Client Credentials
     const val BANGUMI_CLIENT_ID = "bgm31586666817a5d03b"
@@ -129,14 +138,15 @@ object TrackerAccountVerifier {
         }
     }
 
-    suspend fun verifyTrakt(token: String): VerificationState = withContext(Dispatchers.IO) {
+    suspend fun verifyTrakt(token: String, customClientId: String? = null): VerificationState = withContext(Dispatchers.IO) {
         if (token.isBlank()) return@withContext VerificationState.Idle
         try {
+            val clientId = customClientId?.takeIf { it.isNotBlank() } ?: TRAKT_CLIENT_ID
             val request = Request.Builder()
                 .url("https://api.trakt.tv/users/me")
                 .header("Authorization", "Bearer $token")
                 .header("trakt-api-version", "2")
-                .header("trakt-api-key", TRAKT_CLIENT_ID)
+                .header("trakt-api-key", clientId)
                 .get()
                 .build()
 
@@ -350,14 +360,15 @@ object TrackerAccountVerifier {
         val intervalSeconds: Int
     )
 
-    suspend fun requestTraktDeviceCode(): TraktDeviceCode? = withContext(Dispatchers.IO) {
+    suspend fun requestTraktDeviceCode(customClientId: String? = null): TraktDeviceCode? = withContext(Dispatchers.IO) {
         try {
-            val payload = """{"client_id":"$TRAKT_CLIENT_ID"}"""
+            val clientId = customClientId?.takeIf { it.isNotBlank() } ?: TRAKT_CLIENT_ID
+            val payload = """{"client_id":"$clientId"}"""
             val request = Request.Builder()
                 .url("https://api.trakt.tv/oauth/device/code")
                 .header("Content-Type", "application/json")
                 .header("trakt-api-version", "2")
-                .header("trakt-api-key", TRAKT_CLIENT_ID)
+                .header("trakt-api-key", clientId)
                 .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                 .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()
@@ -377,14 +388,24 @@ object TrackerAccountVerifier {
         }
     }
 
-    suspend fun pollTraktDeviceToken(deviceCode: String): String? = withContext(Dispatchers.IO) {
+    suspend fun pollTraktDeviceToken(
+        deviceCode: String,
+        customClientId: String? = null,
+        customClientSecret: String? = null
+    ): String? = withContext(Dispatchers.IO) {
         try {
-            val payload = """{"code":"$deviceCode","client_id":"$TRAKT_CLIENT_ID","client_secret":"$TRAKT_CLIENT_SECRET"}"""
+            val clientId = customClientId?.takeIf { it.isNotBlank() } ?: TRAKT_CLIENT_ID
+            val clientSecret = customClientSecret?.takeIf { it.isNotBlank() } ?: TRAKT_CLIENT_SECRET
+            val payload = if (clientSecret.isNotBlank()) {
+                """{"code":"$deviceCode","client_id":"$clientId","client_secret":"$clientSecret"}"""
+            } else {
+                """{"code":"$deviceCode","client_id":"$clientId"}"""
+            }
             val request = Request.Builder()
                 .url("https://api.trakt.tv/oauth/device/token")
                 .header("Content-Type", "application/json")
                 .header("trakt-api-version", "2")
-                .header("trakt-api-key", TRAKT_CLIENT_ID)
+                .header("trakt-api-key", clientId)
                 .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                 .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()

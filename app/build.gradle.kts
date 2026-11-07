@@ -20,6 +20,16 @@ android {
         versionCode = buildVersionCode
         versionName = buildVersionName
 
+        val envTraktClientId = System.getenv("TRAKT_CLIENT_ID") ?: project.findProperty("TRAKT_CLIENT_ID")?.toString() ?: ""
+        val envTraktClientSecret = System.getenv("TRAKT_CLIENT_SECRET") ?: project.findProperty("TRAKT_CLIENT_SECRET")?.toString() ?: ""
+        val envMalClientId = System.getenv("MAL_CLIENT_ID") ?: project.findProperty("MAL_CLIENT_ID")?.toString() ?: ""
+        val envSimklClientId = System.getenv("SIMKL_CLIENT_ID") ?: project.findProperty("SIMKL_CLIENT_ID")?.toString() ?: ""
+
+        buildConfigField("String", "TRAKT_CLIENT_ID", "\"$envTraktClientId\"")
+        buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"$envTraktClientSecret\"")
+        buildConfigField("String", "MAL_CLIENT_ID", "\"$envMalClientId\"")
+        buildConfigField("String", "SIMKL_CLIENT_ID", "\"$envSimklClientId\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true

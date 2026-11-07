@@ -160,10 +160,6 @@ fun DetailScreen(
     BackHandler(enabled = selectedCompany != null) {
         selectedCompany = null
     }
-    BackHandler(enabled = (uiState.isPreviewMode || item?.id == -1L) && selectedPerson == null && selectedCompany == null) {
-        viewModel.closePreview()
-        onBack()
-    }
 
     if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
         val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
@@ -1387,8 +1383,8 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
 
     val ageBadge = item.contentRating?.trim()?.takeIf { it.isNotBlank() }
     val fallbackScore = item.communityScore?.takeIf { (item.imdbScore == null && item.traktScore == null) }?.let {
-        val s = if (it <= 10f) it.toInt() else (it / 10f).toInt()
-        "★ $s"
+        val s = if (it <= 10f) String.format(java.util.Locale.US, "%.1f", it) else String.format(java.util.Locale.US, "%.1f", it / 10f)
+        s
     }
 
     if (releaseLine != null || runtimeText != null || ageBadge != null || fallbackScore != null) {
@@ -1418,31 +1414,34 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                     modifier = Modifier
                         .border(
                             width = 1.dp,
-                            color = Color.White.copy(alpha = 0.55f),
+                            color = TextSecondary.copy(alpha = 0.45f),
                             shape = RoundedCornerShape(6.dp)
                         )
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
                 ) {
                     Text(
                         text = badge,
-                        fontSize = 11.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.9f)
+                        color = TextSecondary
                     )
                 }
             }
             fallbackScore?.let { scoreText ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF331B28))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
+                        text = "★",
+                        fontSize = 12.sp,
+                        color = TextSecondary.copy(alpha = 0.7f)
+                    )
+                    Text(
                         text = scoreText,
-                        fontSize = 11.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFF4081)
+                        color = TextSecondary
                     )
                 }
             }

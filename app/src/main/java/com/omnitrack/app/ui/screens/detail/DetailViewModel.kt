@@ -238,7 +238,11 @@ class DetailViewModel(
     }
 
     fun closePreview() {
-        _previewItem.value = null
+        EphemeralPreviewHolder.previewItem = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
         EphemeralPreviewHolder.previewItem = null
     }
 

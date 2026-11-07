@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
@@ -852,6 +854,7 @@ private fun ManualTokenTrackerCard(
 ) {
     val context = LocalContext.current
     var textValue by remember(initialToken) { mutableStateOf(initialToken) }
+    var hasJustSaved by remember { mutableStateOf(false) }
     var isRevealed by remember { mutableStateOf(false) }
     var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
 
@@ -994,7 +997,10 @@ private fun ManualTokenTrackerCard(
         ) {
             BasicTextField(
                 value = textValue,
-                onValueChange = { textValue = it },
+                onValueChange = {
+                    textValue = it
+                    hasJustSaved = false
+                },
                 textStyle = TextStyle(
                     color = TextPrimary,
                     fontSize = 12.5.sp,
@@ -1057,6 +1063,7 @@ private fun ManualTokenTrackerCard(
             if (initialToken.isNotBlank()) {
                 Button(
                     onClick = {
+                        hasJustSaved = false
                         textValue = ""
                         onDisconnect()
                     },
@@ -1068,10 +1075,13 @@ private fun ManualTokenTrackerCard(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            val isUnchanged = initialToken.isNotBlank() && textValue.trim() == initialToken.trim()
+            val isSaved = hasJustSaved || (initialToken.isNotBlank() && textValue.trim() == initialToken.trim()) || (verificationState is VerificationState.Verified && (initialToken.isBlank() || textValue.trim() == initialToken.trim()))
             Button(
-                onClick = { onSave(textValue.trim()) },
-                enabled = !isUnchanged && textValue.isNotBlank(),
+                onClick = {
+                    hasJustSaved = true
+                    onSave(textValue.trim())
+                },
+                enabled = !isSaved && textValue.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = accentColor,
                     contentColor = AmoledBlack,
@@ -1081,7 +1091,7 @@ private fun ManualTokenTrackerCard(
                 shape = RoundedCornerShape(999.dp)
             ) {
                 Text(
-                    text = if (isUnchanged) "Saved" else "Save Token",
+                    text = if (isSaved) "Saved" else "Save Token",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
