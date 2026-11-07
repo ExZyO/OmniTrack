@@ -545,7 +545,7 @@ fun TrackerAccountsSheet(
         LaunchedEffect(info) {
             isPollingTrakt = true
             while (isPollingTrakt) {
-                delay(info.interval * 1000L)
+                delay(info.intervalSeconds * 1000L)
                 val token = TrackerAccountVerifier.pollTraktDeviceToken(info.deviceCode)
                 if (!token.isNullOrBlank()) {
                     tokenManager.saveTraktToken(token)
