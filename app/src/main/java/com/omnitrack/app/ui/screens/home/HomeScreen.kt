@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.screens.home
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -139,6 +140,19 @@ fun HomeScreen(
             try {
                 searchFocusRequester.requestFocus()
             } catch (_: Exception) {}
+        }
+    }
+
+    // System Back Gesture handling:
+    // 1. If search is open -> close search
+    // 2. If on another tab (Discover, History, Settings) -> return to Library (Home page)
+    // 3. If on Library with search closed -> BackHandler disabled, exits app naturally
+    BackHandler(enabled = isSearchVisible || currentNavDestination != NavDestination.LIBRARY) {
+        if (isSearchVisible) {
+            isSearchVisible = false
+            searchQuery = ""
+        } else if (currentNavDestination != NavDestination.LIBRARY) {
+            currentNavDestination = NavDestination.LIBRARY
         }
     }
 
