@@ -7,7 +7,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -60,6 +62,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -272,9 +275,14 @@ private fun CategoryWaterfallList(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var itemHeightPx by remember { mutableFloatStateOf(with(density) { 72.dp.toPx() }) }
 
+    fun computeTargetSlot(startIdx: Int, offsetY: Float): Int {
+        if (itemHeightPx <= 0f) return startIdx
+        val step = (offsetY / itemHeightPx).roundToInt()
+        return (startIdx + step).coerceIn(0, currentSources.lastIndex)
+    }
+
     val currentTargetSlot = activeDragIdx?.let { startIdx ->
-        val step = (dragOffsetY / itemHeightPx).roundToInt()
-        (startIdx + step).coerceIn(0, currentSources.lastIndex)
+        computeTargetSlot(startIdx, dragOffsetY)
     }
 
     Column(
@@ -284,6 +292,7 @@ private fun CategoryWaterfallList(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         currentSources.forEachIndexed { idx, source ->
+            key(source) {
             val isDragging = activeDragIdx == idx
             val isEnabled = source !in disabledSources
 
@@ -450,35 +459,40 @@ private fun CategoryWaterfallList(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .pointerInput(idx) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    activeDragIdx = idx
-                                    dragOffsetY = 0f
-                                },
-                                onDrag = { change, dragAmount ->
-                                    // CRITICAL: Consume event so horizontal pager NEVER steals gesture!
-                                    change.consume()
-                                    dragOffsetY += dragAmount.y
-                                },
-                                onDragEnd = {
-                                    val start = activeDragIdx
-                                    val target = currentTargetSlot
-                                    if (start != null && target != null && start != target) {
-                                        val movedItem = currentSources.removeAt(start)
-                                        currentSources.add(target, movedItem)
-                                        coroutineScope.launch {
-                                            prefManager.updateArtSourcePriority(category, currentSources.toList())
+                        .pointerInput(idx, currentSources) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                down.consume()
+                                activeDragIdx = idx
+                                dragOffsetY = 0f
+                                try {
+                                    while (true) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                        change.consume()
+                                        if (!change.pressed) {
+                                            // Pointer lifted (Drag ended)
+                                            val start = activeDragIdx
+                                            if (start != null && itemHeightPx > 0f) {
+                                                val step = (dragOffsetY / itemHeightPx).roundToInt()
+                                                val target = (start + step).coerceIn(0, currentSources.lastIndex)
+                                                if (start != target && start in currentSources.indices && target in currentSources.indices) {
+                                                    val movedItem = currentSources.removeAt(start)
+                                                    currentSources.add(target, movedItem)
+                                                    coroutineScope.launch {
+                                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                                    }
+                                                }
+                                            }
+                                            break
                                         }
+                                        dragOffsetY += (change.position.y - change.previousPosition.y)
                                     }
-                                    activeDragIdx = null
-                                    dragOffsetY = 0f
-                                },
-                                onDragCancel = {
+                                } finally {
                                     activeDragIdx = null
                                     dragOffsetY = 0f
                                 }
-                            )
+                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -489,6 +503,7 @@ private fun CategoryWaterfallList(
                         modifier = Modifier.size(24.dp)
                     )
                 }
+            }
             }
         }
     }

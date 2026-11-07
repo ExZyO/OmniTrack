@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,6 +47,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -140,15 +142,15 @@ fun VisualPresentationScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val isUnblocked = presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO
+                val isHero = presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO
                 PresentationChoiceCard(
-                    title = "Unblocked Hero",
+                    title = "Hero Layout",
                     description = "Full-bleed edge-to-edge banner behind status bar, zero-box AMOLED canvas.",
-                    isSelected = isUnblocked,
+                    isSelected = isHero,
                     modifier = Modifier.weight(1f),
                     onClick = {
                         scope.launch {
-                            prefManager.updateDetailsPagePresentation(DetailsPagePresentation.UNBLOCKED_HERO)
+                            prefManager.updateDetailsPagePresentation(DetailsPagePresentation.HERO)
                         }
                     }
                 )
@@ -176,7 +178,7 @@ fun VisualPresentationScreen(
                 val isFullBleed = presentationSettings.bannerSizing == BannerSizing.FULL_BLEED
                 PresentationChoiceCard(
                     title = "Full-Bleed Hero",
-                    description = "Tall 350dp cinematic backdrop dissolving with smoothstep curve into pure black.",
+                    description = "Tall cinematic backdrop dissolving with smoothstep curve into pure black.",
                     isSelected = isFullBleed,
                     modifier = Modifier.weight(1f),
                     onClick = {
@@ -239,34 +241,119 @@ fun VisualPresentationScreen(
 }
 
 @Composable
+private fun AnimeArtworkCanvas(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        // 1. Cosmic cyberpunk twilight sky
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF0B0F19),
+                    Color(0xFF1E1B4B),
+                    Color(0xFF312E81),
+                    Color(0xFF4338CA),
+                    Color(0xFF0284C7)
+                )
+            )
+        )
+
+        // 2. Glowing moon / neon disc in upper right
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFFDE047).copy(alpha = 0.95f),
+                    Color(0xFFF59E0B).copy(alpha = 0.50f),
+                    Color.Transparent
+                ),
+                center = Offset(w * 0.76f, h * 0.32f),
+                radius = h * 0.38f
+            ),
+            radius = h * 0.38f,
+            center = Offset(w * 0.76f, h * 0.32f)
+        )
+
+        // 3. Cyberpunk distant mountain silhouettes
+        val mountainPath = Path().apply {
+            moveTo(0f, h * 0.70f)
+            lineTo(w * 0.22f, h * 0.38f)
+            lineTo(w * 0.45f, h * 0.60f)
+            lineTo(w * 0.68f, h * 0.32f)
+            lineTo(w * 0.88f, h * 0.52f)
+            lineTo(w, h * 0.42f)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = mountainPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF1E1B4B).copy(alpha = 0.95f),
+                    Color(0xFF0B0F19)
+                ),
+                startY = h * 0.32f,
+                endY = h
+            )
+        )
+
+        // 4. Foreground neon skyline ridge
+        val ridgePath = Path().apply {
+            moveTo(0f, h * 0.82f)
+            lineTo(w * 0.28f, h * 0.62f)
+            lineTo(w * 0.55f, h * 0.75f)
+            lineTo(w * 0.82f, h * 0.58f)
+            lineTo(w, h * 0.70f)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = ridgePath,
+            color = Color(0xFF050811)
+        )
+
+        // 5. Subtle neon horizon glow line
+        drawLine(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color(0xFF38BDF8).copy(alpha = 0.1f),
+                    Color(0xFF38BDF8).copy(alpha = 0.8f),
+                    Color(0xFFA855F7).copy(alpha = 0.8f),
+                    Color(0xFF38BDF8).copy(alpha = 0.1f)
+                )
+            ),
+            start = Offset(0f, h * 0.78f),
+            end = Offset(w, h * 0.78f),
+            strokeWidth = 1.5.dp.toPx()
+        )
+    }
+}
+
+@Composable
 private fun LivePresentationMockup(
     settings: PresentationSettings,
     modifier: Modifier = Modifier
 ) {
-    val isUnblocked = settings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO
+    val isHero = settings.detailsPagePresentation == DetailsPagePresentation.HERO
     val isFullBleed = settings.bannerSizing == BannerSizing.FULL_BLEED
     val isSolidBlack = settings.fallbackBackgroundStyle == FallbackBackgroundStyle.SOLID_BLACK
 
-    val bannerHeight by animateDpAsState(
-        targetValue = if (isFullBleed) 160.dp else 125.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "bannerH"
-    )
-
     val posterAlpha by animateFloatAsState(
-        targetValue = if (isUnblocked) 0f else 1f,
+        targetValue = if (isHero) 0f else 1f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "posterAlpha"
     )
 
     val posterTranslateY by animateDpAsState(
-        targetValue = if (isUnblocked) 20.dp else 0.dp,
+        targetValue = if (isHero) 20.dp else 0.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "posterTransY"
     )
 
     val titlePaddingStart by animateDpAsState(
-        targetValue = if (isUnblocked) 16.dp else 84.dp,
+        targetValue = if (isHero) 16.dp else 84.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "titleStart"
     )
@@ -274,46 +361,176 @@ private fun LivePresentationMockup(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(230.dp)
+            .height(240.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isSolidBlack) AmoledBlack else Color(0xFF0F1420))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
+            .background(if (isSolidBlack) AmoledBlack else Color(0xFF0B101D))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
     ) {
-        // Banner Backdrop Mock
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(bannerHeight)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color(0xFF1E3A8A).copy(alpha = 0.85f),
-                            Color(0xFF0F172A).copy(alpha = 0.5f),
-                            AmoledBlack
+        // Atmospheric Ambient Aura Backdrop (Toggles on in Cinematic Blur, completely gone in Minimalist OLED)
+        if (!isSolidBlack) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF1E3A8A).copy(alpha = 0.35f),
+                                Color(0xFF4C1D95).copy(alpha = 0.25f),
+                                Color.Transparent
+                            ),
+                            center = Offset(250f, 180f),
+                            radius = 600f
                         )
                     )
+            )
+        }
+
+        // Banner Sizing Mockup Area
+        if (isFullBleed) {
+            // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep into AmoledBlack
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+            ) {
+                AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
+
+                // 17-Stop Quintic Smoothstep Dissolve Overlay into pure AmoledBlack (#000000)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.20f to Color.Transparent,
+                                0.60f to AmoledBlack.copy(alpha = 0.65f),
+                                1.00f to AmoledBlack
+                            )
+                        )
                 )
-        )
+
+                // Full-Bleed Badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.70f))
+                        .border(0.8.dp, AccentArctic.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = "FULL-BLEED HERO (EDGE-TO-EDGE)",
+                        fontSize = 8.5.sp,
+                        color = AccentArctic,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        } else {
+            // MODE B: Cinema Showcase Floating 16:9 Widescreen Card with Ambient Colored Aura
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .height(112.dp)
+            ) {
+                // Ambient backlight aura radiating around and behind the floating card
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.06f
+                            scaleY = 1.20f
+                            alpha = 0.75f
+                        }
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFF0284C7).copy(alpha = 0.70f),
+                                    Color(0xFF7C3AED).copy(alpha = 0.45f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+
+                // The floating 16:9 widescreen card itself
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(14.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                ) {
+                    AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
+
+                    // Cinema card subtle vignette
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                                )
+                            )
+                    )
+
+                    // Cinema Showcase Badge
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.75f))
+                            .border(0.8.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                    ) {
+                        Text(
+                            text = "16:9 CINEMA SHOWCASE CARD",
+                            fontSize = 8.5.sp,
+                            color = AccentGold,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // Atmosphere Mode Pill in Top-Left
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(10.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.Black.copy(alpha = 0.70f))
+                .padding(horizontal = 6.dp, vertical = 2.5.dp)
+        ) {
+            Text(
+                text = if (isSolidBlack) "AMOLED #000000" else "CINEMATIC BLUR AURA",
+                fontSize = 8.5.sp,
+                color = if (isSolidBlack) TextMuted else AccentJade,
+                fontWeight = FontWeight.Bold
+            )
+        }
 
         // Mock Poster (Fades in when Classic layout is active)
         if (posterAlpha > 0.01f) {
             Box(
                 modifier = Modifier
-                    .padding(start = 16.dp, top = 56.dp)
+                    .padding(start = 16.dp, top = 65.dp)
                     .graphicsLayer {
                         alpha = posterAlpha
                         translationY = posterTranslateY.toPx()
                     }
-                    .width(56.dp)
-                    .height(82.dp)
+                    .width(54.dp)
+                    .height(80.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
                         Brush.linearGradient(
-                            listOf(AccentArctic, Color(0xFF6366F1))
+                            listOf(Color(0xFF38BDF8), Color(0xFF6366F1), Color(0xFFA855F7))
                         )
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                    .shadow(elevation = 12.dp, shape = RoundedCornerShape(8.dp)),
+                    .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(8.dp))
+                    .shadow(elevation = 14.dp, shape = RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -411,6 +628,8 @@ private fun LivePresentationMockup(
                 Text("9.5", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
+    }
+}
     }
 }
 

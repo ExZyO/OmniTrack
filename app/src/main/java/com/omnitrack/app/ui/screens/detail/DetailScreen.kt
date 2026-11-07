@@ -225,8 +225,8 @@ fun DetailScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                // PRESENTATION MODE 1: Unblocked Hero (Unblocked Banner + Zero-Box Flowing Metadata & Stats)
-                if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
+                // PRESENTATION MODE 1: Hero Layout (Hero Banner + Zero-Box Flowing Metadata & Stats)
+                if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
                     // Full-bleed unblocked hero banner starting from absolute y=0 (under status bar)
                     Box(
                         modifier = Modifier
@@ -668,16 +668,16 @@ fun DetailScreen(
                             }
                         }
 
-                        // 2. Toggle Layout (Unblocked Hero vs Classic Poster)
+                        // 2. Toggle Layout (Hero vs Classic Poster)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable {
-                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
+                                    val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
                                         DetailsPagePresentation.CLASSIC
                                     } else {
-                                        DetailsPagePresentation.UNBLOCKED_HERO
+                                        DetailsPagePresentation.HERO
                                     }
                                     coroutineScope.launch {
                                         prefManager.updateDetailsPagePresentation(newMode)
@@ -702,10 +702,10 @@ fun DetailScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.UNBLOCKED_HERO) {
-                                        "Current: Unblocked Hero (Tap for Classic Poster)"
+                                    text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                                        "Current: Hero Layout (Tap for Classic Poster)"
                                     } else {
-                                        "Current: Classic Poster (Tap for Unblocked Hero)"
+                                        "Current: Classic Poster (Tap for Hero Layout)"
                                     },
                                     color = TextMuted,
                                     fontSize = 12.sp

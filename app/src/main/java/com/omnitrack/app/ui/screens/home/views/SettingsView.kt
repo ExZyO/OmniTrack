@@ -90,9 +90,9 @@ fun SettingsView(
             .fillMaxSize()
             .background(AmoledBlack)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 16.dp)
             .padding(bottom = 110.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp)
+        verticalArrangement = Arrangement.spacedBy(28.dp)
     ) {
         // App Identity Header
         Column(
@@ -119,8 +119,9 @@ fun SettingsView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 14.dp, horizontal = 12.dp),
-                horizontalArrangement = Arrangement.SpaceAround
+                    .padding(vertical = 8.dp, horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 StatMetric(
                     count = allMedia.size.toString(),
@@ -219,22 +220,18 @@ private fun SettingsSection(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
             text = title,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
-            color = TextMuted,
-            letterSpacing = 1.1.sp,
-            modifier = Modifier.padding(horizontal = 6.dp)
+            color = TextSecondary,
+            letterSpacing = 1.3.sp,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkSurfaceCard)
-                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+            modifier = Modifier.fillMaxWidth()
         ) {
             content()
         }
@@ -243,22 +240,16 @@ private fun SettingsSection(
 
 @Composable
 private fun SectionDivider() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 56.dp)
-            .height(0.6.dp)
-            .background(Color(0x12FFFFFF))
-    )
+    Spacer(modifier = Modifier.height(2.dp))
 }
 
 @Composable
 private fun StatDivider() {
     Box(
         modifier = Modifier
-            .height(32.dp)
+            .height(28.dp)
             .width(0.8.dp)
-            .background(Color(0x16FFFFFF))
+            .background(Color.White.copy(alpha = 0.08f))
     )
 }
 
@@ -295,16 +286,17 @@ private fun GroupedSettingRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = onClick != null, onClick = { onClick?.invoke() })
-            .padding(horizontal = 14.dp, vertical = 13.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(38.dp)
                 .clip(CircleShape)
-                .background(iconTint.copy(alpha = 0.14f)),
+                .background(iconTint.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -322,6 +314,7 @@ private fun GroupedSettingRow(
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
                 fontSize = 11.5.sp,
@@ -334,8 +327,8 @@ private fun GroupedSettingRow(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
-                    .background(iconTint.copy(alpha = 0.18f))
-                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                    .background(iconTint.copy(alpha = 0.16f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
             ) {
                 Text(
                     text = badge,

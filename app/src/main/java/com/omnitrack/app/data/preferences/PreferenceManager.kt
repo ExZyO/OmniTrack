@@ -16,14 +16,14 @@ import java.io.IOException
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
-    UNBLOCKED_HERO("Unblocked Hero", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
+    HERO("Hero Layout", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
     CLASSIC("Classic Poster", "Overlaid Poster, Floating Information");
 
     companion object {
         fun fromName(name: String?): DetailsPagePresentation = when (name) {
             "CLASSIC" -> CLASSIC
-            "UNBLOCKED_HERO", "NUVIO_HERO" -> UNBLOCKED_HERO
-            else -> UNBLOCKED_HERO
+            "HERO", "UNBLOCKED_HERO" -> HERO
+            else -> HERO
         }
     }
 }
@@ -45,7 +45,7 @@ enum class FallbackBackgroundStyle(val displayName: String, val description: Str
 }
 
 data class PresentationSettings(
-    val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.UNBLOCKED_HERO,
+    val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
     val bannerSizing: BannerSizing = BannerSizing.CINEMA_SHOWCASE,
     val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
     val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR
@@ -75,7 +75,7 @@ class PreferenceManager(private val context: Context) {
             PresentationSettings(
                 detailsPagePresentation = prefs[PreferencesKeys.DETAILS_PAGE_PRESENTATION]?.let {
                     DetailsPagePresentation.fromName(it)
-                } ?: DetailsPagePresentation.UNBLOCKED_HERO,
+                } ?: DetailsPagePresentation.HERO,
                 bannerSizing = prefs[PreferencesKeys.BANNER_SIZING]?.let {
                     runCatching { BannerSizing.valueOf(it) }.getOrNull()
                 } ?: BannerSizing.CINEMA_SHOWCASE,
