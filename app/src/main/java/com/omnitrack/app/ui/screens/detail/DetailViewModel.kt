@@ -71,6 +71,16 @@ class DetailViewModel(
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
+    init {
+        if (mediaId == -1L) {
+            val ephemeral = EphemeralPreviewHolder.previewItem
+            if (ephemeral != null) {
+                _previewItem.value = ephemeral
+                loadRecommendationsAndReviews(ephemeral)
+            }
+        }
+    }
+
     private fun maybeEnrich(item: MediaItemEntity) {
         if (!enrichedIds.add(item.id)) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -181,12 +191,14 @@ class DetailViewModel(
 
     fun closePreview() {
         _previewItem.value = null
+        EphemeralPreviewHolder.previewItem = null
     }
 
     fun addToLibrary(item: MediaItemEntity) {
         viewModelScope.launch {
             val toInsert = item.copy(id = 0L)
             val newId = repository.insertMedia(toInsert)
+            EphemeralPreviewHolder.previewItem = null
             _previewItem.value = null
             _mediaId.value = newId
         }
@@ -305,13 +317,14 @@ class DetailViewModel(
 
                 // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
                 try {
-                    val traktType = if (type == "movie") "movies" else "shows"
-                    val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$traktType"
+                    val searchType = if (type == "movie") "movie" else "show"
+                    val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
                     val traktSearchReq = Request.Builder()
                         .url(traktSearchUrl)
                         .header("Content-Type", "application/json")
                         .header("trakt-api-version", "2")
                         .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                        .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                         .get()
                         .build()
 
@@ -326,14 +339,16 @@ class DetailViewModel(
                         } else null
                     }
 
+                    val commentsEndpointType = if (type == "movie") "movies" else "shows"
                     val targetSlug = traktSlug ?: item.tmdbId?.toString()
                     if (targetSlug != null) {
-                        val commentsUrl = "https://api.trakt.tv/$traktType/$targetSlug/comments/likes?page=1&limit=100"
+                        val commentsUrl = "https://api.trakt.tv/$commentsEndpointType/$targetSlug/comments/likes?page=1&limit=100"
                         val commentsReq = Request.Builder()
                             .url(commentsUrl)
                             .header("Content-Type", "application/json")
                             .header("trakt-api-version", "2")
                             .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                             .get()
                             .build()
 

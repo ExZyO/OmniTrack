@@ -168,10 +168,12 @@ class MainActivity : ComponentActivity() {
                     }
                     "mal", "myanimelist" -> {
                         try {
-                            val verifier = tokenManager.getMalVerifier().orEmpty()
+                            val verifier = tokenManager.getMalVerifier().orEmpty().ifBlank {
+                                "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+                            }
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
-                                .add("client_id", "043566b44e1077e78676bcc7acc098d8")
+                                .add("client_id", TrackerAccountVerifier.MAL_CLIENT_ID)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
                                 .build()

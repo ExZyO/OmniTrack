@@ -160,7 +160,9 @@ fun DetailScreen(
         selectedCompany = null
     }
     BackHandler(enabled = uiState.isPreviewMode && selectedPerson == null && selectedCompany == null) {
+        val isDirectPreview = item.id == -1L
         viewModel.closePreview()
+        if (isDirectPreview) onBack()
     }
 
     if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
@@ -491,6 +493,9 @@ fun DetailScreen(
                         // 1:1 Nuvio Unboxed Metadata Line (Year, Genres, Runtime, Age Rating)
                         DetailNuvioMetaRow(item = item)
 
+                        // 1:1 Nuvio Pure Stack: Ratings sit directly underneath metadata row (tight 6.dp spacing)
+                        NuvioRatingsRow(item = item)
+
                         // 100% UNBOXED Inline Stats Row with Hairline Dividers (Option A Clean EP Counter)
                         UnboxedStatsRow(
                             item = item,
@@ -499,9 +504,6 @@ fun DetailScreen(
                             onEditScore = { showScoreRatingSheet = true },
                             onOpenTrackers = { showMultiTrackerSheet = true }
                         )
-
-                        // Nuvio Branded Ratings Row with Zero-Key Fallbacks
-                        NuvioRatingsRow(item = item)
                     }
                 } else {
                     // PRESENTATION MODE 2: Classic Overlapping Poster
@@ -625,6 +627,7 @@ fun DetailScreen(
                     ) {
                         Column {
                             DetailNuvioMetaRow(item = item)
+                            NuvioRatingsRow(item = item)
                             UnboxedStatsRow(
                                 item = item,
                                 onEditProgress = { showProgressEditSheet = true },
@@ -632,7 +635,6 @@ fun DetailScreen(
                                 onEditScore = { showScoreRatingSheet = true },
                                 onOpenTrackers = { showMultiTrackerSheet = true }
                             )
-                            NuvioRatingsRow(item = item)
                         }
                     }
                 }
@@ -921,7 +923,9 @@ fun DetailScreen(
                 IconButton(
                     onClick = {
                         if (uiState.isPreviewMode) {
+                            val isDirectPreview = item.id == -1L
                             viewModel.closePreview()
+                            if (isDirectPreview) onBack()
                         } else {
                             onBack()
                         }

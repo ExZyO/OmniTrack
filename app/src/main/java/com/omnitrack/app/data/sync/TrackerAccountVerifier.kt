@@ -33,6 +33,9 @@ object TrackerAccountVerifier {
     const val TRAKT_CLIENT_ID = "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U"
     const val TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
 
+    // MyAnimeList Client ID
+    const val MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
+
     // SIMKL Client Credentials
     const val SIMKL_CLIENT_ID = "6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a"
     const val SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
@@ -324,6 +327,9 @@ object TrackerAccountVerifier {
             val request = Request.Builder()
                 .url("https://api.trakt.tv/oauth/device/code")
                 .header("Content-Type", "application/json")
+                .header("trakt-api-version", "2")
+                .header("trakt-api-key", TRAKT_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                 .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()
 
@@ -348,6 +354,9 @@ object TrackerAccountVerifier {
             val request = Request.Builder()
                 .url("https://api.trakt.tv/oauth/device/token")
                 .header("Content-Type", "application/json")
+                .header("trakt-api-version", "2")
+                .header("trakt-api-key", TRAKT_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                 .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()
 

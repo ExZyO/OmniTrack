@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
@@ -94,9 +96,29 @@ fun CommentDetailSheet(
         containerColor = AmoledBlack,
         dragHandle = null
     ) {
+        var totalDrag by remember { mutableStateOf(0f) }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .pointerInput(review, canGoBack, canGoForward) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { totalDrag = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            totalDrag += dragAmount
+                        },
+                        onDragEnd = {
+                            if (totalDrag < -60f && canGoForward) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onNext()
+                            } else if (totalDrag > 60f && canGoBack) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onPrevious()
+                            }
+                        }
+                    )
+                }
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {

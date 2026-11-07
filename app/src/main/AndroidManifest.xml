@@ -46,6 +46,8 @@
                 <data android:scheme="app.mihon" />
                 <data android:scheme="nuvio" />
                 <data android:scheme="komikku" />
+                <data android:scheme="chimanew" />
+                <data android:scheme="tachiyomi" />
             </intent-filter>
         </activity>
     </application>

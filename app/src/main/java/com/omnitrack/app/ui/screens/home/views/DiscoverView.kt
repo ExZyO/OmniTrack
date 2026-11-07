@@ -65,6 +65,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.MediaCard
+import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -261,6 +262,7 @@ fun DiscoverView(
                 MediaType.ANIME,
                 MediaType.MANGA,
                 MediaType.NOVEL,
+                MediaType.BOOK,
                 MediaType.SHOW,
                 MediaType.MOVIE,
                 MediaType.GAME,
@@ -372,7 +374,8 @@ fun DiscoverView(
                             if (existingInLibrary != null) {
                                 onItemClick(existingInLibrary.id)
                             } else {
-                                onAddMedia(item)
+                                EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                                onItemClick(-1L)
                             }
                         },
                         onQuickProgress = {

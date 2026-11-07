@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +69,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -319,6 +321,7 @@ fun RepeatingHoldButton(
 ) {
     val currentOnStep by rememberUpdatedState(onStep)
     val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
 
     Box(
         modifier = modifier.pointerInput(Unit) {
@@ -326,18 +329,19 @@ fun RepeatingHoldButton(
                 onPress = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     currentOnStep()
-                    val job = coroutineScope {
-                        launch {
-                            delay(initialDelayMs)
-                            while (isActive) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                currentOnStep()
-                                delay(repeatIntervalMs)
-                            }
+                    val job = coroutineScope.launch {
+                        delay(initialDelayMs)
+                        while (isActive) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            currentOnStep()
+                            delay(repeatIntervalMs)
                         }
                     }
-                    tryAwaitRelease()
-                    job.cancel()
+                    try {
+                        tryAwaitRelease()
+                    } finally {
+                        job.cancel()
+                    }
                 }
             )
         },

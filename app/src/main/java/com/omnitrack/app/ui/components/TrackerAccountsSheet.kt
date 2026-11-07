@@ -209,7 +209,7 @@ fun TrackerAccountsSheet(
                 accentColor = Color(0xFF02A9FF),
                 initialToken = tokens.anilistToken.orEmpty(),
                 oauthUrl = "https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token",
-                oauthButtonLabel = "1-Tap Log In",
+                oauthButtonLabel = "Login",
                 verifyFn = { TrackerAccountVerifier.verifyAnilist(it) },
                 onDisconnect = { scope.launch { tokenManager.saveAnilistToken(null); Toast.makeText(context, "AniList disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -220,10 +220,26 @@ fun TrackerAccountsSheet(
                 subtitle = "Anime & Manga status tracking",
                 accentColor = Color(0xFF2E51A2),
                 initialToken = tokens.malToken.orEmpty(),
-                oauthUrl = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=3342466cfb744b714350df413002f5ef&code_challenge=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&code_challenge_method=plain",
-                oauthButtonLabel = "1-Tap Log In",
                 verifyFn = { TrackerAccountVerifier.verifyMal(it) },
-                onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } }
+                onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } },
+                customActionButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+                                tokenManager.saveMalVerifier(verifier)
+                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${TrackerAccountVerifier.MAL_CLIENT_ID}&code_challenge=$verifier&code_challenge_method=plain"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E51A2)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.LockOpen, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             )
 
             // 3. Trakt.tv (8-Char Device Code Flow)
@@ -252,12 +268,12 @@ fun TrackerAccountsSheet(
                     ) {
                         Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Connect with Code", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )
 
-            // 4. SIMKL (1-Tap OAuth with nuvio:// & PIN Code Flow)
+            // 4. SIMKL (Direct PIN Code Flow)
             OAuthDirectTrackerCard(
                 title = "SIMKL",
                 subtitle = "Unified Anime, Shows & Movies tracker",
@@ -266,39 +282,24 @@ fun TrackerAccountsSheet(
                 verifyFn = { TrackerAccountVerifier.verifySimkl(it) },
                 onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } },
                 customActionButton = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                val url = "https://simkl.com/oauth/authorize?response_type=code&client_id=6eaf02a9b63b01eb1750cdecf0f05e7d0d8dd949d1eb6894716857947bb68c1a&redirect_uri=nuvio://auth/simkl"
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                            shape = RoundedCornerShape(999.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
-                                    if (codeInfo != null) {
-                                        simklPinInfo = codeInfo
-                                        showSimklPinDialog = true
-                                    } else {
-                                        Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
-                                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
+                                if (codeInfo != null) {
+                                    simklPinInfo = codeInfo
+                                    showSimklPinDialog = true
+                                } else {
+                                    Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                            shape = RoundedCornerShape(999.dp)
-                        ) {
-                            Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("PIN Code", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(999.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )
@@ -322,7 +323,7 @@ fun TrackerAccountsSheet(
                     ) {
                         Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )
@@ -350,7 +351,7 @@ fun TrackerAccountsSheet(
                     ) {
                         Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("1-Tap Log In", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             )

@@ -120,7 +120,7 @@ fun NuvioRatingsRow(
                             source = "tmdb",
                             displayName = "TMDB",
                             iconRes = R.drawable.rating_tmdb,
-                            valueText = "${(score * 10).roundToInt()}%",
+                            valueText = "${(score * 10).roundToInt()}",
                             valueColor = Color(0xFF01B4E4)
                         )
                     )
@@ -137,7 +137,7 @@ fun NuvioRatingsRow(
                             source = "trakt",
                             displayName = "Trakt",
                             iconRes = R.drawable.rating_trakt,
-                            valueText = "${(score * 10).roundToInt()}%",
+                            valueText = "${(score * 10).roundToInt()}",
                             valueColor = Color(0xFFED1C24)
                         )
                     )

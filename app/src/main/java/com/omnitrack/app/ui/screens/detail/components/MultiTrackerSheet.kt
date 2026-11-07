@@ -196,7 +196,7 @@ fun MultiTrackerSheet(
         )
         fun addSimkl(isAnime: Boolean = true) = list.add(
             TrackerDef("SIMKL", "SIMKL", Color(0xFF00E676), item.simklId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://simkl.com/${if (isAnime) "anime" else "movies"}/$it" }) {
+                browserUrlTemplate = { "https://simkl.com/${if (isAnime) "anime" else if (item.mediaType == MediaType.SHOW) "tv" else "movies"}/$it" }) {
                 onUpdateItem(item.copy(simklId = it?.toLongOrNull()))
             }
         )
@@ -208,13 +208,13 @@ fun MultiTrackerSheet(
         )
         fun addTrakt() = list.add(
             TrackerDef("TRAKT", "Trakt.tv", Color(0xFFED1C24), item.traktId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://trakt.tv/search/trakt/$it?id_type=movie" }) {
+                browserUrlTemplate = { "https://trakt.tv/search/trakt/$it?id_type=${if (item.mediaType == MediaType.SHOW) "show" else "movie"}" }) {
                 onUpdateItem(item.copy(traktId = it?.toLongOrNull()))
             }
         )
         fun addTmdb() = list.add(
             TrackerDef("TMDB", "TMDb", Color(0xFF01D277), item.tmdbId?.toString(), "10-Point (Half-Star)",
-                browserUrlTemplate = { "https://www.themoviedb.org/movie/$it" }) {
+                browserUrlTemplate = { "https://www.themoviedb.org/${if (item.mediaType == MediaType.SHOW) "tv" else "movie"}/$it" }) {
                 onUpdateItem(item.copy(tmdbId = it?.toLongOrNull()))
             }
         )
@@ -601,7 +601,15 @@ private fun UniversalSyncControlsBar(
                         modifier = Modifier
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(AccentJade)
+                            .background(
+                                when (item.status) {
+                                    TrackingStatus.COMPLETED -> AccentJade
+                                    TrackingStatus.IN_PROGRESS -> AccentArctic
+                                    TrackingStatus.DROPPED -> Color(0xFFEF4444)
+                                    TrackingStatus.ON_HOLD -> AccentGold
+                                    else -> Color(0xFF9E9E9E)
+                                }
+                            )
                     )
                     Text(
                         text = item.status.displayName,
@@ -1829,8 +1837,9 @@ private fun SearchAndRebindBottomSheet(
                             "BANGUMI" -> res.bangumiId?.toString()
                             "TMDB" -> res.tmdbId?.toString()
                             "VNDB" -> res.vndbId
-                            else -> res.anilistId?.toString()
-                        } ?: res.title.hashCode().toString()
+                            "IGDB" -> res.igdbId?.toString()
+                            else -> null
+                        } ?: return@forEach
 
                         Row(
                             modifier = Modifier

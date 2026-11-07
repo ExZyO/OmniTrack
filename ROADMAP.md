@@ -95,6 +95,16 @@ The following directives are transcribed directly from Exile's requirements and 
 > Require 7.0 seconds of continuous screen stillness before auto-playing on screen open or re-scroll. or whatever is the standard  
 > anilist, mal, etc tracker scores show up wrong, do it exactly like nuvio and nuvio enhanced does it so it works properly"
 
+### 6. Ratings Placement Option 1, Show & Anime Parity, Reviews Swipe & Auth (Verbatim)
+> "ratings are messed up for example in photo where it says imdb 6.7, that photo is omnitracker with wrong ratings mostly, verify (the mentalist) vs nuvio where it says imdb 8.2  
+> i dont like ratings placement, it looks awkward, out of place there with so much space around it and because of the soft lines of the separation from the buttons on top of it  
+> Pick Option 1 (1:1 Nuvio Pure Stack): no horizontal line above ratings row, sit directly underneath metadata row as tight two-line stack, tight left-aligned spacing, real vector icons, drop % on TMDB, include red Trakt rating  
+> trakt only shows 3 reviews, fix it to show 33+ comments with singular search query  
+> the show details page has status and production in omnitracker, in nuvio for same series it shows status, release info, runtime, certification, origin country, original language  
+> Check the 280.dp × 190.dp review cards with #121212 AMOLED depth and the official green stadium REVIEW chip. Tap any review to open CommentDetailSheet with bilateral (< / >) navigation and spoiler reveal toggle. Add swipe left/right gestures here so i dont have to keep clicking that button  
+> production: marvel studios shows, for anime i cant see production, add clickable anime studios and seiyuu/voice actors clickable cast  
+> poster click auto-adding to library: in DiscoverView.kt tapping a non-library search result called onAddMedia(item), which immediately executed repository.insertMedia(entity). It must instead launch Ephemeral Preview Mode with an explicit + Add to Library button"
+
 ---
 
 ## 🛡️ Architectural Traps & Quality Guardrails
@@ -137,7 +147,18 @@ flowchart LR
 
 ## 📌 Phase 1: Detail Screen 1:1 Nuvio Parity & Universal Brand Icons
 
-### 1.1 Unboxed Detail Metadata & Ratings Row (Zero-Pill Architecture)
+### 1.1 Unboxed Detail Metadata & Ratings Row (Option 1 Pure Stack Architecture)
+- [x] **Option 1 Pure Stack Layout (Selected by Exile)**:
+  - Eliminated the awkward horizontal line divider above the ratings row that previously cut the screen and created empty dead space.
+  - Placed `NuvioRatingsRow` directly underneath `DetailNuvioMetaRow` as a tight two-line stack.
+  - Left-aligned ratings with tight `Arrangement.spacedBy(14.dp)`.
+- [x] **TMDb & Trakt Integer Score Formatting**:
+  - Dropped `%` symbol on TMDb score (`84` instead of `84%`), matching Nuvio 1:1.
+  - Added dedicated red Trakt rating badge (`83`) with `rating_trakt.png`.
+- [x] **MDBList Query Collision Fix (`EnrichmentRepository.kt`)**:
+  - Resolved TMDb TV show IDs to IMDb ID (`tt1196946` for The Mentalist) via TMDb `/external_ids`.
+  - Query MDBList with `i=$imdbId&m=show` (or `m=movie`), preventing TMDb TV IDs from matching completely different movies with the same numeric ID (fixed *The Mentalist* IMDb 6.7 movie collision -> 8.2 TV series).
+  - Added Cinemeta fallback by `imdbId` so IMDb rating is always accurate.
 - [x] **Eliminate Pill Boxes on Metadata**: Removed rounded pills from `STUDIO`, `STATUS`, `RUNTIME`, and `AGE`.
   - Replicate Nuvio `DetailMetaInfo.kt` exact typography:
     - Release & Genre Line: `2024 • Action, Sci-Fi` in `FontWeight.Bold`, 15sp.
@@ -151,8 +172,10 @@ flowchart LR
   - Migrated 28 high-res assets to `app/src/main/res/drawable/`.
 
 ### 1.2 Community Reviews & Trakt Comments (1:1 Nuvio Experience)
-- [x] **Pagination to 100 Comments**: Replace 3-item limit with Trakt pagination `https://api.trakt.tv/shows|movies/{id}/comments/likes?page=1&limit=100`.
-- [x] **Resolve Trakt Slug by TMDb ID**: Query `https://api.trakt.tv/search/tmdb/{id}?type={movie|show}` with Trakt Client ID `eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U` so that every title finds its full Trakt discussion thread (33+ comments).
+- [x] **Pagination to 100 Comments**: Trakt pagination `https://api.trakt.tv/{movies|shows}/{id}/comments/likes?page=1&limit=100`.
+- [x] **Singular Trakt Search Parameter Fix**:
+  - Fixed search parameter from plural `?type=shows` to singular `?type=show` / `?type=movie`. Trakt's search API returned `400 Bad Request` on plural parameters; fixing this restores the full discussion thread (33+ comments) instead of falling back to 3 TMDb reviews.
+  - Added required `trakt-api-version: 2`, `trakt-api-key`, and `User-Agent: OmniTrack/1.0.0 (Android)` headers.
 - [x] **Clean Markdown & BBCode Stripping**:
   - Strip bold `**`, italics `*`, headers `#`, and BBCode `[spoiler]...[/spoiler]` via `sanitizeCommunityComment()`.
   - Render spoiler warning cards: `Contains spoilers • Tap to read` in warning amber.
@@ -160,8 +183,9 @@ flowchart LR
   - Card dimensions: `width = 280.dp`, `height = 190.dp`, corner radius 16dp.
   - Surface color: `Color(0xFF121212)` with AMOLED translucent depth.
   - Official green stadium pill chip: `REVIEW` (`#1B3D2F` background, `#00E054` text) when `isReview == true`.
-- [x] **Interactive Comment Detail Sheet**:
+- [x] **Interactive Comment Detail Sheet with Bilateral Buttons & Swipe Gestures**:
   - Full-screen / modal sheet (`CommentDetailSheet.kt`) with spoiler reveal toggle and bilateral previous/next navigation buttons (`1 / 33`).
+  - Added horizontal swipe left/right gestures to flip through comments without repeatedly clicking buttons.
 
 ### 1.3 Networks & Production Section
 - [x] **Add Dedicated Networks / Production Companies Section (`DetailNetworksSection.kt`)**:
@@ -178,11 +202,18 @@ flowchart LR
     - Actor profile photo & biography (expandable).
     - Known For / Movies / TV Shows horizontal poster rails using `NuvioRailPosterCard(135.dp, 202.dp)`.
     - Tapping filmography items opens their Detail screen in Ephemeral Preview Mode.
+- [ ] **Anime Voice Actors (Seiyuu) Clickable Cast**:
+  - For Anime, fetch voice actor edges (`characters.edges.voiceActors`) from AniList GraphQL with actor avatars, japanese names, and character roles, opening their filmography on tap.
 
-### 1.5 Show & Production Details Section Redesign
+### 1.5 Show & Production Details Section Redesign (Nuvio 1:1 Parity)
 - [x] **Replace Boxed Show Details (`DetailShowDetailsSection.kt`)**: Eliminated the heavy rectangular card.
 - [x] **Clean Unboxed Vertical List**:
   - Left: Label (`Status`, `Release Date`, `Runtime`, `Certification`, `Production`) in semi-bold `onSurface.copy(alpha = 0.8f)`.
+  - Right: Value aligned right.
+  - Hairline dividers between rows (`0.10f alpha`).
+- [ ] **Full Nuvio Metadata Parity**:
+  - Add Origin Country, Original Language, Release Info, and Certification for all TV Shows & Anime.
+  - Fix studio resolution so production companies like Marvel Studios show for movies/shows, and animation studios (MAPPA, Wit Studio, CloverWorks) show for anime.
   - Right: Value aligned right.
   - Hairline dividers between rows (`0.10f alpha`).
 
