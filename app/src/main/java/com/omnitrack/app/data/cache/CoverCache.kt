@@ -131,28 +131,6 @@ class CoverCache(private val context: Context) {
     }
 
     /**
-     * Deletes all local custom cover files for the given media ID.
-     */
-    fun deleteCustomCover(mediaId: Long) {
-        customCoverDir.listFiles()?.forEach { file ->
-            if (file.isFile && (file.name.startsWith("${mediaId}_cover_") || file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg") && !file.name.startsWith("${mediaId}_banner_")) {
-                file.delete()
-            }
-        }
-    }
-
-    /**
-     * Deletes all local custom banner files for the given media ID.
-     */
-    fun deleteCustomBanner(mediaId: Long) {
-        customCoverDir.listFiles()?.forEach { file ->
-            if (file.isFile && file.name.startsWith("${mediaId}_banner_")) {
-                file.delete()
-            }
-        }
-    }
-
-    /**
      * Copies an input stream to a new timestamped custom cover file (${mediaId}_${timestamp}.jpg).
      * Deletes previous custom cover files for this media item so old files don't accumulate.
      */
@@ -250,7 +228,20 @@ class CoverCache(private val context: Context) {
     fun deleteCustomCover(mediaId: Long): Boolean {
         var deleted = false
         customCoverDir.listFiles()?.forEach { file ->
-            if (file.isFile && (file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg")) {
+            if (file.isFile && (file.name.startsWith("${mediaId}_cover_") || file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg") && !file.name.startsWith("${mediaId}_banner_")) {
+                if (file.delete()) deleted = true
+            }
+        }
+        return deleted
+    }
+
+    /**
+     * Deletes a custom banner from disk.
+     */
+    fun deleteCustomBanner(mediaId: Long): Boolean {
+        var deleted = false
+        customCoverDir.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith("${mediaId}_banner_")) {
                 if (file.delete()) deleted = true
             }
         }
