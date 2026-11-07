@@ -24,7 +24,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
-private val GlassSurfaceColor = Color(0xFF14161F)
+private val GlassSurfaceColor = Color(0xFF1C1C1E)
 
 @Composable
 fun GlassBarSurface(
@@ -39,7 +39,7 @@ fun GlassBarSurface(
             modifier
                 .then(if (hazeState != null) Modifier.barBackdrop(hazeState) else Modifier)
                 .drawWithCache {
-                    val fill = GlassSurfaceColor.copy(alpha = if (hazeState != null) 0.65f else 0.88f)
+                    val fill = GlassSurfaceColor.copy(alpha = if (hazeState != null) 0.55f else 0.82f)
                     val edge = Brush.verticalGradient(
                         listOf(Color.White.copy(alpha = 0.28f), Color.White.copy(alpha = 0.04f))
                     )
@@ -88,5 +88,5 @@ private fun Modifier.barBackdrop(hazeState: HazeState): Modifier = hazeEffect(st
     blurRadius = 24.dp
     backgroundColor = GlassSurfaceColor
     tints = listOf(HazeTint(Color.Transparent))
-    noiseFactor = 0.05f
+    noiseFactor = 0f
 }
