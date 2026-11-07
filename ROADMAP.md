@@ -105,6 +105,14 @@ The following directives are transcribed directly from Exile's requirements and 
 > production: marvel studios shows, for anime i cant see production, add clickable anime studios and seiyuu/voice actors clickable cast  
 > poster click auto-adding to library: in DiscoverView.kt tapping a non-library search result called onAddMedia(item), which immediately executed repository.insertMedia(entity). It must instead launch Ephemeral Preview Mode with an explicit + Add to Library button"
 
+### 7. Gold Standard Category Apps, Dropping Radial Hold, In-Line Playback & 1:1 Nuvio Episode Tracking (Verbatim)
+> "btw i found cinexplore, i was wondering we could also try reverse engineering a very good gold standard app that also tracks all kinds of media, even if theres not an all in one, we can find the best app for each category and we could reverse engineer or if its open source, port features, etc? reply to this first, what do u think? whats the best apps to use for this also?  
+> also that hold dialog quick feature, do i just drop it? u cant make it and i dont have anything to copy it from, maybe we can leave it till the end for now, what do u think?  
+> btw the app opens trailers in yt  
+> i also want it to show different types, like i mentioned earlier, behind the scenes, clips, trailers, etc  
+> add to roadmap:  
+> when tracking eps or do i make it look like nuvio? hmm, make it look like nuvio 1 to 1 port, same ui, etc, Shows seasons posters, ep thumbnails but doesnt play vids obv, i should be able to click top right circle button, the exact one from nuvio and mark ep as watched, so add all the related settings, the detail page, every setting"
+
 ---
 
 ## 🛡️ Architectural Traps & Quality Guardrails
@@ -234,6 +242,29 @@ flowchart LR
   - Secondary API: Open Library (Internet Archive) cover archive & edition resolver.
   - Fully integrated in `OmniSearchRepository.kt`, `ArtworkWaterfallRepository.kt`, `PreferenceManager.kt`, and `ArtworkPriorityScreen.kt`.
 
+### 1.9 Full Seasons & Episode Tracking Grid (1:1 Nuvio Parity)
+- [ ] **Season Navigation Bar (`SeriesSeasonSelector` & `SeasonPosterScrollRow`)**:
+  - Season View Modes: Toggle between **Season Posters** (`SeasonPosterScrollRow` with 2:3 vertical season posters) and **Season Chips** (`SeriesSeasonSelector` horizontal pill chips).
+  - Smooth horizontal scrolling with active season indicator and season episode counts.
+- [ ] **16:9 Episode Thumbnail Cards (`EpisodeListCard`)**:
+  - Fixed-width or full-bleed 16:9 episode thumbnail loaded from TMDb `still_path` (`https://image.tmdb.org/t/p/w500/...`).
+  - Episode Code Pill: e.g. `S01E01` / `E16` pinned on top-left of thumbnail with dark alpha backdrop.
+  - **Top-Right Circle Watched Button (`NuvioAnimatedWatchedBadge`)**: Exact circular badge from Nuvio with accent color background and white checkmark icon. Tapping toggles watched state with haptic feedback and updates watch progress immediately.
+  - Episode Metadata: Bold episode title, release date, and IMDb episode rating badge (`ImdbEpisodeRatingBadge`).
+  - Episode Overview: Expandable synopsis text with clean typography.
+  - Optional Spoiler Blur: `blurUnwatchedEpisodes` setting blurs thumbnails of unwatched episodes by 18dp.
+- [ ] **Episode Watched Actions Sheet (`EpisodeWatchedActionSheet`)**:
+  - Long-pressing any episode card opens Nuvio's modal bottom sheet with:
+    - `Mark Episode as Watched / Unwatched` (`Icons.Default.CheckCircle`)
+    - `Mark Previous Episodes as Watched / Unwatched` (`Icons.Default.DoneAll`)
+    - `Mark Entire Season as Watched / Unwatched` (`Icons.Default.PlaylistAddCheckCircle`)
+- [ ] **Related Episode & Detail Settings**:
+  - `Season View Mode`: Posters vs Chips.
+  - `Episode Card Style`: Vertical List vs Horizontal Row.
+  - `Episode Ratings Visibility`: Always, Only Watched, or Never.
+  - `Blur Unwatched Episodes`: Toggle on/off for spoiler protection.
+  - `Auto-sync on Mark`: Pushes episode progress to Trakt and Simkl instantly.
+
 ---
 
 ## 📌 Phase 2: In-Line Hero Trailers, Accurate Tracker Scores & Landscape Artwork System
@@ -243,6 +274,9 @@ flowchart LR
   - Eliminated the awkward red "Watch Trailer" button.
   - Replaced with categorized dropdown selector: Trailers, Behind the Scenes, Clips, Featurettes, and Teasers.
   - 16:9 widescreen thumbnail cards with Amoled depth, play icon badge, video title, and category filter chips.
+- [ ] **In-App Video Playback Popup (`TrailerPlayerPopup.kt`)**:
+  - Stop opening external YouTube application when tapping trailers or bonus videos.
+  - Port Nuvio's in-app `TrailerPlayerPopup.kt` bottom sheet modal player with embedded video surface, scrub bar, and fullscreen orientation lock.
 - [ ] **Port Nuvio's `HeroTrailerPlayerSurface` with ExoPlayer**:
   - Exact 1:1 port of Nuvio / Nuvio Enhanced implementation (`HeroTrailerPlayerSurface.android.kt` using `androidx.media3.exoplayer.ExoPlayer`).
   - Whatever Nuvio uses, exactly that: `TextureView` container with `MergingMediaSource` (separate progressive video stream + separate adaptive audio stream from InnerTube/YouTube cipher extractor), hardware-accelerated surface rendering, video-matrix aspect fill cropping, and zero external redirects.
