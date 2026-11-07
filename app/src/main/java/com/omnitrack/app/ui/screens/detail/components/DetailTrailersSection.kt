@@ -106,28 +106,28 @@ fun DetailTrailersSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Section Header with Category Pill Selector
+        // Section Header with Category Pill Selector (Aligned next to "Trailers", 1:1 Nuvio Parity)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Trailers & Bonus",
+                text = "Trailers",
                 color = TextPrimary,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
 
-            // Category Selector Dropdown Pill
+            // Category Selector Dropdown Pill (Clean category text, number count in submenu only)
             Box {
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(DarkSurfaceElevated)
+                        .background(Color.White.copy(alpha = 0.08f))
                         .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                         .clickable { menuExpanded = true }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -135,7 +135,7 @@ fun DetailTrailersSection(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "$selectedCategory (${selectedTrailers.size})",
+                        text = selectedCategory,
                         color = TextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold

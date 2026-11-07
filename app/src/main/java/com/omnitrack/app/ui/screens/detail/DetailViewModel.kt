@@ -327,12 +327,13 @@ class DetailViewModel(
                 // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
                 try {
                     val searchType = if (type == "movie") "movie" else "show"
+                    val traktApiKey = com.omnitrack.app.data.sync.TrackerAccountVerifier.TRAKT_CLIENT_ID
                     val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
                     val traktSearchReq = Request.Builder()
                         .url(traktSearchUrl)
                         .header("Content-Type", "application/json")
                         .header("trakt-api-version", "2")
-                        .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                        .header("trakt-api-key", traktApiKey)
                         .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                         .get()
                         .build()
@@ -356,7 +357,7 @@ class DetailViewModel(
                             .url(commentsUrl)
                             .header("Content-Type", "application/json")
                             .header("trakt-api-version", "2")
-                            .header("trakt-api-key", "eyAYRNGOL9TopY6lw3agFsTWDZVfiqMG3tp0DMBQo2U")
+                            .header("trakt-api-key", traktApiKey)
                             .header("User-Agent", "OmniTrack/1.0.0 (Android)")
                             .get()
                             .build()
@@ -831,15 +832,21 @@ class DetailViewModel(
 
 fun sanitizeCommunityComment(raw: String): String {
     return raw
-        .replace(Regex("""\*\*(.*?)\*\*"""), "$1")
-        .replace(Regex("""\*(.*?)\*"""), "$1")
-        .replace(Regex("""__(.*?)__"""), "$1")
-        .replace(Regex("""_(.*?)_"""), "$1")
-        .replace(Regex("""(?m)^#{1,6}\s*"""), "")
+        .replace(Regex("""(?is)\[spoiler\].*?\[/spoiler\]"""), "")
         .replace(Regex("""(?i)\[/?spoiler\]"""), "")
-        .replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1")
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""<[^>]*>"""), "")
+        .replace(Regex("""(?m)^#{1,6}\s*"""), "")
+        .replace(Regex("""\[(.*?)\]\(.*?\)"""), "$1")
+        .replace(Regex("""(?s)\*{3}(.*?)\*{3}"""), "$1")
+        .replace(Regex("""(?s)_{3}(.*?)_{3}"""), "$1")
+        .replace(Regex("""(?s)\*{2}(.*?)\*{2}"""), "$1")
+        .replace(Regex("""(?s)_{2}(.*?)_{2}"""), "$1")
+        .replace(Regex("""(?s)\*(.*?)\*"""), "$1")
+        .replace(Regex("""(?s)_(.*?)_"""), "$1")
+        .replace(Regex("""(?s)~~(.*?)~~"""), "$1")
+        .replace(Regex("""_{2,}"""), "")
+        .replace(Regex("""\*{2,}"""), "")
         .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
 }
