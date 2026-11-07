@@ -7,6 +7,7 @@ import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -368,8 +369,11 @@ class EnrichmentRepository(
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
             val body = response.body?.string() ?: return null
-            val parsed = json.parseToJsonElement(body)
-            val root = if (parsed is JsonObject) parsed else return null
+            val root = try {
+                json.parseToJsonElement(body).jsonObject
+            } catch (_: Exception) {
+                return null
+            }
 
             // Support both direct item response and search result wrappers {"search": [...]}
             val itemObj = if (root.containsKey("search")) {
