@@ -387,15 +387,8 @@ class DetailViewModel(
                             }
                         """.trimIndent()
 
-                        val bodyJson = Json.encodeToString(
-                            kotlinx.serialization.json.JsonObject.serializer(),
-                            kotlinx.serialization.json.buildJsonObject {
-                                put("query", query)
-                                putJsonObject("variables") {
-                                    put("id", item.anilistId)
-                                }
-                            }
-                        )
+                        val escapedQuery = query.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+                        val bodyJson = """{"query":"$escapedQuery","variables":{"id":${item.anilistId}}}"""
 
                         val req = Request.Builder()
                             .url("https://graphql.anilist.co")

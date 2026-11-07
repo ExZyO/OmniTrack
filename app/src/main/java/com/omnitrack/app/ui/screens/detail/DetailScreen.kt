@@ -738,7 +738,7 @@ fun DetailScreen(
                                 selectedPlatforms = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
                                     ?: item.platform?.let { setOf(it) }
                                     ?: emptySet(),
-                                steamAppId = item.steamAppId,
+                                steamAppId = null,
                                 onHoursChanged = { viewModel.updatePlaytime(it) },
                                 onStoryProgressChanged = { viewModel.updateProgress(it) },
                                 onPlatformToggled = { viewModel.togglePlatform(it) }

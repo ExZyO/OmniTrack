@@ -36,9 +36,6 @@ fun DetailShowDetailsSection(
     if (!item.airStatus.isNullOrBlank()) {
         detailsList.add("Status" to item.airStatus)
     }
-    if (!item.releaseYear.isNullOrBlank()) {
-        detailsList.add("Release Year" to item.releaseYear)
-    }
     if (item.runtimeMinutes != null && item.runtimeMinutes > 0) {
         val hrs = item.runtimeMinutes / 60
         val mins = item.runtimeMinutes % 60
