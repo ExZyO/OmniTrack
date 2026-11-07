@@ -87,21 +87,28 @@ import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ArtworkBackdrop
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import com.omnitrack.app.ui.components.ArtworkPickerBottomSheet
 import com.omnitrack.app.ui.components.BackgroundMode
 import com.omnitrack.app.ui.components.ChapterStepper
 import com.omnitrack.app.ui.components.CoverGlowBox
-import com.omnitrack.app.ui.components.EpisodeAccordion
 import com.omnitrack.app.ui.components.GameProgressCard
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
-import com.omnitrack.app.ui.screens.detail.components.AttachedStatusFanArcOverlay
-import com.omnitrack.app.ui.screens.detail.components.DualSpeedJogWheelOverlay
+import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
+import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
-import com.omnitrack.app.ui.screens.detail.components.ProgressEditSheet
+import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
+import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
+import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
+import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
-import com.omnitrack.app.ui.screens.detail.components.StatusPickerSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -134,15 +141,13 @@ fun DetailScreen(
     var canExpandSynopsis by remember(item?.id) { mutableStateOf(false) }
 
     var showProgressEditSheet by remember { mutableStateOf(false) }
-    var showJogWheelOverlay by remember { mutableStateOf(false) }
-    var jogWheelAnchor by remember { mutableStateOf(Offset.Zero) }
-
     var showStatusPickerSheet by remember { mutableStateOf(false) }
-    var showStatusFanArcOverlay by remember { mutableStateOf(false) }
-    var statusFanArcAnchor by remember { mutableStateOf(Offset.Zero) }
-
     var showScoreRatingSheet by remember { mutableStateOf(false) }
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = uiState.isPreviewMode) {
+        viewModel.closePreview()
+    }
 
     val scrollState = rememberScrollState()
 
@@ -441,21 +446,16 @@ fun DetailScreen(
                         UnboxedStatsRow(
                             item = item,
                             onEditProgress = { showProgressEditSheet = true },
-                            onLongPressProgress = { anchor ->
-                                jogWheelAnchor = anchor
-                                showJogWheelOverlay = true
+                            onQuickIncrementProgress = {
+                                viewModel.updateProgress(item.currentProgress + 1.0)
                             },
                             onEditStatus = { showStatusPickerSheet = true },
-                            onLongPressStatus = { anchor ->
-                                statusFanArcAnchor = anchor
-                                showStatusFanArcOverlay = true
-                            },
                             onEditScore = { showScoreRatingSheet = true },
                             onOpenTrackers = { showMultiTrackerSheet = true }
                         )
 
-                        // Multi-Source Metadata Enrichment Ratings
-                        EnrichmentRatingsRow(item = item)
+                        // Nuvio Branded Ratings Row with Zero-Key Fallbacks
+                        NuvioRatingsRow(item = item)
                     }
                 } else {
                     // PRESENTATION MODE 2: Classic Overlapping Poster
@@ -581,19 +581,14 @@ fun DetailScreen(
                             UnboxedStatsRow(
                                 item = item,
                                 onEditProgress = { showProgressEditSheet = true },
-                                onLongPressProgress = { anchor ->
-                                    jogWheelAnchor = anchor
-                                    showJogWheelOverlay = true
+                                onQuickIncrementProgress = {
+                                    viewModel.updateProgress(item.currentProgress + 1.0)
                                 },
                                 onEditStatus = { showStatusPickerSheet = true },
-                                onLongPressStatus = { anchor ->
-                                    statusFanArcAnchor = anchor
-                                    showStatusFanArcOverlay = true
-                                },
                                 onEditScore = { showScoreRatingSheet = true },
                                 onOpenTrackers = { showMultiTrackerSheet = true }
                             )
-                            EnrichmentRatingsRow(item = item)
+                            NuvioRatingsRow(item = item)
                         }
                     }
                 }
@@ -638,7 +633,59 @@ fun DetailScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Show Details & Watch Trailer Pills
+                val hasTrailer = !item.trailerYoutubeKey.isNullOrBlank()
+                val hasMetadata = item.studioOrNetwork != null || item.airStatus != null || item.runtimeMinutes != null || item.contentRating != null
+                if (hasTrailer || hasMetadata) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (hasTrailer) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFFFF0000).copy(alpha = 0.18f))
+                                    .border(1.dp, Color(0xFFFF0000).copy(alpha = 0.5f), RoundedCornerShape(999.dp))
+                                    .clickable {
+                                        val key = item.trailerYoutubeKey
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key"))
+                                        context.startActivity(intent)
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text("▶", fontSize = 11.sp, color = Color(0xFFFF0000), fontWeight = FontWeight.Black)
+                                    Text("Watch Trailer", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        }
+
+                        item.studioOrNetwork?.let { studio ->
+                            MetadataBadge(label = "STUDIO", value = studio)
+                        }
+                        item.airStatus?.let { air ->
+                            MetadataBadge(label = "STATUS", value = air)
+                        }
+                        item.runtimeMinutes?.let { runtime ->
+                            MetadataBadge(label = "RUNTIME", value = "${runtime}m")
+                        }
+                        item.contentRating?.let { rating ->
+                            MetadataBadge(label = "AGE", value = rating)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 // Progress Section (100% Unboxed flowing controls)
@@ -650,22 +697,23 @@ fun DetailScreen(
                 ) {
                     when (item.mediaType) {
                         MediaType.ANIME, MediaType.SHOW -> {
+                            if (uiState.seasons.isNotEmpty()) {
+                                SeasonEpisodesSection(
+                                    seasons = uiState.seasons,
+                                    currentProgress = item.currentProgress,
+                                    onToggleEpisodeWatched = { ep, isWatched ->
+                                        viewModel.updateProgress(if (isWatched) ep.toDouble() else (ep - 1).toDouble().coerceAtLeast(0.0))
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                            }
+
                             ChapterStepper(
                                 unitLabel = item.mediaType.unitLabel,
                                 currentProgress = item.currentProgress,
                                 totalProgress = item.totalProgress,
                                 onProgressChanged = { viewModel.updateProgress(it) }
                             )
-
-                            if (uiState.seasons.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                EpisodeAccordion(
-                                    seasons = uiState.seasons,
-                                    onEpisodeToggle = { _, epIdx ->
-                                        viewModel.updateProgress((epIdx + 1).toDouble())
-                                    }
-                                )
-                            }
                         }
 
                         MediaType.MANGA, MediaType.NOVEL -> {
@@ -746,6 +794,50 @@ fun DetailScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Trakt & Jikan Community Reviews Carousel
+                if (uiState.reviews.isNotEmpty()) {
+                    ReviewsSection(reviews = uiState.reviews)
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // "More Like This" & Franchise Relations Carousel (Preview Mode)
+                if (uiState.recommendations.isNotEmpty()) {
+                    RecommendationsSection(
+                        recommendations = uiState.recommendations,
+                        onSelectRecommendation = { viewModel.openPreview(it) }
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // PREVIEW MODE HERO ACTION: + Add to Library
+                if (uiState.isPreviewMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.addToLibrary(item) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp),
+                            shape = RoundedCornerShape(999.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentJade)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Add to Library",
+                                color = AmoledBlack,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(48.dp))
             }
 
@@ -771,7 +863,13 @@ fun DetailScreen(
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 IconButton(
-                    onClick = onBack,
+                    onClick = {
+                        if (uiState.isPreviewMode) {
+                            viewModel.closePreview()
+                        } else {
+                            onBack()
+                        }
+                    },
                     modifier = Modifier.size(44.dp)
                 ) {
                     Icon(
@@ -975,45 +1073,22 @@ fun DetailScreen(
                 )
             }
 
-            // Interactive Progress Modal Sheet
+            // Chimanew Instant Progress Bottom Sheet
             if (showProgressEditSheet) {
-                ProgressEditSheet(
-                    initialProgress = item.currentProgress,
+                ChimanewProgressBottomSheet(
+                    currentProgress = item.currentProgress,
                     totalProgress = item.totalProgress,
-                    mediaType = item.mediaType,
-                    onDismiss = { showProgressEditSheet = false },
-                    onConfirm = { viewModel.updateProgress(it) }
+                    onProgressConfirmed = { viewModel.updateProgress(it) },
+                    onDismiss = { showProgressEditSheet = false }
                 )
             }
 
-            // Dual-Speed Precision Radial Jog-Wheel Overlay (Long-Press Progress)
-            if (showJogWheelOverlay) {
-                DualSpeedJogWheelOverlay(
-                    initialProgress = item.currentProgress,
-                    totalProgress = item.totalProgress,
-                    mediaType = item.mediaType,
-                    centerAnchor = jogWheelAnchor,
-                    onDismiss = { showJogWheelOverlay = false },
-                    onCommit = { viewModel.updateProgress(it) }
-                )
-            }
-
-            // Interactive Status Picker Modal Sheet
+            // Chimanew Instant Status Bottom Sheet
             if (showStatusPickerSheet) {
-                StatusPickerSheet(
+                ChimanewStatusBottomSheet(
                     currentStatus = item.status,
-                    onDismiss = { showStatusPickerSheet = false },
-                    onStatusSelected = { viewModel.updateStatus(it) }
-                )
-            }
-
-            // Attached Contiguous Fan Arc Overlay (0px Gap Between Sectors - Long-Press Status)
-            if (showStatusFanArcOverlay) {
-                AttachedStatusFanArcOverlay(
-                    currentStatus = item.status,
-                    thumbAnchor = statusFanArcAnchor,
-                    onDismiss = { showStatusFanArcOverlay = false },
-                    onCommit = { viewModel.updateStatus(it) }
+                    onStatusSelected = { viewModel.updateStatus(it) },
+                    onDismiss = { showStatusPickerSheet = false }
                 )
             }
 
@@ -1044,16 +1119,12 @@ fun DetailScreen(
 private fun UnboxedStatsRow(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     onEditProgress: () -> Unit,
-    onLongPressProgress: (Offset) -> Unit,
+    onQuickIncrementProgress: () -> Unit,
     onEditStatus: () -> Unit,
-    onLongPressStatus: (Offset) -> Unit,
     onEditScore: () -> Unit,
     onOpenTrackers: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var progressPillCoords by remember { mutableStateOf(Offset.Zero) }
-    var statusPillCoords by remember { mutableStateOf(Offset.Zero) }
-
     val boundCount = remember(item) {
         listOfNotNull(
             item.anilistId,
@@ -1081,51 +1152,64 @@ private fun UnboxedStatsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Section 1: Progress Stepper & Jog-Wheel
+        // Section 1: Progress Stepper & Fast +1 Increment
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .onGloballyPositioned { progressPillCoords = it.positionInRoot() }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onEditProgress() },
-                        onLongPress = { offset -> onLongPressProgress(progressPillCoords + offset) }
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable { onEditProgress() }
+                    .padding(vertical = 4.dp, horizontal = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(AccentArctic.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = AccentArctic,
+                        modifier = Modifier.size(14.dp)
                     )
                 }
-        ) {
+                Column {
+                    Text(
+                        text = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
+                            String.format("%.1f", item.currentProgress)
+                        } else {
+                            "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
+                        },
+                        color = TextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = item.mediaType.unitLabel.uppercase(),
+                        color = TextMuted,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+
+            // Fast +1 increment button with instant optimistic feedback
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(24.dp)
                     .clip(CircleShape)
-                    .background(AccentArctic.copy(alpha = 0.16f)),
+                    .background(AccentArctic)
+                    .clickable { onQuickIncrementProgress() },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = null,
-                    tint = AccentArctic,
-                    modifier = Modifier.size(14.dp)
-                )
-            }
-            Column {
-                Text(
-                    text = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-                        String.format("%.1f", item.currentProgress)
-                    } else {
-                        "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
-                    },
-                    color = TextPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.ExtraBold
-                )
-                Text(
-                    text = item.mediaType.unitLabel.uppercase(),
-                    color = TextMuted,
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp
-                )
+                Text("+1", color = AmoledBlack, fontSize = 10.sp, fontWeight = FontWeight.Black)
             }
         }
 
@@ -1137,18 +1221,14 @@ private fun UnboxedStatsRow(
                 .background(Color.White.copy(alpha = 0.12f))
         )
 
-        // Section 2: Status with Glowing Dot & Fan Arc
+        // Section 2: Status with Glowing Dot
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
-                .onGloballyPositioned { statusPillCoords = it.positionInRoot() }
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onEditStatus() },
-                        onLongPress = { offset -> onLongPressStatus(statusPillCoords + offset) }
-                    )
-                }
+                .clip(RoundedCornerShape(999.dp))
+                .clickable { onEditStatus() }
+                .padding(vertical = 4.dp, horizontal = 4.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -1192,7 +1272,10 @@ private fun UnboxedStatsRow(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.clickable { onEditScore() }
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable { onEditScore() }
+                .padding(vertical = 4.dp, horizontal = 4.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Star,
@@ -1229,7 +1312,10 @@ private fun UnboxedStatsRow(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.clickable { onOpenTrackers() }
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable { onOpenTrackers() }
+                .padding(vertical = 4.dp, horizontal = 4.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -1257,67 +1343,17 @@ private fun UnboxedStatsRow(
 }
 
 @Composable
-private fun EnrichmentRatingsRow(
-    item: MediaItemEntity,
-    modifier: Modifier = Modifier
-) {
-    if (item.communityScore == null && item.imdbScore == null && item.rtScore == null && item.metacriticScore == null) {
-        return
-    }
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        val community = item.communityScore
-        if (community != null) {
-            RatingBadge(label = "COMMUNITY", value = String.format("%.1f", community), color = AccentArctic)
-        }
-        val imdb = item.imdbScore
-        if (imdb != null) {
-            RatingBadge(label = "IMDb", value = String.format("%.1f", imdb), color = AccentGold)
-        }
-        val rt = item.rtScore
-        if (rt != null) {
-            RatingBadge(label = "TOMATOES", value = "$rt%", color = if (rt >= 60) Color(0xFFEF4444) else Color(0xFF10B981))
-        }
-        val meta = item.metacriticScore
-        if (meta != null) {
-            RatingBadge(label = "METACRITIC", value = "$meta", color = if (meta >= 60) Color(0xFF10B981) else Color(0xFFF59E0B))
-        }
-    }
-}
-
-@Composable
-private fun RatingBadge(
-    label: String,
-    value: String,
-    color: Color
-) {
+private fun MetadataBadge(label: String, value: String) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(color.copy(alpha = 0.12f))
-            .border(0.8.dp, color.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 7.dp, vertical = 3.dp),
+            .clip(RoundedCornerShape(999.dp))
+            .background(DarkSurfaceElevated)
+            .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text(
-            text = label,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Black,
-            letterSpacing = 0.5.sp,
-            color = color
-        )
-        Text(
-            text = value,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
+        Text(text = label, fontSize = 9.sp, fontWeight = FontWeight.Black, color = TextMuted)
+        Text(text = value, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
     }
 }

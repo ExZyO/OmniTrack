@@ -27,7 +27,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -497,7 +502,8 @@ fun MultiTrackerSheet(
                             onDeleteItem = {
                                 tracker.onUpdateBoundId(null)
                                 Toast.makeText(context, "Removed from ${tracker.name} list", Toast.LENGTH_SHORT).show()
-                            }
+                            },
+                            onUpdateItem = onUpdateItem
                         )
                     }
                 }
@@ -525,7 +531,8 @@ fun MultiTrackerSheet(
                         onDeleteItem = {
                             tracker.onUpdateBoundId(null)
                             Toast.makeText(context, "Removed from ${tracker.name} list", Toast.LENGTH_SHORT).show()
-                        }
+                        },
+                        onUpdateItem = onUpdateItem
                     )
                 }
             }
@@ -551,7 +558,8 @@ fun MultiTrackerSheet(
 }
 
 /**
- * Universal controls bar with Status pills, Progress scrubber, and 1.0–10.0 Rating slider.
+ * Universal controls bar with Status pills, Nuvio-style smooth continuous progress line scrubber,
+ * and 1.0–10.0 Rating slider.
  * ALWAYS VISIBLE across all tabs and individual tracker screens.
  */
 @Composable
@@ -620,65 +628,79 @@ private fun UniversalSyncControlsBar(
             }
         }
 
-        // 2. Progress Stepper & Scrubber
+        // 2. Progress Header with Fraction & Percentage Pill
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Progress", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Text(
-                text = "${item.currentProgress.toInt()} / ${if (totalProgress > 0) totalProgress.toInt() else "∞"}",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Black,
-                color = AccentArctic
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "${item.currentProgress.toInt()} / ${if (totalProgress > 0) totalProgress.toInt() else "∞"}",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AccentArctic
+                )
+                if (totalProgress > 0.0) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(AccentArctic.copy(alpha = 0.18f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        val pct = ((item.currentProgress / totalProgress) * 100).toInt().coerceIn(0, 100)
+                        Text(
+                            text = "$pct%",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            color = AccentArctic
+                        )
+                    }
+                }
+            }
         }
 
+        // Stepper Buttons and Continuous Progress Scrubber Line
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Decrement Button
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
                     .background(AmoledBlack)
                     .clickable { onUpdateProgress((item.currentProgress - 1.0).coerceAtLeast(0.0)) },
                 contentAlignment = Alignment.Center
             ) {
-                Text("-", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("-1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
 
-            // Slider scrubber
-            if (totalProgress > 0.0) {
-                Slider(
-                    value = item.currentProgress.toFloat(),
-                    onValueChange = { onUpdateProgress(it.toDouble()) },
-                    valueRange = 0f..totalProgress.toFloat(),
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(
-                        thumbColor = AccentArctic,
-                        activeTrackColor = AccentArctic,
-                        inactiveTrackColor = AmoledBlack
-                    )
+            // Continuous Scrubber Line Track
+            Box(modifier = Modifier.weight(1f)) {
+                ProgressScrubberLine(
+                    currentProgress = item.currentProgress,
+                    totalProgress = item.totalProgress,
+                    onProgressChanged = onUpdateProgress
                 )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
             }
 
             // Increment Button
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
                     .background(AccentArctic)
                     .clickable { onUpdateProgress(item.currentProgress + 1.0) },
                 contentAlignment = Alignment.Center
             ) {
-                Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
+                Text("+1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
             }
         }
 
@@ -751,6 +773,178 @@ private fun UniversalSyncControlsBar(
 }
 
 /**
+ * Smooth, scrollable/draggable continuous progress line like in Nuvio Enhanced.
+ * Features live drag tracking, glow indicators, percentage fill, and haptic feedback.
+ */
+@Composable
+private fun ProgressScrubberLine(
+    currentProgress: Double,
+    totalProgress: Double?,
+    onProgressChanged: (Double) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val total = totalProgress ?: 0.0
+    val isBounded = total > 0.0
+    var trackWidthPx by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var dragProgressValue by remember(currentProgress) { androidx.compose.runtime.mutableDoubleStateOf(currentProgress) }
+    var lastHapticInt by remember { androidx.compose.runtime.mutableIntStateOf(currentProgress.toInt()) }
+
+    val activeValue = if (isDragging) dragProgressValue else currentProgress
+    val progressFraction = if (isBounded) (activeValue / total).coerceIn(0.0, 1.0).toFloat() else 0f
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Scrubber line track
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                .onSizeChanged { trackWidthPx = it.width.toFloat().coerceAtLeast(1f) }
+                .pointerInput(totalProgress) {
+                    detectTapGestures { offset ->
+                        if (isBounded) {
+                            val ratio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                            val newVal = (ratio * total).roundToInt().toDouble()
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onProgressChanged(newVal)
+                        }
+                    }
+                }
+                .pointerInput(totalProgress) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            if (isBounded) {
+                                val ratio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
+                                dragProgressValue = (ratio * total).roundToInt().toDouble()
+                            }
+                        },
+                        onDragEnd = {
+                            isDragging = false
+                            onProgressChanged(dragProgressValue)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            if (isBounded) {
+                                val deltaRatio = dragAmount / trackWidthPx
+                                val next = (dragProgressValue + deltaRatio * total).coerceIn(0.0, total)
+                                val rounded = next.roundToInt().toDouble()
+                                if (rounded.toInt() != lastHapticInt) {
+                                    lastHapticInt = rounded.toInt()
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                dragProgressValue = rounded
+                                onProgressChanged(rounded)
+                            } else {
+                                val delta = (dragAmount / 12f).toDouble()
+                                val next = (dragProgressValue + delta).coerceAtLeast(0.0)
+                                val rounded = next.roundToInt().toDouble()
+                                if (rounded.toInt() != lastHapticInt) {
+                                    lastHapticInt = rounded.toInt()
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                dragProgressValue = rounded
+                                onProgressChanged(rounded)
+                            }
+                        }
+                    )
+                },
+            contentAlignment = Alignment.CenterStart
+        ) {
+            // Background track (hollow line)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.12f))
+            )
+
+            // Active progress line (glowing filled track)
+            if (isBounded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction = progressFraction)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(AccentArctic.copy(alpha = 0.7f), AccentArctic)
+                            )
+                        )
+                )
+
+                // Draggable thumb pill
+                Box(
+                    modifier = Modifier
+                        .offset(x = androidx.compose.ui.unit.max(0.dp, (trackWidthPx * progressFraction / androidx.compose.ui.platform.LocalDensity.current.density).dp - 10.dp))
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(AccentArctic)
+                        .border(2.dp, AmoledBlack, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(AmoledBlack)
+                    )
+                }
+            } else {
+                // Unlimited/ongoing scrubber indicator
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(AccentArctic.copy(alpha = 0.35f))
+                )
+            }
+        }
+
+        // Quick jump percentage pills (Nuvio Enhanced style)
+        if (isBounded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(0, 25, 50, 75, 100).forEach { pct ->
+                    val targetVal = ((pct / 100.0) * total).roundToInt().toDouble()
+                    val isCurrent = activeValue.toInt() == targetVal.toInt()
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (isCurrent) AccentArctic else AmoledBlack)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onProgressChanged(targetVal)
+                            }
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "$pct%",
+                            fontSize = 9.5.sp,
+                            fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                            color = if (isCurrent) AmoledBlack else TextMuted
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Collapsible Squircle Accordion Card for ALL Tab
  */
 @Composable
@@ -763,7 +957,8 @@ private fun CollapsibleTrackerCard(
     onOpenBrowser: () -> Unit,
     onSearchRebind: () -> Unit,
     onUntrack: () -> Unit,
-    onDeleteItem: () -> Unit
+    onDeleteItem: () -> Unit,
+    onUpdateItem: (MediaItemEntity) -> Unit
 ) {
     val isBound = !tracker.boundId.isNullOrBlank()
 
@@ -865,18 +1060,10 @@ private fun CollapsibleTrackerCard(
 
                 // Tracker Specific Fields
                 when (tracker.key) {
-                    "SIMKL" -> {
-                        SimklSpecificControls()
-                    }
-                    "MAL" -> {
-                        MalSpecificControls()
-                    }
-                    "ANILIST" -> {
-                        AnilistSpecificControls()
-                    }
-                    "BANGUMI" -> {
-                        BangumiSpecificControls()
-                    }
+                    "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
+                    "MAL" -> MalSpecificControls(item, onUpdateItem)
+                    "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
+                    "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
                     else -> {
                         // Standard generic info
                         Text(
@@ -902,7 +1089,8 @@ private fun SingleTrackerFocusedView(
     onOpenBrowser: () -> Unit,
     onSearchRebind: () -> Unit,
     onUntrack: () -> Unit,
-    onDeleteItem: () -> Unit
+    onDeleteItem: () -> Unit,
+    onUpdateItem: (MediaItemEntity) -> Unit
 ) {
     val isBound = !tracker.boundId.isNullOrBlank()
 
@@ -994,10 +1182,10 @@ private fun SingleTrackerFocusedView(
 
         // Specific controls per tracker
         when (tracker.key) {
-            "SIMKL" -> SimklSpecificControls()
-            "MAL" -> MalSpecificControls()
-            "ANILIST" -> AnilistSpecificControls()
-            "BANGUMI" -> BangumiSpecificControls()
+            "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
+            "MAL" -> MalSpecificControls(item, onUpdateItem)
+            "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
+            "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
             else -> {
                 Text(
                     text = "Status & progress automatically scrobble to ${tracker.name} on playback.",
@@ -1015,9 +1203,12 @@ private fun SingleTrackerFocusedView(
  * - Strictly 140 Character Limit Note Box (Official SIMKL limit)
  */
 @Composable
-private fun SimklSpecificControls() {
-    var memoText by remember { mutableStateOf("") }
-    var isPrivate by remember { mutableStateOf(true) }
+private fun SimklSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    var memoText by remember(item.simklMemo) { mutableStateOf(item.simklMemo ?: "") }
+    var isPrivate by remember(item.simklPrivate) { mutableStateOf(item.simklPrivate) }
 
     Column(
         modifier = Modifier
@@ -1039,7 +1230,11 @@ private fun SimklSpecificControls() {
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(if (isPrivate) Color.White.copy(alpha = 0.12f) else AccentJade.copy(alpha = 0.18f))
-                    .clickable { isPrivate = !isPrivate }
+                    .clickable {
+                        val next = !isPrivate
+                        isPrivate = next
+                        onUpdateItem(item.copy(simklPrivate = next))
+                    }
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Row(
@@ -1065,7 +1260,12 @@ private fun SimklSpecificControls() {
         // Memo input with 140 character limit
         BasicTextField(
             value = memoText,
-            onValueChange = { if (it.length <= 140) memoText = it },
+            onValueChange = {
+                if (it.length <= 140) {
+                    memoText = it
+                    onUpdateItem(item.copy(simklMemo = it))
+                }
+            },
             textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
             cursorBrush = SolidColor(AccentJade),
             modifier = Modifier.fillMaxWidth(),
@@ -1095,9 +1295,12 @@ private fun SimklSpecificControls() {
  * - Rewatches Stepper
  */
 @Composable
-private fun MalSpecificControls() {
-    var malComment by remember { mutableStateOf("") }
-    var rewatches by remember { mutableStateOf(0) }
+private fun MalSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    var malComment by remember(item.malComments) { mutableStateOf(item.malComments ?: "") }
+    var rewatches by remember(item.malRewatches) { mutableStateOf(item.malRewatches) }
 
     Column(
         modifier = Modifier
@@ -1125,7 +1328,13 @@ private fun MalSpecificControls() {
                         .size(24.dp)
                         .clip(CircleShape)
                         .background(DarkSurfaceElevated)
-                        .clickable { if (rewatches > 0) rewatches-- },
+                        .clickable {
+                            if (rewatches > 0) {
+                                val next = rewatches - 1
+                                rewatches = next
+                                onUpdateItem(item.copy(malRewatches = next))
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text("-", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -1136,7 +1345,11 @@ private fun MalSpecificControls() {
                         .size(24.dp)
                         .clip(CircleShape)
                         .background(DarkSurfaceElevated)
-                        .clickable { rewatches++ },
+                        .clickable {
+                            val next = rewatches + 1
+                            rewatches = next
+                            onUpdateItem(item.copy(malRewatches = next))
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -1147,7 +1360,12 @@ private fun MalSpecificControls() {
         // MAL comments text input (1000 char limit)
         BasicTextField(
             value = malComment,
-            onValueChange = { if (it.length <= 1000) malComment = it },
+            onValueChange = {
+                if (it.length <= 1000) {
+                    malComment = it
+                    onUpdateItem(item.copy(malComments = it))
+                }
+            },
             textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
             cursorBrush = SolidColor(Color(0xFF2E51A2)),
             modifier = Modifier.fillMaxWidth(),
@@ -1178,10 +1396,13 @@ private fun MalSpecificControls() {
  * - 2,000 Character Limit Notes
  */
 @Composable
-private fun AnilistSpecificControls() {
-    var anilistNotes by remember { mutableStateOf("") }
-    var isFavorite by remember { mutableStateOf(false) }
-    var isPrivate by remember { mutableStateOf(false) }
+private fun AnilistSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    var anilistNotes by remember(item.anilistNotes) { mutableStateOf(item.anilistNotes ?: "") }
+    var isFavorite by remember(item.anilistFavorite) { mutableStateOf(item.anilistFavorite) }
+    var isPrivate by remember(item.anilistPrivate) { mutableStateOf(item.anilistPrivate) }
 
     Column(
         modifier = Modifier
@@ -1204,7 +1425,11 @@ private fun AnilistSpecificControls() {
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(if (isFavorite) Color(0xFFEF4444).copy(alpha = 0.2f) else DarkSurfaceElevated)
-                        .clickable { isFavorite = !isFavorite }
+                        .clickable {
+                            val next = !isFavorite
+                            isFavorite = next
+                            onUpdateItem(item.copy(anilistFavorite = next))
+                        }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Icon(
@@ -1220,7 +1445,11 @@ private fun AnilistSpecificControls() {
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(if (isPrivate) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                        .clickable { isPrivate = !isPrivate }
+                        .clickable {
+                            val next = !isPrivate
+                            isPrivate = next
+                            onUpdateItem(item.copy(anilistPrivate = next))
+                        }
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
@@ -1235,7 +1464,12 @@ private fun AnilistSpecificControls() {
 
         BasicTextField(
             value = anilistNotes,
-            onValueChange = { if (it.length <= 2000) anilistNotes = it },
+            onValueChange = {
+                if (it.length <= 2000) {
+                    anilistNotes = it
+                    onUpdateItem(item.copy(anilistNotes = it))
+                }
+            },
             textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
             cursorBrush = SolidColor(Color(0xFF02A9FF)),
             modifier = Modifier.fillMaxWidth(),
@@ -1263,9 +1497,12 @@ private fun AnilistSpecificControls() {
  * - Privacy Toggle
  */
 @Composable
-private fun BangumiSpecificControls() {
-    var bgmComment by remember { mutableStateOf("") }
-    var isPrivate by remember { mutableStateOf(false) }
+private fun BangumiSpecificControls(
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    var bgmComment by remember(item.bangumiComment) { mutableStateOf(item.bangumiComment ?: "") }
+    var isPrivate by remember(item.bangumiPrivate) { mutableStateOf(item.bangumiPrivate) }
 
     Column(
         modifier = Modifier
@@ -1286,7 +1523,11 @@ private fun BangumiSpecificControls() {
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(if (isPrivate) Color(0xFFF09199).copy(alpha = 0.2f) else DarkSurfaceElevated)
-                    .clickable { isPrivate = !isPrivate }
+                    .clickable {
+                        val next = !isPrivate
+                        isPrivate = next
+                        onUpdateItem(item.copy(bangumiPrivate = next))
+                    }
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
                 Text(
@@ -1300,7 +1541,12 @@ private fun BangumiSpecificControls() {
 
         BasicTextField(
             value = bgmComment,
-            onValueChange = { if (it.length <= 380) bgmComment = it },
+            onValueChange = {
+                if (it.length <= 380) {
+                    bgmComment = it
+                    onUpdateItem(item.copy(bangumiComment = it))
+                }
+            },
             textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
             cursorBrush = SolidColor(Color(0xFFF09199)),
             modifier = Modifier.fillMaxWidth(),
@@ -1316,6 +1562,11 @@ private fun BangumiSpecificControls() {
             Text(
                 text = "${bgmComment.length} / 380",
                 fontSize = 11.sp,
+                color = if (bgmComment.length >= 360) Color(0xFFEF4444) else TextMuted
+            )
+        }
+    }
+}
                 color = if (bgmComment.length >= 360) Color(0xFFEF4444) else TextMuted
             )
         }

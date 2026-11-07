@@ -61,11 +61,51 @@ class TrackerSyncEngine(
                 )
             )
         }
-        if (item.traktId != null) {
+        if (item.traktId != null || (item.tmdbId != null && (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE || item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW))) {
             syncQueueDao.enqueue(
                 SyncQueueEntity(
                     mediaId = item.id,
                     trackerType = "TRAKT",
+                    action = "PROGRESS",
+                    progressValue = newProgress
+                )
+            )
+        }
+        if (item.simklId != null || item.tmdbId != null || item.malId != null) {
+            syncQueueDao.enqueue(
+                SyncQueueEntity(
+                    mediaId = item.id,
+                    trackerType = "SIMKL",
+                    action = "PROGRESS",
+                    progressValue = newProgress
+                )
+            )
+        }
+        if (item.bangumiId != null) {
+            syncQueueDao.enqueue(
+                SyncQueueEntity(
+                    mediaId = item.id,
+                    trackerType = "BANGUMI",
+                    action = "PROGRESS",
+                    progressValue = newProgress
+                )
+            )
+        }
+        if (item.vndbId != null) {
+            syncQueueDao.enqueue(
+                SyncQueueEntity(
+                    mediaId = item.id,
+                    trackerType = "VNDB",
+                    action = "PROGRESS",
+                    progressValue = newProgress
+                )
+            )
+        }
+        if (item.tmdbId != null) {
+            syncQueueDao.enqueue(
+                SyncQueueEntity(
+                    mediaId = item.id,
+                    trackerType = "TMDB",
                     action = "PROGRESS",
                     progressValue = newProgress
                 )
@@ -91,7 +131,9 @@ class TrackerSyncEngine(
                 "MAL" -> syncMal(task, mediaItem, tokens.malToken)
                 "TRAKT" -> syncTrakt(task, mediaItem, tokens.traktToken)
                 "SIMKL" -> syncSimkl(task, mediaItem, tokens.simklToken)
+                "BANGUMI" -> syncBangumi(task, mediaItem, tokens.bangumiToken)
                 "VNDB" -> syncVndb(task, mediaItem, tokens.vndbToken)
+                "TMDB" -> syncTmdb(task, mediaItem, tokens.tmdbToken)
                 else -> true
             }
 
@@ -106,22 +148,38 @@ class TrackerSyncEngine(
         item: MediaItemEntity,
         token: String?
     ): Boolean = NetworkPacer.withAniListPacing {
-        if (token.isNullOrBlank() || item.anilistId == null) return@withAniListPacing true // Skip if no token
+        if (token.isNullOrBlank() || item.anilistId == null) return@withAniListPacing true
         try {
             val query = """
-                mutation (${'$'}mediaId: Int, ${'$'}progress: Int) {
-                    SaveMediaListEntry(mediaId: ${'$'}mediaId, progress: ${'$'}progress) {
+                mutation (${'$'}mediaId: Int, ${'$'}progress: Int, ${'$'}status: MediaListStatus, ${'$'}scoreRaw: Int, ${'$'}notes: String, ${'$'}private: Boolean) {
+                    SaveMediaListEntry(mediaId: ${'$'}mediaId, progress: ${'$'}progress, status: ${'$'}status, scoreRaw: ${'$'}scoreRaw, notes: ${'$'}notes, private: ${'$'}private) {
                         id
                         progress
+                        status
+                        score
                     }
                 }
             """.trimIndent()
+
+            val alStatus = when (item.status) {
+                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> "CURRENT"
+                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> "PLANNING"
+                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "COMPLETED"
+                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "PAUSED"
+                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "DROPPED"
+            }
+
+            val rawScore = item.userRating?.let { (it * 10f).toInt().coerceIn(0, 100) }
 
             val payload = buildJsonObject {
                 put("query", query)
                 putJsonObject("variables") {
                     put("mediaId", item.anilistId.toInt())
                     put("progress", task.progressValue.toInt())
+                    put("status", alStatus)
+                    if (rawScore != null) put("scoreRaw", rawScore)
+                    item.anilistNotes?.take(2000)?.let { put("notes", it) }
+                    put("private", item.anilistPrivate)
                 }
             }
 
@@ -148,17 +206,36 @@ class TrackerSyncEngine(
         try {
             val isAnime = item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME
             val endpoint = if (isAnime) "anime" else "manga"
-            val field = if (isAnime) "num_watched_episodes" else "num_chapters_read"
+            val progressField = if (isAnime) "num_watched_episodes" else "num_chapters_read"
+
+            val malStatus = when (item.status) {
+                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> if (isAnime) "watching" else "reading"
+                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> if (isAnime) "plan_to_watch" else "plan_to_read"
+                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "completed"
+                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "on_hold"
+                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "dropped"
+            }
 
             val url = "https://api.myanimelist.net/v2/$endpoint/${item.malId}/my_list_status"
-            val body = okhttp3.FormBody.Builder()
-                .add(field, task.progressValue.toInt().toString())
-                .build()
+            val bodyBuilder = okhttp3.FormBody.Builder()
+                .add(progressField, task.progressValue.toInt().toString())
+                .add("status", malStatus)
+
+            item.userRating?.let {
+                val intScore = it.toInt().coerceIn(0, 10)
+                bodyBuilder.add("score", intScore.toString())
+            }
+            item.malComments?.take(1000)?.let {
+                bodyBuilder.add("comments", it)
+            }
+            if (item.malRewatches > 0) {
+                bodyBuilder.add("num_times_rewatched", item.malRewatches.toString())
+            }
 
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
-                .put(body)
+                .put(bodyBuilder.build())
                 .build()
 
             client.newCall(request).execute().use { response ->
@@ -206,20 +283,62 @@ class TrackerSyncEngine(
         item: MediaItemEntity,
         token: String?
     ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || item.tmdbId == null) return@withGeneralPacing true
+        if (token.isNullOrBlank()) return@withGeneralPacing true
         try {
+            val arrayName = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
+            val idObj = buildJsonObject {
+                item.simklId?.let { put("simkl", it.toInt()) }
+                item.tmdbId?.let { put("tmdb", it.toInt()) }
+                item.malId?.let { put("mal", it.toInt()) }
+            }
+
             val payload = buildJsonObject {
-                val arrayName = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
                 put(arrayName, kotlinx.serialization.json.buildJsonArray {
                     add(buildJsonObject {
-                        putJsonObject("ids") {
-                            put("tmdb", item.tmdbId.toInt())
-                        }
+                        put("ids", idObj)
+                        item.simklMemo?.take(140)?.let { put("memo", it) }
+                        put("private", item.simklPrivate)
                     })
                 })
             }
+
             val request = Request.Builder()
                 .url("https://api.simkl.com/sync/history")
+                .header("Authorization", "Bearer $token")
+                .header("Content-Type", "application/json")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun syncBangumi(
+        task: SyncQueueEntity,
+        item: MediaItemEntity,
+        token: String?
+    ): Boolean = NetworkPacer.withGeneralPacing {
+        if (token.isNullOrBlank() || item.bangumiId == null) return@withGeneralPacing true
+        try {
+            val bgmType = when (item.status) {
+                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> 1
+                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> 2
+                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> 3
+                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> 4
+                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> 5
+            }
+
+            val payload = buildJsonObject {
+                put("type", bgmType)
+                item.userRating?.let { put("rate", it.toInt().coerceIn(1, 10)) }
+                item.bangumiComment?.take(380)?.let { put("comment", it) }
+                put("private", item.bangumiPrivate)
+            }
+
+            val request = Request.Builder()
+                .url("https://api.bgm.tv/v0/users/-/collections/${item.bangumiId}")
                 .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
@@ -239,13 +358,40 @@ class TrackerSyncEngine(
         if (token.isNullOrBlank() || item.vndbId == null) return@withVndbPacing true
         try {
             val payload = buildJsonObject {
-                val vote = item.userRating?.let { (it * 10).toInt() }
+                val vote = item.userRating?.let { (it * 10f).toInt().coerceIn(10, 100) }
                 if (vote != null) put("vote", vote)
+                item.anilistNotes?.take(2000)?.let { put("notes", it) }
             }
             val request = Request.Builder()
                 .url("https://api.vndb.org/kana/ulist/${item.vndbId}")
                 .header("Authorization", "token $token")
                 .patch(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun syncTmdb(
+        task: SyncQueueEntity,
+        item: MediaItemEntity,
+        token: String?
+    ): Boolean = NetworkPacer.withGeneralPacing {
+        if (token.isNullOrBlank() || item.tmdbId == null || item.userRating == null) return@withGeneralPacing true
+        try {
+            val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
+            val halfStarRating = ((item.userRating * 2f).toInt() / 2.0).coerceIn(0.5, 10.0)
+
+            val payload = buildJsonObject {
+                put("value", halfStarRating)
+            }
+
+            val request = Request.Builder()
+                .url("https://api.themoviedb.org/3/$type/${item.tmdbId}/rating")
+                .header("Authorization", "Bearer $token")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { it.isSuccessful }

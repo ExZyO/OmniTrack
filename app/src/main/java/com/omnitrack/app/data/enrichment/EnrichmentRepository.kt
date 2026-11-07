@@ -19,7 +19,12 @@ data class EnrichmentData(
     val communityScore: Float? = null,
     val imdbScore: Float? = null,
     val rtScore: Int? = null,
-    val metacriticScore: Int? = null
+    val metacriticScore: Int? = null,
+    val trailerYoutubeKey: String? = null,
+    val studioOrNetwork: String? = null,
+    val runtimeMinutes: Int? = null,
+    val contentRating: String? = null,
+    val airStatus: String? = null
 )
 
 /**
@@ -76,6 +81,11 @@ class EnrichmentRepository(
             }
         }
 
+        // Zero-Key Fallback for IMDb (Cinemeta public Stremio endpoint)
+        if (imdbScore == null && item.tmdbId != null) {
+            imdbScore = fetchCinemetaImdb(item.tmdbId, item.mediaType == MediaType.MOVIE)
+        }
+
         // 3. Fallback / Native vertical rating enrichment
         if (communityScore == null) {
             when (item.mediaType) {
@@ -88,12 +98,39 @@ class EnrichmentRepository(
                         }
                     }
                 }
-                MediaType.NOVEL, MediaType.ANIME, MediaType.MANGA -> {
+                MediaType.ANIME, MediaType.MANGA -> {
+                    if (item.malId != null) {
+                        communityScore = fetchJikanScore(item.malId)
+                    } else if (item.bangumiId != null) {
+                        communityScore = fetchBangumiScore(item.bangumiId)
+                    }
+                }
+                MediaType.NOVEL -> {
                     if (item.bangumiId != null) {
                         communityScore = fetchBangumiScore(item.bangumiId)
                     }
                 }
+                MediaType.SHOW, MediaType.MOVIE -> {
+                    if (item.tmdbId != null) {
+                        communityScore = fetchTmdbVote(item.tmdbId, item.mediaType == MediaType.MOVIE)
+                    }
+                }
                 else -> {}
+            }
+        }
+
+        var trailerKey = item.trailerYoutubeKey
+        var studio = item.studioOrNetwork
+        var runtime = item.runtimeMinutes
+        var airStatus = item.airStatus
+
+        if (item.tmdbId != null && (trailerKey == null || studio == null)) {
+            val details = fetchTmdbDetails(item.tmdbId, item.mediaType == MediaType.MOVIE)
+            if (details != null) {
+                if (trailerKey == null) trailerKey = details.trailerKey
+                if (studio == null) studio = details.studio
+                if (runtime == null) runtime = details.runtime
+                if (airStatus == null) airStatus = details.status
             }
         }
 
@@ -102,7 +139,12 @@ class EnrichmentRepository(
             communityScore = communityScore,
             imdbScore = imdbScore,
             rtScore = rtScore,
-            metacriticScore = metacriticScore
+            metacriticScore = metacriticScore,
+            trailerYoutubeKey = trailerKey,
+            studioOrNetwork = studio,
+            runtimeMinutes = runtime,
+            contentRating = item.contentRating,
+            airStatus = airStatus
         )
     }
 
@@ -236,6 +278,118 @@ class EnrichmentRepository(
                 val root = json.parseToJsonElement(body).jsonObject
                 val score = root["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.content?.toFloatOrNull()
                 score
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun fetchCinemetaImdb(tmdbId: Long, isMovie: Boolean): Float? {
+        return try {
+            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val type = if (isMovie) "movie" else "tv"
+            val extUrl = "https://api.themoviedb.org/3/$type/$tmdbId/external_ids?api_key=$apiKey"
+            val req1 = Request.Builder().url(extUrl).get().build()
+            val imdbId = client.newCall(req1).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).jsonObject
+                root["imdb_id"]?.jsonPrimitive?.content
+            } ?: return null
+
+            val cinemetaType = if (isMovie) "movie" else "series"
+            val cinemetaUrl = "https://v3-cinemeta.strem.io/meta/$cinemetaType/$imdbId.json"
+            val req2 = Request.Builder().url(cinemetaUrl).get().build()
+            client.newCall(req2).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).jsonObject
+                val meta = root["meta"]?.jsonObject
+                meta?.get("imdbRating")?.jsonPrimitive?.content?.toFloatOrNull()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun fetchJikanScore(malId: Long): Float? {
+        return try {
+            val url = "https://api.jikan.moe/v4/anime/$malId"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).jsonObject
+                root["data"]?.jsonObject?.get("score")?.jsonPrimitive?.content?.toFloatOrNull()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun fetchTmdbVote(tmdbId: Long, isMovie: Boolean): Float? {
+        return try {
+            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val type = if (isMovie) "movie" else "tv"
+            val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).jsonObject
+                root["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    data class ExtraDetails(
+        val trailerKey: String? = null,
+        val studio: String? = null,
+        val runtime: Int? = null,
+        val status: String? = null
+    )
+
+    private suspend fun fetchTmdbDetails(tmdbId: Long, isMovie: Boolean): ExtraDetails? {
+        return try {
+            val apiKey = "2c823019808d98d415f33cf2382e70e3"
+            val type = if (isMovie) "movie" else "tv"
+            val url = "https://api.themoviedb.org/3/$type/$tmdbId?api_key=$apiKey&append_to_response=videos"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = json.parseToJsonElement(body).jsonObject
+
+                val runtime = if (isMovie) {
+                    root["runtime"]?.jsonPrimitive?.content?.toIntOrNull()
+                } else {
+                    root["episode_run_time"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content?.toIntOrNull()
+                }
+                val status = root["status"]?.jsonPrimitive?.content
+                val studio = root["production_companies"]?.jsonArray?.firstOrNull()?.jsonObject?.get("name")?.jsonPrimitive?.content
+                    ?: root["networks"]?.jsonArray?.firstOrNull()?.jsonObject?.get("name")?.jsonPrimitive?.content
+
+                val videos = root["videos"]?.jsonObject?.get("results")?.jsonArray
+                var trailerKey: String? = null
+                if (videos != null) {
+                    for (v in videos) {
+                        val site = v.jsonObject["site"]?.jsonPrimitive?.content
+                        val typeStr = v.jsonObject["type"]?.jsonPrimitive?.content
+                        if (site == "YouTube" && (typeStr == "Trailer" || typeStr == "Teaser")) {
+                            trailerKey = v.jsonObject["key"]?.jsonPrimitive?.content
+                            break
+                        }
+                    }
+                }
+
+                ExtraDetails(
+                    trailerKey = trailerKey,
+                    studio = studio,
+                    runtime = runtime,
+                    status = status
+                )
             }
         } catch (_: Exception) {
             null
