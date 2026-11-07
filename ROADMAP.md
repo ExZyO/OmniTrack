@@ -140,6 +140,15 @@ This video is unavailable
 Error code 152 - 4
 when i click the fullscreen button it doesnt open the video, probably cuz it wont play? idk"
 
+### 10. Poster-to-Text Animation, Auth Status, Backup Startup Crash & Artwork Flickering (Verbatim)
+> "poster to text, text to poster animation in details page is not smooth like nuvio, copy from nuvio and make it smooth, transition
+failed to complete MAL login (i reset the app, no client token manually pasted)
+bangumi may have connected, comick also but says session expired
+i backed up app, reset app, tried restoring but it kept crashing on startup
+changing vndb cover or banner starts flashing it, flickering, for games it keeps switching, etc, probably other categories too
+
+just continue phase by phase, without stopping, just so u remember, u can copy home page from chimanew, even see its logs and commits on github, later when u get to that part"
+
 ---
 
 ## 🏆 Gold-Standard Category Benchmarks & Reference Strategy

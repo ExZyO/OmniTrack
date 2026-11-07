@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,13 +85,20 @@ fun PosterCustomizationSheet(
     val scope = rememberCoroutineScope()
     val style by preferenceManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
 
+    var draftEdge by remember(style.cardDepthEdgeStrength) { mutableFloatStateOf(style.cardDepthEdgeStrength.toFloat()) }
+    var draftSheen by remember(style.cardDepthSheenStrength) { mutableFloatStateOf(style.cardDepthSheenStrength.toFloat()) }
+    var draftCoverage by remember(style.cardDepthEdgeCoverage) { mutableFloatStateOf(style.cardDepthEdgeCoverage.toFloat()) }
+
     val widthPresets = listOf(
         PresetOption("Compact", 104),
-        PresetOption("Dense", 112),
-        PresetOption("Standard", 120),
-        PresetOption("Balanced", 126),
+        PresetOption("Dense", 114),
+        PresetOption("Standard", 126),
         PresetOption("Comfort", 134),
-        PresetOption("Large", 140)
+        PresetOption("Large", 144),
+        PresetOption("X-Large", 164),
+        PresetOption("Max", 185),
+        PresetOption("Ultra", 205),
+        PresetOption("Widescreen", 230)
     )
 
     val radiusPresets = listOf(
@@ -207,8 +215,9 @@ fun PosterCustomizationSheet(
                         .clip(RoundedCornerShape(previewCornerRadius))
                         .glassCardDepth(
                             shape = RoundedCornerShape(previewCornerRadius),
-                            edgeStrength = style.cardDepthEdgeStrength.toFloat(),
-                            sheenStrength = style.cardDepthSheenStrength.toFloat(),
+                            edgeStrength = draftEdge,
+                            sheenStrength = draftSheen,
+                            edgeCoverage = draftCoverage,
                             enabled = style.cardDepthEnabled
                         )
                         .background(
@@ -305,7 +314,7 @@ fun PosterCustomizationSheet(
                 Slider(
                     value = style.widthDp.toFloat(),
                     onValueChange = { scope.launch { preferenceManager.updatePosterWidthDp(it.toInt()) } },
-                    valueRange = 100f..150f,
+                    valueRange = 90f..240f,
                     colors = SliderDefaults.colors(
                         thumbColor = AccentArctic,
                         activeTrackColor = AccentArctic,
@@ -525,7 +534,7 @@ fun PosterCustomizationSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -539,16 +548,20 @@ fun PosterCustomizationSheet(
                                 color = AccentArctic
                             )
                             Text(
-                                text = "Edge: ${style.cardDepthEdgeStrength}% • Sheen: ${style.cardDepthSheenStrength}%",
+                                text = "Edge: ${draftEdge.roundToInt()}% • Sheen: ${draftSheen.roundToInt()}%",
                                 fontSize = 11.sp,
                                 color = TextMuted
                             )
                         }
 
                         CardDepthTuningPad(
-                            edgeStrength = style.cardDepthEdgeStrength.toFloat(),
-                            sheenStrength = style.cardDepthSheenStrength.toFloat(),
+                            edgeStrength = draftEdge,
+                            sheenStrength = draftSheen,
                             onChange = { edge, sheen ->
+                                draftEdge = edge
+                                draftSheen = sheen
+                            },
+                            onCommit = { edge, sheen ->
                                 scope.launch {
                                     preferenceManager.updateCardDepthSettings(
                                         edge.roundToInt(),
@@ -559,17 +572,18 @@ fun PosterCustomizationSheet(
                         )
 
                         // Quick Presets
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             listOf(
                                 "Default" to (50 to 35),
-                                "Subtle" to (30 to 20),
-                                "Vivid" to (65 to 50),
-                                "Glassy" to (80 to 60)
+                                "Subtle" to (28 to 10),
+                                "Balanced" to (42 to 15),
+                                "Bold" to (56 to 22),
+                                "Glassy" to (70 to 25)
                             ).forEach { (label, values) ->
-                                val isSelected = style.cardDepthEdgeStrength == values.first && style.cardDepthSheenStrength == values.second
+                                val isSelected = draftEdge.roundToInt() == values.first && draftSheen.roundToInt() == values.second
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -580,6 +594,8 @@ fun PosterCustomizationSheet(
                                             RoundedCornerShape(8.dp)
                                         )
                                         .clickable {
+                                            draftEdge = values.first.toFloat()
+                                            draftSheen = values.second.toFloat()
                                             scope.launch {
                                                 preferenceManager.updateCardDepthSettings(values.first, values.second)
                                             }
@@ -593,6 +609,129 @@ fun PosterCustomizationSheet(
                                         color = if (isSelected) AccentJade else TextSecondary
                                     )
                                 }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(Color.White.copy(alpha = 0.08f))
+                        )
+
+                        // Section: Edge Light Coverage
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Edge Light Coverage",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccentArctic
+                            )
+                            Text(
+                                text = "${draftCoverage.roundToInt()}%",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                "Top (0%)" to 0,
+                                "Half (50%)" to 50,
+                                "Full (100%)" to 100
+                            ).forEach { (label, value) ->
+                                val isSelected = draftCoverage.roundToInt() == value
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) AccentArctic else GlassBorder,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            draftCoverage = value.toFloat()
+                                            scope.launch { preferenceManager.updateCardDepthCoverage(value) }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) AccentArctic else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+
+                        Slider(
+                            value = draftCoverage,
+                            onValueChange = { draftCoverage = it },
+                            onValueChangeFinished = {
+                                scope.launch { preferenceManager.updateCardDepthCoverage(draftCoverage.roundToInt()) }
+                            },
+                            valueRange = 0f..100f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentArctic,
+                                activeTrackColor = AccentArctic,
+                                inactiveTrackColor = DarkSurfaceElevated
+                            )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(Color.White.copy(alpha = 0.08f))
+                        )
+
+                        // Section: Apply Card Depth To (Surfaces)
+                        Text(
+                            text = "Apply Card Depth To",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+
+                        listOf(
+                            "Posters & Grid Cards" to ("posters" to style.cardDepthPostersEnabled),
+                            "Continue Watching Rails" to ("continue_watching" to style.cardDepthContinueWatchingEnabled),
+                            "Episode Cards & Rows" to ("episodes" to style.cardDepthEpisodesEnabled),
+                            "Cast & Crew Avatars" to ("cast" to style.cardDepthCastEnabled),
+                            "Trailers & Videos" to ("trailers" to style.cardDepthTrailersEnabled)
+                        ).forEach { (title, pair) ->
+                            val (surfaceKey, isEnabled) = pair
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = title,
+                                    fontSize = 12.sp,
+                                    color = TextSecondary
+                                )
+                                Switch(
+                                    checked = isEnabled,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch {
+                                            preferenceManager.updateCardDepthSurface(surfaceKey, enabled)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = AmoledBlack,
+                                        checkedTrackColor = AccentJade
+                                    )
+                                )
                             }
                         }
                     }
@@ -614,15 +753,27 @@ fun CardDepthTuningPad(
     edgeStrength: Float,
     sheenStrength: Float,
     onChange: (edge: Float, sheen: Float) -> Unit,
+    onCommit: (edge: Float, sheen: Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentEdge by rememberUpdatedState(edgeStrength)
+    val currentSheen by rememberUpdatedState(sheenStrength)
+    val currentOnChange by rememberUpdatedState(onChange)
+    val currentOnCommit by rememberUpdatedState(onCommit)
+
     var padWidth by remember { mutableFloatStateOf(1f) }
     var padHeight by remember { mutableFloatStateOf(1f) }
+
+    fun valuesAt(x: Float, y: Float): Pair<Float, Float> {
+        val edge = (x / padWidth * 100f).coerceIn(0f, 100f)
+        val sheen = ((padHeight - y) / padHeight * 100f).coerceIn(0f, 100f)
+        return edge to sheen
+    }
 
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(150.dp)
+            .height(170.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFF090D14))
             .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
@@ -630,20 +781,31 @@ fun CardDepthTuningPad(
                 padWidth = it.width.toFloat().coerceAtLeast(1f)
                 padHeight = it.height.toFloat().coerceAtLeast(1f)
             }
-            .pointerInput(padWidth, padHeight) {
+            .pointerInput(Unit) {
                 detectTapGestures { offset ->
-                    val edge = (offset.x / padWidth * 100f).coerceIn(0f, 100f)
-                    val sheen = ((padHeight - offset.y) / padHeight * 100f).coerceIn(0f, 100f)
-                    onChange(edge, sheen)
+                    val (edge, sheen) = valuesAt(offset.x, offset.y)
+                    currentOnChange(edge, sheen)
+                    currentOnCommit(edge, sheen)
                 }
             }
-            .pointerInput(padWidth, padHeight) {
-                detectDragGestures { change, _ ->
-                    change.consume()
-                    val edge = (change.position.x / padWidth * 100f).coerceIn(0f, 100f)
-                    val sheen = ((padHeight - change.position.y) / padHeight * 100f).coerceIn(0f, 100f)
-                    onChange(edge, sheen)
-                }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        val (edge, sheen) = valuesAt(offset.x, offset.y)
+                        currentOnChange(edge, sheen)
+                    },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val (edge, sheen) = valuesAt(change.position.x, change.position.y)
+                        currentOnChange(edge, sheen)
+                    },
+                    onDragEnd = {
+                        currentOnCommit(currentEdge, currentSheen)
+                    },
+                    onDragCancel = {
+                        currentOnCommit(currentEdge, currentSheen)
+                    }
+                )
             }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {

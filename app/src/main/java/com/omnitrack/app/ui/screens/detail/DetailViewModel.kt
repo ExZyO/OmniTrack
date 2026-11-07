@@ -10,6 +10,7 @@ import com.omnitrack.app.data.model.MediaSeason
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
+import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
 import kotlinx.coroutines.Dispatchers
@@ -69,7 +70,8 @@ class DetailViewModel(
     private val repository: MediaRepository,
     mediaId: Long,
     private val enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
-    private val preferenceManager: PreferenceManager? = null
+    private val preferenceManager: PreferenceManager? = null,
+    private val trackerSyncEngine: TrackerSyncEngine? = null
 ) : ViewModel() {
 
     private val _mediaId = MutableStateFlow(mediaId)
@@ -81,9 +83,22 @@ class DetailViewModel(
     private val _realSeasons = MutableStateFlow<List<MediaSeason>>(emptyList())
     private val _realEpisodes = MutableStateFlow<List<MediaEpisode>>(emptyList())
     private val _selectedSeasonNumber = MutableStateFlow(1)
+    private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
     init {
+        val active = ActiveSiblingHolder.activeSiblingIds
+        if (active.isNotEmpty()) {
+            _stableSiblingIds.value = active
+        } else if (mediaId > 0L) {
+            viewModelScope.launch {
+                val all = repository.getAllMedia().firstOrNull()?.map { it.id }.orEmpty()
+                if (_stableSiblingIds.value.isEmpty() && all.isNotEmpty()) {
+                    _stableSiblingIds.value = all
+                }
+            }
+        }
+
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
@@ -95,15 +110,20 @@ class DetailViewModel(
     }
 
     private fun maybeEnrich(item: MediaItemEntity, force: Boolean = false) {
-        val hasStaleRatings = item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null)
-        val needsEnrichment = force ||
+        if (!force && enrichedIds.contains(item.id)) return
+        enrichedIds.add(item.id)
+
+        val isVideoMedia = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.ANIME
+        val hasStaleRatings = isVideoMedia && (item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null))
+        val needsEnrichment = force || (
             item.releaseYear == null ||
             item.contentRating == null ||
-            item.runtimeMinutes == null ||
-            item.traktScore == null ||
+            (isVideoMedia && item.runtimeMinutes == null) ||
+            (isVideoMedia && item.traktScore == null) ||
             hasStaleRatings
-        if (!needsEnrichment && !enrichedIds.add(item.id)) return
-        enrichedIds.add(item.id)
+        )
+        if (!needsEnrichment) return
+
         viewModelScope.launch(Dispatchers.IO) {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
@@ -115,32 +135,57 @@ class DetailViewModel(
                 tmdbApiKey = tmdbKey,
                 mdblistApiKey = mdbKey
             )
-            val updated = item.copy(
-                tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
-                clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
-                communityScore = enrichment.communityScore ?: item.communityScore,
-                imdbScore = enrichment.imdbScore ?: item.imdbScore,
-                rtScore = enrichment.rtScore ?: item.rtScore,
-                metacriticScore = enrichment.metacriticScore ?: item.metacriticScore,
-                traktScore = enrichment.traktScore ?: item.traktScore,
-                audienceScore = enrichment.audienceScore ?: item.audienceScore,
-                releaseYear = enrichment.releaseYear ?: item.releaseYear,
-                trailerYoutubeKey = enrichment.trailerYoutubeKey ?: item.trailerYoutubeKey,
-                studioOrNetwork = enrichment.studioOrNetwork ?: item.studioOrNetwork,
-                runtimeMinutes = enrichment.runtimeMinutes ?: item.runtimeMinutes,
-                contentRating = enrichment.contentRating ?: item.contentRating,
-                airStatus = enrichment.airStatus ?: item.airStatus,
-                totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
-            )
+
             if (item.id > 0) {
-                repository.updateMedia(updated)
+                // Fetch the latest state from repository so we never overwrite user-changed cover or banner
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                val updated = latest.copy(
+                    tmdbId = enrichment.resolvedTmdbId ?: latest.tmdbId,
+                    clearartUrl = enrichment.clearartUrl ?: latest.clearartUrl,
+                    communityScore = enrichment.communityScore ?: latest.communityScore,
+                    imdbScore = enrichment.imdbScore ?: latest.imdbScore,
+                    rtScore = enrichment.rtScore ?: latest.rtScore,
+                    metacriticScore = enrichment.metacriticScore ?: latest.metacriticScore,
+                    traktScore = enrichment.traktScore ?: latest.traktScore,
+                    audienceScore = enrichment.audienceScore ?: latest.audienceScore,
+                    releaseYear = enrichment.releaseYear ?: latest.releaseYear,
+                    trailerYoutubeKey = enrichment.trailerYoutubeKey ?: latest.trailerYoutubeKey,
+                    studioOrNetwork = enrichment.studioOrNetwork ?: latest.studioOrNetwork,
+                    runtimeMinutes = enrichment.runtimeMinutes ?: latest.runtimeMinutes,
+                    contentRating = enrichment.contentRating ?: latest.contentRating,
+                    airStatus = enrichment.airStatus ?: latest.airStatus,
+                    totalProgress = if (latest.totalProgress == null || latest.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: latest.totalProgress else latest.totalProgress
+                )
+                if (updated != latest) {
+                    repository.updateMedia(updated)
+                }
+                if (_recommendations.value.isEmpty()) {
+                    loadRecommendationsAndReviews(updated)
+                }
             } else {
+                val updated = item.copy(
+                    tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
+                    clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
+                    communityScore = enrichment.communityScore ?: item.communityScore,
+                    imdbScore = enrichment.imdbScore ?: item.imdbScore,
+                    rtScore = enrichment.rtScore ?: item.rtScore,
+                    metacriticScore = enrichment.metacriticScore ?: item.metacriticScore,
+                    traktScore = enrichment.traktScore ?: item.traktScore,
+                    audienceScore = enrichment.audienceScore ?: item.audienceScore,
+                    releaseYear = enrichment.releaseYear ?: item.releaseYear,
+                    trailerYoutubeKey = enrichment.trailerYoutubeKey ?: item.trailerYoutubeKey,
+                    studioOrNetwork = enrichment.studioOrNetwork ?: item.studioOrNetwork,
+                    runtimeMinutes = enrichment.runtimeMinutes ?: item.runtimeMinutes,
+                    contentRating = enrichment.contentRating ?: item.contentRating,
+                    airStatus = enrichment.airStatus ?: item.airStatus,
+                    totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
+                )
                 _previewItem.value = updated
+                loadRecommendationsAndReviews(updated)
             }
             if (enrichment.videos.isNotEmpty()) {
                 _trailers.value = enrichment.videos
             }
-            loadRecommendationsAndReviews(updated)
         }
     }
 
@@ -193,17 +238,16 @@ class DetailViewModel(
                 repository.getMediaById(currentId).flatMapLatest { currentItem ->
                     if (currentItem != null) {
                         maybeEnrich(currentItem)
-                        combine(
-                            repository.getAllMedia(),
-                            repository.getEpisodeProgress(currentItem.id)
-                        ) { allItems, progressList ->
-                            val siblings = allItems
-                            val currentIndex = siblings.indexOfFirst { it.id == currentItem.id }
+                        repository.getEpisodeProgress(currentItem.id).map { progressList ->
+                            val siblings = _stableSiblingIds.value.ifEmpty {
+                                ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(currentItem.id) }
+                            }
+                            val currentIndex = siblings.indexOf(currentItem.id)
                             val watchedSet = progressList.filter { it.isWatched }
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
                             DetailUiState(
                                 item = currentItem,
-                                seasons = generateMockSeasons(currentItem),
+                                seasons = emptyList(),
                                 realSeasons = aux.realSeasons,
                                 realEpisodes = aux.realEpisodes,
                                 selectedSeasonNumber = aux.selectedSeasonNumber,
@@ -216,8 +260,8 @@ class DetailViewModel(
                                 } else aux.trailers,
                                 isPreviewMode = false,
                                 isLoading = false,
-                                hasPreviousEntry = currentIndex > 0,
-                                hasNextEntry = currentIndex in 0 until siblings.size - 1
+                                hasPreviousEntry = siblings.size > 1,
+                                hasNextEntry = siblings.size > 1
                             )
                         }
                     } else {
@@ -745,9 +789,15 @@ class DetailViewModel(
                     val seasons = enrichmentRepository.fetchTvSeasons(item.tmdbId, tmdbKey)
                     if (seasons.isNotEmpty()) {
                         _realSeasons.value = seasons
-                        val firstSeason = seasons.firstOrNull { it.seasonNumber > 0 } ?: seasons.first()
-                        _selectedSeasonNumber.value = firstSeason.seasonNumber
-                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(item.tmdbId, firstSeason.seasonNumber, tmdbKey)
+                        val currentSelected = _selectedSeasonNumber.value
+                        val seasonToFetch = if (seasons.any { it.seasonNumber == currentSelected }) {
+                            currentSelected
+                        } else {
+                            val defaultSeason = seasons.firstOrNull { it.seasonNumber > 0 } ?: seasons.first()
+                            _selectedSeasonNumber.value = defaultSeason.seasonNumber
+                            defaultSeason.seasonNumber
+                        }
+                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(item.tmdbId, seasonToFetch, tmdbKey)
                         _realEpisodes.value = eps
                     }
                 } catch (_: Exception) {}
@@ -780,16 +830,42 @@ class DetailViewModel(
                 val pairs = if (epsToMark.isNotEmpty()) {
                     epsToMark.map { it.seasonNumber to it.episodeNumber }
                 } else {
-                    listOf(episode.seasonNumber to episode.episodeNumber)
+                    (1..episode.episodeNumber).map { episode.seasonNumber to it }
                 }
                 repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             } else {
-                // When tapping an already watched episode: unmark only this episode
-                repository.setEpisodeWatched(mediaId, episode.seasonNumber, episode.episodeNumber, false)
+                // When unwatching: if user unmarks Ep 3, unmark all episodes from 3 upwards in this season
+                val epsToUnmark = _realEpisodes.value.filter {
+                    it.seasonNumber == episode.seasonNumber && it.episodeNumber >= episode.episodeNumber
+                }
+                val pairs = if (epsToUnmark.isNotEmpty()) {
+                    epsToUnmark.map { it.seasonNumber to it.episodeNumber }
+                } else {
+                    currentProgress.filter { it.seasonNumber == episode.seasonNumber && it.episodeNumber >= episode.episodeNumber }
+                        .map { it.seasonNumber to it.episodeNumber }
+                }
+                repository.setMultipleEpisodesWatched(mediaId, pairs, false)
             }
             val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val watchedCount = updatedProgress.count { it.isWatched }
-            repository.updateProgress(mediaId, watchedCount.toDouble())
+            val targetProgress = if (!isCurrentlyWatched) {
+                episode.episodeNumber.toDouble()
+            } else {
+                (episode.episodeNumber - 1).toDouble().coerceAtLeast(0.0)
+            }
+            val item = repository.getMediaById(mediaId).firstOrNull()
+            if (item != null) {
+                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                    TrackingStatus.COMPLETED
+                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                    TrackingStatus.IN_PROGRESS
+                } else {
+                    item.status
+                }
+                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+                repository.updateMedia(updated)
+                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+                trackerSyncEngine?.drainQueue()
+            }
         }
     }
 
@@ -798,11 +874,28 @@ class DetailViewModel(
         if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
             val epsToMark = _realEpisodes.value.filter { it.episodeNumber <= episode.episodeNumber }
-            val pairs = epsToMark.map { it.seasonNumber to it.episodeNumber }
+            val pairs = if (epsToMark.isNotEmpty()) {
+                epsToMark.map { it.seasonNumber to it.episodeNumber }
+            } else {
+                (1..episode.episodeNumber).map { episode.seasonNumber to it }
+            }
             repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val watchedCount = updatedProgress.count { it.isWatched }
-            repository.updateProgress(mediaId, watchedCount.toDouble())
+            val targetProgress = episode.episodeNumber.toDouble()
+            val item = repository.getMediaById(mediaId).firstOrNull()
+            if (item != null) {
+                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                    TrackingStatus.COMPLETED
+                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                    TrackingStatus.IN_PROGRESS
+                } else {
+                    item.status
+                }
+                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+                repository.updateMedia(updated)
+                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+                trackerSyncEngine?.drainQueue()
+            }
         }
     }
 
@@ -819,24 +912,41 @@ class DetailViewModel(
             repository.setMultipleEpisodesWatched(mediaId, pairs, !allWatched)
             val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val watchedCount = updatedProgress.count { it.isWatched }
-            repository.updateProgress(mediaId, watchedCount.toDouble())
+            val item = repository.getMediaById(mediaId).firstOrNull()
+            if (item != null) {
+                val targetProgress = watchedCount.toDouble()
+                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                    TrackingStatus.COMPLETED
+                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                    TrackingStatus.IN_PROGRESS
+                } else {
+                    item.status
+                }
+                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+                repository.updateMedia(updated)
+                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+                trackerSyncEngine?.drainQueue()
+            }
         }
     }
 
     fun navigateToPrevious(): Boolean {
         viewModelScope.launch {
             val currentId = _mediaId.value
-            val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
-            val currentIndex = allItems.indexOfFirst { it.id == currentId }
-            if (currentIndex > 0) {
-                val prevItem = allItems[currentIndex - 1]
-                _mediaId.value = prevItem.id
-                _previewItem.value = null
-                _realSeasons.value = emptyList()
-                _realEpisodes.value = emptyList()
-                _selectedSeasonNumber.value = 1
-                loadRecommendationsAndReviews(prevItem)
+            val siblings = _stableSiblingIds.value.ifEmpty {
+                ActiveSiblingHolder.activeSiblingIds
             }
+            if (siblings.isEmpty()) return@launch
+            val currentIndex = siblings.indexOf(currentId)
+            val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
+            val prevId = siblings[prevIndex]
+            val prevItem = repository.getMediaById(prevId).firstOrNull() ?: return@launch
+            _mediaId.value = prevId
+            _previewItem.value = null
+            _realSeasons.value = emptyList()
+            _realEpisodes.value = emptyList()
+            _selectedSeasonNumber.value = 1
+            loadRecommendationsAndReviews(prevItem)
         }
         return true
     }
@@ -844,28 +954,40 @@ class DetailViewModel(
     fun navigateToNext(): Boolean {
         viewModelScope.launch {
             val currentId = _mediaId.value
-            val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
-            val currentIndex = allItems.indexOfFirst { it.id == currentId }
-            if (currentIndex in 0 until allItems.size - 1) {
-                val nextItem = allItems[currentIndex + 1]
-                _mediaId.value = nextItem.id
-                _previewItem.value = null
-                _realSeasons.value = emptyList()
-                _realEpisodes.value = emptyList()
-                _selectedSeasonNumber.value = 1
-                loadRecommendationsAndReviews(nextItem)
+            val siblings = _stableSiblingIds.value.ifEmpty {
+                ActiveSiblingHolder.activeSiblingIds
             }
+            if (siblings.isEmpty()) return@launch
+            val currentIndex = siblings.indexOf(currentId)
+            val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
+            val nextId = siblings[nextIndex]
+            val nextItem = repository.getMediaById(nextId).firstOrNull() ?: return@launch
+            _mediaId.value = nextId
+            _previewItem.value = null
+            _realSeasons.value = emptyList()
+            _realEpisodes.value = emptyList()
+            _selectedSeasonNumber.value = 1
+            loadRecommendationsAndReviews(nextItem)
         }
         return true
     }
 
     fun updateProgress(newProgress: Double) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
+            val item = repository.getMediaById(_mediaId.value).firstOrNull() ?: uiState.value.item ?: return@launch
             val max = item.totalProgress ?: Double.MAX_VALUE
             val clamped = newProgress.coerceIn(0.0, max)
-            val updated = item.copy(currentProgress = clamped)
+            val newStatus = if (item.totalProgress != null && clamped >= item.totalProgress) {
+                TrackingStatus.COMPLETED
+            } else if (clamped > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                TrackingStatus.IN_PROGRESS
+            } else {
+                item.status
+            }
+            val updated = item.copy(currentProgress = clamped, status = newStatus)
             repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, clamped)
+            trackerSyncEngine?.drainQueue()
         }
     }
 
@@ -895,24 +1017,16 @@ class DetailViewModel(
     fun updateCover(newCoverUrl: String) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            repository.updateMedia(
-                item.copy(
-                    coverUrl = newCoverUrl,
-                    customCoverPath = null
-                )
-            )
+            repository.updateCover(item.id, newCoverUrl)
+            repository.updateCustomCoverPath(item.id, null)
         }
     }
 
     fun updateBanner(newBannerUrl: String) {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
-            repository.updateMedia(
-                item.copy(
-                    bannerUrl = newBannerUrl,
-                    customBannerPath = null
-                )
-            )
+            repository.updateBanner(item.id, newBannerUrl)
+            repository.updateCustomBannerPath(item.id, null)
         }
     }
 
@@ -1049,12 +1163,13 @@ class DetailViewModel(
             repository: MediaRepository,
             mediaId: Long,
             enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
-            preferenceManager: PreferenceManager? = null
+            preferenceManager: PreferenceManager? = null,
+            trackerSyncEngine: TrackerSyncEngine? = null
         ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return DetailViewModel(repository, mediaId, enrichmentRepository, preferenceManager) as T
+                    return DetailViewModel(repository, mediaId, enrichmentRepository, preferenceManager, trackerSyncEngine) as T
                 }
             }
         }

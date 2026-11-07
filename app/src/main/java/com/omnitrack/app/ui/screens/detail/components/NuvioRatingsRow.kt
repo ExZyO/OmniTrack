@@ -68,8 +68,8 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 2. TMDb Score (Shows & Movies) - rendered as integer (e.g. 84)
-        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE) {
+        // 2. TMDb Score (Shows, Movies, & Anime) - rendered as integer (e.g. 84)
+        if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE || (item.mediaType == MediaType.ANIME && item.tmdbId != null)) {
             item.communityScore?.let { score ->
                 if (score > 0) {
                     val tmdbVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
@@ -173,8 +173,8 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 7. AniList Community Score (% scale, e.g. 84%)
-        if (item.anilistId != null || (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL)) {
+        // 7. AniList Community Score (100-point % scale, e.g. 84% in cyan #02A9FF)
+        if (item.anilistId != null || ((item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) && item.malId == null && item.bangumiId == null)) {
             item.communityScore?.let { score ->
                 if (score > 0) {
                     val aniVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
@@ -191,8 +191,8 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 8. MyAnimeList Score (10-point scale, e.g. 8.45 / 8.5 in MAL blue #2E51A2)
-        if (item.malId != null && item.anilistId == null) {
+        // 8. MyAnimeList Score (10-point decimal scale, e.g. 8.45 / 8.5 in MAL blue #2E51A2)
+        if (item.malId != null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
                     val malVal = if (score > 10f) score / 10.0 else score.toDouble()
@@ -209,8 +209,8 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 9. Bangumi Score (10-point scale, e.g. 8.2 in pink #F09199)
-        if (item.bangumiId != null && item.anilistId == null && item.malId == null) {
+        // 9. Bangumi Score (10-point decimal scale, e.g. 8.2 in pink #F09199)
+        if (item.bangumiId != null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
                     val bgmVal = if (score > 10f) score / 10.0 else score.toDouble()

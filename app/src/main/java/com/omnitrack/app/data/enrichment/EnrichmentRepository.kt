@@ -82,7 +82,7 @@ class EnrichmentRepository(
 
         // Auto-resolve TMDb ID for Anime if missing so Anime receives Clearart, Trailers, and MDBList scores
         if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
-            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey)
+            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
             if (animeTmdb != null) {
                 effectiveTmdbId = animeTmdb.first
                 isMovie = animeTmdb.second
@@ -111,14 +111,14 @@ class EnrichmentRepository(
         val needsRatings = imdbScore == null || rtScore == null || metacriticScore == null || traktScore == null || audienceScore == null || hasStaleScores
 
         if (!mdblistApiKey.isNullOrBlank() && needsRatings && (resolvedImdbId != null || effectiveTmdbId != null || item.title.isNotBlank())) {
-            val mdbRatings = fetchMdbListRatings(resolvedImdbId, effectiveTmdbId, isMovie, item.title, mdblistApiKey)
+            val mdbRatings = fetchMdbListRatings(resolvedImdbId, effectiveTmdbId, isMovie, item.title, mdblistApiKey, item.nativeTitle)
             if (mdbRatings != null) {
                 if (mdbRatings.imdbScore != null) imdbScore = mdbRatings.imdbScore
                 if (mdbRatings.rtScore != null) rtScore = mdbRatings.rtScore
                 if (mdbRatings.metacriticScore != null) metacriticScore = mdbRatings.metacriticScore
                 if (mdbRatings.traktScore != null) traktScore = mdbRatings.traktScore
                 if (mdbRatings.audienceScore != null) audienceScore = mdbRatings.audienceScore
-                if (mdbRatings.tmdbScore != null && (isMovie || isShow)) communityScore = mdbRatings.tmdbScore
+                if (mdbRatings.tmdbScore != null && (isMovie || isShow || item.mediaType == MediaType.ANIME)) communityScore = mdbRatings.tmdbScore
             }
         }
 
@@ -296,7 +296,7 @@ class EnrichmentRepository(
         val tmdbScore: Float? = null
     )
 
-    private suspend fun searchTmdbForAnime(title: String, apiKey: String): Pair<Long, Boolean>? =
+    private suspend fun searchTmdbForAnime(title: String, apiKey: String, nativeTitle: String? = null): Pair<Long, Boolean>? =
         NetworkPacer.withTmdbPacing {
             try {
                 val cleanTitle = title
@@ -305,33 +305,41 @@ class EnrichmentRepository(
                     .trim()
                 val queryTitle = cleanTitle.ifBlank { title }
 
-                // 1. Search TV (most anime are series)
-                val tvUrl = "https://api.themoviedb.org/3/search/tv?api_key=$apiKey&query=${URLEncoder.encode(queryTitle, "UTF-8")}"
-                val tvReq = Request.Builder().url(tvUrl).get().build()
-                val tvId = client.newCall(tvReq).execute().use { resp ->
-                    if (!resp.isSuccessful) null
-                    else {
-                        val body = resp.body?.string() ?: return@use null
-                        val root = json.parseToJsonElement(body).jsonObject
-                        val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
-                        first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
-                    }
-                }
-                if (tvId != null) return@withTmdbPacing Pair(tvId, false) // false = isMovie (is TV)
+                val searchTitles = listOfNotNull(
+                    queryTitle,
+                    nativeTitle?.takeIf { it.isNotBlank() && it != queryTitle }
+                )
 
-                // 2. Search Movie (for anime movies)
-                val movieUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=${URLEncoder.encode(queryTitle, "UTF-8")}"
-                val movieReq = Request.Builder().url(movieUrl).get().build()
-                val movieId = client.newCall(movieReq).execute().use { resp ->
-                    if (!resp.isSuccessful) null
-                    else {
-                        val body = resp.body?.string() ?: return@use null
-                        val root = json.parseToJsonElement(body).jsonObject
-                        val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
-                        first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                for (searchQ in searchTitles) {
+                    // 1. Search TV (most anime are series)
+                    val tvUrl = "https://api.themoviedb.org/3/search/tv?api_key=$apiKey&query=${URLEncoder.encode(searchQ, "UTF-8")}"
+                    val tvReq = Request.Builder().url(tvUrl).get().build()
+                    val tvId = client.newCall(tvReq).execute().use { resp ->
+                        if (!resp.isSuccessful) null
+                        else {
+                            val body = resp.body?.string() ?: return@use null
+                            val root = json.parseToJsonElement(body).jsonObject
+                            val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
+                            first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                        }
                     }
+                    if (tvId != null) return@withTmdbPacing Pair(tvId, false) // false = isMovie (is TV)
+
+                    // 2. Search Movie (for anime movies)
+                    val movieUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=${URLEncoder.encode(searchQ, "UTF-8")}"
+                    val movieReq = Request.Builder().url(movieUrl).get().build()
+                    val movieId = client.newCall(movieReq).execute().use { resp ->
+                        if (!resp.isSuccessful) null
+                        else {
+                            val body = resp.body?.string() ?: return@use null
+                            val root = json.parseToJsonElement(body).jsonObject
+                            val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
+                            first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                        }
+                    }
+                    if (movieId != null) return@withTmdbPacing Pair(movieId, true)
                 }
-                if (movieId != null) Pair(movieId, true) else null
+                null
             } catch (_: Exception) {
                 null
             }
@@ -342,7 +350,8 @@ class EnrichmentRepository(
         tmdbId: Long?,
         isMovie: Boolean,
         title: String,
-        apiKey: String
+        apiKey: String,
+        nativeTitle: String? = null
     ): MdbRatings? = NetworkPacer.withGeneralPacing {
         try {
             val mediaType = if (isMovie) "movie" else "show"
@@ -354,9 +363,16 @@ class EnrichmentRepository(
                 "s=${URLEncoder.encode(title, "UTF-8")}&m=$mediaType"
             }
             var res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&$queryParam")
-            if (res == null && imdbId.isNullOrBlank() && tmdbId == null) {
+            if (res == null && tmdbId != null) {
+                // Try without &m= constraint in case type was mismatched
+                res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&tm=$tmdbId")
+            }
+            if (res == null) {
                 // Fallback to title search without media type constraint
                 res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&s=${URLEncoder.encode(title, "UTF-8")}")
+                if (res == null && !nativeTitle.isNullOrBlank()) {
+                    res = parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&s=${URLEncoder.encode(nativeTitle, "UTF-8")}")
+                }
             }
             res
         } catch (_: Exception) {
@@ -375,14 +391,29 @@ class EnrichmentRepository(
                 return null
             }
 
-            // Support both direct item response and search result wrappers {"search": [...]}
-            val itemObj = if (root.containsKey("search")) {
-                root["search"]?.jsonArray?.firstOrNull()?.jsonObject ?: root
-            } else {
-                root
+            // If MDBList returned a search result wrapper {"search": [...]}, resolve the top candidate directly
+            if (root.containsKey("search")) {
+                val searchList = root["search"]?.jsonArray
+                val firstMatch = searchList?.firstOrNull()?.jsonObject
+                if (firstMatch != null) {
+                    val foundImdb = firstMatch["imdbid"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                    val foundTmdb = firstMatch["tmdbid"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                    val foundId = firstMatch["id"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+                    val apiKey = url.substringAfter("apikey=").substringBefore("&")
+                    val subParam = when {
+                        foundImdb != null -> "i=$foundImdb"
+                        foundTmdb != null -> "tm=$foundTmdb"
+                        foundId != null -> "id=$foundId"
+                        else -> null
+                    }
+                    if (subParam != null) {
+                        return parseMdbListUrl("https://mdblist.com/api/?apikey=$apiKey&$subParam")
+                    }
+                }
+                return null
             }
 
-            val ratings = itemObj["ratings"]?.jsonArray ?: root["ratings"]?.jsonArray ?: return null
+            val ratings = root["ratings"]?.jsonArray ?: return null
 
             var imdb: Float? = null
             var rt: Int? = null

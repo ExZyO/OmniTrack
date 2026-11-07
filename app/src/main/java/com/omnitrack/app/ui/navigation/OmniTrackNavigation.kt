@@ -103,9 +103,15 @@ fun OmniTrackNavigation(
             val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: return@composable
             val context = LocalContext.current
             val prefManager = remember { PreferenceManager(context) }
+            val app = context.applicationContext as com.omnitrack.app.OmniTrackApplication
 
             val detailViewModel: DetailViewModel = viewModel(
-                factory = DetailViewModel.factory(repository, mediaId, preferenceManager = prefManager)
+                factory = DetailViewModel.factory(
+                    repository = repository,
+                    mediaId = mediaId,
+                    preferenceManager = prefManager,
+                    trackerSyncEngine = app.trackerSyncEngine
+                )
             )
 
             DetailScreen(

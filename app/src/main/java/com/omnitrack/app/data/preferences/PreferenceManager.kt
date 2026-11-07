@@ -3,6 +3,7 @@ package com.omnitrack.app.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -25,7 +26,13 @@ data class PosterCardStyle(
     val alwaysShowLandscapeClearlogo: Boolean = true,
     val cardDepthEnabled: Boolean = true,
     val cardDepthEdgeStrength: Int = 50,
-    val cardDepthSheenStrength: Int = 35
+    val cardDepthSheenStrength: Int = 35,
+    val cardDepthEdgeCoverage: Int = 100,
+    val cardDepthPostersEnabled: Boolean = true,
+    val cardDepthContinueWatchingEnabled: Boolean = true,
+    val cardDepthEpisodesEnabled: Boolean = true,
+    val cardDepthCastEnabled: Boolean = true,
+    val cardDepthTrailersEnabled: Boolean = true
 )
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
@@ -55,6 +62,20 @@ enum class FallbackBackgroundStyle(val displayName: String, val description: Str
     CINEMATIC_BLUR("Cinematic Blur", "Gentle ambient micro-blurred glow"),
     DOMINANT_COLOR("Ambient Palette Glow", "Dynamic dominant color extraction"),
     SOLID_BLACK("Solid AMOLED", "Pure OLED black without aura")
+}
+
+enum class EpisodeLayoutMode(val displayName: String, val description: String) {
+    HORIZONTAL("Horizontal Carousel", "16:9 widescreen scrolling cards with in-image metadata"),
+    LIST("Vertical Compact List", "Classic Nuvio side-by-side list with thumbnail on left"),
+    VERTICAL_CARD("Vertical Hero Cards", "Full-width 16:9 vertical cards with in-image metadata");
+
+    companion object {
+        fun fromName(name: String?): EpisodeLayoutMode = when (name?.uppercase()) {
+            "LIST" -> LIST
+            "VERTICAL_CARD" -> VERTICAL_CARD
+            else -> HORIZONTAL
+        }
+    }
 }
 
 data class PresentationSettings(
@@ -93,6 +114,16 @@ class PreferenceManager(private val context: Context) {
         val POSTER_CARD_DEPTH_ENABLED = booleanPreferencesKey("poster_card_depth_enabled")
         val POSTER_CARD_DEPTH_EDGE_STRENGTH = intPreferencesKey("poster_card_depth_edge_strength")
         val POSTER_CARD_DEPTH_SHEEN_STRENGTH = intPreferencesKey("poster_card_depth_sheen_strength")
+        val POSTER_CARD_DEPTH_EDGE_COVERAGE = intPreferencesKey("poster_card_depth_edge_coverage")
+        val POSTER_CARD_DEPTH_POSTERS = booleanPreferencesKey("poster_card_depth_posters")
+        val POSTER_CARD_DEPTH_CONTINUE_WATCHING = booleanPreferencesKey("poster_card_depth_continue_watching")
+        val POSTER_CARD_DEPTH_EPISODES = booleanPreferencesKey("poster_card_depth_episodes")
+        val POSTER_CARD_DEPTH_CAST = booleanPreferencesKey("poster_card_depth_cast")
+        val POSTER_CARD_DEPTH_TRAILERS = booleanPreferencesKey("poster_card_depth_trailers")
+
+        val EPISODE_LAYOUT_MODE = stringPreferencesKey("episode_layout_mode")
+        val EPISODE_LAYOUT_SCALE = floatPreferencesKey("episode_layout_scale")
+        val SEASON_VIEW_MODE = stringPreferencesKey("season_view_mode")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -100,7 +131,7 @@ class PreferenceManager(private val context: Context) {
 
     val presentationSettings: Flow<PresentationSettings> = context.dataStore.data
         .catch { exception ->
-            if (exception is IOException) {
+            if (exception is IOException || exception is ClassCastException) {
                 emit(emptyPreferences())
             } else {
                 throw exception
@@ -232,18 +263,28 @@ class PreferenceManager(private val context: Context) {
     }
 
     val posterCardStyle: Flow<PosterCardStyle> = context.dataStore.data
-        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
-            PosterCardStyle(
-                widthDp = prefs[PreferencesKeys.POSTER_WIDTH_DP] ?: 126,
-                cornerRadiusDp = prefs[PreferencesKeys.POSTER_CORNER_RADIUS_DP] ?: 12,
-                isLandscape = prefs[PreferencesKeys.POSTER_LANDSCAPE] ?: false,
-                hideLabels = prefs[PreferencesKeys.POSTER_HIDE_LABELS] ?: false,
-                alwaysShowLandscapeClearlogo = prefs[PreferencesKeys.POSTER_ALWAYS_LANDSCAPE_CLEARLOGO] ?: true,
-                cardDepthEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_ENABLED] ?: true,
-                cardDepthEdgeStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH] ?: 50,
-                cardDepthSheenStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH] ?: 35
-            )
+            try {
+                PosterCardStyle(
+                    widthDp = prefs[PreferencesKeys.POSTER_WIDTH_DP] ?: 126,
+                    cornerRadiusDp = prefs[PreferencesKeys.POSTER_CORNER_RADIUS_DP] ?: 12,
+                    isLandscape = prefs[PreferencesKeys.POSTER_LANDSCAPE] ?: false,
+                    hideLabels = prefs[PreferencesKeys.POSTER_HIDE_LABELS] ?: false,
+                    alwaysShowLandscapeClearlogo = prefs[PreferencesKeys.POSTER_ALWAYS_LANDSCAPE_CLEARLOGO] ?: true,
+                    cardDepthEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_ENABLED] ?: true,
+                    cardDepthEdgeStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH] ?: 50,
+                    cardDepthSheenStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH] ?: 35,
+                    cardDepthEdgeCoverage = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_COVERAGE] ?: 100,
+                    cardDepthPostersEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_POSTERS] ?: true,
+                    cardDepthContinueWatchingEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_CONTINUE_WATCHING] ?: true,
+                    cardDepthEpisodesEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EPISODES] ?: true,
+                    cardDepthCastEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_CAST] ?: true,
+                    cardDepthTrailersEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS] ?: true
+                )
+            } catch (_: Exception) {
+                PosterCardStyle()
+            }
         }
 
     suspend fun updatePosterWidthDp(width: Int) {
@@ -277,6 +318,24 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    suspend fun updateCardDepthCoverage(coverage: Int) {
+        context.dataStore.edit {
+            it[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_COVERAGE] = coverage
+        }
+    }
+
+    suspend fun updateCardDepthSurface(surface: String, enabled: Boolean) {
+        context.dataStore.edit {
+            when (surface.lowercase()) {
+                "posters" -> it[PreferencesKeys.POSTER_CARD_DEPTH_POSTERS] = enabled
+                "continue_watching", "continuewatching" -> it[PreferencesKeys.POSTER_CARD_DEPTH_CONTINUE_WATCHING] = enabled
+                "episodes" -> it[PreferencesKeys.POSTER_CARD_DEPTH_EPISODES] = enabled
+                "cast" -> it[PreferencesKeys.POSTER_CARD_DEPTH_CAST] = enabled
+                "trailers" -> it[PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS] = enabled
+            }
+        }
+    }
+
     suspend fun resetPosterStyle() {
         context.dataStore.edit {
             it.remove(PreferencesKeys.POSTER_WIDTH_DP)
@@ -287,7 +346,47 @@ class PreferenceManager(private val context: Context) {
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_ENABLED)
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH)
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_EDGE_COVERAGE)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_POSTERS)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_CONTINUE_WATCHING)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_EPISODES)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_CAST)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS)
         }
+    }
+
+    val episodeLayoutMode: Flow<EpisodeLayoutMode> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            EpisodeLayoutMode.fromName(prefs[PreferencesKeys.EPISODE_LAYOUT_MODE])
+        }
+
+    val episodeLayoutScale: Flow<Float> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            try {
+                prefs[PreferencesKeys.EPISODE_LAYOUT_SCALE] ?: 1.0f
+            } catch (_: Exception) {
+                1.0f
+            }
+        }
+
+    val seasonViewMode: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            prefs[PreferencesKeys.SEASON_VIEW_MODE] ?: "Posters"
+        }
+
+    suspend fun updateEpisodeLayoutMode(mode: EpisodeLayoutMode) {
+        context.dataStore.edit { it[PreferencesKeys.EPISODE_LAYOUT_MODE] = mode.name }
+    }
+
+    suspend fun updateEpisodeLayoutScale(scale: Float) {
+        context.dataStore.edit { it[PreferencesKeys.EPISODE_LAYOUT_SCALE] = scale.coerceIn(0.75f, 1.4f) }
+    }
+
+    suspend fun updateSeasonViewMode(mode: String) {
+        context.dataStore.edit { it[PreferencesKeys.SEASON_VIEW_MODE] = mode }
     }
 
     fun getArtSourcePriority(mediaType: MediaType): Flow<List<String>> {

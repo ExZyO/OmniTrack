@@ -45,7 +45,7 @@ object TrackerAccountVerifier {
     // Default Fallback Credentials
     private const val DEFAULT_TRAKT_CLIENT_ID = "VqwWoA1jPRnMBEtn7fEV3Zlx4XeXYRNaipC7pAaWL4o"
     private const val DEFAULT_TRAKT_CLIENT_SECRET = "fZnobYDga_lRC-jatEiu88saM15CsmuLvfXCbj9WoPs"
-    private const val DEFAULT_MAL_CLIENT_ID = "2db7880d919b9231be3031ec80e77f15"
+    private const val DEFAULT_MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
     private const val DEFAULT_SIMKL_CLIENT_ID = "c9c006c049d34a887a0f744b29f09658e3dce579cf5db98665db4d96e35d036a"
     private const val DEFAULT_SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
 
@@ -252,7 +252,7 @@ object TrackerAccountVerifier {
         if (token.isBlank()) return@withContext VerificationState.Idle
         try {
             val request = Request.Builder()
-                .url("https://api.comick.dev/integrations/v1/users/me")
+                .url("https://api.comick.dev/integrations/v1/me")
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                 .header("Accept", "application/json")

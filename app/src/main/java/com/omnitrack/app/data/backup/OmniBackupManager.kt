@@ -4,6 +4,9 @@ import android.content.Context
 import android.os.Build
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.room.withTransaction
 import com.omnitrack.app.BuildConfig
@@ -74,9 +77,20 @@ object OmniBackupManager {
             val dbDumpJson = json.encodeToString(dbDump)
             val checksum = sha256(dbDumpJson)
 
-            // Gathers DataStore preferences
-            val prefsMap = context.dataStore.data.first().asMap().mapKeys { it.key.name }.mapValues { it.value.toString() }
-            val prefsDumpJson = json.encodeToString(OmniPreferencesDump(entries = prefsMap))
+            // Gathers DataStore preferences with strict type tracking
+            val rawPrefs = context.dataStore.data.first().asMap()
+            val prefsMap = rawPrefs.mapKeys { it.key.name }.mapValues { it.value.toString() }
+            val typedList = rawPrefs.map { (key, value) ->
+                val typeName = when (value) {
+                    is Int -> "INT"
+                    is Float -> "FLOAT"
+                    is Boolean -> "BOOLEAN"
+                    is Long -> "LONG"
+                    else -> "STRING"
+                }
+                OmniPrefEntry(key = key.name, type = typeName, value = value.toString())
+            }
+            val prefsDumpJson = json.encodeToString(OmniPreferencesDump(entries = prefsMap, typedEntries = typedList))
 
             // Build manifest
             val manifest = OmniBackupManifest(
@@ -234,16 +248,74 @@ object OmniBackupManager {
                 File(cacheDir, fileName).writeBytes(bytes)
             }
 
-            // Restore DataStore Preferences
+            // Restore DataStore Preferences with Type-Safe Deserialization
             if (prefsBytes != null) {
                 try {
                     val prefsDump = json.decodeFromString<OmniPreferencesDump>(String(prefsBytes!!, StandardCharsets.UTF_8))
+                    val knownBooleanKeys = setOf(
+                        "ai_semantic_search_enabled",
+                        "poster_card_landscape",
+                        "poster_card_hide_labels",
+                        "poster_always_landscape_clearlogo",
+                        "poster_card_depth_enabled",
+                        "poster_card_depth_posters",
+                        "poster_card_depth_continue_watching",
+                        "poster_card_depth_episodes",
+                        "poster_card_depth_cast",
+                        "poster_card_depth_trailers"
+                    )
+                    val knownIntKeys = setOf(
+                        "poster_card_width_dp",
+                        "poster_card_corner_radius_dp",
+                        "poster_card_depth_edge_strength",
+                        "poster_card_depth_sheen_strength",
+                        "poster_card_depth_edge_coverage"
+                    )
+                    val knownFloatKeys = setOf("episode_layout_scale")
+
                     context.dataStore.edit { prefs ->
-                        for ((key, value) in prefsDump.entries) {
-                            if (value.equals("true", ignoreCase = true) || value.equals("false", ignoreCase = true)) {
-                                prefs[booleanPreferencesKey(key)] = value.toBoolean()
-                            } else {
-                                prefs[stringPreferencesKey(key)] = value
+                        // Clear existing to avoid type collisions across versions
+                        prefs.clear()
+                        if (prefsDump.typedEntries.isNotEmpty()) {
+                            for (entry in prefsDump.typedEntries) {
+                                val key = entry.key
+                                when {
+                                    key in knownBooleanKeys || entry.type == "BOOLEAN" -> {
+                                        prefs[booleanPreferencesKey(key)] = entry.value.toBoolean()
+                                    }
+                                    key in knownIntKeys || entry.type == "INT" -> {
+                                        entry.value.toIntOrNull()?.let { prefs[intPreferencesKey(key)] = it }
+                                    }
+                                    key in knownFloatKeys || entry.type == "FLOAT" -> {
+                                        entry.value.toFloatOrNull()?.let { prefs[floatPreferencesKey(key)] = it }
+                                    }
+                                    entry.type == "LONG" -> {
+                                        entry.value.toLongOrNull()?.let { prefs[longPreferencesKey(key)] = it }
+                                    }
+                                    else -> {
+                                        prefs[stringPreferencesKey(key)] = entry.value
+                                    }
+                                }
+                            }
+                        } else {
+                            // Smart legacy fallback: prevents ClassCastException on startup
+                            for ((key, value) in prefsDump.entries) {
+                                when {
+                                    key in knownBooleanKeys || value.equals("true", ignoreCase = true) || value.equals("false", ignoreCase = true) -> {
+                                        prefs[booleanPreferencesKey(key)] = value.toBoolean()
+                                    }
+                                    key in knownIntKeys || key.endsWith("_dp") || key.endsWith("_strength") || key.endsWith("_coverage") -> {
+                                        value.toIntOrNull()?.let { prefs[intPreferencesKey(key)] = it }
+                                            ?: run { prefs[stringPreferencesKey(key)] = value }
+                                    }
+                                    key in knownFloatKeys || key.endsWith("_scale") -> {
+                                        value.toFloatOrNull()?.let { prefs[floatPreferencesKey(key)] = it }
+                                            ?: run { prefs[stringPreferencesKey(key)] = value }
+                                    }
+                                    else -> {
+                                        prefs[stringPreferencesKey(key)] = value
+                                    }
+                                }
                             }
                         }
                     }

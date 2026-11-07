@@ -68,6 +68,7 @@ import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
 import com.omnitrack.app.ui.components.PosterCustomizationSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
+import com.omnitrack.app.ui.screens.detail.components.EpisodeLayoutSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -97,6 +98,7 @@ fun SettingsView(
     var showBackupRestoreSheet by remember { mutableStateOf(false) }
     var showTrackerAccountsSheet by remember { mutableStateOf(false) }
     var showPosterCustomizationSheet by remember { mutableStateOf(false) }
+    var showEpisodeLayoutSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -172,6 +174,14 @@ fun SettingsView(
                 title = "Poster Card Style",
                 subtitle = "Configure grid density (104–140dp), corner radius (0–24dp), 16:9 mode & labels",
                 onClick = { showPosterCustomizationSheet = true }
+            )
+            SectionDivider()
+            GroupedSettingRow(
+                icon = Icons.Default.ViewCarousel,
+                iconTint = AccentJade,
+                title = "Episode Layout & Sizing",
+                subtitle = "Horizontal carousel, compact list, or vertical cards with adjustable size",
+                onClick = { showEpisodeLayoutSheet = true }
             )
         }
 
@@ -286,6 +296,13 @@ fun SettingsView(
         PosterCustomizationSheet(
             preferenceManager = prefManager,
             onDismiss = { showPosterCustomizationSheet = false }
+        )
+    }
+
+    if (showEpisodeLayoutSheet) {
+        EpisodeLayoutSheet(
+            preferenceManager = prefManager,
+            onDismiss = { showEpisodeLayoutSheet = false }
         )
     }
 }

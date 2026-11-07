@@ -60,10 +60,18 @@ private val backdropScrim = Brush.verticalGradient(
 fun rememberArtworkBackdrop(imageUrl: String?, enabled: Boolean = true): ImageBitmap? {
     val context = LocalContext.current
     val losslessUrl = remember(imageUrl) { imageUrl?.let { LosslessCoverMapper.toLosslessUrl(it) } }
-    var image by remember(losslessUrl) { mutableStateOf(losslessUrl?.let { backdropCache[it] }) }
+    var image by remember { mutableStateOf(losslessUrl?.let { backdropCache[it] }) }
 
     LaunchedEffect(losslessUrl, enabled, context) {
-        if (!enabled || losslessUrl.isNullOrBlank() || image != null) return@LaunchedEffect
+        if (!enabled || losslessUrl.isNullOrBlank()) {
+            if (!enabled) image = null
+            return@LaunchedEffect
+        }
+        val cached = backdropCache[losslessUrl]
+        if (cached != null) {
+            image = cached
+            return@LaunchedEffect
+        }
         val request = ImageRequest.Builder(context)
             .data(losslessUrl)
             .size(128)

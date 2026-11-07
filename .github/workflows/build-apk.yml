@@ -47,8 +47,8 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=1.0.0-b${{ github.run_number }} --stacktrace
+      - name: Build Release & Debug APKs
+        run: ./gradlew assembleRelease assembleDebug -PversionCode=${{ github.run_number }} -PversionName=1.0.0-b${{ github.run_number }} --stacktrace
         env:
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
@@ -59,12 +59,14 @@ jobs:
         run: |
           mkdir -p release-output
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk
           COMMIT_SUBJ=$(git log -1 --pretty=%s)
           cat <<EOF > release-output/version.json
           {
             "version": "${{ steps.release_info.outputs.tag }}",
             "versionCode": ${{ github.run_number }},
             "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}.apk",
+            "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk",
             "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: $COMMIT_SUBJ"
           }
           EOF
@@ -76,17 +78,21 @@ jobs:
           ### ✨ What's in this build
           - **Latest Update:** $COMMIT_SUBJ
 
+          ### 📦 Download Options
+          - **Release APK:** \`OmniTrack-${{ steps.release_info.outputs.tag }}.apk\`
+          - **Debug APK (for ADB / Wireless Debugging logs):** \`OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk\`
+
           ### 🔧 Technical Details
           - **Commit:** ${{ github.sha }}
-          - **Build Type:** Release (\`assembleRelease\` signed)
+          - **Build Type:** Release & Debug
           - **Engine:** Room SQLite WAL, Coil 3 Lossless Artwork, Fast Dual-Channel Update Stream
           EOF
 
-      - name: Upload Release APK Artifact
+      - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: OmniTrack-${{ steps.release_info.outputs.tag }}
-          path: release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          path: release-output/*.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -96,6 +102,7 @@ jobs:
           name: OmniTrack ${{ steps.release_info.outputs.tag }}
           files: |
             release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+            release-output/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk
             release-output/version.json
           body_path: release-output/notes.md
           draft: false

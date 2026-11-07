@@ -173,7 +173,7 @@ fun OmniFloatingNavBar(
     scrollState: OmniNavBarScrollState,
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
-    glowEnabled: Boolean = true,
+    glowEnabled: Boolean = false,
     onActiveTabReSelected: ((NavDestination) -> Unit)? = null
 ) {
     val density = LocalDensity.current.density

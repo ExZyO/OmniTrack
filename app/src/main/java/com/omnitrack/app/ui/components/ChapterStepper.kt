@@ -38,6 +38,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -209,15 +210,16 @@ fun ChapterStepper(
 
         // Unboxed scrub slider (seamless thin line directly on AMOLED canvas)
         if (totalProgress != null && totalProgress > 0) {
-            val sliderProgress by animateFloatAsState(
-                targetValue = (currentProgress / totalProgress).toFloat().coerceIn(0f, 1f),
-                animationSpec = spring(stiffness = Spring.StiffnessLow),
-                label = "slider"
-            )
+            val progressFraction = (currentProgress / totalProgress).toFloat().coerceIn(0f, 1f)
+            var isDragging by remember { mutableStateOf(false) }
+            var dragFraction by remember { mutableFloatStateOf(0f) }
+            val sliderValue = if (isDragging) dragFraction else progressFraction
 
             Slider(
-                value = sliderProgress,
+                value = sliderValue,
                 onValueChange = { fraction ->
+                    isDragging = true
+                    dragFraction = fraction
                     val newProgress = (fraction * totalProgress)
                     val rounded = if (isDecimal) {
                         (newProgress * 10).toLong() / 10.0
@@ -225,6 +227,9 @@ fun ChapterStepper(
                         newProgress.toLong().toDouble()
                     }
                     onProgressChanged(rounded)
+                },
+                onValueChangeFinished = {
+                    isDragging = false
                 },
                 modifier = Modifier
                     .fillMaxWidth()

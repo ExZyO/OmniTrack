@@ -139,6 +139,9 @@ fun DetailScreen(
     val context = LocalContext.current
     val prefManager = remember { PreferenceManager(context) }
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
+    val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
+    val seasonViewMode by prefManager.seasonViewMode.collectAsState(initial = "Posters")
 
     val uiState by viewModel.uiState.collectAsState()
     val item = uiState.item
@@ -330,16 +333,15 @@ fun DetailScreen(
             val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
                 item.customCoverPath ?: when (item.artworkRole) {
                     "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-                    "SYNCHRONIZED" -> item.bannerUrl ?: item.coverUrl
                     else -> item.coverUrl
                 }
             }
             val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
                 when {
-                    item.customBannerPath == "NONE" -> null
+                    item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
                     item.customBannerPath != null -> item.customBannerPath
                     item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-                    item.artworkRole == "SYNCHRONIZED" -> item.coverUrl
+                    item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
                     else -> item.bannerUrl ?: item.coverUrl
                 }
             }
@@ -448,7 +450,7 @@ fun DetailScreen(
                                 if (item.nativeTitle != null) {
                                     Text(
                                         text = item.nativeTitle,
-                                        color = TextMuted,
+                                        color = Color.White.copy(alpha = 0.85f),
                                         fontSize = 12.5.sp
                                     )
                                 }
@@ -465,8 +467,8 @@ fun DetailScreen(
                                         letterSpacing = 1.sp
                                     )
                                     if (item.platform != null) {
-                                        Text(text = " • ", color = TextMuted, fontSize = 11.sp)
-                                        Text(text = item.platform, color = TextSecondary, fontSize = 11.5.sp)
+                                        Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
+                                        Text(text = item.platform, color = Color.White, fontSize = 11.5.sp)
                                     }
                                 }
                             }
@@ -481,7 +483,7 @@ fun DetailScreen(
                                 Icon(
                                     imageVector = Icons.Default.MoreVert,
                                     contentDescription = "Options",
-                                    tint = TextSecondary,
+                                    tint = Color.White,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -589,7 +591,7 @@ fun DetailScreen(
                                     if (item.nativeTitle != null) {
                                         Text(
                                             text = item.nativeTitle,
-                                            color = TextMuted,
+                                            color = Color.White.copy(alpha = 0.85f),
                                             fontSize = 12.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
@@ -603,7 +605,7 @@ fun DetailScreen(
                                     Icon(
                                         imageVector = Icons.Default.MoreVert,
                                         contentDescription = "Options",
-                                        tint = TextSecondary,
+                                        tint = Color.White,
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
@@ -654,7 +656,7 @@ fun DetailScreen(
                     ) {
                         Text(
                             text = item.synopsis,
-                            color = TextSecondary,
+                            color = Color.White.copy(alpha = 0.90f),
                             fontSize = 13.5.sp,
                             lineHeight = 20.sp,
                             maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
@@ -784,6 +786,15 @@ fun DetailScreen(
                             watchedEpisodes = uiState.watchedEpisodes,
                             selectedSeasonNumber = uiState.selectedSeasonNumber,
                             fallbackBackdropUrl = item.bannerUrl,
+                            layoutMode = episodeLayoutMode,
+                            layoutScale = episodeLayoutScale,
+                            initialSeasonViewMode = seasonViewMode,
+                            onSeasonViewModeChanged = { next ->
+                                coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
+                            },
+                            onLayoutModeChanged = { next ->
+                                coroutineScope.launch { prefManager.updateEpisodeLayoutMode(next) }
+                            },
                             onSelectSeason = { viewModel.selectSeason(it) },
                             onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                             onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
@@ -1243,7 +1254,7 @@ private fun UnboxedStatsRow(
                 )
                 Text(
                     text = "STATUS",
-                    color = TextMuted,
+                    color = Color.White.copy(alpha = 0.85f),
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
@@ -1283,7 +1294,7 @@ private fun UnboxedStatsRow(
                 )
                 Text(
                     text = "SCORE",
-                    color = TextMuted,
+                    color = Color.White.copy(alpha = 0.85f),
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
@@ -1312,7 +1323,7 @@ private fun UnboxedStatsRow(
                 modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(if (boundCount > 0) AccentJade else TextMuted.copy(alpha = 0.5f))
+                    .background(if (boundCount > 0) AccentJade else Color.White.copy(alpha = 0.35f))
             )
             Column {
                 Text(
@@ -1323,7 +1334,7 @@ private fun UnboxedStatsRow(
                 )
                 Text(
                     text = "TRACKERS",
-                    color = TextMuted,
+                    color = Color.White.copy(alpha = 0.85f),
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = 0.5.sp
@@ -1391,7 +1402,7 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                     modifier = Modifier
                         .border(
                             width = 1.dp,
-                            color = TextSecondary.copy(alpha = 0.45f),
+                            color = Color.White.copy(alpha = 0.60f),
                             shape = RoundedCornerShape(6.dp)
                         )
                         .padding(horizontal = 7.dp, vertical = 2.5.dp)
@@ -1400,7 +1411,7 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                         text = badge,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextSecondary
+                        color = Color.White
                     )
                 }
             }

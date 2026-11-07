@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
                                 .build()
                             val req = Request.Builder()
                                 .url("https://bgm.tv/oauth/access_token")
+                                .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                                 .post(form)
                                 .build()
                             client.newCall(req).execute().use { resp ->
@@ -163,6 +164,7 @@ class MainActivity : ComponentActivity() {
                                 .build()
                             val req = Request.Builder()
                                 .url("https://comick.dev/api/auth/oauth2/token")
+                                .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                                 .post(form)
                                 .build()
                             client.newCall(req).execute().use { resp ->
@@ -186,17 +188,41 @@ class MainActivity : ComponentActivity() {
                                 .add("client_id", effectiveClientId)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
-                                .add("redirect_uri", effectiveRedirectUri)
-                                .build()
+                            if (customMal?.isNotBlank() == true) {
+                                form.add("redirect_uri", effectiveRedirectUri)
+                            }
                             val req = Request.Builder()
                                 .url("https://myanimelist.net/v1/oauth2/token")
-                                .post(form)
+                                .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                                .post(form.build())
                                 .build()
                             client.newCall(req).execute().use { resp ->
                                 if (resp.isSuccessful) {
                                     val body = resp.body?.string().orEmpty()
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
                                     finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                } else {
+                                    // Fallback retry with/without redirect_uri
+                                    val fallbackForm = FormBody.Builder()
+                                        .add("grant_type", "authorization_code")
+                                        .add("client_id", effectiveClientId)
+                                        .add("code", code)
+                                        .add("code_verifier", verifier)
+                                    if (customMal?.isNotBlank() != true) {
+                                        fallbackForm.add("redirect_uri", effectiveRedirectUri)
+                                    }
+                                    val fallbackReq = Request.Builder()
+                                        .url("https://myanimelist.net/v1/oauth2/token")
+                                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                                        .post(fallbackForm.build())
+                                        .build()
+                                    client.newCall(fallbackReq).execute().use { fbResp ->
+                                        if (fbResp.isSuccessful) {
+                                            val fbBody = fbResp.body?.string().orEmpty()
+                                            val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(fbBody).jsonObject
+                                            finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                        }
+                                    }
                                 }
                             }
                         } catch (_: Exception) {}

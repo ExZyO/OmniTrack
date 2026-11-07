@@ -26,8 +26,16 @@ data class OmniDatabaseDump(
 )
 
 @Serializable
+data class OmniPrefEntry(
+    val key: String,
+    val type: String, // "INT", "FLOAT", "BOOLEAN", "STRING", "LONG"
+    val value: String
+)
+
+@Serializable
 data class OmniPreferencesDump(
-    val entries: Map<String, String> = emptyMap()
+    val entries: Map<String, String> = emptyMap(),
+    val typedEntries: List<OmniPrefEntry> = emptyList()
 )
 
 @Serializable

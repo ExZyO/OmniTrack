@@ -72,6 +72,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
  * Supports AMOLED #000000 styling, squircle 16:9 container, hardware-accelerated playback,
  * and seamless one-tap Fullscreen Landscape Mode lock.
  */
+@SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TrailerPlayerPopup(
@@ -116,6 +117,80 @@ fun TrailerPlayerPopup(
         }
     }
 
+    val htmlContent = remember(youtubeKey) {
+        """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000000; }
+                html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
+                .iframe-container { position: relative; width: 100%; height: 100%; }
+                iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+            </style>
+        </head>
+        <body>
+            <div class="iframe-container">
+                <iframe
+                    src="https://www.youtube-nocookie.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1&controls=1"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowfullscreen>
+                </iframe>
+            </div>
+        </body>
+        </html>
+        """.trimIndent()
+    }
+
+    val persistentWebView = remember(youtubeKey, context) {
+        WebView(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(android.graphics.Color.BLACK)
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            settings.apply {
+                javaScriptEnabled = true
+                domStorageEnabled = true
+                mediaPlaybackRequiresUserGesture = false
+                cacheMode = WebSettings.LOAD_DEFAULT
+                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                allowFileAccess = false
+                allowContentAccess = true
+                userAgentString = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                    isFullscreen = true
+                }
+                override fun onHideCustomView() {
+                    isFullscreen = false
+                }
+            }
+            webViewClient = WebViewClient()
+            loadDataWithBaseURL(
+                "https://omnitrack.app",
+                htmlContent,
+                "text/html",
+                "UTF-8",
+                null
+            )
+        }
+    }
+
+    DisposableEffect(youtubeKey) {
+        onDispose {
+            (persistentWebView.parent as? ViewGroup)?.removeView(persistentWebView)
+            persistentWebView.apply {
+                loadUrl("about:blank")
+                stopLoading()
+                destroy()
+            }
+        }
+    }
+
     if (isFullscreen) {
         // Fullscreen Mode Dialog
         Dialog(
@@ -133,7 +208,7 @@ fun TrailerPlayerPopup(
                     .background(Color.Black)
             ) {
                 EmbeddedYouTubePlayer(
-                    youtubeKey = youtubeKey,
+                    webView = persistentWebView,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -242,14 +317,14 @@ fun TrailerPlayerPopup(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = trailerType.ifBlank { "Trailer" },
-                            color = TextPrimary,
+                            color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
                         )
                         if (subtitle.isNotBlank()) {
                             Text(
                                 text = subtitle,
-                                color = TextMuted,
+                                color = Color.White.copy(alpha = 0.80f),
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -276,7 +351,7 @@ fun TrailerPlayerPopup(
                             Icon(
                                 imageVector = Icons.Default.Fullscreen,
                                 contentDescription = "Fullscreen",
-                                tint = TextSecondary,
+                                tint = Color.White,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -287,7 +362,7 @@ fun TrailerPlayerPopup(
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Close",
-                                tint = TextSecondary,
+                                tint = Color.White,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -305,7 +380,7 @@ fun TrailerPlayerPopup(
                     contentAlignment = Alignment.Center
                 ) {
                     EmbeddedYouTubePlayer(
-                        youtubeKey = youtubeKey,
+                        webView = persistentWebView,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
@@ -314,84 +389,22 @@ fun TrailerPlayerPopup(
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun EmbeddedYouTubePlayer(
-    youtubeKey: String,
+    webView: WebView,
     modifier: Modifier = Modifier
 ) {
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-
-    DisposableEffect(youtubeKey) {
-        onDispose {
-            webViewRef?.apply {
-                loadUrl("about:blank")
-                stopLoading()
-                destroy()
-            }
-        }
-    }
-
-    val htmlContent = remember(youtubeKey) {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000000; }
-                html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
-                .iframe-container { position: relative; width: 100%; height: 100%; }
-                iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
-            </style>
-        </head>
-        <body>
-            <div class="iframe-container">
-                <iframe
-                    src="https://www.youtube.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&origin=https://www.youtube.com&widget_referrer=https://www.youtube.com&rel=0&modestbranding=1"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowfullscreen>
-                </iframe>
-            </div>
-        </body>
-        </html>
-        """.trimIndent()
-    }
-
     AndroidView(
         modifier = modifier,
-        factory = { ctx ->
-            WebView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                setBackgroundColor(android.graphics.Color.BLACK)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    cacheMode = WebSettings.LOAD_DEFAULT
-                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36"
-                    allowFileAccess = false
-                    allowContentAccess = true
-                }
-                webChromeClient = object : WebChromeClient() {
-                    override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                        super.onShowCustomView(view, callback)
-                    }
-                    override fun onHideCustomView() {
-                        super.onHideCustomView()
-                    }
-                }
-                webViewClient = WebViewClient()
-                loadDataWithBaseURL("https://www.youtube.com", htmlContent, "text/html", "UTF-8", "https://www.youtube.com")
-                webViewRef = this
-            }
+        factory = { _ ->
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView
         },
-        update = { /* Preserves playback state; does not reload page on recomposition */ }
+        update = { v ->
+            if (v.parent == null) {
+                // View reattached
+            }
+        }
     )
 }
 

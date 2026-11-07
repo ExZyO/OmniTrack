@@ -102,6 +102,11 @@ dependencies {
     // Haze for Liquid Glass Backdrop Blur
     implementation(libs.haze)
 
+    // Media3 ExoPlayer for Hero Trailer Surface & Video Playback
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.media3.common)
+
     // Jetpack DataStore Preferences
     implementation(libs.androidx.datastore.preferences)
 

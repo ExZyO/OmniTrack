@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +94,7 @@ fun MediaCard(
     cardDepthEnabled: Boolean = true,
     cardDepthEdgeStrength: Float = 50f,
     cardDepthSheenStrength: Float = 35f,
+    cardDepthEdgeCoverage: Float = 100f,
     badgeText: String? = null,
     badgeColor: Color = AccentArctic
 ) {
@@ -149,6 +151,7 @@ fun MediaCard(
                     shape = shape,
                     edgeStrength = cardDepthEdgeStrength,
                     sheenStrength = cardDepthSheenStrength,
+                    edgeCoverage = cardDepthEdgeCoverage,
                     enabled = cardDepthEnabled
                 )
         ) {
@@ -177,8 +180,9 @@ fun MediaCard(
                             Brush.verticalGradient(
                                 colorStops = arrayOf(
                                     0.0f to Color.Transparent,
-                                    0.45f to Color.Transparent,
-                                    1.0f to Color.Black.copy(alpha = 0.50f)
+                                    0.35f to Color.Transparent,
+                                    0.70f to Color.Black.copy(alpha = 0.65f),
+                                    1.0f to Color.Black.copy(alpha = 0.92f)
                                 )
                             )
                         )
@@ -186,14 +190,14 @@ fun MediaCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .padding(start = 10.dp, bottom = 10.dp, end = 44.dp)
                 ) {
                     AsyncImage(
                         model = item.clearartUrl,
                         contentDescription = item.title,
                         modifier = Modifier
-                            .fillMaxWidth(0.65f)
-                            .height(36.dp),
+                            .fillMaxWidth(0.70f)
+                            .height(38.dp),
                         contentScale = ContentScale.Fit,
                         alignment = Alignment.BottomStart
                     )
@@ -209,7 +213,8 @@ fun MediaCard(
                         .padding(6.dp)
                         .align(Alignment.TopStart)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(AmoledBlack.copy(alpha = 0.75f))
+                        .background(AmoledBlack.copy(alpha = 0.82f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
@@ -222,7 +227,7 @@ fun MediaCard(
             }
 
             // Bottom glass scrim for readable progress overlay - only when clearart logo is not displayed at bottom
-            if (!hasClearart) {
+            if (!hasClearart && !isLandscape) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -236,35 +241,23 @@ fun MediaCard(
                 )
             }
 
-            // Progress text overlay - positioned away from bottom-start when clearart logo is present so it never covers it!
+            // Progress text overlay - positioned neatly at Top-End away from bottom logo
             val progressText = formatProgress(item)
             if (progressText.isNotEmpty()) {
-                if (hasClearart) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 34.dp, end = 6.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(AmoledBlack.copy(alpha = 0.75f))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = progressText,
-                            color = TextSecondary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 0.2.sp
-                        )
-                    }
-                } else {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AmoledBlack.copy(alpha = 0.82f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
+                ) {
                     Text(
                         text = progressText,
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 8.dp, bottom = 7.dp),
-                        color = TextSecondary,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
                         letterSpacing = 0.3.sp
                     )
                 }

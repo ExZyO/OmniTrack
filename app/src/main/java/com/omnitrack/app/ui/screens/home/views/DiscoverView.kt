@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -331,20 +332,21 @@ fun DiscoverView(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            val effectiveDiscoverCardWidth = if (posterStyle.isLandscape) {
-                (posterStyle.widthDp * (180f / 110f)).dp
-            } else {
-                posterStyle.widthDp.dp
-            }
-
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = effectiveDiscoverCardWidth),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = PaddingValues(bottom = 110.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(searchResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val isPhone = maxWidth < 600.dp
+                val discoverColumns = if (posterStyle.isLandscape) {
+                    if (isPhone) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
+                } else {
+                    GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
+                }
+                LazyVerticalGrid(
+                    columns = discoverColumns,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    contentPadding = PaddingValues(bottom = 110.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(searchResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
                     val existingInLibrary = allMedia.firstOrNull { summary ->
                         summary.mediaType == item.mediaType && (
                             summary.title.equals(item.title, ignoreCase = true) ||
@@ -394,6 +396,7 @@ fun DiscoverView(
                     )
                 }
             }
+            }
         } else if (searchQuery.length >= 2) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
@@ -412,16 +415,18 @@ fun DiscoverView(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             val spotlight = allMedia.take(12)
-            val effectiveDiscoverCardWidth = if (posterStyle.isLandscape) {
-                (posterStyle.widthDp * (180f / 110f)).dp
-            } else {
-                posterStyle.widthDp.dp
-            }
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val isPhone = maxWidth < 600.dp
+                val discoverColumns = if (posterStyle.isLandscape) {
+                    if (isPhone) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
+                } else {
+                    GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
+                }
 
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = effectiveDiscoverCardWidth),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                LazyVerticalGrid(
+                    columns = discoverColumns,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 contentPadding = PaddingValues(bottom = 110.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -431,10 +436,14 @@ fun DiscoverView(
                         cornerRadiusDp = posterStyle.cornerRadiusDp,
                         isLandscape = posterStyle.isLandscape,
                         hideLabels = posterStyle.hideLabels,
-                        onCardClick = { onItemClick(item.id) },
+                        onCardClick = {
+                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(spotlight.map { it.id })
+                            onItemClick(item.id)
+                        },
                         onQuickProgress = { onItemClick(item.id) }
                     )
                 }
+            }
             }
         }
     }

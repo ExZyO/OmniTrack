@@ -1,7 +1,14 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -247,48 +254,65 @@ fun CommentDetailSheet(
             }
 
             // Vertically scrollable review body with unconstrained wrap-content height & fluid spring animation
-            Column(
+            AnimatedContent(
+                targetState = currentReview,
+                transitionSpec = {
+                    if (isSwipingForward) {
+                        (slideInHorizontally(tween(260)) { width -> width / 4 } + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(tween(200)) { width -> -width / 4 } + fadeOut(tween(160)))
+                    } else {
+                        (slideInHorizontally(tween(260)) { width -> -width / 4 } + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(tween(200)) { width -> width / 4 } + fadeOut(tween(160)))
+                    }
+                },
+                label = "review_comment_body",
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
-                    .verticalScroll(scrollState)
-            ) {
-                if (isSpoilerHidden) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                isSpoilerRevealed = true
-                            }
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Color(0xFFF59E0B),
-                            modifier = Modifier.size(18.dp)
-                        )
+            ) { review ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(scrollState)
+                ) {
+                    val spoilerHidden = review.hasSpoiler && !isSpoilerRevealed
+                    if (spoilerHidden) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    isSpoilerRevealed = true
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "This review contains spoilers. Tap to reveal.",
+                                color = Color(0xFFF59E0B),
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    } else {
                         Text(
-                            text = "This review contains spoilers. Tap to reveal.",
-                            color = Color(0xFFF59E0B),
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = review.comment,
+                            style = androidx.compose.ui.text.TextStyle(
+                                fontSize = 14.5.sp,
+                                lineHeight = 23.sp,
+                                color = TextPrimary
+                            )
                         )
                     }
-                } else {
-                    Text(
-                        text = currentReview.comment,
-                        style = androidx.compose.ui.text.TextStyle(
-                            fontSize = 14.5.sp,
-                            lineHeight = 23.sp,
-                            color = TextPrimary
-                        )
-                    )
                 }
             }
 

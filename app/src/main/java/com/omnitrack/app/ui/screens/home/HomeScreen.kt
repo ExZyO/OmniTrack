@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -419,41 +420,45 @@ fun HomeScreen(
                                             }
                                         }
                                     } else {
-                                        // Adaptive poster grid with 96dp bottom padding for liquid floating nav (1.636x width scaling in landscape mode for full-bleed banners)
-                                        val effectiveCardWidth = if (posterStyle.isLandscape) {
-                                            (posterStyle.widthDp * (180f / 110f)).dp
-                                        } else {
-                                            posterStyle.widthDp.dp
-                                        }
-                                        LazyVerticalGrid(
-                                            state = gridStates[pageIndex],
-                                            columns = GridCells.Adaptive(minSize = effectiveCardWidth),
-                                            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 96.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                                            modifier = Modifier.fillMaxSize()
-                                        ) {
-                                            itemsIndexed(
-                                                items = displayedItems,
-                                                key = { _, item -> item.id }
-                                            ) { _, item ->
-                                                MediaCard(
-                                                    item = item,
-                                                    cornerRadiusDp = posterStyle.cornerRadiusDp,
-                                                    isLandscape = posterStyle.isLandscape,
-                                                    hideLabels = posterStyle.hideLabels,
-                                                    cardDepthEnabled = posterStyle.cardDepthEnabled,
-                                                    cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
-                                                    cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
-                                                    onCardClick = {
-                                                        AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
-                                                        onItemClick(item.id)
-                                                    },
-                                                    onQuickProgress = {
-                                                        AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
-                                                        viewModel.incrementProgress(item)
-                                                    }
-                                                )
+                                        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                            val isPhoneScreen = maxWidth < 600.dp
+                                            val gridColumns = if (posterStyle.isLandscape) {
+                                                if (isPhoneScreen) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
+                                            } else {
+                                                GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
+                                            }
+                                            LazyVerticalGrid(
+                                                state = gridStates[pageIndex],
+                                                columns = gridColumns,
+                                                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 96.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                itemsIndexed(
+                                                    items = displayedItems,
+                                                    key = { _, item -> item.id }
+                                                ) { _, item ->
+                                                    MediaCard(
+                                                        item = item,
+                                                        cornerRadiusDp = posterStyle.cornerRadiusDp,
+                                                        isLandscape = posterStyle.isLandscape,
+                                                        hideLabels = posterStyle.hideLabels,
+                                                        cardDepthEnabled = posterStyle.cardDepthEnabled,
+                                                        cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                                                        cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                                                        cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                                                        onCardClick = {
+                                                            AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
+                                                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                            onItemClick(item.id)
+                                                        },
+                                                        onQuickProgress = {
+                                                            AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
+                                                            viewModel.incrementProgress(item)
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                     }
