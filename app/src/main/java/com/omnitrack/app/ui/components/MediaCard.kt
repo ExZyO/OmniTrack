@@ -156,18 +156,6 @@ fun MediaCard(
                     )
                 }
             }
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onSuccess = {
-                    if (coverModel is String && coverCache != null) {
-                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            coverCache.promoteFromDiskCache(coverModel, diskCache)
-                        }
-                    }
-                }
-            )
 
             // Bottom glass scrim for readable progress overlay
             Box(
