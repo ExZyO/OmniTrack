@@ -806,7 +806,7 @@ fun DetailScreen(
                             episodes = uiState.realEpisodes,
                             watchedEpisodes = uiState.watchedEpisodes,
                             selectedSeasonNumber = uiState.selectedSeasonNumber,
-                            fallbackBackdropUrl = item.backdropUrl ?: item.bannerUrl,
+                            fallbackBackdropUrl = item.bannerUrl,
                             onSelectSeason = { viewModel.selectSeason(it) },
                             onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                             onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
