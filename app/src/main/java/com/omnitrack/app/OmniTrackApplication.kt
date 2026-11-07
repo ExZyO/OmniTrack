@@ -17,6 +17,8 @@ import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.search.OmniSearchRepository
+import com.omnitrack.app.data.sync.TrackerSyncEngine
+import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.util.AppLogger
 import okhttp3.Cache
 import okhttp3.OkHttpClient
@@ -26,12 +28,14 @@ import java.util.concurrent.TimeUnit
 class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
-    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao()) }
+    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao()) }
     val coverCache by lazy { CoverCache(this) }
     val preferenceManager by lazy { PreferenceManager(this) }
     val omniSearchRepository by lazy { OmniSearchRepository() }
     val enrichmentRepository by lazy { EnrichmentRepository() }
     val aiQueryEngine by lazy { AiQueryEngine() }
+    val trackerTokenManager by lazy { TrackerTokenManager(this) }
+    val trackerSyncEngine by lazy { TrackerSyncEngine(repository, database.syncQueueDao(), trackerTokenManager) }
 
     override fun onCreate() {
         super.onCreate()

@@ -342,23 +342,27 @@ fun DetailScreen(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                if (item.clearartUrl != null) {
+                                var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
+                                val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+
+                                if (hasClearart) {
                                     AsyncImage(
                                         model = item.clearartUrl,
                                         contentDescription = item.title,
                                         modifier = Modifier
-                                            .height(48.dp)
-                                            .padding(bottom = 4.dp),
+                                            .height(52.dp)
+                                            .padding(bottom = 6.dp),
                                         contentScale = ContentScale.Fit,
-                                        alignment = Alignment.CenterStart
+                                        alignment = Alignment.CenterStart,
+                                        onError = { clearartFailed = true }
                                     )
                                 }
                                 Text(
                                     text = item.title,
                                     color = TextPrimary,
-                                    fontSize = 24.sp,
+                                    fontSize = if (hasClearart) 20.sp else 24.sp,
                                     fontWeight = FontWeight.Black,
-                                    lineHeight = 29.sp
+                                    lineHeight = if (hasClearart) 25.sp else 29.sp
                                 )
                                 if (item.nativeTitle != null) {
                                     Text(

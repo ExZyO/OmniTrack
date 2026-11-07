@@ -57,7 +57,9 @@ class OmniSearchRepository(
                 MediaType.ALL -> {
                     deferreds.add(async { searchAniList(trimmed, isAnime = true) })
                     deferreds.add(async { searchAniList(trimmed, isAnime = false) })
-                    deferreds.add(async { searchBangumi(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(async { searchOpenLibraryNovels(trimmed) })
+                    deferreds.add(async { searchWlnUpdates(trimmed) })
                     deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey) })
                     deferreds.add(async { searchSteam(trimmed) })
                     deferreds.add(async { searchVndb(trimmed) })
@@ -72,9 +74,12 @@ class OmniSearchRepository(
                     deferreds.add(async { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
                 }
                 MediaType.NOVEL -> {
-                    // Bangumi is king for CN/KR/JP web novels & light novels (e.g. LOTM, ORV, Reverend Insanity)
-                    deferreds.add(async { searchBangumi(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    // Multi-source novel discovery: Bangumi with native aliases, AniList LN, OpenLibrary & WLNUpdates
+                    deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
                     deferreds.add(async { searchAniList(trimmed, isAnime = false, formatNovel = true) })
+                    deferreds.add(async { searchOpenLibraryNovels(trimmed) })
+                    deferreds.add(async { searchWlnUpdates(trimmed) })
+                    deferreds.add(async { searchNovelUpdates(trimmed) })
                 }
                 MediaType.SHOW -> {
                     deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.SHOW) })
@@ -327,11 +332,60 @@ class OmniSearchRepository(
         tmdbApiKey: String?,
         preferType: MediaType? = null
     ): List<SearchResultItem> {
-        // If TMDB API key is available, use TMDb multi-search; otherwise fallback to TVMaze
-        return if (!tmdbApiKey.isNullOrBlank()) {
-            searchTmdb(query, tmdbApiKey, preferType)
+        val results = mutableListOf<SearchResultItem>()
+        if (!tmdbApiKey.isNullOrBlank()) {
+            results.addAll(searchTmdb(query, tmdbApiKey, preferType))
         } else {
-            searchTvMaze(query)
+            // Keyless Public Fallbacks:
+            // TV Shows -> TVMaze (zero-key open API)
+            if (preferType == null || preferType == MediaType.SHOW || preferType == MediaType.ALL) {
+                results.addAll(searchTvMaze(query))
+            }
+            // Movies -> Cinemeta (zero-key public IMDb catalog)
+            if (preferType == null || preferType == MediaType.MOVIE || preferType == MediaType.ALL) {
+                results.addAll(searchCinemetaMovies(query))
+            }
+        }
+        return results
+    }
+
+    private suspend fun searchCinemetaMovies(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://v3-cinemeta.strem.io/catalog/movie/top/search=$encoded.json"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val metas = root["metas"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                metas.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val rawPoster = obj["poster"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val rawBanner = obj["background"]?.jsonPrimitive?.content
+                    // Upgrade metahub /small/ thumbnails to /medium/ for crystal clear poster resolution
+                    val poster = rawPoster.replace("/small/", "/medium/")
+                    val banner = rawBanner?.replace("/small/", "/medium/")
+                    val year = obj["releaseInfo"]?.jsonPrimitive?.content ?: obj["year"]?.jsonPrimitive?.content
+                    val score = obj["imdbRating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                    val desc = obj["description"]?.jsonPrimitive?.content?.take(400)
+
+                    SearchResultItem(
+                        title = title,
+                        synopsis = desc,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(poster),
+                        bannerUrl = banner?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        mediaType = MediaType.MOVIE,
+                        releaseYear = year,
+                        communityScore = score,
+                        sourceProvider = "Cinemeta"
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
@@ -529,6 +583,156 @@ class OmniSearchRepository(
                         vndbId = id
                     )
                 }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private val novelAliasMap = mapOf(
+        "reverend insanity" to "蛊真人",
+        "lord of the mysteries" to "诡秘之主",
+        "omniscient reader" to "全知读者视角",
+        "omniscient reader's viewpoint" to "全知读者视角",
+        "coiling dragon" to "盘龙",
+        "against the gods" to "逆天邪神",
+        "martial world" to "武极天下",
+        "renegade immortal" to "仙逆",
+        "a will eternal" to "一念永恒",
+        "battle through the heavens" to "斗破苍穹",
+        "perfect world" to "完美世界",
+        "shrouding the heavens" to "遮天",
+        "swallowed star" to "吞噬星空",
+        "i shall seal the heavens" to "我欲封天",
+        "tales of demons and gods" to "妖神记",
+        "solo leveling" to "나 혼자만 레벨업",
+        "the beginning after the end" to "The Beginning After the End"
+    )
+
+    private suspend fun searchBangumiWithAliases(
+        query: String,
+        type: Int,
+        defaultType: MediaType
+    ): List<SearchResultItem> = coroutineScope {
+        val deferreds = mutableListOf(async { searchBangumi(query, type, defaultType) })
+        val alias = novelAliasMap[query.trim().lowercase()]
+        if (alias != null && !alias.equals(query, ignoreCase = true)) {
+            deferreds.add(async { searchBangumi(alias, type, defaultType) })
+        }
+        deferreds.awaitAll().flatten()
+    }
+
+    private suspend fun searchOpenLibraryNovels(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://openlibrary.org/search.json?q=$encoded&limit=6"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val docs = root["docs"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                docs.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val coverId = obj["cover_i"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val coverUrl = "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
+                    val year = obj["first_publish_year"]?.jsonPrimitive?.content
+                    val author = obj["author_name"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content
+
+                    SearchResultItem(
+                        title = title,
+                        synopsis = author?.let { "By $it" },
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        mediaType = MediaType.NOVEL,
+                        releaseYear = year,
+                        sourceProvider = "OpenLibrary"
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun searchWlnUpdates(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val payload = buildJsonObject {
+                put("mode", "search-title")
+                put("title", query)
+            }
+            val request = Request.Builder()
+                .url("https://www.wlnupdates.com/api")
+                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val error = root["error"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+                if (error) return@withGeneralPacing emptyList()
+
+                val data = root["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                data.mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val covers = obj["covers"]?.jsonArray
+                    val coverUrl = covers?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content
+                        ?: covers?.firstOrNull()?.jsonPrimitive?.content
+                        ?: return@mapNotNull null
+                    val chp = obj["tot_chapters"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                    val rating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+
+                    SearchResultItem(
+                        title = title,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        mediaType = MediaType.NOVEL,
+                        communityScore = rating,
+                        totalProgress = chp,
+                        sourceProvider = "WLNUpdates"
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun searchNovelUpdates(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val url = "https://www.novelupdates.com/?s=$encoded&post_type=seriesposts"
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                .header("Referer", "https://www.novelupdates.com/")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                // Cloudflare fast-skip: if 403, 503, or challenge detected, skip instantly without blocking
+                if (response.code in listOf(403, 503)) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                if (body.contains("Just a moment...") || body.contains("cf-chl-opt")) {
+                    return@withGeneralPacing emptyList() // Fast-skip Cloudflare
+                }
+                val results = mutableListOf<SearchResultItem>()
+                val matches = Regex("""class="search_title_nu"><a href="[^"]*">([^<]+)</a>.*?(?:src="([^"]+)").*?(?:class="search_ratings_nu">\((\d+(?:\.\d+)?)\))?""", RegexOption.DOT_MATCHES_ALL).findAll(body)
+                for (match in matches.take(6)) {
+                    val title = match.groupValues.getOrNull(1)?.trim() ?: continue
+                    val cover = match.groupValues.getOrNull(2) ?: continue
+                    val rating = match.groupValues.getOrNull(3)?.toFloatOrNull()
+                    results.add(
+                        SearchResultItem(
+                            title = title,
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                            mediaType = MediaType.NOVEL,
+                            communityScore = rating,
+                            sourceProvider = "NovelUpdates"
+                        )
+                    )
+                }
+                results
             }
         } catch (_: Exception) {
             emptyList()

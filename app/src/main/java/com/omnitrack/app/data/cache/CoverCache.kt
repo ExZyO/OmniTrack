@@ -20,8 +20,8 @@ class CoverCache(private val context: Context) {
         private const val CUSTOM_COVERS_DIR = "covers/custom"
     }
 
-    private val cacheDir: File = getStorageDir(COVERS_DIR)
-    private val customCoverDir: File = getStorageDir(CUSTOM_COVERS_DIR)
+    val cacheDir: File = getStorageDir(COVERS_DIR)
+    val customCoverDir: File = getStorageDir(CUSTOM_COVERS_DIR)
 
     /**
      * Returns the permanent cover cache file for a given thumbnail URL.

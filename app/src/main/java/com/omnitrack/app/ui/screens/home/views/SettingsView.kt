@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Image
@@ -62,6 +63,7 @@ import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
+import com.omnitrack.app.ui.components.BackupRestoreSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -88,6 +90,7 @@ fun SettingsView(
     val scope = rememberCoroutineScope()
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     var showApiConfigSheet by remember { mutableStateOf(false) }
+    var showBackupRestoreSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -181,6 +184,18 @@ fun SettingsView(
             )
         }
 
+        // Section: Backup & Restoration (.omnibk)
+        SettingsSection(title = "BACKUP & RESTORATION (.OMNIBK)") {
+            GroupedSettingRow(
+                icon = Icons.Default.Archive,
+                iconTint = AccentJade,
+                title = "100% Fidelity App Backup",
+                subtitle = "Export or restore library, custom covers, categories, and settings in .omnibk format",
+                badge = "100%",
+                onClick = { showBackupRestoreSheet = true }
+            )
+        }
+
         // Section: Updates & Maintenance
         SettingsSection(title = "UPDATES & MAINTENANCE") {
             GroupedSettingRow(
@@ -213,7 +228,7 @@ fun SettingsView(
                 icon = Icons.Default.Storage,
                 iconTint = AccentArctic,
                 title = "Local Database Engine",
-                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v4"
+                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v5"
             )
             SectionDivider()
             GroupedSettingRow(
@@ -229,6 +244,12 @@ fun SettingsView(
         ApiKeyConfigSheet(
             preferenceManager = prefManager,
             onDismiss = { showApiConfigSheet = false }
+        )
+    }
+
+    if (showBackupRestoreSheet) {
+        BackupRestoreSheet(
+            onDismiss = { showBackupRestoreSheet = false }
         )
     }
 }

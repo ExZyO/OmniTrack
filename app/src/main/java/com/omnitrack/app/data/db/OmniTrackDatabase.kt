@@ -7,12 +7,14 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.MediaDao
+import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SyncQueueEntity
 
 @Database(
-    entities = [MediaItemEntity::class, CategoryEntity::class],
-    version = 4,
+    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class],
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -20,6 +22,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
 
     abstract fun mediaDao(): MediaDao
     abstract fun categoryDao(): CategoryDao
+    abstract fun syncQueueDao(): SyncQueueDao
 
     companion object {
         @Volatile

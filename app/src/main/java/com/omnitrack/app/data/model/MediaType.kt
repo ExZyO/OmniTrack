@@ -1,5 +1,8 @@
 package com.omnitrack.app.data.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class MediaType(
     val displayName: String,
     val unitLabel: String,

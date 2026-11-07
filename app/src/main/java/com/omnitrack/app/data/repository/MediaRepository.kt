@@ -2,16 +2,20 @@ package com.omnitrack.app.data.repository
 
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.MediaDao
+import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 class MediaRepository(
     private val mediaDao: MediaDao,
-    private val categoryDao: CategoryDao
+    private val categoryDao: CategoryDao,
+    private val syncQueueDao: SyncQueueDao? = null
 ) {
     fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia()
 
@@ -52,4 +56,14 @@ class MediaRepository(
     suspend fun insertCategory(category: CategoryEntity): Long = categoryDao.insertCategory(category)
 
     suspend fun insertAllCategories(categories: List<CategoryEntity>) = categoryDao.insertAll(categories)
+
+    fun getPendingSyncTasks(): Flow<List<SyncQueueEntity>> = syncQueueDao?.getPendingTasks() ?: emptyFlow()
+
+    suspend fun getPendingSyncTasksSnapshot(): List<SyncQueueEntity> = syncQueueDao?.getPendingTasksSnapshot() ?: emptyList()
+
+    suspend fun enqueueSyncTask(task: SyncQueueEntity): Long? = syncQueueDao?.enqueue(task)
+
+    suspend fun deleteSyncTask(id: Long) = syncQueueDao?.deleteTask(id)
+
+    suspend fun clearSyncQueue() = syncQueueDao?.clearQueue()
 }

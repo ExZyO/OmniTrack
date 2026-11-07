@@ -334,8 +334,10 @@ fun DiscoverView(
             ) {
                 items(searchResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
                     val existingInLibrary = allMedia.firstOrNull { summary ->
-                        summary.title.equals(item.title, ignoreCase = true) ||
+                        summary.mediaType == item.mediaType && (
+                            summary.title.equals(item.title, ignoreCase = true) ||
                             (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
+                        )
                     }
 
                     SearchResultCard(

@@ -6,7 +6,9 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Immutable
 @Entity(
     tableName = "media_items",

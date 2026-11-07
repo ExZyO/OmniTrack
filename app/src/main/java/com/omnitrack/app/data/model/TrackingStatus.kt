@@ -1,5 +1,8 @@
 package com.omnitrack.app.data.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class TrackingStatus(val displayName: String) {
     ALL("All"),
     IN_PROGRESS("In Progress"),
