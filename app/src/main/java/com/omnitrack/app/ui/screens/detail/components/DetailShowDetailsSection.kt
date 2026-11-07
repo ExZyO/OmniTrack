@@ -32,25 +32,24 @@ fun DetailShowDetailsSection(
     item: MediaItemEntity,
     modifier: Modifier = Modifier
 ) {
-    val detailsList = buildList {
-        item.airStatus?.takeIf { it.isNotBlank() }?.let {
-            add("Status" to it)
-        }
-        item.releaseYear?.takeIf { it.isNotBlank() }?.let {
-            add("Release Year" to it)
-        }
-        item.runtimeMinutes?.takeIf { it > 0 }?.let {
-            val hrs = it / 60
-            val mins = it % 60
-            val formatted = if (hrs > 0) "${hrs}h ${mins}m" else "${mins}m"
-            add("Runtime" to formatted)
-        }
-        item.contentRating?.takeIf { it.isNotBlank() }?.let {
-            add("Content Rating" to it)
-        }
-        item.studioOrNetwork?.takeIf { it.isNotBlank() }?.let {
-            add("Studio / Network" to it)
-        }
+    val detailsList = mutableListOf<Pair<String, String>>()
+    if (!item.airStatus.isNullOrBlank()) {
+        detailsList.add("Status" to item.airStatus)
+    }
+    if (!item.releaseYear.isNullOrBlank()) {
+        detailsList.add("Release Year" to item.releaseYear)
+    }
+    if (item.runtimeMinutes != null && item.runtimeMinutes > 0) {
+        val hrs = item.runtimeMinutes / 60
+        val mins = item.runtimeMinutes % 60
+        val formatted = if (hrs > 0) "${hrs}h ${mins}m" else "${mins}m"
+        detailsList.add("Runtime" to formatted)
+    }
+    if (!item.contentRating.isNullOrBlank()) {
+        detailsList.add("Content Rating" to item.contentRating)
+    }
+    if (!item.studioOrNetwork.isNullOrBlank()) {
+        detailsList.add("Studio / Network" to item.studioOrNetwork)
     }
 
     if (detailsList.isEmpty()) return
