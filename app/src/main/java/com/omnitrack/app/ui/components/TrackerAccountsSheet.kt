@@ -224,7 +224,7 @@ fun TrackerAccountsSheet(
                 subtitle = "REST API v2 • Anime & Manga status sync",
                 accentColor = Color(0xFF2E51A2),
                 initialToken = tokens.malToken.orEmpty(),
-                oauthUrl = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=3342466cfb744b714350df413002f5ef&code_challenge=omnitrack_challenge",
+                oauthUrl = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=3342466cfb744b714350df413002f5ef&code_challenge=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&code_challenge_method=plain",
                 onSave = { scope.launch { tokenManager.saveMalToken(it); Toast.makeText(context, "MAL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -235,7 +235,7 @@ fun TrackerAccountsSheet(
                 subtitle = "REST OAuth v2 • Shows & Movies watched history",
                 accentColor = Color(0xFFED1C24),
                 initialToken = tokens.traktToken.orEmpty(),
-                oauthUrl = "https://trakt.tv/oauth/authorize?response_type=code&client_id=d6981fae6206d203ddb5bc77583647864bbffb5be03816a75f8f533a110034a7&redirect_uri=omnitrack://auth/trakt",
+                oauthUrl = "https://trakt.tv/oauth/applications",
                 onSave = { scope.launch { tokenManager.saveTraktToken(it); Toast.makeText(context, "Trakt token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -246,7 +246,7 @@ fun TrackerAccountsSheet(
                 subtitle = "Unified API • Anime, Shows & Movies tracker",
                 accentColor = Color(0xFF00E676),
                 initialToken = tokens.simklToken.orEmpty(),
-                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=457b98d9f43058fbeffcf31c77ce8d7b38cb7ffc76ff8b7fc93bf8fa0cb41fe2&redirect_uri=omnitrack://auth/simkl",
+                oauthUrl = "https://simkl.com/oauth/authorize?response_type=code&client_id=aa62a7da32518aae5d5049a658b87fa4837c3b739e06ed250b315aab6af82b0e&redirect_uri=aniyomi://simkl-auth",
                 onSave = { scope.launch { tokenManager.saveSimklToken(it); Toast.makeText(context, "SIMKL token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } }
             )
@@ -257,12 +257,34 @@ fun TrackerAccountsSheet(
                 subtitle = "Manga & Webtoon chapter progress bridge",
                 accentColor = Color(0xFFF43F5E),
                 initialToken = tokens.comickToken.orEmpty(),
-                oauthUrl = null,
+                oauthUrl = "https://comick.io/oauth/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&code_challenge=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&code_challenge_method=plain",
                 onSave = { scope.launch { tokenManager.saveComickToken(it); Toast.makeText(context, "Comick token saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
-            // 6. VNDB
+            // 6. Bangumi
+            TrackerConfigCard(
+                title = "Bangumi",
+                subtitle = "bgm.tv API • Anime, Manga & Games collection",
+                accentColor = Color(0xFFF09199),
+                initialToken = tokens.bangumiToken.orEmpty(),
+                oauthUrl = "https://bgm.tv/oauth/authorize?client_id=bgm310660d3d5f81e3a&response_type=code&redirect_uri=aniyomi://bangumi-auth",
+                onSave = { scope.launch { tokenManager.saveBangumiToken(it); Toast.makeText(context, "Bangumi token saved", Toast.LENGTH_SHORT).show() } },
+                onDisconnect = { scope.launch { tokenManager.saveBangumiToken(null); Toast.makeText(context, "Bangumi disconnected", Toast.LENGTH_SHORT).show() } }
+            )
+
+            // 7. TMDb
+            TrackerConfigCard(
+                title = "TMDb",
+                subtitle = "v3/v4 API • Movies & TV Shows metadata and ratings",
+                accentColor = Color(0xFF01D277),
+                initialToken = tokens.tmdbToken.orEmpty(),
+                oauthUrl = "https://www.themoviedb.org/settings/api",
+                onSave = { scope.launch { tokenManager.saveTmdbToken(it); Toast.makeText(context, "TMDb token saved", Toast.LENGTH_SHORT).show() } },
+                onDisconnect = { scope.launch { tokenManager.saveTmdbToken(null); Toast.makeText(context, "TMDb disconnected", Toast.LENGTH_SHORT).show() } }
+            )
+
+            // 8. VNDB
             TrackerConfigCard(
                 title = "VNDB",
                 subtitle = "Kana REST API • Visual Novels list & votes",
@@ -273,7 +295,7 @@ fun TrackerAccountsSheet(
                 onDisconnect = { scope.launch { tokenManager.saveVndbToken(null); Toast.makeText(context, "VNDB disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
-            // 7. Steam
+            // 9. Steam
             TrackerConfigCard(
                 title = "Steam",
                 subtitle = "Web API • Video Games playtime sync",
@@ -282,6 +304,17 @@ fun TrackerAccountsSheet(
                 oauthUrl = "https://steamcommunity.com/dev/apikey",
                 onSave = { scope.launch { tokenManager.saveSteamApiKey(it); Toast.makeText(context, "Steam API key saved", Toast.LENGTH_SHORT).show() } },
                 onDisconnect = { scope.launch { tokenManager.saveSteamApiKey(null); Toast.makeText(context, "Steam disconnected", Toast.LENGTH_SHORT).show() } }
+            )
+
+            // 10. IGDB
+            TrackerConfigCard(
+                title = "IGDB",
+                subtitle = "Twitch API • Video game database ratings & progress",
+                accentColor = Color(0xFF9146FF),
+                initialToken = tokens.igdbToken.orEmpty(),
+                oauthUrl = "https://api-docs.igdb.com",
+                onSave = { scope.launch { tokenManager.saveIgdbToken(it); Toast.makeText(context, "IGDB token saved", Toast.LENGTH_SHORT).show() } },
+                onDisconnect = { scope.launch { tokenManager.saveIgdbToken(null); Toast.makeText(context, "IGDB disconnected", Toast.LENGTH_SHORT).show() } }
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -307,11 +340,11 @@ private fun TrackerConfigCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -321,22 +354,22 @@ private fun TrackerConfigCard(
             Column {
                 Text(
                     text = title,
-                    fontSize = 14.5.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 11.sp,
+                    fontSize = 11.5.sp,
                     color = TextMuted
                 )
             }
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
+                    .clip(RoundedCornerShape(999.dp))
                     .background(if (isConnected) AccentJade.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = if (isConnected) "CONNECTED" else "NOT CONNECTED",
@@ -350,10 +383,10 @@ private fun TrackerConfigCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(16.dp))
                 .background(AmoledBlack)
-                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             BasicTextField(
@@ -408,7 +441,7 @@ private fun TrackerConfigCard(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(999.dp)
                 ) {
                     Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
@@ -424,7 +457,7 @@ private fun TrackerConfigCard(
                         onDisconnect()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(999.dp)
                 ) {
                     Text(text = "Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
@@ -434,7 +467,7 @@ private fun TrackerConfigCard(
             Button(
                 onClick = { onSave(textValue.trim()) },
                 colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(999.dp)
             ) {
                 Text(text = "Save Token", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }

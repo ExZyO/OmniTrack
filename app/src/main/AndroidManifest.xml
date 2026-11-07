@@ -41,6 +41,26 @@
                 <data android:scheme="omnitrack" android:host="auth" />
                 <data android:scheme="omnitrack" android:host="oauth" />
             </intent-filter>
+            <!-- One-tap OAuth deep links matching standard tracking endpoints -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="aniyomi" android:host="anilist-auth" />
+                <data android:scheme="aniyomi" android:host="mal-auth" />
+                <data android:scheme="aniyomi" android:host="simkl-auth" />
+                <data android:scheme="aniyomi" android:host="bangumi-auth" />
+                <data android:scheme="aniyomi" android:host="comick-auth" />
+                <data android:scheme="chimahon" android:host="anilist-auth" />
+                <data android:scheme="chimahon" android:host="mal-auth" />
+                <data android:scheme="chimahon" android:host="simkl-auth" />
+                <data android:scheme="chimahon" android:host="bangumi-auth" />
+                <data android:scheme="mihon" android:host="anilist-auth" />
+                <data android:scheme="mihon" android:host="mal-auth" />
+                <data android:scheme="mihon" android:host="simkl-auth" />
+                <data android:scheme="app.mihon" android:host="comick-auth" />
+                <data android:scheme="app.mihon" android:host="anilist-auth" />
+            </intent-filter>
         </activity>
     </application>
 

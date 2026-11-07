@@ -459,7 +459,11 @@ fun DetailScreen(
                     }
                 } else {
                     // PRESENTATION MODE 2: Classic Overlapping Poster
-                    if (backdropTargetUrl != null) {
+                    val hasBackdrop = backdropTargetUrl != null
+                    val posterOffset = if (hasBackdrop) (-50).dp else 0.dp
+                    val statsOffset = if (hasBackdrop) (-30).dp else 0.dp
+
+                    if (hasBackdrop) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -475,7 +479,12 @@ fun DetailScreen(
                             )
                         }
                     } else {
-                        Spacer(modifier = Modifier.height(72.dp))
+                        // Chimanew-style natural breathing room below top action bar
+                        Spacer(
+                            modifier = Modifier
+                                .statusBarsPadding()
+                                .height(56.dp + 16.dp)
+                        )
                     }
 
                     // Overlapping Poster Row (Clean, no buttons over banner!)
@@ -483,7 +492,7 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp)
-                            .offset(y = (-50).dp),
+                            .offset(y = posterOffset),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
@@ -566,7 +575,7 @@ fun DetailScreen(
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 20.dp)
-                            .offset(y = (-30).dp)
+                            .offset(y = statsOffset)
                     ) {
                         Column {
                             UnboxedStatsRow(
@@ -948,6 +957,9 @@ fun DetailScreen(
                         } else if (newBanner.startsWith("/") || newBanner.startsWith("file:")) {
                             viewModel.updateCustomBannerPath(newBanner, context)
                         } else {
+                            if (item.customBannerPath == "NONE") {
+                                viewModel.updateCustomBannerPath(null, context)
+                            }
                             viewModel.updateBanner(newBanner)
                         }
                     },

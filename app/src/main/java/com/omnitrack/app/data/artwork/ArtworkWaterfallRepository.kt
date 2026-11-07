@@ -52,21 +52,25 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchBangumiCovers(title, type = 2) })
                     deferreds.add(async { fetchKitsuCovers(title, isAnime = true) })
                     deferreds.add(async { fetchMangaDexCovers(title) })
+                    deferreds.add(async { fetchTmdbArtwork(title, isMovie = false) })
                 }
                 MediaType.MANGA -> {
                     deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
                     deferreds.add(async { fetchMangaDexCovers(title) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 1) })
                     deferreds.add(async { fetchKitsuCovers(title, isAnime = false) })
+                    deferreds.add(async { fetchComickCovers(title) })
                 }
                 MediaType.NOVEL -> {
                     deferreds.add(async { fetchAniListCovers(title, isAnime = false) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 1) })
                     deferreds.add(async { fetchMangaDexCovers(title) })
+                    deferreds.add(async { fetchComickCovers(title) })
                 }
                 MediaType.SHOW, MediaType.MOVIE -> {
                     deferreds.add(async { fetchTvMazeCovers(title) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 2) })
+                    deferreds.add(async { fetchTmdbArtwork(title, isMovie = (mediaType == MediaType.MOVIE)) })
                 }
                 MediaType.GAME -> {
                     deferreds.add(async { fetchSteamCovers(title) })
@@ -81,6 +85,7 @@ class ArtworkWaterfallRepository(
                     deferreds.add(async { fetchTvMazeCovers(title) })
                     deferreds.add(async { fetchSteamCovers(title) })
                     deferreds.add(async { fetchBangumiCovers(title, type = 1) })
+                    deferreds.add(async { fetchTmdbArtwork(title, isMovie = true) })
                 }
             }
 
@@ -436,6 +441,88 @@ class ArtworkWaterfallRepository(
                         )
                     } else null
                 }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchTmdbArtwork(title: String, isMovie: Boolean): List<ArtworkCandidate> {
+        return try {
+            val apiKey = "2c823019808d98d415f33cf2382e70e3" // Standard public TMDb v3 client key
+            val encoded = URLEncoder.encode(title, "UTF-8")
+            val endpoint = if (isMovie) "movie" else "tv"
+            val url = "https://api.themoviedb.org/3/search/$endpoint?api_key=$apiKey&query=$encoded"
+
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val responseStr = response.body?.string() ?: return emptyList()
+                val parsed = json.parseToJsonElement(responseStr).jsonObject
+                val results = parsed["results"]?.jsonArray ?: return emptyList()
+
+                val candidates = mutableListOf<ArtworkCandidate>()
+                for (elem in results.take(6)) {
+                    val obj = elem.jsonObject
+                    val itemTitle = obj["title"]?.jsonPrimitive?.content
+                        ?: obj["name"]?.jsonPrimitive?.content
+                        ?: title
+                    val posterPath = obj["poster_path"]?.jsonPrimitive?.content
+                    if (!posterPath.isNullOrBlank()) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = "https://image.tmdb.org/t/p/original$posterPath",
+                                sourceName = "TMDb",
+                                description = itemTitle,
+                                isBanner = false
+                            )
+                        )
+                    }
+                    val backdropPath = obj["backdrop_path"]?.jsonPrimitive?.content
+                    if (!backdropPath.isNullOrBlank()) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = "https://image.tmdb.org/t/p/original$backdropPath",
+                                sourceName = "TMDb",
+                                description = "$itemTitle (Backdrop)",
+                                isBanner = true
+                            )
+                        )
+                    }
+                }
+                candidates
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchComickCovers(title: String): List<ArtworkCandidate> {
+        return try {
+            val encoded = URLEncoder.encode(title, "UTF-8")
+            val url = "https://api.comick.io/v1.0/search?q=$encoded&limit=6"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val responseStr = response.body?.string() ?: return emptyList()
+                val list = json.parseToJsonElement(responseStr).jsonArray
+                val candidates = mutableListOf<ArtworkCandidate>()
+                for (elem in list) {
+                    val obj = elem.jsonObject
+                    val comicTitle = obj["title"]?.jsonPrimitive?.content ?: title
+                    val b2key = obj["b2key"]?.jsonPrimitive?.content
+                    if (!b2key.isNullOrBlank()) {
+                        candidates.add(
+                            ArtworkCandidate(
+                                url = "https://meo.comick.picture/$b2key",
+                                sourceName = "Comick",
+                                description = comicTitle,
+                                isBanner = false
+                            )
+                        )
+                    }
+                }
+                candidates
             }
         } catch (_: Exception) {
             emptyList()

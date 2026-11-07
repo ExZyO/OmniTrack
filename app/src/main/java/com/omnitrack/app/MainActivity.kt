@@ -43,10 +43,18 @@ class MainActivity : ComponentActivity() {
 
     private fun handleAuthDeepLink(data: Uri?, app: OmniTrackApplication) {
         if (data == null) return
-        if (data.scheme != "omnitrack") return
-        if (data.host != "auth" && data.host != "oauth") return
+        val validSchemes = setOf("omnitrack", "aniyomi", "chimahon", "mihon", "app.mihon")
+        val scheme = data.scheme?.lowercase() ?: return
+        if (scheme !in validSchemes) return
 
-        val service = data.pathSegments.firstOrNull()?.lowercase() ?: ""
+        val host = data.host?.lowercase() ?: ""
+        val service: String = when {
+            host.endsWith("-auth") -> host.removeSuffix("-auth")
+            host == "auth" || host == "oauth" -> data.pathSegments.firstOrNull()?.lowercase() ?: ""
+            else -> ""
+        }
+
+        if (service.isBlank()) return
         val tokenManager = app.trackerTokenManager
 
         // Parse token from URL fragment (e.g. #access_token=... for AniList implicit grant)
@@ -91,6 +99,18 @@ class MainActivity : ComponentActivity() {
                     "vndb" -> {
                         tokenManager.saveVndbToken(token)
                         Toast.makeText(this@MainActivity, "VNDB connected successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                    "bangumi", "bgm" -> {
+                        tokenManager.saveBangumiToken(token)
+                        Toast.makeText(this@MainActivity, "Bangumi connected successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                    "tmdb" -> {
+                        tokenManager.saveTmdbToken(token)
+                        Toast.makeText(this@MainActivity, "TMDb connected successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                    "igdb" -> {
+                        tokenManager.saveIgdbToken(token)
+                        Toast.makeText(this@MainActivity, "IGDB connected successfully!", Toast.LENGTH_SHORT).show()
                     }
                 }
             }

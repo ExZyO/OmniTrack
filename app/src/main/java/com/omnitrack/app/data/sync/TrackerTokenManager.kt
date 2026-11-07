@@ -25,7 +25,10 @@ data class TrackerTokens(
     val simklToken: String? = null,
     val comickToken: String? = null,
     val vndbToken: String? = null,
-    val steamApiKey: String? = null
+    val steamApiKey: String? = null,
+    val bangumiToken: String? = null,
+    val tmdbToken: String? = null,
+    val igdbToken: String? = null
 )
 
 /**
@@ -44,6 +47,9 @@ class TrackerTokenManager(private val context: Context) {
         val COMICK_TOKEN = stringPreferencesKey("token_comick")
         val VNDB_TOKEN = stringPreferencesKey("token_vndb")
         val STEAM_API_KEY = stringPreferencesKey("token_steam_api")
+        val BANGUMI_TOKEN = stringPreferencesKey("token_bangumi")
+        val TMDB_TOKEN = stringPreferencesKey("token_tmdb")
+        val IGDB_TOKEN = stringPreferencesKey("token_igdb")
     }
 
     val tokens: Flow<TrackerTokens> = context.dataStore.data
@@ -56,7 +62,10 @@ class TrackerTokenManager(private val context: Context) {
                 simklToken = prefs[Keys.SIMKL_TOKEN]?.let { decrypt(it) },
                 comickToken = prefs[Keys.COMICK_TOKEN]?.let { decrypt(it) },
                 vndbToken = prefs[Keys.VNDB_TOKEN]?.let { decrypt(it) },
-                steamApiKey = prefs[Keys.STEAM_API_KEY]?.let { decrypt(it) }
+                steamApiKey = prefs[Keys.STEAM_API_KEY]?.let { decrypt(it) },
+                bangumiToken = prefs[Keys.BANGUMI_TOKEN]?.let { decrypt(it) },
+                tmdbToken = prefs[Keys.TMDB_TOKEN]?.let { decrypt(it) },
+                igdbToken = prefs[Keys.IGDB_TOKEN]?.let { decrypt(it) }
             )
         }
 
@@ -67,6 +76,9 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun saveComickToken(token: String?) = saveToken(Keys.COMICK_TOKEN, token)
     suspend fun saveVndbToken(token: String?) = saveToken(Keys.VNDB_TOKEN, token)
     suspend fun saveSteamApiKey(key: String?) = saveToken(Keys.STEAM_API_KEY, key)
+    suspend fun saveBangumiToken(token: String?) = saveToken(Keys.BANGUMI_TOKEN, token)
+    suspend fun saveTmdbToken(token: String?) = saveToken(Keys.TMDB_TOKEN, token)
+    suspend fun saveIgdbToken(token: String?) = saveToken(Keys.IGDB_TOKEN, token)
 
     private suspend fun saveToken(key: androidx.datastore.preferences.core.Preferences.Key<String>, token: String?) {
         context.dataStore.edit { prefs ->

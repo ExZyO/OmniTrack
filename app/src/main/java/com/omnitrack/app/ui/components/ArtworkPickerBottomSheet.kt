@@ -591,7 +591,7 @@ fun ArtworkPickerBottomSheet(
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = if (isBannerDisabled) "Banner Disabled" else "Disable Banner",
+                                        text = if (isBannerDisabled) "Enable Banner" else "Disable Banner",
                                         fontSize = 12.sp,
                                         color = if (isBannerDisabled) AccentGold else TextSecondary
                                     )
