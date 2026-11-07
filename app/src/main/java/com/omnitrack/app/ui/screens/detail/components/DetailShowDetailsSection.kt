@@ -51,9 +51,6 @@ fun DetailShowDetailsSection(
         item.studioOrNetwork?.takeIf { it.isNotBlank() }?.let {
             add("Studio / Network" to it)
         }
-        if (!item.genres.isNullOrEmpty()) {
-            add("Genres" to item.genres.joinToString(", "))
-        }
     }
 
     if (detailsList.isEmpty()) return
