@@ -196,8 +196,8 @@ class DetailViewModel(
                             repository.getAllMedia(),
                             repository.getEpisodeProgress(currentItem.id)
                         ) { allItems, progressList ->
-                            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-                            val siblings = if (sameType.size > 1) sameType else allItems
+                            val siblings = allItems
+                            val currentIndex = siblings.indexOfFirst { it.id == currentItem.id }
                             val watchedSet = progressList.filter { it.isWatched }
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
                             DetailUiState(
@@ -215,8 +215,8 @@ class DetailViewModel(
                                 } else aux.trailers,
                                 isPreviewMode = false,
                                 isLoading = false,
-                                hasPreviousEntry = siblings.size > 1,
-                                hasNextEntry = siblings.size > 1
+                                hasPreviousEntry = currentIndex > 0,
+                                hasNextEntry = currentIndex in 0 until siblings.size - 1
                             )
                         }
                     } else {
@@ -826,14 +826,14 @@ class DetailViewModel(
         viewModelScope.launch {
             val currentId = _mediaId.value
             val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
-            val currentItem = allItems.find { it.id == currentId } ?: return@launch
-            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-            val pool = if (sameType.size > 1) sameType else allItems
-            val currentIndex = pool.indexOfFirst { it.id == currentId }
+            val currentIndex = allItems.indexOfFirst { it.id == currentId }
             if (currentIndex > 0) {
-                val prevItem = pool[currentIndex - 1]
+                val prevItem = allItems[currentIndex - 1]
                 _mediaId.value = prevItem.id
                 _previewItem.value = null
+                _realSeasons.value = emptyList()
+                _realEpisodes.value = emptyList()
+                _selectedSeasonNumber.value = 1
                 loadRecommendationsAndReviews(prevItem)
             }
         }
@@ -844,14 +844,14 @@ class DetailViewModel(
         viewModelScope.launch {
             val currentId = _mediaId.value
             val allItems = repository.getAllMedia().firstOrNull() ?: return@launch
-            val currentItem = allItems.find { it.id == currentId } ?: return@launch
-            val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
-            val pool = if (sameType.size > 1) sameType else allItems
-            val currentIndex = pool.indexOfFirst { it.id == currentId }
-            if (currentIndex >= 0 && currentIndex < pool.size - 1) {
-                val nextItem = pool[currentIndex + 1]
+            val currentIndex = allItems.indexOfFirst { it.id == currentId }
+            if (currentIndex in 0 until allItems.size - 1) {
+                val nextItem = allItems[currentIndex + 1]
                 _mediaId.value = nextItem.id
                 _previewItem.value = null
+                _realSeasons.value = emptyList()
+                _realEpisodes.value = emptyList()
+                _selectedSeasonNumber.value = 1
                 loadRecommendationsAndReviews(nextItem)
             }
         }

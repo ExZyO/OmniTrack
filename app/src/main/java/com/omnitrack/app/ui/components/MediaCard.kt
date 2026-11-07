@@ -161,7 +161,8 @@ fun MediaCard(
             )
 
             // Landscape transparent title logo overlay (1:1 with Nuvio)
-            if (isLandscape && !item.clearartUrl.isNullOrBlank()) {
+            val hasClearart = isLandscape && !item.clearartUrl.isNullOrBlank()
+            if (hasClearart) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -170,7 +171,7 @@ fun MediaCard(
                                 colorStops = arrayOf(
                                     0.0f to Color.Transparent,
                                     0.45f to Color.Transparent,
-                                    1.0f to Color.Black.copy(alpha = 0.80f)
+                                    1.0f to Color.Black.copy(alpha = 0.50f)
                                 )
                             )
                         )
@@ -178,14 +179,14 @@ fun MediaCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
                 ) {
                     AsyncImage(
                         model = item.clearartUrl,
                         contentDescription = item.title,
                         modifier = Modifier
                             .fillMaxWidth(0.65f)
-                            .height(34.dp),
+                            .height(36.dp),
                         contentScale = ContentScale.Fit,
                         alignment = Alignment.BottomStart
                     )
@@ -213,32 +214,53 @@ fun MediaCard(
                 }
             }
 
-            // Bottom glass scrim for readable progress overlay
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(65.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.88f))
+            // Bottom glass scrim for readable progress overlay - only when clearart logo is not displayed at bottom
+            if (!hasClearart) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(65.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.88f))
+                            )
                         )
-                    )
-            )
+                )
+            }
 
-            // Progress text overlay
+            // Progress text overlay - positioned away from bottom-start when clearart logo is present so it never covers it!
             val progressText = formatProgress(item)
             if (progressText.isNotEmpty()) {
-                Text(
-                    text = progressText,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 8.dp, bottom = 7.dp),
-                    color = TextSecondary,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.3.sp
-                )
+                if (hasClearart) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 34.dp, end = 6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AmoledBlack.copy(alpha = 0.75f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = progressText,
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 0.2.sp
+                        )
+                    }
+                } else {
+                    Text(
+                        text = progressText,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 8.dp, bottom = 7.dp),
+                        color = TextSecondary,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.3.sp
+                    )
+                }
             }
 
             // Tactile +1 / Add to Library Quick Action floating pill
