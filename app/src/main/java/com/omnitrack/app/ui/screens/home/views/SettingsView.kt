@@ -150,7 +150,6 @@ fun SettingsView(
                 iconTint = AccentGold,
                 title = "Visual Presentation & Themes",
                 subtitle = "Interactive preview & customization for hero layouts, banner sizing & ambient auras",
-                badge = "CUSTOMIZE",
                 onClick = onNavigateToVisualPresentation
             )
         }
@@ -162,7 +161,6 @@ fun SettingsView(
                 iconTint = AccentArctic,
                 title = "Artwork Priority & Waterfall",
                 subtitle = "Fluid drag-to-reorder & toggle upstream fallbacks per category",
-                badge = "OPEN",
                 onClick = onNavigateToArtworkPriority
             )
         }
@@ -174,7 +172,6 @@ fun SettingsView(
                 iconTint = AccentJade,
                 title = "Check for Updates",
                 subtitle = "Installed: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
-                badge = "CHECK",
                 onClick = onCheckUpdate
             )
             SectionDivider()

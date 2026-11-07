@@ -309,8 +309,8 @@ private fun CategoryWaterfallList(
             val animatedShift by animateFloatAsState(
                 targetValue = shift,
                 animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMediumLow
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium
                 ),
                 label = "slotShift"
             )

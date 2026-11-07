@@ -50,19 +50,32 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} -PversionName=1.0.0-b${{ github.run_number }} --stacktrace
 
-      - name: Prepare Release Artifact
+      - name: Prepare Release Artifact & Notes
         run: |
           mkdir -p release-output
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
+          COMMIT_SUBJ=$(git log -1 --pretty=%s)
           cat <<EOF > release-output/version.json
           {
             "version": "${{ steps.release_info.outputs.tag }}",
             "versionCode": ${{ github.run_number }},
             "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}.apk",
-            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: Fixed in-place update signature, dynamic build versioning, lossless cover loader, multi-source category waterfall, seamless ambient glow, adaptive grid, and interactive search."
+            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: $COMMIT_SUBJ"
           }
           EOF
           cp release-output/version.json version.json
+
+          cat <<EOF > release-output/notes.md
+          ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
+
+          ### ✨ What's in this build
+          - **Latest Update:** $COMMIT_SUBJ
+
+          ### 🔧 Technical Details
+          - **Commit:** ${{ github.sha }}
+          - **Build Type:** Release (\`assembleRelease\` signed)
+          - **Engine:** Room SQLite WAL, Coil 3 Lossless Artwork, Fast Dual-Channel Update Stream
+          EOF
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
@@ -79,22 +92,7 @@ jobs:
           files: |
             release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
             release-output/version.json
-          body: |
-            ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
-
-            ### ✨ What's in this build (Non-Technical Summary)
-            - **In-App Auto-Update Engine:** Seamless background version checking ported from Gemini EPUB & Chimanew. Whenever an update drops, a one-tap update prompt appears — tapping it downloads and launches the Android installer automatically, zero manual GitHub downloading needed!
-            - **Unboxed Nuvio Noir Progress Controls:** Removed all boxed containers and chunky cards around episode/chapter trackers. Large floating numbers roll vertically with mechanical spring animations directly on the AMOLED canvas.
-            - **Seamless Movie & Game Controls:** Unboxed clean checkmark toggle for movies and floating playtime counters for games with platform pills.
-            - **Chimanew Cover Waterfall:** Multi-source cover discovery (MangaDex, AniList, Bangumi) with lossless uncompressed artwork.
-
-            ### 🔧 Technical Details
-            - **Commit:** ${{ github.sha }}
-            - **Build Type:** Release (`assembleRelease` with signingConfig)
-            - **Update System:** Concurrent multi-source query (`releases/latest` + raw `version.json` with cache-busting timestamp), OkHttp streaming downloader, and FileProvider intent launcher.
-            - **Image Engine:** Coil 3.1.0 with LosslessCoverMapper and AndroidX Palette color bloom
-            - **Network Layer:** OkHttp 4.12.0 with async coroutines
-            - **Database:** Room 2.6.1 SQLite with WAL enabled
+          body_path: release-output/notes.md
           draft: false
           prerelease: false
         env:

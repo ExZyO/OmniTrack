@@ -211,7 +211,7 @@ fun VisualPresentationScreen(
                 val isBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
                 PresentationChoiceCard(
                     title = "Cinematic Blur",
-                    description = "Soft, deep atmospheric Gaussian glow drawn from cover artwork.",
+                    description = "Vibrant atmospheric aura sampled from artwork, bathing the background in color.",
                     isSelected = isBlur,
                     modifier = Modifier.weight(1f),
                     onClick = {
@@ -224,7 +224,7 @@ fun VisualPresentationScreen(
                 val isSolidBlack = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.SOLID_BLACK
                 PresentationChoiceCard(
                     title = "Minimalist OLED",
-                    description = "Pure #000000 AMOLED plane with zero color bleed. Maximum power efficiency.",
+                    description = "Pure pitch-black #000000 canvas with zero light bleed. Maximum battery savings.",
                     isSelected = isSolidBlack,
                     modifier = Modifier.weight(1f),
                     onClick = {
@@ -358,12 +358,16 @@ private fun LivePresentationMockup(
         label = "titleStart"
     )
 
+    val containerBg = if (isSolidBlack) AmoledBlack else Color(0xFF080C16)
+    val bottomRowBg = if (isSolidBlack) AmoledBlack else Color.Black.copy(alpha = 0.45f)
+    val dissolveTarget = if (isSolidBlack) AmoledBlack else Color.Black.copy(alpha = 0.50f)
+
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(240.dp)
             .clip(RoundedCornerShape(20.dp))
-            .background(if (isSolidBlack) AmoledBlack else Color(0xFF0B101D))
+            .background(containerBg)
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
     ) {
         // Atmospheric Ambient Aura Backdrop (Toggles on in Cinematic Blur, completely gone in Minimalist OLED)
@@ -374,20 +378,40 @@ private fun LivePresentationMockup(
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                Color(0xFF1E3A8A).copy(alpha = 0.35f),
-                                Color(0xFF4C1D95).copy(alpha = 0.25f),
+                                Color(0xFF0284C7).copy(alpha = 0.60f),
+                                Color(0xFF38BDF8).copy(alpha = 0.35f),
                                 Color.Transparent
                             ),
-                            center = Offset(250f, 180f),
-                            radius = 600f
+                            center = Offset(120f, 90f),
+                            radius = 420f
                         )
                     )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF8B5CF6).copy(alpha = 0.55f),
+                                Color(0xFFD946EF).copy(alpha = 0.30f),
+                                Color.Transparent
+                            ),
+                            center = Offset(700f, 220f),
+                            radius = 480f
+                        )
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.20f))
             )
         }
 
         // Banner Sizing Mockup Area
         if (isFullBleed) {
-            // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep into AmoledBlack
+            // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -395,15 +419,15 @@ private fun LivePresentationMockup(
             ) {
                 AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
 
-                // 17-Stop Quintic Smoothstep Dissolve Overlay into pure AmoledBlack (#000000)
+                // 17-Stop Quintic Smoothstep Dissolve Overlay
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                0.20f to Color.Transparent,
-                                0.60f to AmoledBlack.copy(alpha = 0.65f),
-                                1.00f to AmoledBlack
+                                0.15f to Color.Transparent,
+                                0.60f to dissolveTarget.copy(alpha = 0.55f),
+                                1.00f to dissolveTarget
                             )
                         )
                 )
@@ -581,7 +605,7 @@ private fun LivePresentationMockup(
                         strokeWidth = strokeW
                     )
                 }
-                .background(AmoledBlack)
+                .background(bottomRowBg)
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
