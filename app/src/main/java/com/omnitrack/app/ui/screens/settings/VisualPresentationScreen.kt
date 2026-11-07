@@ -630,8 +630,6 @@ private fun LivePresentationMockup(
         }
     }
 }
-    }
-}
 
 @Composable
 private fun PresentationSectionTitle(title: String) {
