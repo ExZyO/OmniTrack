@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -70,13 +71,26 @@ class HomeViewModel(
                 if (items.isEmpty()) {
                     repository.insertAllMedia(MockData.sampleMedia)
                     repository.insertAllCategories(MockData.categories)
-                } else if (coverCache != null) {
-                    val activeUrls = items.map { it.coverUrl }.toSet()
-                    val activeIds = items.map { it.id }.toSet()
-                    coverCache.pruneOrphans(activeUrls, activeIds)
-                    if (diskCache != null) {
-                        for (url in activeUrls) {
-                            coverCache.promoteFromDiskCache(url, diskCache)
+                } else {
+                    // Smart sync canonical seed updates without requiring data wipe
+                    val allItems = repository.getAllMedia().first()
+                    for (existing in allItems) {
+                        if (existing.title == "Omniscient Reader's Viewpoint" && existing.totalProgress != 551.0) {
+                            repository.updateMedia(existing.copy(mediaType = MediaType.NOVEL, totalProgress = 551.0, bangumiId = 295483))
+                        } else if (existing.title == "Lord of the Mysteries" && existing.bangumiId == null) {
+                            repository.updateMedia(existing.copy(bangumiId = 243916))
+                        } else if (existing.title == "Baldur's Gate 3" && existing.igdbId == 119171L) {
+                            repository.updateMedia(existing.copy(igdbId = 26955L))
+                        }
+                    }
+                    if (coverCache != null) {
+                        val activeUrls = items.map { it.coverUrl }.toSet()
+                        val activeIds = items.map { it.id }.toSet()
+                        coverCache.pruneOrphans(activeUrls, activeIds)
+                        if (diskCache != null) {
+                            for (url in activeUrls) {
+                                coverCache.promoteFromDiskCache(url, diskCache)
+                            }
                         }
                     }
                 }
@@ -113,6 +127,16 @@ class HomeViewModel(
 
     fun incrementProgress(item: MediaItemEntity) {
         incrementProgress(item.id, item.mediaType, item.currentProgress, item.totalProgress)
+    }
+
+    fun addMediaFromSearch(searchResult: com.omnitrack.app.data.search.SearchResultItem, status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK) {
+        viewModelScope.launch {
+            val entity = searchResult.toMediaItemEntity(status)
+            repository.insertMedia(entity)
+            if (coverCache != null && diskCache != null) {
+                coverCache.promoteFromDiskCache(entity.coverUrl, diskCache)
+            }
+        }
     }
 
     companion object {

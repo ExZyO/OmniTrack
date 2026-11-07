@@ -1,7 +1,9 @@
 package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,18 +20,23 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,22 +45,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import com.omnitrack.app.data.artwork.ArtworkCandidate
-import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
+import com.omnitrack.app.data.ai.AiQueryEngine
+import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.search.OmniSearchRepository
+import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
+import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -64,20 +79,65 @@ import kotlinx.coroutines.launch
 fun DiscoverView(
     allMedia: List<MediaCardSummary>,
     onItemClick: (Long) -> Unit,
+    onAddMedia: (SearchResultItem) -> Unit,
     modifier: Modifier = Modifier,
-    repository: ArtworkWaterfallRepository = remember { ArtworkWaterfallRepository() }
+    searchRepository: OmniSearchRepository = remember { OmniSearchRepository() },
+    aiEngine: AiQueryEngine = remember { AiQueryEngine() }
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var isSearching by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<ArtworkCandidate>>(emptyList()) }
-    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val prefManager = remember { PreferenceManager(context) }
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.length >= 3) {
-            delay(500)
+    val geminiKey by prefManager.geminiApiKey.collectAsState(initial = "")
+    val openRouterKey by prefManager.openRouterApiKey.collectAsState(initial = "")
+    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
+    val aiSearchSetting by prefManager.aiSemanticSearchEnabled.collectAsState(initial = false)
+
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf(MediaType.ALL) }
+    var isSearching by remember { mutableStateOf(false) }
+    var searchResults by remember { mutableStateOf<List<SearchResultItem>>(emptyList()) }
+    var aiResolutionBanner by remember { mutableStateOf<String?>(null) }
+    var useAiSearch by remember(aiSearchSetting) { mutableStateOf(aiSearchSetting) }
+
+    // Multi-Vertical OmniSearch Trigger
+    LaunchedEffect(searchQuery, selectedFilter, useAiSearch) {
+        val trimmed = searchQuery.trim()
+        if (trimmed.length >= 2) {
+            delay(400)
             isSearching = true
+            aiResolutionBanner = null
             try {
-                val results = repository.searchArtworkCandidates(searchQuery, MediaType.ALL)
+                var queryToRun = trimmed
+                var filterToRun = selectedFilter
+
+                if (useAiSearch) {
+                    val aiResult = aiEngine.resolveQuery(
+                        rawQuery = trimmed,
+                        geminiApiKey = geminiKey.ifBlank { null },
+                        openRouterApiKey = openRouterKey.ifBlank { null }
+                    )
+                    if (aiResult.isAiResolved) {
+                        queryToRun = aiResult.resolvedTitle
+                        aiResolutionBanner = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
+                            (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
+                            (aiResult.explanation?.let { " • $it" } ?: "")
+                        if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
+                            filterToRun = aiResult.detectedType
+                        }
+                    } else if (aiResult.resolvedTitle != trimmed) {
+                        queryToRun = aiResult.resolvedTitle
+                        if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
+                            filterToRun = aiResult.detectedType
+                        }
+                    }
+                }
+
+                val results = searchRepository.searchAll(
+                    query = queryToRun,
+                    filter = filterToRun,
+                    tmdbApiKey = tmdbKey.ifBlank { null }
+                )
                 searchResults = results
             } catch (_: Exception) {
                 searchResults = emptyList()
@@ -86,6 +146,8 @@ fun DiscoverView(
             }
         } else {
             searchResults = emptyList()
+            aiResolutionBanner = null
+            isSearching = false
         }
     }
 
@@ -95,21 +157,22 @@ fun DiscoverView(
             .background(AmoledBlack)
             .padding(horizontal = 18.dp, vertical = 12.dp)
     ) {
+        // Header
         Column(modifier = Modifier.padding(bottom = 12.dp)) {
             Text(
-                text = "Discover & Explore",
+                text = "Universal OmniSearch",
                 fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
+                fontSize = 24.sp,
                 color = TextPrimary
             )
             Text(
-                text = "Search online across AniList, Steam, TVMaze & Bangumi",
+                text = "Live parallel search across AniList, MangaDex, Bangumi, TMDb, Steam & VNDB",
                 fontSize = 12.sp,
                 color = TextMuted
             )
         }
 
-        // Online Search Box
+        // Search Input Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -122,8 +185,8 @@ fun DiscoverView(
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = null,
-                tint = TextMuted,
-                modifier = Modifier.size(18.dp)
+                tint = if (useAiSearch) AccentArctic else TextMuted,
+                modifier = Modifier.size(20.dp)
             )
             BasicTextField(
                 value = searchQuery,
@@ -134,11 +197,40 @@ fun DiscoverView(
                 cursorBrush = SolidColor(AccentArctic),
                 decorationBox = { innerTextField ->
                     if (searchQuery.isEmpty()) {
-                        Text("Search online anime, manga, games, shows...", color = TextMuted, fontSize = 13.5.sp)
+                        Text(
+                            text = if (useAiSearch) "Ask AI or describe (e.g. 'anime with slime')" else "Search anime, manga, novels, games, shows...",
+                            color = TextMuted,
+                            fontSize = 13.sp
+                        )
                     }
                     innerTextField()
                 }
             )
+
+            // Inline AI Toggle Pill
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (useAiSearch) AccentArctic.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
+                    .clickable { useAiSearch = !useAiSearch }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = "AI Mode",
+                    tint = if (useAiSearch) AccentArctic else TextMuted,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "AI",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (useAiSearch) AccentArctic else TextMuted
+                )
+            }
+
             if (searchQuery.isNotEmpty()) {
                 Icon(
                     imageVector = Icons.Default.Close,
@@ -151,6 +243,73 @@ fun DiscoverView(
             }
         }
 
+        // Category Filter Chips
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val categories = listOf(
+                MediaType.ALL,
+                MediaType.ANIME,
+                MediaType.MANGA,
+                MediaType.NOVEL,
+                MediaType.SHOW,
+                MediaType.MOVIE,
+                MediaType.GAME,
+                MediaType.VISUAL_NOVEL
+            )
+            categories.forEach { type ->
+                val isSelected = selectedFilter == type
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isSelected) AccentArctic else DarkSurfaceElevated)
+                        .clickable { selectedFilter = type }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (type == MediaType.ALL) "All Verticals" else type.displayName,
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (isSelected) AmoledBlack else TextSecondary
+                    )
+                }
+            }
+        }
+
+        // AI Resolution Banner
+        if (aiResolutionBanner != null) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AccentArctic.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = AccentArctic,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = aiResolutionBanner!!,
+                    fontSize = 11.5.sp,
+                    color = AccentArctic,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(14.dp))
 
         if (isSearching) {
@@ -159,54 +318,44 @@ fun DiscoverView(
             }
         } else if (searchResults.isNotEmpty()) {
             Text(
-                text = "Found ${searchResults.size} results online:",
+                text = "Results (${searchResults.size})",
                 fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = TextMuted,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
+
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 108.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = PaddingValues(bottom = 96.dp),
+                columns = GridCells.Adaptive(minSize = 150.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = 110.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(searchResults) { candidate ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurfaceCard)
-                            .padding(6.dp)
-                    ) {
-                        AsyncImage(
-                            model = candidate.url,
-                            contentDescription = candidate.description,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(0.68f)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = candidate.description ?: "Unknown",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = candidate.sourceName,
-                            fontSize = 10.sp,
-                            color = AccentArctic
-                        )
+                items(searchResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
+                    val existingInLibrary = allMedia.firstOrNull { summary ->
+                        summary.title.equals(item.title, ignoreCase = true) ||
+                            (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
                     }
+
+                    SearchResultCard(
+                        item = item,
+                        existingInLibrary = existingInLibrary,
+                        onAdd = { onAddMedia(item) },
+                        onOpenDetail = { existingInLibrary?.id?.let(onItemClick) }
+                    )
                 }
             }
+        } else if (searchQuery.length >= 2) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No media found matching \"$searchQuery\"",
+                    fontSize = 13.5.sp,
+                    color = TextMuted
+                )
+            }
         } else {
-            // Recommendations / Spotlight from library
+            // Spotlight from library when search box is empty
             Text(
                 text = "Spotlight Titles in Library",
                 fontSize = 13.sp,
@@ -214,15 +363,15 @@ fun DiscoverView(
                 color = TextSecondary,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
-            val spotlight = allMedia.take(6)
+            val spotlight = allMedia.take(8)
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 108.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
-                contentPadding = PaddingValues(bottom = 96.dp),
+                contentPadding = PaddingValues(bottom = 110.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(spotlight) { item ->
+                items(spotlight, key = { it.id }) { item ->
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -256,6 +405,163 @@ fun DiscoverView(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchResultCard(
+    item: SearchResultItem,
+    existingInLibrary: MediaCardSummary?,
+    onAdd: () -> Unit,
+    onOpenDetail: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(DarkSurfaceCard)
+            .clickable {
+                if (existingInLibrary != null) onOpenDetail() else onAdd()
+            }
+            .padding(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(0.68f)
+                .clip(RoundedCornerShape(10.dp))
+        ) {
+            AsyncImage(
+                model = LosslessCoverMapper.toLosslessUrl(item.coverUrl),
+                contentDescription = item.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+
+            // Provider Pill (top start)
+            Box(
+                modifier = Modifier
+                    .padding(6.dp)
+                    .align(Alignment.TopStart)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AmoledBlack.copy(alpha = 0.75f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = item.sourceProvider.uppercase(),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentArctic
+                )
+            }
+
+            // Score Badge (top end)
+            if (item.communityScore != null) {
+                Row(
+                    modifier = Modifier
+                        .padding(6.dp)
+                        .align(Alignment.TopEnd)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(AmoledBlack.copy(alpha = 0.75f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = String.format("%.1f", item.communityScore),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = item.title,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${item.mediaType.displayName}${item.releaseYear?.let { " • $it" } ?: ""}",
+                fontSize = 10.5.sp,
+                color = TextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Action Button: "+ Track" or "✓ In Library"
+        if (existingInLibrary != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AccentJade.copy(alpha = 0.15f))
+                    .clickable { onOpenDetail() }
+                    .padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = AccentJade,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "In Library",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentJade
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AccentArctic)
+                    .clickable { onAdd() }
+                    .padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = AmoledBlack,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Track",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AmoledBlack
+                )
             }
         }
     }

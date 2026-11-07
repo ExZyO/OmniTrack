@@ -6,12 +6,15 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.ui.screens.detail.DetailScreen
 import com.omnitrack.app.ui.screens.detail.DetailViewModel
@@ -98,9 +101,11 @@ fun OmniTrackNavigation(
             }
         ) { backStackEntry ->
             val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: return@composable
+            val context = LocalContext.current
+            val prefManager = remember { PreferenceManager(context) }
 
             val detailViewModel: DetailViewModel = viewModel(
-                factory = DetailViewModel.factory(repository, mediaId)
+                factory = DetailViewModel.factory(repository, mediaId, preferenceManager = prefManager)
             )
 
             DetailScreen(

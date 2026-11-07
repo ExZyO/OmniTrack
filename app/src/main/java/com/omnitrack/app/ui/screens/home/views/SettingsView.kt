@@ -20,9 +20,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
@@ -59,6 +61,7 @@ import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -84,6 +87,7 @@ fun SettingsView(
     val prefManager = remember { PreferenceManager(context) }
     val scope = rememberCoroutineScope()
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    var showApiConfigSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -165,6 +169,18 @@ fun SettingsView(
             )
         }
 
+        // Section: External APIs & AI Engine
+        SettingsSection(title = "EXTERNAL APIS & ENRICHMENT") {
+            GroupedSettingRow(
+                icon = Icons.Default.Key,
+                iconTint = AccentGold,
+                title = "API Keys & AI Query Engine",
+                subtitle = "Configure Google Gemini, OpenRouter, TMDb, Fanart.tv & MdbList",
+                badge = "PRO",
+                onClick = { showApiConfigSheet = true }
+            )
+        }
+
         // Section: Updates & Maintenance
         SettingsSection(title = "UPDATES & MAINTENANCE") {
             GroupedSettingRow(
@@ -197,7 +213,7 @@ fun SettingsView(
                 icon = Icons.Default.Storage,
                 iconTint = AccentArctic,
                 title = "Local Database Engine",
-                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v3"
+                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v4"
             )
             SectionDivider()
             GroupedSettingRow(
@@ -207,6 +223,13 @@ fun SettingsView(
                 subtitle = "Unified native media tracker for Anime, Manga, Novels, Shows, Movies, Games & VNs"
             )
         }
+    }
+
+    if (showApiConfigSheet) {
+        ApiKeyConfigSheet(
+            preferenceManager = prefManager,
+            onDismiss = { showApiConfigSheet = false }
+        )
     }
 }
 

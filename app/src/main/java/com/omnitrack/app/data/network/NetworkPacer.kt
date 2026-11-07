@@ -33,6 +33,14 @@ object NetworkPacer {
     private var lastSteamCallTime = 0L
     private const val STEAM_MIN_INTERVAL_MS = 1500L
 
+    private val bangumiSemaphore = Semaphore(1)
+    private var lastBangumiCallTime = 0L
+    private const val BANGUMI_MIN_INTERVAL_MS = 500L
+
+    private val vndbSemaphore = Semaphore(1)
+    private var lastVndbCallTime = 0L
+    private const val VNDB_MIN_INTERVAL_MS = 600L
+
     private val generalSemaphore = Semaphore(2)
 
     private val coalescingMutex = Mutex()
@@ -90,6 +98,32 @@ object NetworkPacer {
         }
     }
 
+    suspend fun <T> withBangumiPacing(block: suspend () -> T): T = bangumiSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastBangumiCallTime
+        if (elapsed < BANGUMI_MIN_INTERVAL_MS) {
+            delay(BANGUMI_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastBangumiCallTime = System.currentTimeMillis()
+        }
+    }
+
+    suspend fun <T> withVndbPacing(block: suspend () -> T): T = vndbSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastVndbCallTime
+        if (elapsed < VNDB_MIN_INTERVAL_MS) {
+            delay(VNDB_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastVndbCallTime = System.currentTimeMillis()
+        }
+    }
+
     suspend fun <T> withGeneralPacing(block: suspend () -> T): T = generalSemaphore.withPermit {
         block()
     }
@@ -101,6 +135,8 @@ object NetworkPacer {
             "mangadex" in lower -> withMangaDexPacing(block)
             "themoviedb" in lower || "tmdb" in lower -> withTmdbPacing(block)
             "steam" in lower -> withSteamPacing(block)
+            "bgm.tv" in lower || "bangumi" in lower -> withBangumiPacing(block)
+            "vndb" in lower -> withVndbPacing(block)
             else -> withGeneralPacing(block)
         }
     }

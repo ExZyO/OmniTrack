@@ -44,6 +44,9 @@ class MediaRepository(
 
     suspend fun updateArtworkRole(id: Long, role: String) = mediaDao.updateArtworkRole(id, role)
 
+    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?) =
+        mediaDao.updateEnrichment(id, clearart, score, imdb, rt, meta)
+
     suspend fun deleteMedia(item: MediaItemEntity) = mediaDao.deleteMedia(item)
 
     suspend fun insertCategory(category: CategoryEntity): Long = categoryDao.insertCategory(category)

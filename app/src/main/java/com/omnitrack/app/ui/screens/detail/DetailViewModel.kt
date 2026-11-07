@@ -4,15 +4,19 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -28,14 +32,44 @@ data class DetailUiState(
 
 class DetailViewModel(
     private val repository: MediaRepository,
-    mediaId: Long
+    mediaId: Long,
+    private val enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
+    private val preferenceManager: PreferenceManager? = null
 ) : ViewModel() {
 
     private val _mediaId = MutableStateFlow(mediaId)
+    private val enrichedIds = mutableSetOf<Long>()
+
+    private fun maybeEnrich(item: MediaItemEntity) {
+        if (!enrichedIds.add(item.id)) return
+        if (item.clearartUrl == null || item.communityScore == null || item.imdbScore == null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
+                val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+                val mdbKey = preferenceManager?.mdblistApiKey?.firstOrNull()?.ifBlank { null }
+
+                val enrichment = enrichmentRepository.enrich(
+                    item = item,
+                    fanartApiKey = fanartKey,
+                    tmdbApiKey = tmdbKey,
+                    mdblistApiKey = mdbKey
+                )
+                repository.updateEnrichment(
+                    id = item.id,
+                    clearart = enrichment.clearartUrl ?: item.clearartUrl,
+                    score = enrichment.communityScore ?: item.communityScore,
+                    imdb = enrichment.imdbScore ?: item.imdbScore,
+                    rt = enrichment.rtScore ?: item.rtScore,
+                    meta = enrichment.metacriticScore ?: item.metacriticScore
+                )
+            }
+        }
+    }
 
     val uiState: StateFlow<DetailUiState> = _mediaId
         .flatMapLatest { id ->
             repository.getMediaById(id).filterNotNull().flatMapLatest { currentItem ->
+                maybeEnrich(currentItem)
                 repository.getAllMedia().map { allItems ->
                     val sameType = allItems.filter { it.mediaType == currentItem.mediaType }
                     val siblings = if (sameType.size > 1) sameType else allItems
@@ -184,11 +218,16 @@ class DetailViewModel(
     }
 
     companion object {
-        fun factory(repository: MediaRepository, mediaId: Long): ViewModelProvider.Factory {
+        fun factory(
+            repository: MediaRepository,
+            mediaId: Long,
+            enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
+            preferenceManager: PreferenceManager? = null
+        ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return DetailViewModel(repository, mediaId) as T
+                    return DetailViewModel(repository, mediaId, enrichmentRepository, preferenceManager) as T
                 }
             }
         }

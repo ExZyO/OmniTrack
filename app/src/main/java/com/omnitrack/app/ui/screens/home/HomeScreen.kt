@@ -448,7 +448,8 @@ fun HomeScreen(
                 NavDestination.DISCOVER -> {
                     DiscoverView(
                         allMedia = uiState.allMediaSummaries,
-                        onItemClick = onItemClick
+                        onItemClick = onItemClick,
+                        onAddMedia = { viewModel.addMediaFromSearch(it) }
                     )
                 }
 

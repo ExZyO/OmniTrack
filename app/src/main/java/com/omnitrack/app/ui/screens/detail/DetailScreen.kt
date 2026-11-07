@@ -140,6 +140,7 @@ fun DetailScreen(
     )
 
     var isPullDownArmed by remember { mutableStateOf(false) }
+    var scrollConsumedInGesture by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
     val nestedScrollConnection = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
@@ -147,10 +148,8 @@ fun DetailScreen(
                 available: Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
             ): Offset {
-                // Arm pull-down ONLY when pointer gesture begins while scrollState is strictly at 0
-                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && scrollState.value == 0 && dragOffsetY == 0f && available.y > 0) {
-                    isPullDownArmed = true
-                } else if (scrollState.value > 0) {
+                // If scrollState > 0, this gesture is scrolling content, so disarm pull-down
+                if (scrollState.value > 0) {
                     isPullDownArmed = false
                 }
                 return Offset.Zero
@@ -161,7 +160,19 @@ fun DetailScreen(
                 available: Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
             ): Offset {
-                // Only accumulate dismiss drag if the gesture began at scrollState == 0
+                if (consumed.y != 0f) {
+                    scrollConsumedInGesture += kotlin.math.abs(consumed.y)
+                }
+                // Arm pull-down ONLY if zero scroll was consumed in this gesture AND scrollState is at 0
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput &&
+                    scrollConsumedInGesture == 0f &&
+                    scrollState.value == 0 &&
+                    available.y > 0
+                ) {
+                    isPullDownArmed = true
+                }
+
+                // Only accumulate dismiss drag if gesture strictly started at scrollState == 0 with zero prior scroll
                 if (isPullDownArmed && available.y > 0 && scrollState.value == 0) {
                     dragOffsetY += available.y * 0.5f
                     return Offset(0f, available.y)
@@ -173,6 +184,7 @@ fun DetailScreen(
                 val shouldDismiss = isPullDownArmed && dragOffsetY > 160f
                 isPullDownArmed = false
                 dragOffsetY = 0f
+                scrollConsumedInGesture = 0f
                 if (shouldDismiss) {
                     onBack()
                 }
@@ -329,6 +341,17 @@ fun DetailScreen(
                                 modifier = Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
+                                if (item.clearartUrl != null) {
+                                    AsyncImage(
+                                        model = item.clearartUrl,
+                                        contentDescription = item.title,
+                                        modifier = Modifier
+                                            .height(48.dp)
+                                            .padding(bottom = 4.dp),
+                                        contentScale = ContentScale.Fit,
+                                        alignment = Alignment.CenterStart
+                                    )
+                                }
                                 Text(
                                     text = item.title,
                                     color = TextPrimary,
@@ -380,6 +403,9 @@ fun DetailScreen(
 
                         // 100% UNBOXED Inline Stats Row with Hairline Dividers
                         UnboxedStatsRow(item = item, viewModel = viewModel)
+
+                        // Multi-Source Metadata Enrichment Ratings
+                        EnrichmentRatingsRow(item = item)
                     }
                 } else {
                     // PRESENTATION MODE 2: Classic Overlapping Poster
@@ -489,7 +515,10 @@ fun DetailScreen(
                             .padding(horizontal = 20.dp)
                             .offset(y = (-30).dp)
                     ) {
-                        UnboxedStatsRow(item = item, viewModel = viewModel)
+                        Column {
+                            UnboxedStatsRow(item = item, viewModel = viewModel)
+                            EnrichmentRatingsRow(item = item)
+                        }
                     }
                 }
 
@@ -1013,5 +1042,67 @@ private fun UnboxedStatsRow(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun EnrichmentRatingsRow(
+    item: MediaItemEntity,
+    modifier: Modifier = Modifier
+) {
+    if (item.communityScore == null && item.imdbScore == null && item.rtScore == null && item.metacriticScore == null) {
+        return
+    }
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        item.communityScore?.let { score ->
+            RatingBadge(label = "COMMUNITY", value = String.format("%.1f", score), color = AccentArctic)
+        }
+        item.imdbScore?.let { imdb ->
+            RatingBadge(label = "IMDb", value = String.format("%.1f", imdb), color = AccentGold)
+        }
+        item.rtScore?.let { rt ->
+            RatingBadge(label = "TOMATOES", value = "$rt%", color = if (rt >= 60) Color(0xFFEF4444) else Color(0xFF10B981))
+        }
+        item.metacriticScore?.let { mc ->
+            RatingBadge(label = "METACRITIC", value = "$mc", color = if (mc >= 60) Color(0xFF10B981) else Color(0xFFF59E0B))
+        }
+    }
+}
+
+@Composable
+private fun RatingBadge(
+    label: String,
+    value: String,
+    color: Color
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.12f))
+            .border(0.8.dp, color.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = 0.5.sp,
+            color = color
+        )
+        Text(
+            text = value,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary
+        )
     }
 }

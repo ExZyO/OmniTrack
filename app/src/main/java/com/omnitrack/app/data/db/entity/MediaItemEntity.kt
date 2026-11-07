@@ -45,5 +45,10 @@ data class MediaItemEntity(
     val customCoverPath: String? = null,
     val customBannerPath: String? = null,
     val artworkRole: String = "DEFAULT",
+    val clearartUrl: String? = null,
+    val communityScore: Float? = null,
+    val imdbScore: Float? = null,
+    val rtScore: Int? = null,
+    val metacriticScore: Int? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

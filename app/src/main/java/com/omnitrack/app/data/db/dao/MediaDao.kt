@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
@@ -44,6 +44,9 @@ interface MediaDao {
 
     @Query("UPDATE media_items SET artworkRole = :role, lastUpdated = :updated WHERE id = :id")
     suspend fun updateArtworkRole(id: Long, role: String, updated: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET clearartUrl = :clearart, communityScore = :score, imdbScore = :imdb, rtScore = :rt, metacriticScore = :meta WHERE id = :id")
+    suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMedia(item: MediaItemEntity): Long

@@ -3,6 +3,7 @@ package com.omnitrack.app.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -59,6 +60,13 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
 
+        val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
+        val TMDB_API_KEY = stringPreferencesKey("tmdb_api_key")
+        val FANART_API_KEY = stringPreferencesKey("fanart_api_key")
+        val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
+        val AI_SEMANTIC_SEARCH_ENABLED = booleanPreferencesKey("ai_semantic_search_enabled")
+
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
     }
@@ -110,6 +118,54 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.FALLBACK_BACKGROUND_STYLE] = style.name
         }
+    }
+
+    val geminiApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.GEMINI_API_KEY] ?: "" }
+
+    suspend fun updateGeminiApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.GEMINI_API_KEY] = key }
+    }
+
+    val openRouterApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.OPENROUTER_API_KEY] ?: "" }
+
+    suspend fun updateOpenRouterApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.OPENROUTER_API_KEY] = key }
+    }
+
+    val tmdbApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.TMDB_API_KEY] ?: "" }
+
+    suspend fun updateTmdbApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.TMDB_API_KEY] = key }
+    }
+
+    val fanartApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.FANART_API_KEY] ?: "" }
+
+    suspend fun updateFanartApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.FANART_API_KEY] = key }
+    }
+
+    val mdblistApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.MDBLIST_API_KEY] ?: "" }
+
+    suspend fun updateMdblistApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.MDBLIST_API_KEY] = key }
+    }
+
+    val aiSemanticSearchEnabled: Flow<Boolean> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] ?: false }
+
+    suspend fun updateAiSemanticSearchEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] = enabled }
     }
 
     fun getArtSourcePriority(mediaType: MediaType): Flow<List<String>> {

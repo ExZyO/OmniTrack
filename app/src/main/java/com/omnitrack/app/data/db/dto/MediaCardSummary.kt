@@ -23,5 +23,6 @@ data class MediaCardSummary(
     val customCoverPath: String? = null,
     val customBannerPath: String? = null,
     val artworkRole: String = "DEFAULT",
+    val communityScore: Float? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )
