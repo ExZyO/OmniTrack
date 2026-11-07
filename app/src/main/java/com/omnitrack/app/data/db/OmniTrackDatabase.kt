@@ -14,7 +14,7 @@ import com.omnitrack.app.data.db.entity.SyncQueueEntity
 
 @Database(
     entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

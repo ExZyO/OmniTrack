@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.screens.detail.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,12 +40,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -60,6 +65,10 @@ import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -116,7 +125,7 @@ fun ScoreRatingSheet(
                 }
             }
 
-            // Central Value Display & Manual Keypad Box
+            // Central Value Display & Manual Keypad Box with Smooth Repeating Steppers
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -127,8 +136,8 @@ fun ScoreRatingSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = { updateScore(scoreValue - 0.1f) },
+                RepeatingHoldButton(
+                    onStep = { updateScore(scoreValue - 0.1f) },
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
@@ -177,8 +186,8 @@ fun ScoreRatingSheet(
                     )
                 }
 
-                IconButton(
-                    onClick = { updateScore(scoreValue + 0.1f) },
+                RepeatingHoldButton(
+                    onStep = { updateScore(scoreValue + 0.1f) },
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
@@ -227,7 +236,7 @@ fun ScoreRatingSheet(
                 }
             }
 
-            // Quick Preset Score Pills
+            // Quick Preset Score Pills - Stable Non-Flickering Style
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -235,19 +244,19 @@ fun ScoreRatingSheet(
             ) {
                 val presets = listOf(5.0f, 6.0f, 7.0f, 8.0f, 8.5f, 9.0f, 9.5f, 10.0f)
                 presets.forEach { preset ->
-                    val isSelected = (scoreValue * 10).roundToInt() == (preset * 10).roundToInt()
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) AccentGold else DarkSurfaceElevated)
+                            .background(DarkSurfaceElevated)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
                             .clickable { updateScore(preset) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
                     ) {
                         Text(
                             text = String.format("%.1f", preset),
                             fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Normal,
-                            color = if (isSelected) AmoledBlack else TextSecondary
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextSecondary
                         )
                     }
                 }
@@ -297,5 +306,43 @@ fun ScoreRatingSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun RepeatingHoldButton(
+    onStep: () -> Unit,
+    modifier: Modifier = Modifier,
+    initialDelayMs: Long = 320L,
+    repeatIntervalMs: Long = 90L,
+    content: @Composable () -> Unit
+) {
+    val currentOnStep by rememberUpdatedState(onStep)
+    val haptic = LocalHapticFeedback.current
+
+    Box(
+        modifier = modifier.pointerInput(Unit) {
+            detectTapGestures(
+                onPress = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    currentOnStep()
+                    val job = coroutineScope {
+                        launch {
+                            delay(initialDelayMs)
+                            while (isActive) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                currentOnStep()
+                                delay(repeatIntervalMs)
+                            }
+                        }
+                    }
+                    tryAwaitRelease()
+                    job.cancel()
+                }
+            )
+        },
+        contentAlignment = Alignment.Center
+    ) {
+        content()
     }
 }

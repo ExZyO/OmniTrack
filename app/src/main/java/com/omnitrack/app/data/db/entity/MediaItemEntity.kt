@@ -68,5 +68,17 @@ data class MediaItemEntity(
     val contentRating: String? = null,
     val airStatus: String? = null,
     val isFavorite: Boolean = false,
+    val isSimklStatusLocked: Boolean = false,
+    val simklStatus: TrackingStatus? = null,
+    val isAnilistStatusLocked: Boolean = false,
+    val anilistStatus: TrackingStatus? = null,
+    val isMalStatusLocked: Boolean = false,
+    val malStatus: TrackingStatus? = null,
+    val isBangumiStatusLocked: Boolean = false,
+    val bangumiStatus: TrackingStatus? = null,
+    val isTraktStatusLocked: Boolean = false,
+    val traktStatus: TrackingStatus? = null,
+    val isComickStatusLocked: Boolean = false,
+    val comickStatus: TrackingStatus? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

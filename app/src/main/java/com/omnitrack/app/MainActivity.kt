@@ -48,9 +48,17 @@ class MainActivity : ComponentActivity() {
         if (scheme !in validSchemes) return
 
         val host = data.host?.lowercase() ?: ""
+        val uriStr = data.toString().lowercase()
         val service: String = when {
             host.endsWith("-auth") -> host.removeSuffix("-auth")
             host == "auth" || host == "oauth" -> data.pathSegments.firstOrNull()?.lowercase() ?: ""
+            uriStr.contains("anilist") -> "anilist"
+            uriStr.contains("simkl") -> "simkl"
+            uriStr.contains("bangumi") || uriStr.contains("bgm") -> "bangumi"
+            uriStr.contains("comick") -> "comick"
+            uriStr.contains("myanimelist") || uriStr.contains("mal") -> "mal"
+            uriStr.contains("trakt") -> "trakt"
+            uriStr.contains("vndb") -> "vndb"
             else -> ""
         }
 

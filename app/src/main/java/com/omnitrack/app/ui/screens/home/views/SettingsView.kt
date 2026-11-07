@@ -171,7 +171,6 @@ fun SettingsView(
                 iconTint = AccentArctic,
                 title = "Poster Card Style",
                 subtitle = "Configure grid density (104–140dp), corner radius (0–24dp), 16:9 mode & labels",
-                badge = "STYLE",
                 onClick = { showPosterCustomizationSheet = true }
             )
         }
@@ -194,7 +193,6 @@ fun SettingsView(
                 iconTint = AccentGold,
                 title = "API Keys & AI Query Engine",
                 subtitle = "Configure Google Gemini, OpenRouter, TMDb, Fanart.tv & MdbList",
-                badge = "PRO",
                 onClick = { showApiConfigSheet = true }
             )
         }
@@ -206,7 +204,6 @@ fun SettingsView(
                 iconTint = AccentArctic,
                 title = "Tracker Accounts & Live Sync",
                 subtitle = "Connect AniList, MAL, Trakt, SIMKL, Comick, VNDB & Steam for two-way library sync",
-                badge = "OAUTH",
                 onClick = { showTrackerAccountsSheet = true }
             )
         }
@@ -216,9 +213,8 @@ fun SettingsView(
             GroupedSettingRow(
                 icon = Icons.Default.Archive,
                 iconTint = AccentJade,
-                title = "100% Fidelity App Backup",
+                title = "Universal App Backup (.omnibk)",
                 subtitle = "Export or restore library, custom covers, categories, and settings in .omnibk format",
-                badge = "100%",
                 onClick = { showBackupRestoreSheet = true }
             )
         }

@@ -161,12 +161,14 @@ class TrackerSyncEngine(
                 }
             """.trimIndent()
 
-            val alStatus = when (item.status) {
+            val effectiveStatus = if (item.isAnilistStatusLocked && item.anilistStatus != null) item.anilistStatus else item.status
+            val alStatus = when (effectiveStatus) {
                 com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> "CURRENT"
                 com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> "PLANNING"
                 com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "COMPLETED"
                 com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "PAUSED"
                 com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "DROPPED"
+                else -> "CURRENT"
             }
 
             val rawScore = item.userRating?.let { (it * 10f).toInt().coerceIn(0, 100) }
@@ -208,12 +210,14 @@ class TrackerSyncEngine(
             val endpoint = if (isAnime) "anime" else "manga"
             val progressField = if (isAnime) "num_watched_episodes" else "num_chapters_read"
 
-            val malStatus = when (item.status) {
+            val effectiveStatus = if (item.isMalStatusLocked && item.malStatus != null) item.malStatus else item.status
+            val malStatus = when (effectiveStatus) {
                 com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> if (isAnime) "watching" else "reading"
                 com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> if (isAnime) "plan_to_watch" else "plan_to_read"
                 com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "completed"
                 com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "on_hold"
                 com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "dropped"
+                else -> if (isAnime) "watching" else "reading"
             }
 
             val url = "https://api.myanimelist.net/v2/$endpoint/${item.malId}/my_list_status"
@@ -322,12 +326,14 @@ class TrackerSyncEngine(
     ): Boolean = NetworkPacer.withGeneralPacing {
         if (token.isNullOrBlank() || item.bangumiId == null) return@withGeneralPacing true
         try {
-            val bgmType = when (item.status) {
+            val effectiveStatus = if (item.isBangumiStatusLocked && item.bangumiStatus != null) item.bangumiStatus else item.status
+            val bgmType = when (effectiveStatus) {
                 com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> 1
                 com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> 2
                 com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> 3
                 com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> 4
                 com.omnitrack.app.data.model.TrackingStatus.DROPPED -> 5
+                else -> 3
             }
 
             val payload = buildJsonObject {
@@ -340,6 +346,7 @@ class TrackerSyncEngine(
             val request = Request.Builder()
                 .url("https://api.bgm.tv/v0/users/-/collections/${item.bangumiId}")
                 .header("Authorization", "Bearer $token")
+                .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                 .header("Content-Type", "application/json")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()

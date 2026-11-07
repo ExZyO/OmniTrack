@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -309,79 +313,69 @@ fun MultiTrackerSheet(
                 .padding(horizontal = 20.dp, vertical = 22.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Top Header: Title, Bound Count, Auto-Status Toggle & Close
+            // Top Header: Back Arrow on Left, Title, Service Count & Clean Auto-Status Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(AccentArctic.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(18.dp))
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
                         Text(
                             text = "Multi-Tracker Hub",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Black,
                             color = TextPrimary
                         )
-                    }
-                    Text(
-                        text = "${availableTrackers.count { !it.boundId.isNullOrBlank() }} of ${availableTrackers.size} services active",
-                        fontSize = 11.5.sp,
-                        color = AccentJade,
-                        modifier = Modifier.padding(start = 42.dp)
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Auto-Status Switching Pill (Nuvio-style)
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (autoStatusEnabled) AccentArctic.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f))
-                            .clickable { autoStatusEnabled = !autoStatusEnabled }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
                         Text(
-                            text = if (autoStatusEnabled) "⚡ Auto Status" else "✋ Manual",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (autoStatusEnabled) AccentArctic else TextMuted
+                            text = "${availableTrackers.count { !it.boundId.isNullOrBlank() }} of ${availableTrackers.size} services active",
+                            fontSize = 11.5.sp,
+                            color = AccentJade
                         )
                     }
+                }
 
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted, modifier = Modifier.size(16.dp))
-                    }
+                // Clean Auto-Status Switching Pill (Zero Emojis)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (autoStatusEnabled) AccentArctic.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f))
+                        .clickable { autoStatusEnabled = !autoStatusEnabled }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (autoStatusEnabled) "Auto Status: Active" else "Auto Status: Off",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (autoStatusEnabled) AccentArctic else TextMuted
+                    )
                 }
             }
 
-            // Category Switcher Chips (Squircle stadium pills)
+            // Category Switcher Chips (Spacious Squircle stadium pills)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 categoryOptions.forEach { cat ->
                     val isCatSelected = cat == selectedCategory
@@ -389,15 +383,16 @@ fun MultiTrackerSheet(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(if (isCatSelected) AccentJade else DarkSurfaceElevated)
+                            .border(1.dp, if (isCatSelected) AccentJade else GlassBorder, RoundedCornerShape(999.dp))
                             .clickable {
                                 selectedCategory = cat
                                 activeTab = "ALL"
                             }
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                            .padding(horizontal = 16.dp, vertical = 9.dp)
                     ) {
                         Text(
                             text = cat,
-                            fontSize = 12.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = if (isCatSelected) FontWeight.ExtraBold else FontWeight.Medium,
                             color = if (isCatSelected) AmoledBlack else TextSecondary
                         )
@@ -405,12 +400,12 @@ fun MultiTrackerSheet(
                 }
             }
 
-            // Tab Switcher Row (ALL + Individual Tracker Tabs)
+            // Tab Switcher Row (ALL + Individual Tracker Tabs with Spacious Breathing Room)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 tabOptions.forEach { tabName ->
                     val isTabActive = tabName == activeTab
@@ -421,8 +416,9 @@ fun MultiTrackerSheet(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(if (isTabActive) tabAccent else DarkSurfaceElevated)
+                            .border(1.dp, if (isTabActive) tabAccent else GlassBorder, RoundedCornerShape(999.dp))
                             .clickable { activeTab = tabName }
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(horizontal = 18.dp, vertical = 9.dp)
                     ) {
                         Text(
                             text = tabName,
@@ -570,6 +566,7 @@ private fun UniversalSyncControlsBar(
     onUpdateRating: (Float?) -> Unit
 ) {
     val totalProgress = item.totalProgress ?: 0.0
+    var showUniversalStatusSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -580,52 +577,56 @@ private fun UniversalSyncControlsBar(
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Status Selector Stadium Pills
+        // 1. Status Selector: Single Stadium Pill opening Chimanew status sheet
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Tracking Status", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Text(item.status.displayName, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = AccentJade)
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val statuses = listOf(
-                TrackingStatus.IN_PROGRESS,
-                TrackingStatus.COMPLETED,
-                TrackingStatus.PLAN_TO_TRACK,
-                TrackingStatus.ON_HOLD,
-                TrackingStatus.DROPPED
-            )
-
-            statuses.forEach { st ->
-                val isSelected = item.status == st
-                val label = when (st) {
-                    TrackingStatus.IN_PROGRESS -> "Watching / Reading"
-                    TrackingStatus.PLAN_TO_TRACK -> "Plan to Watch"
-                    else -> st.displayName
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (isSelected) AccentJade else AmoledBlack)
-                        .clickable { onUpdateStatus(st) }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(AmoledBlack)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                    .clickable { showUniversalStatusSheet = true }
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(AccentJade)
+                    )
                     Text(
-                        text = label,
-                        fontSize = 11.5.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) AmoledBlack else TextSecondary
+                        text = item.status.displayName,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextPrimary
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = null,
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
+        }
+
+        if (showUniversalStatusSheet) {
+            ChimanewStatusBottomSheet(
+                currentStatus = item.status,
+                onStatusSelected = {
+                    onUpdateStatus(it)
+                    showUniversalStatusSheet = false
+                },
+                onDismiss = { showUniversalStatusSheet = false }
+            )
         }
 
         // 2. Progress Header with Fraction & Percentage Pill
@@ -664,20 +665,19 @@ private fun UniversalSyncControlsBar(
             }
         }
 
-        // Stepper Buttons and Continuous Progress Scrubber Line
+        // Stepper Buttons with Smooth Repeating Hold and Continuous Progress Scrubber Line
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Decrement Button
-            Box(
+            // Repeating Decrement Button
+            RepeatingHoldButton(
+                onStep = { onUpdateProgress((item.currentProgress - 1.0).coerceAtLeast(0.0)) },
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
                     .background(AmoledBlack)
-                    .clickable { onUpdateProgress((item.currentProgress - 1.0).coerceAtLeast(0.0)) },
-                contentAlignment = Alignment.Center
             ) {
                 Text("-1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
@@ -691,14 +691,13 @@ private fun UniversalSyncControlsBar(
                 )
             }
 
-            // Increment Button
-            Box(
+            // Repeating Increment Button
+            RepeatingHoldButton(
+                onStep = { onUpdateProgress(item.currentProgress + 1.0) },
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
                     .background(AccentArctic)
-                    .clickable { onUpdateProgress(item.currentProgress + 1.0) },
-                contentAlignment = Alignment.Center
             ) {
                 Text("+1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
             }
@@ -725,16 +724,15 @@ private fun UniversalSyncControlsBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
+            RepeatingHoldButton(
+                onStep = {
+                    val next = ((score - 0.1f) * 10f).roundToInt() / 10f
+                    onUpdateRating(if (next <= 0f) null else next.coerceIn(1.0f, 10.0f))
+                },
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
                     .background(AmoledBlack)
-                    .clickable {
-                        val next = ((score - 0.1f) * 10f).roundToInt() / 10f
-                        onUpdateRating(if (next <= 0f) null else next.coerceIn(1.0f, 10.0f))
-                    },
-                contentAlignment = Alignment.Center
             ) {
                 Text("-0.1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
             }
@@ -755,16 +753,15 @@ private fun UniversalSyncControlsBar(
                 )
             )
 
-            Box(
+            RepeatingHoldButton(
+                onStep = {
+                    val next = if (score <= 0f) 1.0f else ((score + 0.1f) * 10f).roundToInt() / 10f
+                    onUpdateRating(next.coerceIn(1.0f, 10.0f))
+                },
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
                     .background(AccentGold)
-                    .clickable {
-                        val next = if (score <= 0f) 1.0f else ((score + 0.1f) * 10f).roundToInt() / 10f
-                        onUpdateRating(next.coerceIn(1.0f, 10.0f))
-                    },
-                contentAlignment = Alignment.Center
             ) {
                 Text("+0.1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
             }
@@ -1058,6 +1055,9 @@ private fun CollapsibleTrackerCard(
                     }
                 }
 
+                // Dedicated Per-Tracker Status Lock Pill (Exile Choice)
+                TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
+
                 // Tracker Specific Fields
                 when (tracker.key) {
                     "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
@@ -1152,12 +1152,15 @@ private fun SingleTrackerFocusedView(
             if (isBound) {
                 ActionStadiumPill("Open on ${tracker.name}", Icons.Default.OpenInBrowser, tracker.accentColor, onOpenBrowser)
             }
-            ActionStadiumPill("Search & Rebind Season (Chimanew)", Icons.Default.Search, AccentArctic, onSearchRebind)
+            ActionStadiumPill("Search & Rebind Season", Icons.Default.Search, AccentArctic, onSearchRebind)
             if (isBound) {
                 ActionStadiumPill("Untrack", Icons.Default.LinkOff, TextMuted, onUntrack)
                 ActionStadiumPill("Delete from Remote", Icons.Default.Delete, Color(0xFFEF4444), onDeleteItem)
             }
         }
+
+        // Dedicated Per-Tracker Status Lock Pill (Exile Choice)
+        TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
 
         // Translation pill
         if (item.userRating != null) {
@@ -1194,6 +1197,137 @@ private fun SingleTrackerFocusedView(
                 )
             }
         }
+    }
+}
+
+/**
+ * Dedicated Per-Tracker Status Lock Row:
+ * Allows locking individual trackers to custom statuses decoupling them from global updates.
+ */
+@Composable
+private fun TrackerStatusLockRow(
+    trackerKey: String,
+    trackerName: String,
+    item: MediaItemEntity,
+    onUpdateItem: (MediaItemEntity) -> Unit
+) {
+    var showStatusSheet by remember { mutableStateOf(false) }
+
+    val (isLocked, currentStatus) = when (trackerKey) {
+        "SIMKL" -> item.isSimklStatusLocked to (item.simklStatus ?: item.status)
+        "ANILIST" -> item.isAnilistStatusLocked to (item.anilistStatus ?: item.status)
+        "MAL" -> item.isMalStatusLocked to (item.malStatus ?: item.status)
+        "BANGUMI" -> item.isBangumiStatusLocked to (item.bangumiStatus ?: item.status)
+        "TRAKT" -> item.isTraktStatusLocked to (item.traktStatus ?: item.status)
+        "COMICK" -> item.isComickStatusLocked to (item.comickStatus ?: item.status)
+        else -> false to item.status
+    }
+
+    fun updateLock(locked: Boolean, newStatus: TrackingStatus?) {
+        val updated = when (trackerKey) {
+            "SIMKL" -> item.copy(isSimklStatusLocked = locked, simklStatus = if (locked) (newStatus ?: item.status) else null)
+            "ANILIST" -> item.copy(isAnilistStatusLocked = locked, anilistStatus = if (locked) (newStatus ?: item.status) else null)
+            "MAL" -> item.copy(isMalStatusLocked = locked, malStatus = if (locked) (newStatus ?: item.status) else null)
+            "BANGUMI" -> item.copy(isBangumiStatusLocked = locked, bangumiStatus = if (locked) (newStatus ?: item.status) else null)
+            "TRAKT" -> item.copy(isTraktStatusLocked = locked, traktStatus = if (locked) (newStatus ?: item.status) else null)
+            "COMICK" -> item.copy(isComickStatusLocked = locked, comickStatus = if (locked) (newStatus ?: item.status) else null)
+            else -> item
+        }
+        onUpdateItem(updated)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(AmoledBlack)
+            .border(1.dp, if (isLocked) AccentGold.copy(alpha = 0.4f) else GlassBorder, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                contentDescription = null,
+                tint = if (isLocked) AccentGold else TextMuted,
+                modifier = Modifier.size(15.dp)
+            )
+            Text(
+                text = if (isLocked) "Locked to $trackerName" else "Syncs with Global",
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isLocked) AccentGold else TextSecondary
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Status Stadium Pill (Clickable if locked)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (isLocked) AccentGold.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f))
+                    .clickable {
+                        if (isLocked) showStatusSheet = true
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = currentStatus.displayName,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isLocked) AccentGold else TextMuted
+                    )
+                    if (isLocked) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            }
+
+            // Lock / Unlock Toggle Pill
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (isLocked) AccentGold else Color.White.copy(alpha = 0.08f))
+                    .clickable {
+                        updateLock(!isLocked, currentStatus)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = if (isLocked) "Unlock" else "Lock",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (isLocked) AmoledBlack else TextMuted
+                )
+            }
+        }
+    }
+
+    if (showStatusSheet) {
+        ChimanewStatusBottomSheet(
+            currentStatus = currentStatus,
+            onStatusSelected = {
+                updateLock(true, it)
+                showStatusSheet = false
+            },
+            onDismiss = { showStatusSheet = false }
+        )
     }
 }
 

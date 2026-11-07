@@ -26,6 +26,7 @@ data class TrackerTokens(
     val comickToken: String? = null,
     val vndbToken: String? = null,
     val steamApiKey: String? = null,
+    val steamId64: String? = null,
     val bangumiToken: String? = null,
     val tmdbToken: String? = null,
     val igdbToken: String? = null
@@ -47,6 +48,7 @@ class TrackerTokenManager(private val context: Context) {
         val COMICK_TOKEN = stringPreferencesKey("token_comick")
         val VNDB_TOKEN = stringPreferencesKey("token_vndb")
         val STEAM_API_KEY = stringPreferencesKey("token_steam_api")
+        val STEAM_ID_64 = stringPreferencesKey("token_steam_id_64")
         val BANGUMI_TOKEN = stringPreferencesKey("token_bangumi")
         val TMDB_TOKEN = stringPreferencesKey("token_tmdb")
         val IGDB_TOKEN = stringPreferencesKey("token_igdb")
@@ -63,6 +65,7 @@ class TrackerTokenManager(private val context: Context) {
                 comickToken = prefs[Keys.COMICK_TOKEN]?.let { decrypt(it) },
                 vndbToken = prefs[Keys.VNDB_TOKEN]?.let { decrypt(it) },
                 steamApiKey = prefs[Keys.STEAM_API_KEY]?.let { decrypt(it) },
+                steamId64 = prefs[Keys.STEAM_ID_64]?.let { decrypt(it) },
                 bangumiToken = prefs[Keys.BANGUMI_TOKEN]?.let { decrypt(it) },
                 tmdbToken = prefs[Keys.TMDB_TOKEN]?.let { decrypt(it) },
                 igdbToken = prefs[Keys.IGDB_TOKEN]?.let { decrypt(it) }
@@ -76,6 +79,7 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun saveComickToken(token: String?) = saveToken(Keys.COMICK_TOKEN, token)
     suspend fun saveVndbToken(token: String?) = saveToken(Keys.VNDB_TOKEN, token)
     suspend fun saveSteamApiKey(key: String?) = saveToken(Keys.STEAM_API_KEY, key)
+    suspend fun saveSteamId64(steamId: String?) = saveToken(Keys.STEAM_ID_64, steamId)
     suspend fun saveBangumiToken(token: String?) = saveToken(Keys.BANGUMI_TOKEN, token)
     suspend fun saveTmdbToken(token: String?) = saveToken(Keys.TMDB_TOKEN, token)
     suspend fun saveIgdbToken(token: String?) = saveToken(Keys.IGDB_TOKEN, token)
