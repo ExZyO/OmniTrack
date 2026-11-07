@@ -89,6 +89,12 @@ The following directives are transcribed directly from Exile's requirements and 
 >   
 > if i as a dev need to add a client or some other key to the app, thats fine too. i know many devs do that"
 
+### 5. Hero Trailer Player, 7s Stationary Debounce & 1:1 Tracker Scores (Verbatim)
+> "also, Port Nuvio's HeroTrailerPlayerSurface with ExoPlayer  
+> whatever nuvio uses, exactly that  
+> Require 7.0 seconds of continuous screen stillness before auto-playing on screen open or re-scroll. or whatever is the standard  
+> anilist, mal, etc tracker scores show up wrong, do it exactly like nuvio and nuvio enhanced does it so it works properly"
+
 ---
 
 ## 🛡️ Architectural Traps & Quality Guardrails
@@ -200,22 +206,33 @@ flowchart LR
 
 ---
 
-## 📌 Phase 2: In-Line Hero Trailers & Landscape Artwork System
+## 📌 Phase 2: In-Line Hero Trailers, Accurate Tracker Scores & Landscape Artwork System
 
-### 2.1 Hero Trailer Player & Debounce Controls
-- [ ] **Port In-Line Hero Trailer Player**:
-  - Port Nuvio's `HeroTrailerPlayerSurface` with ExoPlayer.
-  - YouTube direct stream resolution or embedded player surface.
-- [ ] **Configurable Stationary Debounce Delay**:
-  - Require 3.0 seconds of continuous screen stillness before auto-playing on screen open or re-scroll.
-  - Never pop instantly into video playback when scrolling past.
+### 2.1 Hero Trailer Player & Debounce Controls (Exact Nuvio 1:1 Parity)
+- [ ] **Port Nuvio's `HeroTrailerPlayerSurface` with ExoPlayer**:
+  - Exact 1:1 port of Nuvio / Nuvio Enhanced implementation (`HeroTrailerPlayerSurface.android.kt` using `androidx.media3.exoplayer.ExoPlayer`).
+  - Whatever Nuvio uses, exactly that: `TextureView` container with `MergingMediaSource` (separate progressive video stream + separate adaptive audio stream from InnerTube/YouTube cipher extractor), hardware-accelerated surface rendering, video-matrix aspect fill cropping, and zero external redirects.
+- [ ] **7.0-Second Stationary Debounce Delay**:
+  - Require **7.0 seconds** of continuous screen stillness before auto-playing on screen open or re-scroll (standard stationary debounce delay so user can read synopsis, examine metadata, and review ratings without premature video or audio disturbance).
+  - Reset timer immediately upon any scroll delta or touch interaction.
 - [ ] **Re-Scroll Resume Policy**:
-  - Option to auto-pause when scrolled out of view, and require manual tap (or 3s delay) to resume when returning.
-  - Mute/unmute toggle pill overlay.
-- [ ] **Internal Trailer Popup**:
-  - Clicking trailers opens Nuvio's `TrailerPlayerPopup` bottom sheet with embedded player and fullscreen landscape lock—never redirecting to external YouTube app.
+  - Auto-pause instantly when scrolled out of viewport.
+  - Require stationary debounce stillness (or explicit manual tap) to resume when scrolled back into view.
+  - Mute/unmute toggle pill overlay (`HeroTrailerAudioState`).
+- [ ] **Internal Trailer Popup (`TrailerPlayerPopup.kt`)**:
+  - Tapping trailer button opens internal popup bottom sheet with embedded ExoPlayer surface, scrub bar, and fullscreen landscape lock—never redirects to external YouTube or browser app.
 
-### 2.2 Landscape vs Portrait Cover Artwork Ecosystem & Nuvio Card Depth
+### 2.2 Accurate Tracker Scores Normalization (AniList, MAL, Bangumi 1:1 Nuvio Parity)
+- [ ] **Fix Tracker Scores (AniList, MAL, Bangumi, Steam, VNDB)**:
+  - AniList, MAL, etc. tracker scores show up wrong: Replicate exact rating computation, normalization, and display formatting from Nuvio and Nuvio Enhanced (`DetailMetaInfo.kt` / `NuvioRatingsRow.kt`).
+  - **MyAnimeList (MAL)**: 10-point decimal scale formatted to 2 decimals or 1 decimal (e.g. `8.45` or `8.5`) with MAL brand blue (`#2E51A2`).
+  - **AniList**: 100-point percentage scale (e.g. `84%`) normalized with `%` badge, or 10-point decimal, matching AniList user preferred format with brand cyan (`#02A9FF`).
+  - **Bangumi**: 10-point decimal scale (e.g. `8.2`) with Bangumi brand pink (`#F09199`).
+  - **Steam**: Positive review percentage (e.g. `94%`) with Steam brand blue (`#66C0F4`).
+  - **VNDB**: 10-point decimal scale (e.g. `8.50`) with VNDB brand blue (`#2A5684`).
+  - **TMDb / IMDb / Rotten Tomatoes / Metacritic / Trakt / Letterboxd**: Exact Nuvio `ratingVisuals` alignment: IMDb `formatOneDecimal` (`#F5C518`), TMDb `formatWhole` (`#01B4E4`), Rotten Tomatoes `formatPercent` (`#FA320A`), Metacritic `formatWhole` (`#FFCC33`), Trakt `formatWhole` (`#ED1C24`), Letterboxd `formatOneDecimal` (`#00E054`).
+
+### 2.3 Landscape vs Portrait Cover Artwork Ecosystem & Nuvio Card Depth
 - [ ] **Dynamic Landscape Card Mode (`catalogLandscapeModeEnabled`)**:
   - In library and browse grids, allow switching between Portrait (2:3) posters and Landscape (16:9) backdrop cards.
 - [ ] **Always Backdrop with Logo for Landscape Posters (`alwaysShowLandscapeClearlogo`)**:
