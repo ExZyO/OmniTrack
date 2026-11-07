@@ -113,6 +113,25 @@ The following directives are transcribed directly from Exile's requirements and 
 > add to roadmap:  
 > when tracking eps or do i make it look like nuvio? hmm, make it look like nuvio 1 to 1 port, same ui, etc, Shows seasons posters, ep thumbnails but doesnt play vids obv, i should be able to click top right circle button, the exact one from nuvio and mark ep as watched, so add all the related settings, the detail page, every setting"
 
+### 8. Accurate Tracker Scores, Episode UI, Clearart, Swiping & Sheen Customization Directives (Verbatim)
+> "also, anime dont show mdblist ratings
+even with cover size max in poster card style setting, landscape banners r not as big as nuvio
+when in Home page, All tab, i can swipe right 2 times at most, it follows correct order but then starts swiping right to random entries instead of the next entry on that page
+
+clear art logo, its hard to see cuz the covers have progress data on them like 3 / 151 Ep and vigente so its bllack and hard to see
+
+in details page, when i open it, it loads the old simple episode style and then i can see the new one appearing on top
+also the circle on top right of the UI is not the same as in nuvio, it has to look the same
+and if for example my progress is ep 2, i click ep 4 to mark it, my progress from ep 2 to 4 should be filled and it should say 4 in my tracker, not 3
+add option in setting to resize the episode layout 
+also port exact nuvio vertical and horizontal episode layouts alongside their settings, let us adjust their size too and also port the episode posters in details page, the exact same ui for it, animation and also the Posters buttton should look the same and work the same way with the same color, etc
+
+the vertical ep ui u will port from nuvio later should look the exact same as nuvio's horiontal ui but vertical, as a third setting ofc, it should have the descriptions, rating, etc inside the image the way nuvio has it, oh and dont forget to add imdb ratings to our current episode ui too later,
+
+also me adding the client id of simkl, mal, anilist in github didnt work for simkl, says failed to generate pin
+comick says session expired in setting but i think it probably connected, if i click open, it opens https://comick.dev/search?q=Nano%20Machine (nano machine manhwa) idk if its correct
+add nuvio poster card style properly, it is missing features like me moving the graph to properly customize cover sheen"
+
 ---
 
 ## 🏆 Gold-Standard Category Benchmarks & Reference Strategy
@@ -289,21 +308,36 @@ flowchart LR
   - `Auto-sync on Mark`: Pushes episode progress to Trakt and Simkl instantly.
 
 ### 🧪 On-Device Verification Checklist (Scheduled for Later Testing by Exile)
+- [ ] **Accurate Tracker Scores Normalization (AniList, MAL, Bangumi, Steam, VNDB) Verification**:
+  - Test MAL (10-point decimal scale e.g. `8.45` / `8.5`) in MAL blue (`#2E51A2`).
+  - Test AniList (100-point percentage scale e.g. `84%`) in cyan (`#02A9FF`).
+  - Test Bangumi (10-point decimal scale e.g. `8.2`) in pink (`#F09199`).
+  - Test Steam (Positive review percentage e.g. `94%`) in Steam blue (`#66C0F4`).
+  - Test VNDB (10-point decimal e.g. `8.50`) in VNDB blue (`#2A5684`).
 - [ ] **Trakt.tv Authentication Test**:
   - Test Trakt Device Code flow (`trakt.tv/activate` PIN code).
   - Confirm connection status, user profile hydration, and scrobble synchronization using personal `TRAKT_CLIENT_ID` injected via GitHub Secrets.
-- [ ] **SIMKL Authentication Test**:
+- [ ] **SIMKL Authentication Test & PIN Generation Diagnosis**:
   - Test SIMKL PIN flow (`simkl.com/pin` PIN code).
+  - Diagnose "failed to generate pin" when client ID is configured.
   - Confirm connection status, list sync, and profile resolution using personal `SIMKL_CLIENT_ID` injected via GitHub Secrets.
 - [ ] **MyAnimeList (MAL) Authentication Test**:
   - Test MAL PKCE OAuth flow (`omnitrack://auth/mal`).
   - Confirm deep-link return, token exchange without secret, and anime list retrieval using personal `MAL_CLIENT_ID` injected via GitHub Secrets.
+- [ ] **Comick Session & Search Link Verification**:
+  - Verify session status and link resolution (`https://comick.dev/search?q=...`).
 - [ ] **Muted Metadata Row AMOLED Verification**:
   - Inspect detail screen header on Galaxy S24 Ultra Pure AMOLED (`#000000`).
   - Verify that the rating next to runtime and age certification badge render cleanly in muted `TextSecondary` (`#9CA3AF`) with 45% alpha border, eliminating high-contrast pills and matching Nuvio 1:1.
 - [ ] **Seasons & 16:9 Episode Tracking Grid Verification**:
   - Verify season poster / chip selector.
   - Verify 16:9 episode thumbnail cards, watched checkmark badge, and long-press watched action sheet (`Mark Episode`, `Mark Previous`, `Mark Season`).
+  - Verify fill-forward progress behavior: e.g. at ep 2, clicking ep 4 marks 2, 3, and 4 as watched and records 4 in external trackers.
+  - Verify elimination of layout flash on screen open.
+- [ ] **Cover Art, Clearart Contrast & Sheen 2D Pad**:
+  - Verify landscape banner max sizing matching Nuvio.
+  - Ensure clearart title logo is positioned above/independent of bottom progress data so it remains legible.
+  - Test interactive 2D graph pad for adjusting sheen and depth gradient.
 
 ---
 

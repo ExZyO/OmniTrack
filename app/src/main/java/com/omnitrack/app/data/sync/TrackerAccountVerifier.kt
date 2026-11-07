@@ -57,7 +57,7 @@ object TrackerAccountVerifier {
     val TRAKT_CLIENT_SECRET: String
         get() = customTraktClientSecret?.takeIf { it.isNotBlank() }
             ?: BuildConfig.TRAKT_CLIENT_SECRET.takeIf { it.isNotBlank() }
-            ?: ""
+            ?: DEFAULT_TRAKT_CLIENT_SECRET
 
     val MAL_CLIENT_ID: String
         get() = customMalClientId?.takeIf { it.isNotBlank() }
@@ -429,17 +429,47 @@ object TrackerAccountVerifier {
         val userCode: String,
         val verificationUrl: String,
         val expiresIn: Int,
-        val intervalSeconds: Int
+        val intervalSeconds: Int,
+        val deviceCode: String? = null
     )
 
     suspend fun requestSimklPinCode(): SimklPinCode? = withContext(Dispatchers.IO) {
+        // 1. Modern SIMKL OAuth 2.0 Device Flow (Required for modern apps: POST /oauth2/device)
+        try {
+            val modernUrl = "https://api.simkl.com/oauth2/device"
+            val modernPayload = """{"client_id":"$SIMKL_CLIENT_ID"}"""
+            val modernRequest = Request.Builder()
+                .url(modernUrl)
+                .header("Content-Type", "application/json")
+                .header("simkl-api-key", SIMKL_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .post(modernPayload.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            client.newCall(modernRequest).execute().use { response ->
+                if (response.isSuccessful) {
+                    val body = response.body?.string().orEmpty()
+                    val obj = json.parseToJsonElement(body).jsonObject
+                    val userCode = obj["user_code"]?.jsonPrimitive?.content ?: return@withContext null
+                    val deviceCode = obj["device_code"]?.jsonPrimitive?.content
+                    val verificationUrl = obj["verification_uri_complete"]?.jsonPrimitive?.content
+                        ?: obj["verification_uri"]?.jsonPrimitive?.content
+                        ?: "https://simkl.com/pin"
+                    val interval = obj["interval"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5
+                    val expires = obj["expires_in"]?.jsonPrimitive?.content?.toIntOrNull() ?: 900
+                    return@withContext SimklPinCode(userCode, verificationUrl, expires, interval, deviceCode)
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Legacy SIMKL PIN Flow fallback (GET /oauth/pin)
         try {
             val url = "https://api.simkl.com/oauth/pin?client_id=$SIMKL_CLIENT_ID"
             val request = Request.Builder()
                 .url(url)
                 .header("Content-Type", "application/json")
                 .header("simkl-api-key", SIMKL_CLIENT_ID)
-                .header("User-Agent", "OmniTrack/1.0")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 
@@ -451,20 +481,44 @@ object TrackerAccountVerifier {
                 val verificationUrl = obj["verification_url"]?.jsonPrimitive?.content ?: "https://simkl.com/pin"
                 val interval = obj["interval"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5
                 val expires = obj["expires_in"]?.jsonPrimitive?.content?.toIntOrNull() ?: 900
-                SimklPinCode(userCode, verificationUrl, expires, interval)
+                SimklPinCode(userCode, verificationUrl, expires, interval, null)
             }
         } catch (_: Exception) {
             null
         }
     }
 
-    suspend fun pollSimklPinToken(userCode: String): String? = withContext(Dispatchers.IO) {
+    suspend fun pollSimklPinToken(userCode: String, deviceCode: String? = null): String? = withContext(Dispatchers.IO) {
+        if (!deviceCode.isNullOrBlank()) {
+            try {
+                val tokenUrl = "https://api.simkl.com/oauth2/token"
+                val tokenPayload = """{"client_id":"$SIMKL_CLIENT_ID","device_code":"$deviceCode","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}"""
+                val tokenRequest = Request.Builder()
+                    .url(tokenUrl)
+                    .header("Content-Type", "application/json")
+                    .header("simkl-api-key", SIMKL_CLIENT_ID)
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .post(tokenPayload.toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                client.newCall(tokenRequest).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val body = response.body?.string().orEmpty()
+                        val obj = json.parseToJsonElement(body).jsonObject
+                        val token = obj["access_token"]?.jsonPrimitive?.content
+                        if (!token.isNullOrBlank()) return@withContext token
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Legacy fallback
         try {
             val url = "https://api.simkl.com/oauth/pin/$userCode?client_id=$SIMKL_CLIENT_ID"
             val request = Request.Builder()
                 .url(url)
                 .header("Content-Type", "application/json")
-                .header("User-Agent", "OmniTrack/1.0")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 

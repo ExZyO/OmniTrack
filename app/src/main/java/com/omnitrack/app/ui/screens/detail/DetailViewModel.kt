@@ -428,32 +428,65 @@ class DetailViewModel(
                 // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
                 try {
                     val searchType = if (type == "movie") "movie" else "show"
+                    val commentsEndpointType = if (type == "movie") "movies" else "shows"
                     val traktApiKey = com.omnitrack.app.data.sync.TrackerAccountVerifier.TRAKT_CLIENT_ID
-                    val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
-                    val traktSearchReq = Request.Builder()
-                        .url(traktSearchUrl)
-                        .header("Content-Type", "application/json")
-                        .header("trakt-api-version", "2")
-                        .header("trakt-api-key", traktApiKey)
-                        .header("User-Agent", "OmniTrack/1.0.0 (Android)")
-                        .get()
-                        .build()
 
-                    val traktSlug: String? = client.newCall(traktSearchReq).execute().use { searchResp ->
-                        if (searchResp.isSuccessful) {
-                            val searchBody = searchResp.body?.string().orEmpty()
-                            val searchJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(searchBody).jsonArray
-                            val firstItem = searchJson.firstOrNull()?.jsonObject
-                            val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
-                            val ids = mediaObj?.get("ids")?.jsonObject
-                            ids?.get("slug")?.jsonPrimitive?.content ?: ids?.get("trakt")?.jsonPrimitive?.content
-                        } else null
+                    var targetId: String? = null
+
+                    // 1. TMDb ID -> Trakt resolution
+                    if (item.tmdbId != null) {
+                        val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
+                        val traktSearchReq = Request.Builder()
+                            .url(traktSearchUrl)
+                            .header("Content-Type", "application/json")
+                            .header("trakt-api-version", "2")
+                            .header("trakt-api-key", traktApiKey)
+                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
+                            .get()
+                            .build()
+
+                        client.newCall(traktSearchReq).execute().use { searchResp ->
+                            if (searchResp.isSuccessful) {
+                                val searchBody = searchResp.body?.string().orEmpty()
+                                val searchJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(searchBody).jsonArray
+                                val firstItem = searchJson.firstOrNull()?.jsonObject
+                                val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
+                                val ids = mediaObj?.get("ids")?.jsonObject
+                                targetId = ids?.get("slug")?.jsonPrimitive?.content
+                                    ?: ids?.get("trakt")?.jsonPrimitive?.content
+                                    ?: ids?.get("imdb")?.jsonPrimitive?.content
+                            }
+                        }
                     }
 
-                    val commentsEndpointType = if (type == "movie") "movies" else "shows"
-                    val targetSlug = traktSlug ?: item.tmdbId?.toString()
-                    if (targetSlug != null) {
-                        val commentsUrl = "https://api.trakt.tv/$commentsEndpointType/$targetSlug/comments/likes?page=1&limit=100"
+                    // 3. Title query search fallback
+                    if (targetId == null && item.title.isNotBlank()) {
+                        val titleQueryUrl = "https://api.trakt.tv/search/$searchType?query=" + java.net.URLEncoder.encode(item.title, "UTF-8")
+                        val titleSearchReq = Request.Builder()
+                            .url(titleQueryUrl)
+                            .header("Content-Type", "application/json")
+                            .header("trakt-api-version", "2")
+                            .header("trakt-api-key", traktApiKey)
+                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
+                            .get()
+                            .build()
+
+                        client.newCall(titleSearchReq).execute().use { titleResp ->
+                            if (titleResp.isSuccessful) {
+                                val titleBody = titleResp.body?.string().orEmpty()
+                                val titleJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(titleBody).jsonArray
+                                val firstItem = titleJson.firstOrNull()?.jsonObject
+                                val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
+                                val ids = mediaObj?.get("ids")?.jsonObject
+                                targetId = ids?.get("slug")?.jsonPrimitive?.content
+                                    ?: ids?.get("trakt")?.jsonPrimitive?.content
+                                    ?: ids?.get("imdb")?.jsonPrimitive?.content
+                            }
+                        }
+                    }
+
+                    if (targetId != null) {
+                        val commentsUrl = "https://api.trakt.tv/$commentsEndpointType/$targetId/comments/likes?page=1&limit=100"
                         val commentsReq = Request.Builder()
                             .url(commentsUrl)
                             .header("Content-Type", "application/json")
@@ -1015,6 +1048,8 @@ class DetailViewModel(
 
 fun sanitizeCommunityComment(raw: String): String {
     return raw
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
         .replace(Regex("""(?i)\[/?spoiler\]"""), "")
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""<[^>]*>"""), "")
@@ -1027,8 +1062,10 @@ fun sanitizeCommunityComment(raw: String): String {
         .replace(Regex("""(?s)\*(.*?)\*"""), "$1")
         .replace(Regex("""(?s)_(.*?)_"""), "$1")
         .replace(Regex("""(?s)~~(.*?)~~"""), "$1")
+        .replace(Regex("""(?m)^[-*_]{3,}\s*$"""), "")
         .replace(Regex("""_{2,}"""), "")
         .replace(Regex("""\*{2,}"""), "")
+        .replace(Regex("""(?<=\s|^)_|_(?=\s|$)"""), "")
         .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
 }

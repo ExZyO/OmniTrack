@@ -223,10 +223,12 @@ fun MultiTrackerSheet(
         fun addComick() = list.add(
             TrackerDef("COMICK", "Comick", Color(0xFFF43F5E), item.comickId, "Chapters",
                 browserUrlTemplate = {
-                    if (it.contains(" ") || !it.contains("-")) {
-                        "https://comick.dev/search?q=${Uri.encode(it)}"
+                    val trimmed = it.trim()
+                    if (trimmed.contains(" ") || !trimmed.contains("-")) {
+                        val slug = trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
+                        if (slug.isNotBlank()) "https://comick.io/comic/$slug" else "https://comick.io/search?q=${Uri.encode(trimmed)}"
                     } else {
-                        "https://comick.dev/comic/$it"
+                        "https://comick.io/comic/$trimmed"
                     }
                 }) {
                 onUpdateItem(item.copy(comickId = it))
@@ -248,7 +250,7 @@ fun MultiTrackerSheet(
             TrackerDef("IGDB", "IGDB", Color(0xFF9146FF), item.igdbId?.toString(), "100-Point",
                 browserUrlTemplate = {
                     if (it.all { c -> c.isDigit() }) {
-                        "https://www.igdb.com/search?type=1&q=${Uri.encode(item.title)}"
+                        "https://www.igdb.com/search?q=${Uri.encode(item.title)}"
                     } else {
                         "https://www.igdb.com/games/$it"
                     }
@@ -1867,7 +1869,7 @@ private fun SearchAndRebindBottomSheet(
                             "VNDB" -> res.vndbId
                             "IGDB" -> res.igdbId?.toString()
                             "STEAM" -> res.igdbId?.toString()
-                            "COMICK" -> res.title
+                            "COMICK" -> res.title.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
                             else -> res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.bangumiId?.toString()
                         } ?: res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.title
 

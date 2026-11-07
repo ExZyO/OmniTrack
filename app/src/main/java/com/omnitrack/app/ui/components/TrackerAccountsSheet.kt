@@ -611,7 +611,7 @@ fun TrackerAccountsSheet(
             isPollingSimkl = true
             while (isPollingSimkl) {
                 delay(info.intervalSeconds * 1000L)
-                val token = TrackerAccountVerifier.pollSimklPinToken(info.userCode)
+                val token = TrackerAccountVerifier.pollSimklPinToken(info.userCode, info.deviceCode)
                 if (!token.isNullOrBlank()) {
                     tokenManager.saveSimklToken(token)
                     Toast.makeText(context, "SIMKL connected successfully!", Toast.LENGTH_LONG).show()
@@ -659,7 +659,7 @@ fun TrackerAccountsSheet(
                 )
 
                 Text(
-                    text = "Enter this 5-digit PIN code at simkl.com/pin:",
+                    text = "Enter this code at simkl.com/pin (or tap Open Link below):",
                     fontSize = 12.sp,
                     color = TextMuted,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center

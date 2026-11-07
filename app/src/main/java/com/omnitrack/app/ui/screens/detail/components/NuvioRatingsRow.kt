@@ -191,7 +191,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 8. MyAnimeList Score (10-point scale, e.g. 8.5)
+        // 8. MyAnimeList Score (10-point scale, e.g. 8.45 / 8.5 in MAL blue #2E51A2)
         if (item.malId != null && item.anilistId == null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -201,7 +201,7 @@ fun NuvioRatingsRow(
                             source = "mal",
                             displayName = "MyAnimeList",
                             iconRes = R.drawable.rating_mal,
-                            valueText = formatOneDecimal(malVal),
+                            valueText = formatMalScore(malVal),
                             valueColor = Color(0xFF2E51A2)
                         )
                     )
@@ -209,7 +209,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 9. Bangumi Score (10-point scale, e.g. 8.2)
+        // 9. Bangumi Score (10-point scale, e.g. 8.2 in pink #F09199)
         if (item.bangumiId != null && item.anilistId == null && item.malId == null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -227,7 +227,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 10. Steam Positive % (Games, e.g. 94%)
+        // 10. Steam Positive % (Games, e.g. 94% in Steam blue #66C0F4)
         if (item.mediaType == MediaType.GAME) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -245,7 +245,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 11. VNDB Rating (Visual Novels, e.g. 8.5)
+        // 11. VNDB Rating (Visual Novels, e.g. 8.50 in VNDB blue #2A5684)
         if (item.mediaType == MediaType.VISUAL_NOVEL) {
             item.communityScore?.let { score ->
                 if (score > 0) {
@@ -255,8 +255,8 @@ fun NuvioRatingsRow(
                             source = "vndb",
                             displayName = "VNDB",
                             iconRes = R.drawable.brand_vndb,
-                            valueText = formatOneDecimal(vnVal),
-                            valueColor = Color(0xFF3B82F6)
+                            valueText = formatTwoDecimals(vnVal),
+                            valueColor = Color(0xFF2A5684)
                         )
                     )
                 }
@@ -306,4 +306,18 @@ private fun formatOneDecimal(value: Double): String {
     val whole = rounded / 10
     val decimal = (rounded % 10).absoluteValue
     return "$whole.$decimal"
+}
+
+private fun formatMalScore(value: Double): String {
+    val roundedTwo = (value * 100.0).roundToInt() / 100.0
+    val formatted = String.format(java.util.Locale.US, "%.2f", roundedTwo)
+    return if (formatted.endsWith("0")) {
+        String.format(java.util.Locale.US, "%.1f", roundedTwo)
+    } else {
+        formatted
+    }
+}
+
+private fun formatTwoDecimals(value: Double): String {
+    return String.format(java.util.Locale.US, "%.2f", value)
 }
