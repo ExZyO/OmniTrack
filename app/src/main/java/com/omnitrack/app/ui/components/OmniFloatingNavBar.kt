@@ -7,6 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -480,7 +481,7 @@ private fun JellyTabTargets(
                     .selectable(
                         selected = isSelected,
                         role = Role.Tab,
-                        interactionSource = null,
+                        interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = onClick
                     )
@@ -489,8 +490,7 @@ private fun JellyTabTargets(
                         selected = isSelected
                         contentDescription = destination.title
                         onClick { onClick(); true }
-                    },
-                contentAlignment = Alignment.Center
+                    }
             )
         }
     }
