@@ -1379,12 +1379,12 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
     }
 
     val ageBadge = item.contentRating?.trim()?.takeIf { it.isNotBlank() }
-    val fallbackScore = item.communityScore?.takeIf { (item.imdbScore == null && item.traktScore == null) }?.let {
-        val s = if (it <= 10f) String.format(java.util.Locale.US, "%.1f", it) else String.format(java.util.Locale.US, "%.1f", it / 10f)
-        s
+    val scoreVal = item.imdbScore ?: item.communityScore
+    val displayScore = scoreVal?.let { s ->
+        if (s <= 10f) String.format(java.util.Locale.US, "%.1f", s) else String.format(java.util.Locale.US, "%.1f", s / 10f)
     }
 
-    if (releaseLine != null || runtimeText != null || ageBadge != null || fallbackScore != null) {
+    if (releaseLine != null || runtimeText != null || ageBadge != null || displayScore != null) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1424,21 +1424,21 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
                     )
                 }
             }
-            fallbackScore?.let { scoreText ->
+            displayScore?.let { scoreText ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
                         text = "★",
-                        fontSize = 12.sp,
-                        color = TextSecondary.copy(alpha = 0.7f)
+                        fontSize = 13.sp,
+                        color = AccentGold
                     )
                     Text(
                         text = scoreText,
-                        fontSize = 14.5.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextSecondary
+                        color = Color.White
                     )
                 }
             }

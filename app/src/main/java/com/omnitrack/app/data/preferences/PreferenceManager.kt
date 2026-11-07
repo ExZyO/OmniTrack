@@ -21,7 +21,11 @@ data class PosterCardStyle(
     val widthDp: Int = 126,
     val cornerRadiusDp: Int = 12,
     val isLandscape: Boolean = false,
-    val hideLabels: Boolean = false
+    val hideLabels: Boolean = false,
+    val alwaysShowLandscapeClearlogo: Boolean = true,
+    val cardDepthEnabled: Boolean = true,
+    val cardDepthEdgeStrength: Int = 50,
+    val cardDepthSheenStrength: Int = 35
 )
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
@@ -85,6 +89,10 @@ class PreferenceManager(private val context: Context) {
         val POSTER_CORNER_RADIUS_DP = intPreferencesKey("poster_card_corner_radius_dp")
         val POSTER_LANDSCAPE = booleanPreferencesKey("poster_card_landscape")
         val POSTER_HIDE_LABELS = booleanPreferencesKey("poster_card_hide_labels")
+        val POSTER_ALWAYS_LANDSCAPE_CLEARLOGO = booleanPreferencesKey("poster_always_landscape_clearlogo")
+        val POSTER_CARD_DEPTH_ENABLED = booleanPreferencesKey("poster_card_depth_enabled")
+        val POSTER_CARD_DEPTH_EDGE_STRENGTH = intPreferencesKey("poster_card_depth_edge_strength")
+        val POSTER_CARD_DEPTH_SHEEN_STRENGTH = intPreferencesKey("poster_card_depth_sheen_strength")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -230,7 +238,11 @@ class PreferenceManager(private val context: Context) {
                 widthDp = prefs[PreferencesKeys.POSTER_WIDTH_DP] ?: 126,
                 cornerRadiusDp = prefs[PreferencesKeys.POSTER_CORNER_RADIUS_DP] ?: 12,
                 isLandscape = prefs[PreferencesKeys.POSTER_LANDSCAPE] ?: false,
-                hideLabels = prefs[PreferencesKeys.POSTER_HIDE_LABELS] ?: false
+                hideLabels = prefs[PreferencesKeys.POSTER_HIDE_LABELS] ?: false,
+                alwaysShowLandscapeClearlogo = prefs[PreferencesKeys.POSTER_ALWAYS_LANDSCAPE_CLEARLOGO] ?: true,
+                cardDepthEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_ENABLED] ?: true,
+                cardDepthEdgeStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH] ?: 50,
+                cardDepthSheenStrength = prefs[PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH] ?: 35
             )
         }
 
@@ -250,12 +262,31 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.POSTER_HIDE_LABELS] = hide }
     }
 
+    suspend fun updateAlwaysShowLandscapeClearlogo(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_ALWAYS_LANDSCAPE_CLEARLOGO] = enabled }
+    }
+
+    suspend fun updateCardDepthEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_CARD_DEPTH_ENABLED] = enabled }
+    }
+
+    suspend fun updateCardDepthSettings(edgeStrength: Int, sheenStrength: Int) {
+        context.dataStore.edit {
+            it[PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH] = edgeStrength
+            it[PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH] = sheenStrength
+        }
+    }
+
     suspend fun resetPosterStyle() {
         context.dataStore.edit {
             it.remove(PreferencesKeys.POSTER_WIDTH_DP)
             it.remove(PreferencesKeys.POSTER_CORNER_RADIUS_DP)
             it.remove(PreferencesKeys.POSTER_LANDSCAPE)
             it.remove(PreferencesKeys.POSTER_HIDE_LABELS)
+            it.remove(PreferencesKeys.POSTER_ALWAYS_LANDSCAPE_CLEARLOGO)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_ENABLED)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_EDGE_STRENGTH)
+            it.remove(PreferencesKeys.POSTER_CARD_DEPTH_SHEEN_STRENGTH)
         }
     }
 

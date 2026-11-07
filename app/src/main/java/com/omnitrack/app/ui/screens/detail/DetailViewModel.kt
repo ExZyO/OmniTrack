@@ -89,13 +89,20 @@ class DetailViewModel(
             if (ephemeral != null) {
                 _previewItem.value = ephemeral
                 loadRecommendationsAndReviews(ephemeral)
+                maybeEnrich(ephemeral)
             }
         }
     }
 
     private fun maybeEnrich(item: MediaItemEntity, force: Boolean = false) {
         val hasStaleRatings = item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null)
-        if (!force && !hasStaleRatings && !enrichedIds.add(item.id)) return
+        val needsEnrichment = force ||
+            item.releaseYear == null ||
+            item.contentRating == null ||
+            item.runtimeMinutes == null ||
+            item.traktScore == null ||
+            hasStaleRatings
+        if (!needsEnrichment && !enrichedIds.add(item.id)) return
         enrichedIds.add(item.id)
         viewModelScope.launch(Dispatchers.IO) {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
@@ -124,7 +131,11 @@ class DetailViewModel(
                 airStatus = enrichment.airStatus ?: item.airStatus,
                 totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
             )
-            repository.updateMedia(updated)
+            if (item.id > 0) {
+                repository.updateMedia(updated)
+            } else {
+                _previewItem.value = updated
+            }
             if (enrichment.videos.isNotEmpty()) {
                 _trailers.value = enrichment.videos
             }
@@ -475,11 +486,12 @@ class DetailViewModel(
                                         revs.add(
                                             CommunityReview(
                                                 author = authorName,
+                                                username = userObj?.get("username")?.jsonPrimitive?.content,
                                                 source = "Trakt",
                                                 rating = userRating,
                                                 comment = sanitized,
                                                 date = date,
-                                                hasSpoiler = spoiler,
+                                                hasSpoiler = spoiler || commentText.contains("[spoiler]", ignoreCase = true),
                                                 isReview = reviewFlag,
                                                 likes = likes
                                             )
@@ -512,6 +524,7 @@ class DetailViewModel(
                                             revs.add(
                                                 CommunityReview(
                                                     author = author,
+                                                    username = obj["author_details"]?.jsonObject?.get("username")?.jsonPrimitive?.content,
                                                     source = "TMDb Community",
                                                     rating = rating,
                                                     comment = sanitizeCommunityComment(content),
@@ -574,6 +587,10 @@ class DetailViewModel(
                                             body
                                             score
                                         }
+                                    }
+                                    trailer {
+                                        id
+                                        site
                                     }
                                 }
                             }
@@ -645,6 +662,14 @@ class DetailViewModel(
                                         }
                                     }
 
+                                    // AniList Trailer
+                                    val trailerObj = mediaObj?.get("trailer")?.jsonObject
+                                    val tId = trailerObj?.get("id")?.jsonPrimitive?.content
+                                    val tSite = trailerObj?.get("site")?.jsonPrimitive?.content
+                                    if (tSite.equals("youtube", ignoreCase = true) && !tId.isNullOrBlank()) {
+                                        trailerList.add(MediaTrailer(title = "Official Anime Trailer", youtubeKey = tId, type = "Trailers"))
+                                    }
+
                                     // AniList Reviews
                                     val reviewNodes = mediaObj?.get("reviews")?.jsonObject?.get("nodes")?.jsonArray
                                     if (reviewNodes != null) {
@@ -659,9 +684,10 @@ class DetailViewModel(
                                                 revs.add(
                                                     CommunityReview(
                                                         author = author,
+                                                        username = author,
                                                         source = "AniList",
                                                         rating = score,
-                                                        comment = text.replace(Regex("<[^>]*>"), ""),
+                                                        comment = sanitizeCommunityComment(text),
                                                         isReview = true
                                                     )
                                                 )
@@ -989,7 +1015,6 @@ class DetailViewModel(
 
 fun sanitizeCommunityComment(raw: String): String {
     return raw
-        .replace(Regex("""(?is)\[spoiler\].*?\[/spoiler\]"""), "")
         .replace(Regex("""(?i)\[/?spoiler\]"""), "")
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
         .replace(Regex("""<[^>]*>"""), "")

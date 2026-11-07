@@ -1307,10 +1307,15 @@ private fun ManualTokenTrackerCard(
                 Spacer(modifier = Modifier.width(8.dp))
             }
 
-            val isSaved = hasJustSaved || (initialToken.isNotBlank() && textValue.trim() == initialToken.trim()) || (verificationState is VerificationState.Verified && (initialToken.isBlank() || textValue.trim() == initialToken.trim()))
+            val isVerified = verificationState is VerificationState.Verified
+            val isSaved = hasJustSaved ||
+                (initialToken.isNotBlank() && (textValue.trim() == initialToken.trim() || textValue.isBlank())) ||
+                (isVerified && (initialToken.isNotBlank() || hasJustSaved || textValue.trim() == initialToken.trim()))
+
             Button(
                 onClick = {
                     hasJustSaved = true
+                    textValue = textValue.trim()
                     onSave(textValue.trim())
                 },
                 enabled = !isSaved && textValue.isNotBlank(),

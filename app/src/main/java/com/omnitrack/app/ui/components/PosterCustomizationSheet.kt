@@ -189,6 +189,10 @@ fun PosterCustomizationSheet(
                         .aspectRatio(if (style.isLandscape) 16f / 9f else 0.68f)
                         .shadow(12.dp, RoundedCornerShape(previewCornerRadius))
                         .clip(RoundedCornerShape(previewCornerRadius))
+                        .glassCardDepth(
+                            shape = RoundedCornerShape(previewCornerRadius),
+                            enabled = style.cardDepthEnabled
+                        )
                         .background(
                             Brush.linearGradient(
                                 colors = listOf(
@@ -419,6 +423,78 @@ fun PosterCustomizationSheet(
                     Switch(
                         checked = style.hideLabels,
                         onCheckedChange = { scope.launch { preferenceManager.updatePosterHideLabels(it) } },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = AmoledBlack,
+                            checkedTrackColor = AccentJade
+                        )
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                // Always Backdrop with Logo in Landscape
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Always Backdrop with Title Logo",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Overlay transparent clearart title logos on landscape 16:9 cards",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                    Switch(
+                        checked = style.alwaysShowLandscapeClearlogo,
+                        onCheckedChange = { scope.launch { preferenceManager.updateAlwaysShowLandscapeClearlogo(it) } },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = AmoledBlack,
+                            checkedTrackColor = AccentJade
+                        )
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+
+                // Card Depth Effect
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Card Depth & Specular Top Sheen",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "1dp specular edge light gradient and curved glass top-sheen reflection",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                    }
+                    Switch(
+                        checked = style.cardDepthEnabled,
+                        onCheckedChange = { scope.launch { preferenceManager.updateCardDepthEnabled(it) } },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = AmoledBlack,
                             checkedTrackColor = AccentJade

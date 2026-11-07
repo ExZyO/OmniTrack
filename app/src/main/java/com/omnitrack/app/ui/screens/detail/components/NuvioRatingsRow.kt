@@ -173,16 +173,17 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 7. AniList Community Score
+        // 7. AniList Community Score (% scale, e.g. 84%)
         if (item.anilistId != null || (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL)) {
             item.communityScore?.let { score ->
                 if (score > 0) {
+                    val aniVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
                     list.add(
                         RatingBadgeData(
                             source = "anilist",
                             displayName = "AniList",
                             iconRes = R.drawable.brand_anilist,
-                            valueText = "${score.roundToInt()}%",
+                            valueText = "$aniVal%",
                             valueColor = Color(0xFF02A9FF)
                         )
                     )
@@ -190,8 +191,8 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 8. MyAnimeList Score
-        if (item.malId != null) {
+        // 8. MyAnimeList Score (10-point scale, e.g. 8.5)
+        if (item.malId != null && item.anilistId == null) {
             item.communityScore?.let { score ->
                 if (score > 0) {
                     val malVal = if (score > 10f) score / 10.0 else score.toDouble()
@@ -208,16 +209,35 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 9. Steam Positive % (Games)
+        // 9. Bangumi Score (10-point scale, e.g. 8.2)
+        if (item.bangumiId != null && item.anilistId == null && item.malId == null) {
+            item.communityScore?.let { score ->
+                if (score > 0) {
+                    val bgmVal = if (score > 10f) score / 10.0 else score.toDouble()
+                    list.add(
+                        RatingBadgeData(
+                            source = "bangumi",
+                            displayName = "Bangumi",
+                            iconRes = R.drawable.brand_bangumi,
+                            valueText = formatOneDecimal(bgmVal),
+                            valueColor = Color(0xFFF09199)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 10. Steam Positive % (Games, e.g. 94%)
         if (item.mediaType == MediaType.GAME) {
             item.communityScore?.let { score ->
                 if (score > 0) {
+                    val steamVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
                     list.add(
                         RatingBadgeData(
                             source = "steam",
                             displayName = "Steam",
                             iconRes = R.drawable.brand_steam,
-                            valueText = "${score.roundToInt()}%",
+                            valueText = "$steamVal%",
                             valueColor = Color(0xFF66C0F4)
                         )
                     )
@@ -225,7 +245,7 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 10. VNDB Rating (Visual Novels)
+        // 11. VNDB Rating (Visual Novels, e.g. 8.5)
         if (item.mediaType == MediaType.VISUAL_NOVEL) {
             item.communityScore?.let { score ->
                 if (score > 0) {

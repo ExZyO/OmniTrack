@@ -1,18 +1,9 @@
 package com.omnitrack.app.ui.screens.detail.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,9 +12,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,391 +24,335 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
-import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
+/**
+ * 1:1 Nuvio-Style Community Review Detail Sheet:
+ * Top header with author display name & @username on the left, bilateral circular (< / >) pagination controls
+ * on the right. Fluid 120Hz HorizontalPager for native left/right swipe gestures with page translations,
+ * official green REVIEW badge (#1B3D2F / #00E054), warning-masked spoiler protection, and bottom metadata row.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CommentDetailSheet(
-    review: CommunityReview,
-    currentIndex: Int,
-    totalCount: Int,
-    canGoBack: Boolean,
-    canGoForward: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
+    reviews: List<CommunityReview>,
+    initialIndex: Int = 0,
     onDismiss: () -> Unit
 ) {
+    if (reviews.isEmpty()) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-
-    LaunchedEffect(review.author) {
-        scrollState.scrollTo(0)
-    }
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex.coerceIn(reviews.indices),
+        pageCount = { reviews.size }
+    )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = AmoledBlack,
-        dragHandle = null
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 10.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.2f))
+            )
+        }
     ) {
-        var totalDrag by remember { mutableStateOf(0f) }
-
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(review, canGoBack, canGoForward) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { totalDrag = 0f },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            totalDrag += dragAmount
-                        },
-                        onDragEnd = {
-                            if (totalDrag < -60f && canGoForward) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onNext()
-                            } else if (totalDrag > 60f && canGoBack) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onPrevious()
-                            }
-                        }
-                    )
-                }
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header Row: Top Bar with stationary Close Button
+            val currentReview = reviews[pagerState.currentPage]
+            val canGoBack = pagerState.currentPage > 0
+            val canGoForward = pagerState.currentPage < reviews.size - 1
+
+            // 1:1 Nuvio Header: Author name + @username on the left, Bilateral Circle Buttons on the right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Review & Discussion",
-                    color = TextPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = currentReview.author,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val handle = currentReview.username?.let { "@$it" } ?: "@${currentReview.source.replace(" ", "")}"
+                    Text(
+                        text = handle,
+                        fontSize = 12.sp,
+                        color = TextMuted
+                    )
+                }
 
-                IconButton(onClick = onDismiss) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
+                // Bilateral Navigation Controls (Circle <, Index / Total, Circle >)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (canGoBack) Color.White.copy(alpha = 0.12f)
+                                else Color.White.copy(alpha = 0.04f)
+                            )
+                            .then(
+                                if (canGoBack) {
+                                    Modifier.clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                        }
+                                    }
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                            contentDescription = "Previous Review",
+                            tint = if (canGoBack) Color.White else Color.White.copy(alpha = 0.25f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${reviews.size}",
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextMuted
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (canGoForward) Color.White.copy(alpha = 0.12f)
+                                else Color.White.copy(alpha = 0.04f)
+                            )
+                            .then(
+                                if (canGoForward) {
+                                    Modifier.clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                        }
+                                    }
+                                } else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                            contentDescription = "Next Review",
+                            tint = if (canGoForward) Color.White else Color.White.copy(alpha = 0.25f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
-            // Animated Review Body with bilateral slide transitions
-            AnimatedContent(
-                targetState = currentIndex to review,
-                transitionSpec = {
-                    if (targetState.first > initialState.first) {
-                        (slideInHorizontally(animationSpec = tween(280)) { width -> width / 3 } + fadeIn(animationSpec = tween(280)))
-                            .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { width -> -width / 3 } + fadeOut(animationSpec = tween(280)))
-                    } else {
-                        (slideInHorizontally(animationSpec = tween(280)) { width -> -width / 3 } + fadeIn(animationSpec = tween(280)))
-                            .togetherWith(slideOutHorizontally(animationSpec = tween(280)) { width -> width / 3 } + fadeOut(animationSpec = tween(280)))
-                    }
-                },
-                label = "ReviewSlideAnimation"
-            ) { (_, currentReview) ->
-                var currentSpoilerRevealed by rememberSaveable(currentReview.author + currentReview.comment.take(20)) {
-                    mutableStateOf(!currentReview.hasSpoiler)
+            // HorizontalPager for 120Hz smooth finger swipe gestures across all reviews
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxWidth()
+            ) { page ->
+                val review = reviews[page]
+                val scrollState = rememberScrollState()
+                var isSpoilerRevealed by rememberSaveable(review.author + review.comment.take(15)) {
+                    mutableStateOf(!review.hasSpoiler)
                 }
+                val isSpoilerHidden = review.hasSpoiler && !isSpoilerRevealed
 
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = 0.9f,
+                                stiffness = 500f
+                            )
+                        )
                 ) {
-                    // Author Row
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
+                    // 1:1 Nuvio REVIEW Badge
+                    if (review.isReview) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(AccentArctic.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color(0xFF1B3D2F))
+                                .padding(horizontal = 12.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = currentReview.author.take(1).uppercase(),
-                                color = AccentArctic,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "REVIEW",
+                                color = Color(0xFF00E054),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
                             )
                         }
-
-                        Column {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text(
-                                    text = currentReview.author,
-                                    color = TextPrimary,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (currentReview.isReview) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(AccentJade.copy(alpha = 0.15f))
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(
-                                            text = "REVIEW",
-                                            color = AccentJade,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-
-                            Text(
-                                text = currentReview.source + (currentReview.date?.let { " • $it" } ?: ""),
-                                color = TextMuted,
-                                fontSize = 11.5.sp
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
-                    // Rating & Likes Bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (currentReview.isReview) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFF1B3D2F))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "REVIEW",
-                                    color = Color(0xFF00E054),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-                        }
-
-                        if (currentReview.rating != null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(AccentGold.copy(alpha = 0.15f))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
-                                Text(
-                                    text = "${currentReview.rating.toInt()}/10",
-                                    color = AccentGold,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        if (currentReview.likes > 0) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(12.dp))
-                                Text(
-                                    text = "${currentReview.likes}",
-                                    color = Color(0xFFEF4444),
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        if (currentReview.hasSpoiler) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
-                                    .padding(horizontal = 9.dp, vertical = 4.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
-                                Text(
-                                    text = "Spoiler",
-                                    color = Color(0xFFF59E0B),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // Comment Body (with clean formatting and spoiler reveal)
-                    Box(
+                    // Vertically scrollable review body
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 380.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFF121212).copy(alpha = 0.75f))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                            .padding(16.dp)
+                            .heightIn(min = 120.dp, max = 400.dp)
                             .verticalScroll(scrollState)
                     ) {
-                        if (currentReview.hasSpoiler && !currentSpoilerRevealed) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                        if (isSpoilerHidden) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        isSpoilerRevealed = true
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 14.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Warning,
                                     contentDescription = null,
                                     tint = Color(0xFFF59E0B),
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                                 Text(
-                                    text = "This review contains spoiler content.",
-                                    color = TextSecondary,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium
+                                    text = "This review contains spoilers. Tap to reveal.",
+                                    color = Color(0xFFF59E0B),
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
-                                Button(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        currentSpoilerRevealed = true
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF59E0B)),
-                                    shape = RoundedCornerShape(999.dp)
-                                ) {
-                                    Text("Reveal Spoiler", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                }
                             }
                         } else {
                             Text(
-                                text = currentReview.comment.replace(Regex("\\[/?spoiler\\]", RegexOption.IGNORE_CASE), ""),
-                                color = TextPrimary,
-                                fontSize = 13.5.sp,
-                                lineHeight = 22.sp,
-                                fontWeight = FontWeight.Normal
+                                text = review.comment,
+                                style = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 14.5.sp,
+                                    lineHeight = 23.sp,
+                                    color = TextPrimary
+                                )
                             )
                         }
                     }
-                }
-            }
 
-            // Pagination Footer (Previous / Next)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(enabled = canGoBack) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onPrevious()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 1:1 Nuvio Footer Row: Rating & Likes on the Left, Date on the Right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            review.rating?.let { rating ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(AccentGold.copy(alpha = 0.15f))
+                                        .padding(horizontal = 9.dp, vertical = 3.5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = AccentGold,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "${rating.toInt()}/10",
+                                        color = AccentGold,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            if (review.likes > 0) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        tint = Color(0xFFED1C24).copy(alpha = 0.85f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "${review.likes} likes",
+                                        color = TextMuted,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = review.source,
+                                color = TextMuted.copy(alpha = 0.7f),
+                                fontSize = 11.5.sp
+                            )
                         }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
-                        contentDescription = "Previous",
-                        tint = if (canGoBack) TextPrimary else TextMuted.copy(alpha = 0.3f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "Previous",
-                        color = if (canGoBack) TextPrimary else TextMuted.copy(alpha = 0.3f),
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
 
-                Text(
-                    text = "${currentIndex + 1} / $totalCount",
-                    color = TextMuted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(enabled = canGoForward) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onNext()
+                        review.date?.let { date ->
+                            Text(
+                                text = date,
+                                fontSize = 11.5.sp,
+                                color = TextMuted
+                            )
                         }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = "Next",
-                        color = if (canGoForward) TextPrimary else TextMuted.copy(alpha = 0.3f),
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = "Next",
-                        tint = if (canGoForward) TextPrimary else TextMuted.copy(alpha = 0.3f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                    }
                 }
             }
         }

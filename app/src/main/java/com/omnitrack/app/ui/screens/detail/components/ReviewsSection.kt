@@ -53,7 +53,8 @@ data class CommunityReview(
     val hasSpoiler: Boolean = false,
     val isReview: Boolean = false,
     val likes: Int = 0,
-    val userAvatarUrl: String? = null
+    val userAvatarUrl: String? = null,
+    val username: String? = null
 )
 
 /**
@@ -291,15 +292,9 @@ fun ReviewsSection(
     }
 
     if (selectedIndex in reviews.indices) {
-        val currentReview = reviews[selectedIndex]
         CommentDetailSheet(
-            review = currentReview,
-            currentIndex = selectedIndex,
-            totalCount = reviews.size,
-            canGoBack = selectedIndex > 0,
-            canGoForward = selectedIndex < reviews.size - 1,
-            onPrevious = { if (selectedIndex > 0) selectedIndex-- },
-            onNext = { if (selectedIndex < reviews.size - 1) selectedIndex++ },
+            reviews = reviews,
+            initialIndex = selectedIndex,
             onDismiss = { selectedIndex = -1 }
         )
     }

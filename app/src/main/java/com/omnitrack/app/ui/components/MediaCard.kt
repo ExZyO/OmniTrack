@@ -68,6 +68,7 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     nativeTitle = nativeTitle,
     coverUrl = coverUrl,
     bannerUrl = bannerUrl,
+    clearartUrl = clearartUrl,
     mediaType = mediaType,
     status = status,
     currentProgress = currentProgress,
@@ -76,6 +77,7 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     customCoverPath = customCoverPath,
     customBannerPath = customBannerPath,
     artworkRole = artworkRole,
+    communityScore = communityScore,
     lastUpdated = lastUpdated
 )
 
@@ -88,6 +90,7 @@ fun MediaCard(
     cornerRadiusDp: Int = 12,
     isLandscape: Boolean = false,
     hideLabels: Boolean = false,
+    cardDepthEnabled: Boolean = true,
     badgeText: String? = null,
     badgeColor: Color = AccentArctic
 ) {
@@ -98,13 +101,25 @@ fun MediaCard(
     val context = androidx.compose.ui.platform.LocalContext.current
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
 
-    // Zero-syscall model: customCoverPath is timestamped on write, avoiding disk stat() on 120Hz scroll
-    val coverModel = remember(item.customCoverPath, item.coverUrl) {
-        item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+    // In landscape mode, prioritize bannerUrl (16:9 backdrop) over portrait cover
+    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.customCoverPath, item.coverUrl) {
+        if (isLandscape) {
+            item.customBannerPath?.let { java.io.File(it) }
+                ?: (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
+        } else {
+            item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+        }
     }
 
     val isInitiallyInLibrary = badgeText == "IN LIBRARY" || (item.id != 0L && badgeText != null)
     var isAddedToLibrary by remember(item.id, badgeText) { mutableStateOf(isInitiallyInLibrary) }
+    val isDiscoverAdd = !isInitiallyInLibrary
+
+    val pillBg by androidx.compose.animation.animateColorAsState(
+        targetValue = if (isAddedToLibrary && isDiscoverAdd) Color(0xFF1B3D2F) else AmoledBlack.copy(alpha = 0.75f),
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 250),
+        label = "pillBgColor"
+    )
 
     val shape = RoundedCornerShape(cornerRadiusDp.dp)
 
@@ -121,31 +136,66 @@ fun MediaCard(
             ),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Full-bleed Poster Container with dynamic shadow
+        // Full-bleed Poster Container with dynamic shadow and Specular Glass Card Depth
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (isLandscape) 16f / 9f else 0.68f)
                 .shadow(10.dp, shape)
                 .clip(shape)
+                .glassCardDepth(shape = shape, enabled = cardDepthEnabled)
         ) {
             AsyncImage(
-                model = coverModel,
+                model = activeModel,
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 onSuccess = {
-                    if (coverModel is String && coverCache != null) {
+                    if (activeModel is String && coverCache != null) {
                         val diskCache = coil3.SingletonImageLoader.get(context).diskCache
                         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            coverCache.promoteFromDiskCache(coverModel, diskCache)
+                            coverCache.promoteFromDiskCache(activeModel, diskCache)
                         }
                     }
                 }
             )
 
+            // Landscape transparent title logo overlay (1:1 with Nuvio)
+            if (isLandscape && !item.clearartUrl.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colorStops = arrayOf(
+                                    0.0f to Color.Transparent,
+                                    0.45f to Color.Transparent,
+                                    1.0f to Color.Black.copy(alpha = 0.80f)
+                                )
+                            )
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                ) {
+                    AsyncImage(
+                        model = item.clearartUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier
+                            .fillMaxWidth(0.65f)
+                            .height(34.dp),
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.BottomStart
+                    )
+                }
+            }
+
             // Optional Top-Start Badge (e.g. Discover source provider)
-            if (badgeText != null) {
+            val currentBadgeText = if (isAddedToLibrary && isDiscoverAdd) "IN LIBRARY" else badgeText
+            val currentBadgeColor = if (isAddedToLibrary && isDiscoverAdd) AccentJade else badgeColor
+            if (currentBadgeText != null) {
                 Box(
                     modifier = Modifier
                         .padding(6.dp)
@@ -155,10 +205,10 @@ fun MediaCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = badgeText.uppercase(),
+                        text = currentBadgeText.uppercase(),
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = badgeColor
+                        color = currentBadgeColor
                     )
                 }
             }
@@ -198,16 +248,19 @@ fun MediaCard(
                     .padding(6.dp)
                     .size(28.dp)
                     .clip(CircleShape)
-                    .background(AmoledBlack.copy(alpha = 0.75f))
+                    .background(pillBg)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {
-                            isAddedToLibrary = true
-                            scope.launch {
+                            if (isDiscoverAdd) {
+                                isAddedToLibrary = true
+                            } else {
                                 showPlusOne = true
+                            }
+                            scope.launch {
                                 bounceScale.animateTo(
-                                    targetValue = 0.94f,
+                                    targetValue = 0.92f,
                                     animationSpec = spring(
                                         dampingRatio = Spring.DampingRatioMediumBouncy,
                                         stiffness = Spring.StiffnessLow
@@ -238,13 +291,13 @@ fun MediaCard(
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = "In Library",
-                            tint = AccentJade,
+                            tint = Color(0xFF00E054),
                             modifier = Modifier.size(16.dp)
                         )
                     } else {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = "+1 Progress",
+                            contentDescription = if (isDiscoverAdd) "Add to Library" else "+1 Progress",
                             tint = AccentJade,
                             modifier = Modifier.size(16.dp)
                         )
