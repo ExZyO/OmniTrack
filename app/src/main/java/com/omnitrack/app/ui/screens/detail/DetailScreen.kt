@@ -159,7 +159,7 @@ fun DetailScreen(
     BackHandler(enabled = selectedCompany != null) {
         selectedCompany = null
     }
-    BackHandler(enabled = (uiState.isPreviewMode || mediaId == -1L) && selectedPerson == null && selectedCompany == null) {
+    BackHandler(enabled = (uiState.isPreviewMode || item?.id == -1L) && selectedPerson == null && selectedCompany == null) {
         viewModel.closePreview()
         onBack()
     }
@@ -897,12 +897,10 @@ fun DetailScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (uiState.isPreviewMode || mediaId == -1L) {
+                        if (uiState.isPreviewMode || item?.id == -1L) {
                             viewModel.closePreview()
-                            onBack()
-                        } else {
-                            onBack()
                         }
+                        onBack()
                     },
                     modifier = Modifier.size(44.dp)
                 ) {
