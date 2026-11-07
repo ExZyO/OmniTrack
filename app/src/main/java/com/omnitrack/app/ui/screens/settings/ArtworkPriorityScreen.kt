@@ -441,7 +441,7 @@ private fun CategoryWaterfallList(
                 else -> "#${idx + 1}"
             }
 
-            val itemModifier = if (isDragging) {
+            val itemModifier = if (isDragging || (!dragDropState.isDragging && !dragDropState.isSettling)) {
                 Modifier
             } else {
                 Modifier.animateItem(

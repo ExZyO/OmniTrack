@@ -81,28 +81,45 @@ object MockData {
 
         // ── Novels ──
         MediaItemEntity(
+            title = "Omniscient Reader's Viewpoint",
+            nativeTitle = "전지적 독자 시점",
+            synopsis = "Kim Dokja was an average office worker whose sole hobby was reading his favorite web novel 'Three Ways to Survive the Apocalypse'. But when the novel suddenly becomes reality, he is the only person who knows how the world will end.",
+            coverUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx119787-8t7bT4VfW4uN.jpg",
+            bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/banner/119787-tO7B2cHQM9Fp.jpg",
+            mediaType = MediaType.NOVEL,
+            status = TrackingStatus.IN_PROGRESS,
+            currentProgress = 188.0,
+            totalProgress = 551.0,
+            userRating = 9.9f,
+            bangumiId = 295483,
+            categoryNames = "Favorites"
+        ),
+        MediaItemEntity(
+            title = "Lord of the Mysteries",
+            nativeTitle = "诡秘之主",
+            synopsis = "Waking up in a Victorian steampunk world intertwined with eldritch horrors, Klein Moretti consumes mysterious potions to ascend the sequences of the gods.",
+            coverUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx110682-1Fq8h3KzJ5mZ.jpg",
+            bannerUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/banner/110682-XnQ75e2N3M3h.jpg",
+            mediaType = MediaType.NOVEL,
+            status = TrackingStatus.COMPLETED,
+            currentProgress = 1432.0,
+            totalProgress = 1432.0,
+            userRating = 9.7f,
+            bangumiId = 243916,
+            categoryNames = "Favorites"
+        ),
+        MediaItemEntity(
             title = "Reverend Insanity",
             nativeTitle = "蛊真人",
-            synopsis = "A story about a demonic cultivator who is reborn 500 years into the past.",
+            synopsis = "A ruthless demonic cultivator uses the Spring Autumn Cicada to rebirth 500 years into the past, navigating a brutal world governed by Gu insects in relentless pursuit of eternal life.",
             coverUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx108506-F8UoU9u1L7Z2.jpg",
             mediaType = MediaType.NOVEL,
             status = TrackingStatus.IN_PROGRESS,
             currentProgress = 845.0,
             totalProgress = 2334.0,
             userRating = 9.8f,
+            bangumiId = 228966,
             categoryNames = "Cultivation"
-        ),
-        MediaItemEntity(
-            title = "Lord of the Mysteries",
-            nativeTitle = "诡秘之主",
-            synopsis = "Waking up in a mysterious world, Klein Moretti finds himself in the body of a young man.",
-            coverUrl = "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx110682-1Fq8h3KzJ5mZ.jpg",
-            mediaType = MediaType.NOVEL,
-            status = TrackingStatus.COMPLETED,
-            currentProgress = 1432.0,
-            totalProgress = 1432.0,
-            userRating = 9.7f,
-            categoryNames = "Favorites"
         ),
 
         // ── Shows ──
@@ -208,7 +225,7 @@ object MockData {
         ),
         MediaItemEntity(
             title = "Baldur's Gate 3",
-            synopsis = "Gather your party and return to the Forgotten Realms.",
+            synopsis = "Gather your party and return to the Forgotten Realms in a tale of fellowship and betrayal, sacrifice and survival, and the lure of absolute power.",
             coverUrl = "https://images.igdb.com/igdb/image/upload/t_cover_big/co670h.jpg",
             mediaType = MediaType.GAME,
             status = TrackingStatus.IN_PROGRESS,
@@ -216,7 +233,7 @@ object MockData {
             totalProgress = null,
             userRating = 9.3f,
             platform = "PC",
-            igdbId = 119171
+            igdbId = 26955
         ),
     )
 }

@@ -79,7 +79,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.ArtworkCandidate
 import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
-import com.omnitrack.app.data.artwork.CoverStore
+import com.omnitrack.app.data.cache.CoverCache
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
@@ -114,7 +114,7 @@ fun ArtworkPickerBottomSheet(
     var isLoading by remember { mutableStateOf(false) }
     var customUrlInput by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
-    val coverStore = remember { CoverStore(context) }
+    val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
     // Activity result launcher for picking image from device gallery
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -122,7 +122,7 @@ fun ArtworkPickerBottomSheet(
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
-                val savedPath = coverStore.saveCustomCover(mediaId, uri)
+                val savedPath = coverCache.saveCustomCoverUri(mediaId, uri)
                 if (savedPath != null) {
                     onCoverSelected(savedPath)
                 } else {

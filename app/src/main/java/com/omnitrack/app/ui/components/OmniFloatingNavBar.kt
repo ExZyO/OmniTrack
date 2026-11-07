@@ -177,7 +177,7 @@ fun OmniFloatingNavBar(
     )
 
     val pillHeight by animateDpAsState(
-        targetValue = 54.dp,
+        targetValue = 62.dp,
         label = "nav_pill_height"
     )
 
@@ -218,13 +218,12 @@ fun OmniFloatingNavBar(
         ) {
             GlassBarSurface(hazeState = hazeState, modifier = Modifier.matchParentSize())
             Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 items.forEachIndexed { index, destination ->
                     val isSelected = destination == selectedDestination
-                    val showLabel = isSelected && labelFraction > 0.5f
 
                     val iconTint by animateColorAsState(
                         targetValue = if (isSelected) AccentArctic else TextMuted,
@@ -236,18 +235,10 @@ fun OmniFloatingNavBar(
                         label = "pillBg"
                     )
 
-                    Row(
+                    Column(
                         modifier = Modifier
-                            .height(44.dp)
-                            .graphicsLayer {
-                                if (isSelected) {
-                                    val scale = motion.frame.contentScale
-                                    scaleX = scale * motion.frame.pillScaleX
-                                    scaleY = scale * motion.frame.pillScaleY
-                                }
-                            }
-                            .clip(CircleShape)
-                            .background(pillBg)
+                            .width(64.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
@@ -270,28 +261,42 @@ fun OmniFloatingNavBar(
                                     }
                                 }
                             )
-                            .padding(horizontal = if (showLabel) 14.dp else 12.dp)
-                            .animateContentSize(animationSpec = spring(stiffness = 400f)),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            .padding(vertical = 3.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
-                            contentDescription = destination.title,
-                            tint = iconTint,
-                            modifier = Modifier.size(20.dp)
-                        )
-
-                        // Only the active tab expands its label when dock is expanded
-                        if (showLabel) {
-                            Text(
-                                text = destination.title,
-                                color = AccentArctic,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp, 28.dp)
+                                .graphicsLayer {
+                                    if (isSelected) {
+                                        val scale = motion.frame.contentScale
+                                        scaleX = scale * motion.frame.pillScaleX
+                                        scaleY = scale * motion.frame.pillScaleY
+                                    }
+                                }
+                                .clip(CircleShape)
+                                .background(pillBg),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
+                                contentDescription = destination.title,
+                                tint = iconTint,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = destination.title,
+                            color = if (isSelected) AccentArctic else TextMuted,
+                            fontSize = 10.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            letterSpacing = (-0.2).sp
+                        )
                     }
                 }
             }

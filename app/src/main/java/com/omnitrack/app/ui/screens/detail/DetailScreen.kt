@@ -64,6 +64,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -138,15 +139,30 @@ fun DetailScreen(
         label = "verticalDismiss"
     )
 
+    var isPullDownArmed by remember { mutableStateOf(false) }
+
     val nestedScrollConnection = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(
+                available: Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+            ): Offset {
+                // Arm pull-down ONLY when pointer gesture begins while scrollState is strictly at 0
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && scrollState.value == 0 && dragOffsetY == 0f && available.y > 0) {
+                    isPullDownArmed = true
+                } else if (scrollState.value > 0) {
+                    isPullDownArmed = false
+                }
+                return Offset.Zero
+            }
+
             override fun onPostScroll(
                 consumed: Offset,
                 available: Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
             ): Offset {
-                // When pulling down at the very top of the screen (scrollState == 0)
-                if (available.y > 0 && scrollState.value == 0) {
+                // Only accumulate dismiss drag if the gesture began at scrollState == 0
+                if (isPullDownArmed && available.y > 0 && scrollState.value == 0) {
                     dragOffsetY += available.y * 0.5f
                     return Offset(0f, available.y)
                 }
@@ -154,11 +170,11 @@ fun DetailScreen(
             }
 
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
-                if (dragOffsetY > 160f) {
-                    dragOffsetY = 0f
+                val shouldDismiss = isPullDownArmed && dragOffsetY > 160f
+                isPullDownArmed = false
+                dragOffsetY = 0f
+                if (shouldDismiss) {
                     onBack()
-                } else {
-                    dragOffsetY = 0f
                 }
                 return androidx.compose.ui.unit.Velocity.Zero
             }
@@ -172,6 +188,31 @@ fun DetailScreen(
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
         }
+    }
+
+    // Hero-scoped horizontal swipe modifier (isolates gestures to artwork canvas so chapter slider is never intercepted)
+    val heroSwipeModifier = Modifier.pointerInput(uiState.hasPreviousEntry, uiState.hasNextEntry) {
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                when {
+                    // Swiping right: navigate to previous sibling entry
+                    dragOffsetX > 100f && uiState.hasPreviousEntry -> {
+                        dragOffsetX = 0f
+                        viewModel.navigateToPrevious()
+                    }
+                    // Swiping left: navigate to next sibling entry
+                    dragOffsetX < -100f && uiState.hasNextEntry -> {
+                        dragOffsetX = 0f
+                        viewModel.navigateToNext()
+                    }
+                    else -> dragOffsetX = 0f
+                }
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                dragOffsetX += dragAmount
+                change.consume()
+            }
+        )
     }
 
     Box(
@@ -189,35 +230,7 @@ fun DetailScreen(
                 scaleY = scale
                 alpha = (1f - (totalOffset / 1000f * 0.35f)).coerceIn(0.65f, 1f)
             }
-            .androidx.compose.ui.input.nestedscroll.nestedScroll(nestedScrollConnection)
-            .pointerInput(uiState.hasPreviousEntry, uiState.hasNextEntry) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        when {
-                            // Swiping right: navigate to previous sibling entry
-                            dragOffsetX > 100f && uiState.hasPreviousEntry -> {
-                                dragOffsetX = 0f
-                                viewModel.navigateToPrevious()
-                            }
-                            // Swiping left: navigate to next sibling entry
-                            dragOffsetX < -100f && uiState.hasNextEntry -> {
-                                dragOffsetX = 0f
-                                viewModel.navigateToNext()
-                            }
-                            // Swiping right past threshold when at start of category: return to library
-                            dragOffsetX > 200f && !uiState.hasPreviousEntry -> {
-                                dragOffsetX = 0f
-                                onBack()
-                            }
-                            else -> dragOffsetX = 0f
-                        }
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        dragOffsetX += dragAmount
-                        change.consume()
-                    }
-                )
-            }
+            .nestedScroll(nestedScrollConnection)
     ) {
         if (uiState.isLoading || item == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -286,6 +299,7 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(350.dp)
+                            .then(heroSwipeModifier)
                     ) {
                         AsyncImage(
                             model = backdropTargetUrl,
@@ -373,6 +387,7 @@ fun DetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(350.dp)
+                            .then(heroSwipeModifier)
                     ) {
                         AsyncImage(
                             model = backdropTargetUrl,
@@ -409,7 +424,7 @@ fun DetailScreen(
                                 onSuccess = {
                                     if (coverImageModel is String && coverCache != null) {
                                         val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                             coverCache.promoteFromDiskCache(coverImageModel, diskCache)
                                         }
                                     }

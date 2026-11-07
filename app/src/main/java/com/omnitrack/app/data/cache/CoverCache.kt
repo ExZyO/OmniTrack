@@ -53,6 +53,46 @@ class CoverCache(private val context: Context) {
     }
 
     /**
+     * Imports a user-selected local image Uri via ActivityResultContracts into covers/custom/.
+     * Decodes with allowHardware=false (ARGB_8888 software bitmap) to prevent compression crashes.
+     * Cleans up previous versions and saves with a fresh timestamp for zero-syscall cache busting.
+     */
+    suspend fun saveCustomCoverUri(mediaId: Long, uri: android.net.Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            val inputStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            }
+            val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream, null, options) ?: return@withContext null
+            inputStream.close()
+
+            // Clean up previous custom cover versions
+            customCoverDir.listFiles()?.forEach { file ->
+                if (file.isFile && (file.name.startsWith("${mediaId}_") || file.name == "$mediaId.jpg")) {
+                    file.delete()
+                }
+            }
+
+            val timestampedFile = File(customCoverDir, "${mediaId}_cover_${System.currentTimeMillis()}.webp")
+            timestampedFile.parentFile?.mkdirs()
+            java.io.FileOutputStream(timestampedFile).use { out ->
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP_LOSSY, 95, out)
+                } else {
+                    @Suppress("DEPRECATION")
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP, 95, out)
+                }
+            }
+            bitmap.recycle()
+            com.omnitrack.app.util.AppLogger.i("CoverCache", "Saved custom cover for media $mediaId -> ${timestampedFile.absolutePath}")
+            timestampedFile.absolutePath
+        } catch (e: Exception) {
+            com.omnitrack.app.util.AppLogger.e("CoverCache", "Failed to save custom cover for $mediaId", e)
+            null
+        }
+    }
+
+    /**
      * Copies an input stream to a new timestamped custom cover file (${mediaId}_${timestamp}.jpg).
      * Deletes previous custom cover files for this media item so old files don't accumulate.
      */
