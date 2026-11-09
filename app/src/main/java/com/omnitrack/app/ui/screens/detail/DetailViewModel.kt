@@ -32,6 +32,7 @@ import kotlinx.coroutines.launch
 import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.CommunityReview
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
+import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -54,6 +55,7 @@ data class DetailUiState(
     val reviews: List<CommunityReview> = emptyList(),
     val cast: List<CastMember> = emptyList(),
     val trailers: List<MediaTrailer> = emptyList(),
+    val companies: List<NetworkProductionCompany> = emptyList(),
     val isPreviewMode: Boolean = false,
     val isLoading: Boolean = true,
     val hasPreviousEntry: Boolean = false,
@@ -69,7 +71,8 @@ private data class PreviewAndAux(
     val realSeasons: List<MediaSeason>,
     val realEpisodes: List<MediaEpisode>,
     val selectedSeasonNumber: Int,
-    val episodesBySeason: Map<Int, List<MediaEpisode>>
+    val episodesBySeason: Map<Int, List<MediaEpisode>>,
+    val companies: List<NetworkProductionCompany>
 )
 
 class DetailViewModel(
@@ -86,6 +89,7 @@ class DetailViewModel(
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
     private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
+    private val _companies = MutableStateFlow<List<NetworkProductionCompany>>(emptyList())
     private val _realSeasons = MutableStateFlow<List<MediaSeason>>(emptyList())
     private val _realEpisodes = MutableStateFlow<List<MediaEpisode>>(emptyList())
     private val _selectedSeasonNumber = MutableStateFlow(1)
@@ -102,6 +106,42 @@ class DetailViewModel(
                 val all = repository.getAllMedia().firstOrNull()?.map { it.id }.orEmpty()
                 if (_stableSiblingIds.value.isEmpty() && all.isNotEmpty()) {
                     _stableSiblingIds.value = all
+                }
+            }
+        }
+
+        // 0ms Synchronous Cache Hit: populate seasons and episodes at millisecond 0!
+        if (mediaId > 0L) {
+            val cachedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]
+            val cachedSeasons = SeriesContentMemoryCache.seasonsCache[mediaId]
+                ?: cachedTmdbId?.let { SeriesContentMemoryCache.seasonsCache[it] }
+            val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[mediaId]
+                ?: cachedTmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
+            if (!cachedSeasons.isNullOrEmpty()) {
+                val validSeasons = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                _realSeasons.value = validSeasons
+                if (!cachedGrouped.isNullOrEmpty()) {
+                    _episodesBySeason.value = cachedGrouped
+                    val target = validSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validSeasons.first().seasonNumber
+                    _selectedSeasonNumber.value = target
+                    _realEpisodes.value = cachedGrouped[target].orEmpty()
+                }
+            }
+        } else if (mediaId == -1L) {
+            val ephemeral = EphemeralPreviewHolder.previewItem
+            if (ephemeral != null) {
+                val tmdbId = ephemeral.tmdbId
+                val cachedSeasons = tmdbId?.let { SeriesContentMemoryCache.seasonsCache[it] }
+                val cachedGrouped = tmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
+                if (!cachedSeasons.isNullOrEmpty()) {
+                    val validSeasons = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                    _realSeasons.value = validSeasons
+                    if (!cachedGrouped.isNullOrEmpty()) {
+                        _episodesBySeason.value = cachedGrouped
+                        val target = validSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validSeasons.first().seasonNumber
+                        _selectedSeasonNumber.value = target
+                        _realEpisodes.value = cachedGrouped[target].orEmpty()
+                    }
                 }
             }
         }
@@ -214,7 +254,8 @@ class DetailViewModel(
             _realSeasons,
             _realEpisodes,
             _selectedSeasonNumber,
-            _episodesBySeason
+            _episodesBySeason,
+            _companies
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -227,7 +268,8 @@ class DetailViewModel(
             realSeasons = args[5] as List<MediaSeason>,
             realEpisodes = args[6] as List<MediaEpisode>,
             selectedSeasonNumber = args[7] as Int,
-            episodesBySeason = args[8] as Map<Int, List<MediaEpisode>>
+            episodesBySeason = args[8] as Map<Int, List<MediaEpisode>>,
+            companies = args[9] as List<NetworkProductionCompany>
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -244,6 +286,7 @@ class DetailViewModel(
                     reviews = aux.reviews,
                     cast = aux.cast,
                     trailers = aux.trailers,
+                    companies = aux.companies,
                     isPreviewMode = true,
                     isLoading = false,
                     hasPreviousEntry = false,
@@ -279,6 +322,7 @@ class DetailViewModel(
                                 trailers = if (aux.trailers.isEmpty() && currentItem.trailerYoutubeKey != null) {
                                     listOf(MediaTrailer("Official Trailer", currentItem.trailerYoutubeKey))
                                 } else aux.trailers,
+                                companies = aux.companies,
                                 isPreviewMode = false,
                                 isLoading = false,
                                 hasPreviousEntry = siblings.size > 1,
@@ -334,16 +378,23 @@ class DetailViewModel(
     }
 
     private var recommendationFetchJob: kotlinx.coroutines.Job? = null
+    private var seriesFetchJob: kotlinx.coroutines.Job? = null
 
     private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
+        val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+        val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
+
+        if (isShowOrAnime) {
+            launchSeriesFetch(item, tmdbKey)
+        }
+
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()
             val castMembers = mutableListOf<CastMember>()
             val trailerList = mutableListOf<MediaTrailer>()
-
-            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            val compList = mutableListOf<NetworkProductionCompany>()
 
             if (item.tmdbId != null) {
                 val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
@@ -458,6 +509,38 @@ class DetailViewModel(
                                 val sBody = sResp.body?.string()
                                 if (sBody != null) {
                                     val sRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(sBody).jsonObject
+
+                                    // Parse TV Networks and Production Companies with real TMDb IDs & logos
+                                    val netArray = sRoot["networks"]?.jsonArray
+                                    netArray?.forEach { nElem ->
+                                        val nObj = nElem.jsonObject
+                                        val nId = nObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                        val nName = nObj["name"]?.jsonPrimitive?.content ?: return@forEach
+                                        val nLogo = nObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
+                                        compList.add(
+                                            NetworkProductionCompany(
+                                                id = nId,
+                                                name = nName,
+                                                logoUrl = nLogo,
+                                                kind = "network"
+                                            )
+                                        )
+                                    }
+                                    val prodArray = sRoot["production_companies"]?.jsonArray
+                                    prodArray?.forEach { pElem ->
+                                        val pObj = pElem.jsonObject
+                                        val pId = pObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                        val pName = pObj["name"]?.jsonPrimitive?.content ?: return@forEach
+                                        val pLogo = pObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
+                                        compList.add(
+                                            NetworkProductionCompany(
+                                                id = pId,
+                                                name = pName,
+                                                logoUrl = pLogo,
+                                                kind = "company"
+                                            )
+                                        )
+                                    }
                                     val seasonsArray = sRoot["seasons"]?.jsonArray
                                     val sNumbers = seasonsArray?.mapNotNull { it.jsonObject["season_number"]?.jsonPrimitive?.content?.toIntOrNull() }
                                         ?.filter { it > 0 }?.take(8) ?: emptyList()
@@ -807,7 +890,15 @@ class DetailViewModel(
             _reviews.value = revs.distinctBy { it.author + it.source }
             _cast.value = castMembers.distinctBy { it.name }
             _trailers.value = trailerList.distinctBy { it.youtubeKey }
+            if (compList.isNotEmpty()) {
+                _companies.value = compList.distinctBy { it.name }
+            }
+        }
+    }
 
+    private fun launchSeriesFetch(item: MediaItemEntity, tmdbKey: String) {
+        seriesFetchJob?.cancel()
+        seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
             var resolvedTmdbId = item.tmdbId
             val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
             if (resolvedTmdbId == null && isShowOrAnime) {
@@ -834,11 +925,12 @@ class DetailViewModel(
                     val cachedSeasons = SeriesContentMemoryCache.seasonsCache[tmdbId] ?: SeriesContentMemoryCache.seasonsCache[item.id]
                     val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] ?: SeriesContentMemoryCache.episodesBySeasonCache[item.id]
                     if (cachedSeasons != null && cachedSeasons.isNotEmpty()) {
-                        _realSeasons.value = cachedSeasons
+                        val validCached = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                        _realSeasons.value = validCached
                         if (!cachedGrouped.isNullOrEmpty()) {
                             _episodesBySeason.value = cachedGrouped
                             val target = if (cachedGrouped.containsKey(_selectedSeasonNumber.value)) _selectedSeasonNumber.value
-                            else cachedSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: cachedSeasons.first().seasonNumber
+                            else validCached.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validCached.first().seasonNumber
                             _selectedSeasonNumber.value = target
                             _realEpisodes.value = cachedGrouped[target].orEmpty()
                         }
@@ -846,7 +938,8 @@ class DetailViewModel(
 
                     val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title)
                     if (seasons.isNotEmpty()) {
-                        val sortedSeasons = seasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
+                        val validSeasons = seasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                        val sortedSeasons = validSeasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
                         SeriesContentMemoryCache.seasonsCache[tmdbId] = sortedSeasons
                         SeriesContentMemoryCache.seasonsCache[item.id] = sortedSeasons
                         _realSeasons.value = sortedSeasons

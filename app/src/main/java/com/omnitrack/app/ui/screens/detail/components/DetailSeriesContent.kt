@@ -426,7 +426,10 @@ fun NuvioAnimatedWatchedBadge(
 @Composable
 private fun ImdbEpisodeRatingBadge(
     rating: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    logoWidth: Dp = 22.dp,
+    logoHeight: Dp = 11.dp,
+    textSize: androidx.compose.ui.unit.TextUnit = 10.sp
 ) {
     Row(
         modifier = modifier,
@@ -437,13 +440,13 @@ private fun ImdbEpisodeRatingBadge(
             painter = painterResource(R.drawable.rating_imdb),
             contentDescription = "IMDb",
             modifier = Modifier
-                .width(24.dp)
-                .height(12.dp),
+                .width(logoWidth)
+                .height(logoHeight),
             contentScale = ContentScale.Fit
         )
         Text(
             text = String.format(java.util.Locale.US, "%.1f", rating),
-            fontSize = 11.sp,
+            fontSize = textSize,
             fontWeight = FontWeight.Bold,
             color = Color(0xFFF5C518)
         )
@@ -496,7 +499,7 @@ private fun formatSeasonLabel(seasonNumber: Int): String {
 }
 
 /**
- * Mode 1: Nuvio Horizontal Carousel Row
+ * Mode 1: Nuvio Horizontal Carousel Row (1:1 Nuvio Phone Metrics: 296dp x 184dp, 12dp spacing, 12dp corners)
  */
 @Composable
 private fun EpisodeHorizontalRow(
@@ -507,8 +510,8 @@ private fun EpisodeHorizontalRow(
     onToggleWatched: (MediaEpisode) -> Unit,
     onLongPress: (MediaEpisode) -> Unit
 ) {
-    val cardWidth = (280.dp * scale).coerceAtLeast(220.dp)
-    val cardHeight = (168.dp * scale).coerceAtLeast(136.dp)
+    val cardWidth = (296.dp * scale).coerceAtLeast(220.dp)
+    val cardHeight = (184.dp * scale).coerceAtLeast(136.dp)
 
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
@@ -541,7 +544,7 @@ private fun EpisodeHorizontalCard(
     onToggleWatched: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(12.dp)
     val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
@@ -572,11 +575,11 @@ private fun EpisodeHorizontalCard(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.40f to Color.Transparent,
-                        0.55f to Color.Black.copy(alpha = 0.20f),
-                        0.70f to Color.Black.copy(alpha = 0.50f),
-                        0.85f to Color.Black.copy(alpha = 0.75f),
-                        1f to Color.Black.copy(alpha = 0.95f)
+                        0.42f to Color.Transparent,
+                        0.56f to Color.Black.copy(alpha = 0.20f),
+                        0.70f to Color.Black.copy(alpha = 0.45f),
+                        0.84f to Color.Black.copy(alpha = 0.68f),
+                        1f to Color.Black.copy(alpha = 0.92f)
                     )
                 )
         )
@@ -589,18 +592,22 @@ private fun EpisodeHorizontalCard(
                 .padding(10.dp)
         )
 
-        // In-Image Content Overlay at Bottom Start
+        // In-Image Content Overlay at Bottom Start (1:1 Nuvio Phone Metrics)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
+                    textSize = 9.sp,
+                    radius = 5.dp,
+                    horizontalPadding = 7.dp,
+                    verticalPadding = 3.dp,
                     backgroundAlpha = 0.42f
                 )
             }
@@ -608,8 +615,9 @@ private fun EpisodeHorizontalCard(
             val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
             Text(
                 text = titleText,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.ExtraBold,
+                lineHeight = 19.sp,
                 color = Color.White,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -619,35 +627,40 @@ private fun EpisodeHorizontalCard(
                 Text(
                     text = episode.overview,
                     fontSize = 11.sp,
-                    color = Color.White.copy(alpha = 0.82f),
+                    lineHeight = 15.sp,
+                    color = Color.White.copy(alpha = 0.86f),
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 15.sp
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
             // Bottom Metadata Line: Runtime, IMDb Rating, Air Date
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (episode.runtimeMinutes != null && episode.runtimeMinutes > 0) {
                     Text(
                         text = "${episode.runtimeMinutes}m",
-                        fontSize = 10.5.sp,
-                        color = Color.White.copy(alpha = 0.75f)
+                        fontSize = 10.sp,
+                        color = Color.White.copy(alpha = 0.78f)
                     )
                 }
                 if (episode.voteAverage != null && episode.voteAverage > 0) {
-                    ImdbEpisodeRatingBadge(rating = episode.voteAverage)
+                    ImdbEpisodeRatingBadge(
+                        rating = episode.voteAverage,
+                        logoWidth = 22.dp,
+                        logoHeight = 11.dp,
+                        textSize = 10.sp
+                    )
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (!episode.airDate.isNullOrBlank()) {
                     Text(
                         text = episode.airDate,
                         fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.75f)
+                        color = Color.White.copy(alpha = 0.78f)
                     )
                 }
             }
@@ -656,7 +669,7 @@ private fun EpisodeHorizontalCard(
 }
 
 /**
- * Mode 2: Nuvio Compact List (Thumbnail on Left, Metadata on Right)
+ * Mode 2: Nuvio Compact List (1:1 Nuvio Phone Metrics: 120x120dp square thumbnail with badge on top-left, watched on top-right, metadata on right)
  */
 @Composable
 private fun EpisodeListColumn(
@@ -667,14 +680,14 @@ private fun EpisodeListColumn(
     onToggleWatched: (MediaEpisode) -> Unit,
     onLongPress: (MediaEpisode) -> Unit
 ) {
-    val cardHeight = (108.dp * scale).coerceAtLeast(90.dp)
-    val imageWidth = (130.dp * scale).coerceAtLeast(110.dp)
+    val cardHeight = (120.dp * scale).coerceAtLeast(96.dp)
+    val imageWidth = (120.dp * scale).coerceAtLeast(96.dp)
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         episodes.forEach { episode ->
             val isWatched = (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
@@ -702,7 +715,7 @@ private fun EpisodeListCardItem(
     onToggleWatched: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(14.dp)
+    val cardShape = RoundedCornerShape(12.dp)
     val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
@@ -718,12 +731,12 @@ private fun EpisodeListCardItem(
             )
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
-            // Left: Thumbnail Still
+            // Left: Square Thumbnail Still with 1:1 Nuvio Top-Left Code Badge & Top-Right Watched Circle
             Box(
                 modifier = Modifier
                     .width(imageWidth)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 14.dp, bottomStart = 14.dp))
+                    .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
                     .background(DarkSurfaceCard)
             ) {
                 if (!imgModel.isNullOrBlank()) {
@@ -735,76 +748,86 @@ private fun EpisodeListCardItem(
                     )
                 }
 
-                // Top-Right Watched Circle (hidden when unwatched)
+                // 1:1 Nuvio Top-Left Episode Code Badge
+                val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+                if (badgeText.isNotBlank()) {
+                    EpisodeCodeBadge(
+                        text = badgeText,
+                        textSize = 11.sp,
+                        radius = 4.dp,
+                        horizontalPadding = 6.dp,
+                        verticalPadding = 2.dp,
+                        backgroundAlpha = 0.85f,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = 8.dp, top = 8.dp)
+                    )
+                }
+
+                // 1:1 Nuvio Top-Right Watched Circle (hidden when unwatched)
                 NuvioAnimatedWatchedBadge(
                     isWatched = isWatched,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
+                        .padding(8.dp)
                 )
             }
 
-            // Right: Episode Metadata Column
+            // Right: Episode Metadata Column (1:1 Nuvio Metrics: 15sp title, 12sp subtitle row, 13sp overview)
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
                     .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.SpaceBetween
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+                val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
+                Text(
+                    text = titleText,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 18.sp,
+                    letterSpacing = 0.sp,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                if (!episode.airDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (badgeText.isNotBlank()) {
-                            EpisodeCodeBadge(
-                                text = badgeText,
-                                backgroundAlpha = 0.35f
+                        if (!episode.airDate.isNullOrBlank()) {
+                            Text(
+                                text = episode.airDate,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.80f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
-                        Text(
-                            text = titleText,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (!episode.overview.isNullOrBlank()) {
-                        Text(
-                            text = episode.overview,
-                            fontSize = 11.sp,
-                            color = Color.White.copy(alpha = 0.85f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                            lineHeight = 15.sp
-                        )
+                        if (episode.voteAverage != null && episode.voteAverage > 0) {
+                            ImdbEpisodeRatingBadge(
+                                rating = episode.voteAverage,
+                                logoWidth = 24.dp,
+                                logoHeight = 12.dp,
+                                textSize = 12.sp
+                            )
+                        }
                     }
                 }
 
-                // Bottom Line: Rating + Air Date
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (episode.voteAverage != null && episode.voteAverage > 0) {
-                        ImdbEpisodeRatingBadge(rating = episode.voteAverage)
-                    } else if (episode.runtimeMinutes != null && episode.runtimeMinutes > 0) {
-                        Text(text = "${episode.runtimeMinutes}m", fontSize = 10.5.sp, color = Color.White.copy(alpha = 0.75f))
-                    }
-                    if (!episode.airDate.isNullOrBlank()) {
-                        Text(
-                            text = episode.airDate,
-                            fontSize = 10.5.sp,
-                            color = Color.White.copy(alpha = 0.75f)
-                        )
-                    }
+                if (!episode.overview.isNullOrBlank()) {
+                    Text(
+                        text = episode.overview,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = Color.White.copy(alpha = 0.70f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

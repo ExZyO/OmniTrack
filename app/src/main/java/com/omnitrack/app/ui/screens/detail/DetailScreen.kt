@@ -179,10 +179,10 @@ fun DetailScreen(
         return
     }
 
-    if (selectedCompany != null && selectedCompany!!.id != null) {
+    if (selectedCompany != null) {
         val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
         TmdbEntityBrowseScreen(
-            entityId = selectedCompany!!.id!!,
+            entityId = selectedCompany!!.id,
             entityName = selectedCompany!!.name,
             entityKind = selectedCompany!!.kind,
             apiKey = tmdbKey,
@@ -467,6 +467,7 @@ fun DetailScreen(
                 // Detail Networks & Production Companies Section (Clickable)
                 DetailNetworksSection(
                     item = item,
+                    companies = uiState.companies,
                     onCompanyClick = { company ->
                         selectedCompany = company
                     }

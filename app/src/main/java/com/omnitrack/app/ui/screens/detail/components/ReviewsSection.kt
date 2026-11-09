@@ -74,27 +74,19 @@ fun ReviewsSection(
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Section Header matching Nuvio
-        Row(
+        // Section Header matching Nuvio 1:1 ("Comments")
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 20.dp)
         ) {
             Text(
-                text = "Community Reviews",
+                text = "Comments",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                text = "${reviews.size} reviews",
-                color = TextMuted,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
             )
         }
 
@@ -113,8 +105,8 @@ fun ReviewsSection(
                         .width(cardWidth)
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                        .background(Color(0xFF121212))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {

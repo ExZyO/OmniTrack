@@ -138,15 +138,26 @@ fun TrailerPlayerPopup(
         <head>
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
             <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000000; }
-                html, body { width: 100%; height: 100%; overflow: hidden; background: #000000; }
-                .iframe-container { position: relative; width: 100%; height: 100%; }
-                iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+                * { margin: 0; padding: 0; box-sizing: border-box; background: #000000; }
+                html, body { width: 100vw; height: 100vh; overflow: hidden; background: #000000; display: flex; align-items: center; justify-content: center; }
+                .iframe-container { width: 100vw; height: 100vh; position: relative; display: flex; align-items: center; justify-content: center; }
+                iframe { width: 100%; height: 100%; border: 0; }
             </style>
+            <script>
+                function updateViewport() {
+                    var w = window.innerWidth;
+                    var h = window.innerHeight;
+                    document.body.style.width = w + 'px';
+                    document.body.style.height = h + 'px';
+                }
+                window.addEventListener('resize', updateViewport);
+                window.addEventListener('orientationchange', function() { setTimeout(updateViewport, 100); });
+            </script>
         </head>
         <body>
             <div class="iframe-container">
                 <iframe
+                    id="ytplayer"
                     src="https://www.youtube-nocookie.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1&controls=1"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowfullscreen>
@@ -233,13 +244,17 @@ fun TrailerPlayerPopup(
             DisposableEffect(dialogWindow) {
                 dialogWindow?.let { win ->
                     win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    win.addFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                     win.setBackgroundDrawableResource(android.R.color.black)
+                    win.decorView.setPadding(0, 0, 0, 0)
                     val controller = WindowCompat.getInsetsController(win, win.decorView)
                     controller.hide(WindowInsetsCompat.Type.systemBars())
                     controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
+                persistentWebView.evaluateJavascript("if (typeof updateViewport === 'function') updateViewport(); window.dispatchEvent(new Event('resize'));", null)
                 onDispose {
                     dialogWindow?.let { win ->
+                        win.clearFlags(android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                         val controller = WindowCompat.getInsetsController(win, win.decorView)
                         controller.show(WindowInsetsCompat.Type.systemBars())
                     }
