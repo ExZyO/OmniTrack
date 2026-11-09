@@ -834,8 +834,8 @@ class DetailViewModel(
 
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
-        val item = _previewItem.value ?: repository.getMediaById(_mediaId.value).firstOrNull()
-        val tmdbId = item?.tmdbId
+        val previewItem = _previewItem.value
+        val tmdbId = previewItem?.tmdbId
         if (tmdbId != null) {
             SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonNumber"]?.let { cached ->
                 _realEpisodes.value = cached
@@ -843,11 +843,11 @@ class DetailViewModel(
         }
         seasonEpisodesJob?.cancel()
         seasonEpisodesJob = viewModelScope.launch(Dispatchers.IO) {
-            if (tmdbId == null) return@launch
+            val resolvedTmdbId = tmdbId ?: repository.getMediaById(_mediaId.value).firstOrNull()?.tmdbId ?: return@launch
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
-            val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonNumber, tmdbKey)
+            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey)
             if (eps.isNotEmpty()) {
-                SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonNumber"] = eps
+                SeriesContentMemoryCache.episodesCache["$resolvedTmdbId:$seasonNumber"] = eps
                 _realEpisodes.value = eps
             }
         }
