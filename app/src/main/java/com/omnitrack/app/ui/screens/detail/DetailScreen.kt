@@ -327,7 +327,7 @@ fun DetailScreen(
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
         } else if (item != null) {
-            val customPosterPattern by preferenceManager?.customPosterUrlPattern?.collectAsState(initial = "") ?: remember { mutableStateOf("") }
+            val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
 
             val customCoverUrl = remember(item, customPosterPattern) {
                 if (customPosterPattern.isNotBlank()) {
