@@ -236,7 +236,10 @@ class PreferenceManager(private val context: Context) {
 
     val customMalClientId: Flow<String> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-        .map { it[PreferencesKeys.CUSTOM_MAL_CLIENT_ID] ?: "" }
+        .map { 
+            val id = it[PreferencesKeys.CUSTOM_MAL_CLIENT_ID] ?: ""
+            if (id == "2db7880d919b9231be3031ec80e77f15") "" else id
+        }
 
     val customSimklClientId: Flow<String> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }

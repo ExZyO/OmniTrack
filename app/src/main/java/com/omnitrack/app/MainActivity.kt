@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
         val effectiveRedirectUri = when {
             scheme == "komikku" -> "komikku://bangumi-auth"
             scheme == "app.mihon" -> "app.mihon://comick-auth"
+            scheme == "chimahon" || host == "myanimelist-auth" -> "chimahon://myanimelist-auth"
             scheme == "nuvio" -> "nuvio://auth/$service"
             else -> "omnitrack://auth/$service"
         }
@@ -179,19 +180,20 @@ class MainActivity : ComponentActivity() {
                     "mal", "myanimelist" -> {
                         try {
                             val pref = (application as OmniTrackApplication).preferenceManager
-                            val customMal = pref.customMalClientId.firstOrNull()?.takeIf { it.isNotBlank() }
+                            val customMal = pref.customMalClientId.firstOrNull()?.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
                             val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
                             val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
                                 ?: tokenManager.getMalVerifier().orEmpty()
+                            val malRedirectUri = if (customMal != null) effectiveRedirectUri else "chimahon://myanimelist-auth"
                             
-                            android.util.Log.d("OmniTrack-MAL", "Starting MAL token exchange: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$effectiveRedirectUri, codeLen=${code.length}")
+                            android.util.Log.d("OmniTrack-MAL", "Starting MAL token exchange: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$malRedirectUri, codeLen=${code.length}")
                             
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", effectiveClientId)
                                 .add("code", code)
                                 .add("code_verifier", verifier)
-                                .add("redirect_uri", effectiveRedirectUri)
+                                .add("redirect_uri", malRedirectUri)
                                 .build()
 
                             val req = Request.Builder()

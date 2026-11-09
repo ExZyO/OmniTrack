@@ -60,7 +60,8 @@ object TrackerAccountVerifier {
             ?: DEFAULT_TRAKT_CLIENT_SECRET
 
     val MAL_CLIENT_ID: String
-        get() = customMalClientId?.takeIf { it.isNotBlank() }
+        get() = customMalClientId?.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
+            ?: BuildConfig.MAL_CLIENT_ID.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
             ?: DEFAULT_MAL_CLIENT_ID
 
     val SIMKL_CLIENT_ID: String
