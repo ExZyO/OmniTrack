@@ -668,13 +668,13 @@ class EnrichmentRepository(
                 seasons.mapNotNull { node ->
                     val obj = node.jsonObject
                     val seasonNumber = obj["season_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.content ?: "Season $seasonNumber"
+                    val cleanName = if (seasonNumber <= 0) "Specials" else "Season $seasonNumber"
                     val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     val posterPath = obj["poster_path"]?.jsonPrimitive?.content
                     val airDate = obj["air_date"]?.jsonPrimitive?.content
                     com.omnitrack.app.data.model.MediaSeason(
                         seasonNumber = seasonNumber,
-                        name = name,
+                        name = cleanName,
                         episodeCount = epCount,
                         posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
                         airDate = airDate
@@ -694,12 +694,11 @@ class EnrichmentRepository(
                                         val sObj = sNode.jsonObject
                                         val sNum = sObj["number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@forEach
                                         if (sNum > 0 && list.none { it.seasonNumber == sNum }) {
-                                            val sName = sObj["name"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: "Season $sNum"
                                             val sEpCount = sObj["episodeOrder"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                                             list.add(
                                                 com.omnitrack.app.data.model.MediaSeason(
                                                     seasonNumber = sNum,
-                                                    name = sName,
+                                                    name = "Season $sNum",
                                                     episodeCount = sEpCount,
                                                     posterUrl = null,
                                                     airDate = null
@@ -711,7 +710,10 @@ class EnrichmentRepository(
                             }
                         } catch (_: Exception) {}
                     }
-                }.sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
+                }
+                .distinctBy { it.seasonNumber }
+                .map { s -> s.copy(name = if (s.seasonNumber <= 0) "Specials" else "Season ${s.seasonNumber}") }
+                .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
             }
         } catch (_: Exception) {
             emptyList()

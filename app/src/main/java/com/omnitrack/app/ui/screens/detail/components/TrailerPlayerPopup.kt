@@ -50,6 +50,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +58,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -88,6 +93,15 @@ fun TrailerPlayerPopup(
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var isFullscreen by remember { mutableStateOf(false) }
+    var customVideoView by remember { mutableStateOf<View?>(null) }
+    var customVideoCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+
+    val exitFullscreen: () -> Unit = {
+        customVideoCallback?.onCustomViewHidden()
+        customVideoView = null
+        customVideoCallback = null
+        isFullscreen = false
+    }
 
     // Lock to landscape in fullscreen mode, restore to unspecified on exit
     DisposableEffect(isFullscreen) {
@@ -163,9 +177,14 @@ fun TrailerPlayerPopup(
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                    customVideoView = view
+                    customVideoCallback = callback
                     isFullscreen = true
                 }
                 override fun onHideCustomView() {
+                    customVideoView = null
+                    customVideoCallback?.onCustomViewHidden()
+                    customVideoCallback = null
                     isFullscreen = false
                 }
             }
@@ -182,6 +201,7 @@ fun TrailerPlayerPopup(
 
     DisposableEffect(youtubeKey) {
         onDispose {
+            exitFullscreen()
             (persistentWebView.parent as? ViewGroup)?.removeView(persistentWebView)
             persistentWebView.apply {
                 loadUrl("about:blank")
@@ -192,25 +212,53 @@ fun TrailerPlayerPopup(
     }
 
     if (isFullscreen) {
-        // Fullscreen Mode Dialog
+        // Fullscreen Mode Dialog (1:1 Nuvio Parity)
         Dialog(
-            onDismissRequest = { isFullscreen = false },
+            onDismissRequest = exitFullscreen,
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 decorFitsSystemWindows = false
             )
         ) {
-            BackHandler { isFullscreen = false }
+            BackHandler { exitFullscreen() }
+
+            val view = LocalView.current
+            val dialogWindow = (view.parent as? DialogWindowProvider)?.window ?: context.findActivity()?.window
+
+            DisposableEffect(dialogWindow) {
+                dialogWindow?.let { win ->
+                    win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    val controller = WindowCompat.getInsetsController(win, win.decorView)
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+                onDispose {
+                    dialogWindow?.let { win ->
+                        val controller = WindowCompat.getInsetsController(win, win.decorView)
+                        controller.show(WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+            }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-                EmbeddedYouTubePlayer(
-                    webView = persistentWebView,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (customVideoView != null) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { _ ->
+                            (customVideoView?.parent as? ViewGroup)?.removeView(customVideoView)
+                            customVideoView ?: View(context)
+                        }
+                    )
+                } else {
+                    EmbeddedYouTubePlayer(
+                        webView = persistentWebView,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 // Top Floating Control Bar
                 Row(
@@ -258,7 +306,7 @@ fun TrailerPlayerPopup(
                         }
 
                         IconButton(
-                            onClick = { isFullscreen = false },
+                            onClick = exitFullscreen,
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
@@ -274,7 +322,7 @@ fun TrailerPlayerPopup(
 
                         IconButton(
                             onClick = {
-                                isFullscreen = false
+                                exitFullscreen()
                                 onDismiss()
                             },
                             modifier = Modifier
@@ -296,7 +344,10 @@ fun TrailerPlayerPopup(
     } else {
         // Bottom Sheet Mode (1:1 Nuvio Parity)
         ModalBottomSheet(
-            onDismissRequest = onDismiss,
+            onDismissRequest = {
+                exitFullscreen()
+                onDismiss()
+            },
             sheetState = sheetState,
             containerColor = AmoledBlack,
             dragHandle = null
@@ -345,7 +396,10 @@ fun TrailerPlayerPopup(
                             )
                         }
                         IconButton(
-                            onClick = { isFullscreen = true },
+                            onClick = {
+                                persistentWebView.evaluateJavascript("try { var v = document.querySelector('iframe') || document.querySelector('video'); v?.requestFullscreen?.(); } catch(e){}", null)
+                                isFullscreen = true
+                            },
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(
@@ -356,7 +410,10 @@ fun TrailerPlayerPopup(
                             )
                         }
                         IconButton(
-                            onClick = onDismiss,
+                            onClick = {
+                                exitFullscreen()
+                                onDismiss()
+                            },
                             modifier = Modifier.size(34.dp)
                         ) {
                             Icon(

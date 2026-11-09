@@ -111,8 +111,8 @@ fun ReviewsSection(
                         .width(cardWidth)
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF121212))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                        .background(Color(0x18FFFFFF))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {

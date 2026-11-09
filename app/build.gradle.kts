@@ -22,7 +22,8 @@ android {
 
         val envTraktClientId = System.getenv("TRAKT_CLIENT_ID") ?: project.findProperty("TRAKT_CLIENT_ID")?.toString() ?: ""
         val envTraktClientSecret = System.getenv("TRAKT_CLIENT_SECRET") ?: project.findProperty("TRAKT_CLIENT_SECRET")?.toString() ?: ""
-        val envMalClientId = System.getenv("MAL_CLIENT_ID") ?: project.findProperty("MAL_CLIENT_ID")?.toString() ?: ""
+        val rawMalClientId = System.getenv("MAL_CLIENT_ID") ?: project.findProperty("MAL_CLIENT_ID")?.toString() ?: ""
+        val envMalClientId = if (rawMalClientId.isBlank() || rawMalClientId == "2db7880d919b9231be3031ec80e77f15") "3342466cfb744b714350df413002f5ef" else rawMalClientId
         val envSimklClientId = System.getenv("SIMKL_CLIENT_ID") ?: project.findProperty("SIMKL_CLIENT_ID")?.toString() ?: ""
 
         buildConfigField("String", "TRAKT_CLIENT_ID", "\"$envTraktClientId\"")

@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -399,6 +400,46 @@ private fun ImdbEpisodeRatingBadge(
 }
 
 /**
+ * 1:1 Nuvio Floating Episode Code Badge ("S1E1" / "E1" / "SP1")
+ */
+@Composable
+private fun EpisodeCodeBadge(
+    text: String,
+    modifier: Modifier = Modifier,
+    textSize: androidx.compose.ui.unit.TextUnit = 10.sp,
+    radius: Dp = 6.dp,
+    horizontalPadding: Dp = 8.dp,
+    verticalPadding: Dp = 3.dp,
+    backgroundAlpha: Float = 0.42f
+) {
+    if (text.isBlank()) return
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(radius))
+            .background(Color.Black.copy(alpha = backgroundAlpha))
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontSize = textSize,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White.copy(alpha = 0.92f),
+            maxLines = 1
+        )
+    }
+}
+
+private fun formatEpisodeBadge(seasonNumber: Int?, episodeNumber: Int?): String {
+    return when {
+        seasonNumber != null && seasonNumber > 0 && episodeNumber != null -> "S${seasonNumber}E${episodeNumber}"
+        episodeNumber != null -> "E${episodeNumber}"
+        seasonNumber != null && seasonNumber <= 0 && episodeNumber != null -> "SP${episodeNumber}"
+        else -> ""
+    }
+}
+
+/**
  * Mode 1: Nuvio Horizontal Carousel Row
  */
 @Composable
@@ -410,8 +451,8 @@ private fun EpisodeHorizontalRow(
     onToggleWatched: (MediaEpisode) -> Unit,
     onLongPress: (MediaEpisode) -> Unit
 ) {
-    val cardWidth = (296.dp * scale).coerceAtLeast(240.dp)
-    val cardHeight = (184.dp * scale).coerceAtLeast(150.dp)
+    val cardWidth = (280.dp * scale).coerceAtLeast(220.dp)
+    val cardHeight = (168.dp * scale).coerceAtLeast(136.dp)
 
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
@@ -500,18 +541,21 @@ private fun EpisodeHorizontalCard(
                 .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val epNumStr = "Episode ${episode.episodeNumber}"
-            val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
-                episode.title.ifBlank { epNumStr }
-            } else {
-                "$epNumStr • ${episode.title}"
+            val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+            if (badgeText.isNotBlank()) {
+                EpisodeCodeBadge(
+                    text = badgeText,
+                    backgroundAlpha = 0.42f
+                )
             }
+
+            val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
             Text(
                 text = titleText,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
 
@@ -652,21 +696,28 @@ private fun EpisodeListCardItem(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    val epNumStr = "Episode ${episode.episodeNumber}"
-                    val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
-                        episode.title.ifBlank { epNumStr }
-                    } else {
-                        "$epNumStr • ${episode.title}"
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (badgeText.isNotBlank()) {
+                            EpisodeCodeBadge(
+                                text = badgeText,
+                                backgroundAlpha = 0.35f
+                            )
+                        }
+                        val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
+                        Text(
+                            text = titleText,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    Text(
-                        text = titleText,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
 
                     if (!episode.overview.isNullOrBlank()) {
                         Text(
@@ -803,18 +854,21 @@ private fun EpisodeVerticalCardItem(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val epNumStr = "Episode ${episode.episodeNumber}"
-            val titleText = if (episode.title.startsWith("Episode ", ignoreCase = true) || episode.title.startsWith("Ep. ", ignoreCase = true) || episode.title.isBlank()) {
-                episode.title.ifBlank { epNumStr }
-            } else {
-                "$epNumStr • ${episode.title}"
+            val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+            if (badgeText.isNotBlank()) {
+                EpisodeCodeBadge(
+                    text = badgeText,
+                    backgroundAlpha = 0.42f
+                )
             }
+
+            val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
             Text(
                 text = titleText,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
 
@@ -883,6 +937,7 @@ private fun SeasonPosterScrollRow(
                 modifier = Modifier
                     .width(105.dp)
                     .clickable { onSelectSeason(season.seasonNumber) },
+                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Box(
@@ -913,8 +968,10 @@ private fun SeasonPosterScrollRow(
                     color = if (isSelected) Color.White else TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    textAlign = TextAlign.Center,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
         }

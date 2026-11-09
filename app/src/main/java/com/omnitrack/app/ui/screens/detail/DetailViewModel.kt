@@ -790,8 +790,26 @@ class DetailViewModel(
 
             if (item.tmdbId != null && (item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW || item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME)) {
                 try {
-                    val seasons = enrichmentRepository.fetchTvSeasons(item.tmdbId, tmdbKey, item.title)
+                    val tmdbId = item.tmdbId
+                    // Instant 0ms cache retrieval
+                    SeriesContentMemoryCache.seasonsCache[tmdbId]?.let { cachedSeasons ->
+                        _realSeasons.value = cachedSeasons
+                        val currentSelected = _selectedSeasonNumber.value
+                        val seasonToFetch = if (cachedSeasons.any { it.seasonNumber == currentSelected }) {
+                            currentSelected
+                        } else {
+                            val defaultSeason = cachedSeasons.firstOrNull { it.seasonNumber > 0 } ?: cachedSeasons.first()
+                            _selectedSeasonNumber.value = defaultSeason.seasonNumber
+                            defaultSeason.seasonNumber
+                        }
+                        SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToFetch"]?.let { cachedEps ->
+                            _realEpisodes.value = cachedEps
+                        }
+                    }
+
+                    val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title)
                     if (seasons.isNotEmpty()) {
+                        SeriesContentMemoryCache.seasonsCache[tmdbId] = seasons
                         _realSeasons.value = seasons
                         val currentSelected = _selectedSeasonNumber.value
                         val seasonToFetch = if (seasons.any { it.seasonNumber == currentSelected }) {
@@ -801,8 +819,11 @@ class DetailViewModel(
                             _selectedSeasonNumber.value = defaultSeason.seasonNumber
                             defaultSeason.seasonNumber
                         }
-                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(item.tmdbId, seasonToFetch, tmdbKey)
-                        _realEpisodes.value = eps
+                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToFetch, tmdbKey)
+                        if (eps.isNotEmpty()) {
+                            SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToFetch"] = eps
+                            _realEpisodes.value = eps
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -813,13 +834,22 @@ class DetailViewModel(
 
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
+        val item = _previewItem.value ?: repository.getMediaById(_mediaId.value).firstOrNull()
+        val tmdbId = item?.tmdbId
+        if (tmdbId != null) {
+            SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonNumber"]?.let { cached ->
+                _realEpisodes.value = cached
+            }
+        }
         seasonEpisodesJob?.cancel()
         seasonEpisodesJob = viewModelScope.launch(Dispatchers.IO) {
-            val item = _previewItem.value ?: repository.getMediaById(_mediaId.value).firstOrNull()
-            val tmdbId = item?.tmdbId ?: return@launch
+            if (tmdbId == null) return@launch
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonNumber, tmdbKey)
-            _realEpisodes.value = eps
+            if (eps.isNotEmpty()) {
+                SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonNumber"] = eps
+                _realEpisodes.value = eps
+            }
         }
     }
 
@@ -1205,4 +1235,9 @@ fun sanitizeCommunityComment(raw: String): String {
         .replace(Regex("""(?<=\s|^)_|_(?=\s|$)"""), "")
         .replace(Regex("""\n{3,}"""), "\n\n")
         .trim()
+}
+
+internal object SeriesContentMemoryCache {
+    val seasonsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaSeason>>()
+    val episodesCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
 }

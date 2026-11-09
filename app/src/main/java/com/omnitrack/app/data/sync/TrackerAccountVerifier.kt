@@ -61,7 +61,6 @@ object TrackerAccountVerifier {
 
     val MAL_CLIENT_ID: String
         get() = customMalClientId?.takeIf { it.isNotBlank() }
-            ?: BuildConfig.MAL_CLIENT_ID.takeIf { it.isNotBlank() }
             ?: DEFAULT_MAL_CLIENT_ID
 
     val SIMKL_CLIENT_ID: String
