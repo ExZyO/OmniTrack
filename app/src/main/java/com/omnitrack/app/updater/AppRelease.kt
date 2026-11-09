@@ -17,5 +17,6 @@ data class VersionManifest(
     val version: String = "",
     val versionCode: Long = 0,
     val apkUrl: String = "",
+    val debugApkUrl: String = "",
     val releaseNotes: String = ""
 )

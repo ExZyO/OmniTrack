@@ -31,6 +31,8 @@ android {
         buildConfigField("String", "MAL_CLIENT_ID", "\"$envMalClientId\"")
         buildConfigField("String", "SIMKL_CLIENT_ID", "\"$envSimklClientId\"")
 
+        manifestPlaceholders["appName"] = "OmniTrack"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
@@ -50,6 +52,7 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
+            manifestPlaceholders["appName"] = "OmniTrack"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -57,6 +60,9 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("release")
+            manifestPlaceholders["appName"] = "OmniTrack (Debug)"
         }
     }
 

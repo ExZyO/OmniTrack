@@ -84,11 +84,28 @@ class AppUpdateChecker(
                 var apkUrl = ""
                 val assets = root["assets"]?.jsonArray
                 if (assets != null) {
+                    val isDebug = com.omnitrack.app.BuildConfig.DEBUG
                     for (asset in assets) {
                         val name = asset.jsonObject["name"]?.jsonPrimitive?.content ?: ""
-                        if (name.endsWith(".apk", ignoreCase = true)) {
-                            apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
-                            break
+                        if (isDebug) {
+                            if (name.endsWith("-debug.apk", ignoreCase = true)) {
+                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                break
+                            }
+                        } else {
+                            if (name.endsWith(".apk", ignoreCase = true) && !name.contains("-debug", ignoreCase = true)) {
+                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                break
+                            }
+                        }
+                    }
+                    if (apkUrl.isBlank()) {
+                        for (asset in assets) {
+                            val name = asset.jsonObject["name"]?.jsonPrimitive?.content ?: ""
+                            if (name.endsWith(".apk", ignoreCase = true)) {
+                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                break
+                            }
                         }
                     }
                 }
@@ -117,11 +134,16 @@ class AppUpdateChecker(
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
                 val manifest = json.decodeFromString<VersionManifest>(body)
+                val downloadUrl = if (com.omnitrack.app.BuildConfig.DEBUG) {
+                    manifest.debugApkUrl.takeIf { it.isNotBlank() } ?: manifest.apkUrl
+                } else {
+                    manifest.apkUrl
+                }
                 AppRelease(
                     version = manifest.version.removePrefix("v"),
                     versionCode = manifest.versionCode,
                     releaseNotes = manifest.releaseNotes,
-                    apkDownloadUrl = manifest.apkUrl,
+                    apkDownloadUrl = downloadUrl,
                     releasePageUrl = "https://github.com/$githubRepo/releases"
                 )
             }
