@@ -12,6 +12,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -105,13 +107,51 @@ fun DetailSeriesContent(
     onMarkPreviousWatched: (MediaEpisode) -> Unit,
     onToggleSeasonWatched: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    episodesBySeason: Map<Int, List<MediaEpisode>> = emptyMap(),
     layoutMode: EpisodeLayoutMode = EpisodeLayoutMode.HORIZONTAL,
     layoutScale: Float = 1.0f,
     initialSeasonViewMode: String = "Posters",
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
     onLayoutModeChanged: ((EpisodeLayoutMode) -> Unit)? = null
 ) {
-    if (seasons.isEmpty() && episodes.isEmpty()) return
+    if (seasons.isEmpty() && episodes.isEmpty() && episodesBySeason.isEmpty()) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(80.dp)
+                        .height(20.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(3) {
+                    Box(
+                        modifier = Modifier
+                            .width(280.dp)
+                            .height(168.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                    )
+                }
+            }
+        }
+        return
+    }
 
     var activeActionSheetEpisode by remember { mutableStateOf<MediaEpisode?>(null) }
     var currentSeasonViewMode by remember(initialSeasonViewMode) { mutableStateOf(initialSeasonViewMode) }
@@ -180,6 +220,7 @@ fun DetailSeriesContent(
                             seasons = seasons,
                             selectedSeasonNumber = selectedSeasonNumber,
                             episodes = episodes,
+                            episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
                             fallbackImageUrl = fallbackBackdropUrl,
                             onSelectSeason = onSelectSeason
@@ -189,6 +230,7 @@ fun DetailSeriesContent(
                             seasons = seasons,
                             selectedSeasonNumber = selectedSeasonNumber,
                             episodes = episodes,
+                            episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
                             onSelectSeason = onSelectSeason
                         )
@@ -198,9 +240,7 @@ fun DetailSeriesContent(
         }
 
         // 3. Episodes Header with Layout Switcher (Horizontal / List / Vertical Cards)
-        val seasonEpisodes = remember(episodes, selectedSeasonNumber) {
-            episodes.filter { it.seasonNumber == selectedSeasonNumber }
-        }
+        val seasonEpisodes = episodesBySeason[selectedSeasonNumber] ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
         val currentSeason = seasons.firstOrNull { it.seasonNumber == selectedSeasonNumber }
         val totalInSeason = currentSeason?.episodeCount ?: seasonEpisodes.size
         val watchedInSeason = seasonEpisodes.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
@@ -260,21 +300,32 @@ fun DetailSeriesContent(
             }
         }
 
-        // 4. Render Active Episode Layout Mode with Smooth Nuvio Glide
+        // 4. Render Active Episode Layout Mode with 1:1 Nuvio Directional Slide & Instant Switching
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(tween(250))
         ) {
-            Crossfade(
+            AnimatedContent(
                 targetState = selectedSeasonNumber to currentLayoutMode,
-                animationSpec = tween(220),
-                label = "episode_layout_transition"
-            ) { (_, mode) ->
+                transitionSpec = {
+                    val fromSeason = initialState.first
+                    val toSeason = targetState.first
+                    val fromIdx = seasons.indexOfFirst { it.seasonNumber == fromSeason }.takeIf { it >= 0 } ?: 0
+                    val toIdx = seasons.indexOfFirst { it.seasonNumber == toSeason }.takeIf { it >= 0 } ?: 0
+                    val dir = if (toIdx >= fromIdx) 1 else -1
+                    (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { dir * it / 5 })
+                        .togetherWith(
+                            fadeOut(tween(170)) + slideOutHorizontally(tween(170)) { -dir * it / 5 }
+                        )
+                },
+                label = "season_episodes_transition"
+            ) { (seasonNum, mode) ->
+                val activeSeasonEps = episodesBySeason[seasonNum] ?: episodes.filter { it.seasonNumber == seasonNum }
                 when (mode) {
                     EpisodeLayoutMode.HORIZONTAL -> {
                         EpisodeHorizontalRow(
-                            episodes = seasonEpisodes,
+                            episodes = activeSeasonEps,
                             watchedEpisodes = watchedEpisodes,
                             fallbackImageUrl = fallbackBackdropUrl,
                             scale = layoutScale,
@@ -285,7 +336,7 @@ fun DetailSeriesContent(
 
                     EpisodeLayoutMode.LIST -> {
                         EpisodeListColumn(
-                            episodes = seasonEpisodes,
+                            episodes = activeSeasonEps,
                             watchedEpisodes = watchedEpisodes,
                             fallbackImageUrl = fallbackBackdropUrl,
                             scale = layoutScale,
@@ -296,7 +347,7 @@ fun DetailSeriesContent(
 
                     EpisodeLayoutMode.VERTICAL_CARD -> {
                         EpisodeVerticalCardColumn(
-                            episodes = seasonEpisodes,
+                            episodes = activeSeasonEps,
                             watchedEpisodes = watchedEpisodes,
                             fallbackImageUrl = fallbackBackdropUrl,
                             scale = layoutScale,
@@ -400,15 +451,15 @@ private fun ImdbEpisodeRatingBadge(
 }
 
 /**
- * 1:1 Nuvio Floating Episode Code Badge ("S1E1" / "E1" / "SP1")
+ * 1:1 Nuvio Floating Episode Code Badge ("S1 E1" / "E1" / "SP 1")
  */
 @Composable
 private fun EpisodeCodeBadge(
     text: String,
     modifier: Modifier = Modifier,
-    textSize: androidx.compose.ui.unit.TextUnit = 10.sp,
-    radius: Dp = 6.dp,
-    horizontalPadding: Dp = 8.dp,
+    textSize: androidx.compose.ui.unit.TextUnit = 9.sp,
+    radius: Dp = 5.dp,
+    horizontalPadding: Dp = 7.dp,
     verticalPadding: Dp = 3.dp,
     backgroundAlpha: Float = 0.42f
 ) {
@@ -424,7 +475,8 @@ private fun EpisodeCodeBadge(
             text = text,
             fontSize = textSize,
             fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.92f),
+            color = Color.White.copy(alpha = 0.90f),
+            letterSpacing = 0.sp,
             maxLines = 1
         )
     }
@@ -432,11 +484,15 @@ private fun EpisodeCodeBadge(
 
 private fun formatEpisodeBadge(seasonNumber: Int?, episodeNumber: Int?): String {
     return when {
-        seasonNumber != null && seasonNumber > 0 && episodeNumber != null -> "S${seasonNumber}E${episodeNumber}"
-        episodeNumber != null -> "E${episodeNumber}"
-        seasonNumber != null && seasonNumber <= 0 && episodeNumber != null -> "SP${episodeNumber}"
+        seasonNumber != null && seasonNumber > 0 && episodeNumber != null -> "S$seasonNumber E$episodeNumber"
+        seasonNumber != null && seasonNumber <= 0 && episodeNumber != null -> "SP $episodeNumber"
+        episodeNumber != null -> "E$episodeNumber"
         else -> ""
     }
+}
+
+private fun formatSeasonLabel(seasonNumber: Int): String {
+    return if (seasonNumber <= 0) "Specials" else "Season $seasonNumber"
 }
 
 /**
@@ -459,7 +515,7 @@ private fun EpisodeHorizontalRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(episodes, key = { it.id }) { episode ->
+        items(episodes, key = { "${it.seasonNumber}_${it.episodeNumber}_${it.id}" }) { episode ->
             val isWatched = (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
             EpisodeHorizontalCard(
                 episode = episode,
@@ -908,6 +964,7 @@ private fun SeasonPosterScrollRow(
     seasons: List<MediaSeason>,
     selectedSeasonNumber: Int,
     episodes: List<MediaEpisode>,
+    episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
     fallbackImageUrl: String?,
     onSelectSeason: (Int) -> Unit
@@ -929,13 +986,14 @@ private fun SeasonPosterScrollRow(
     ) {
         items(seasons, key = { it.seasonNumber }) { season ->
             val isSelected = season.seasonNumber == selectedSeasonNumber
-            val seasonEps = episodes.filter { it.seasonNumber == season.seasonNumber }
+            val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
             val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
             val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
+            val label = formatSeasonLabel(season.seasonNumber)
 
             Column(
                 modifier = Modifier
-                    .width(105.dp)
+                    .width(100.dp)
                     .clickable { onSelectSeason(season.seasonNumber) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -943,31 +1001,43 @@ private fun SeasonPosterScrollRow(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(155.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(DarkSurfaceElevated)
                         .border(
                             width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) AccentJade else GlassBorder,
-                            shape = RoundedCornerShape(14.dp)
+                            color = if (isSelected) AccentJade else Color.White.copy(alpha = 0.10f),
+                            shape = RoundedCornerShape(8.dp)
                         )
                 ) {
                     val posterModel = season.posterUrl ?: fallbackImageUrl
                     if (!posterModel.isNullOrBlank()) {
                         AsyncImage(
                             model = posterModel,
-                            contentDescription = season.name,
+                            contentDescription = label,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = TextMuted,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
 
                 Text(
-                    text = season.name,
+                    text = label,
                     color = if (isSelected) Color.White else TextPrimary,
                     fontSize = 12.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -983,19 +1053,31 @@ private fun SeasonTextChipScrollRow(
     seasons: List<MediaSeason>,
     selectedSeasonNumber: Int,
     episodes: List<MediaEpisode>,
+    episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
     onSelectSeason: (Int) -> Unit
 ) {
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(selectedSeasonNumber) {
+        val idx = seasons.indexOfFirst { it.seasonNumber == selectedSeasonNumber }
+        if (idx >= 0) {
+            listState.animateScrollToItem(idx)
+        }
+    }
+
     LazyRow(
+        state = listState,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(seasons, key = { it.seasonNumber }) { season ->
             val isSelected = season.seasonNumber == selectedSeasonNumber
-            val seasonEps = episodes.filter { it.seasonNumber == season.seasonNumber }
+            val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
             val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
             val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
+            val label = formatSeasonLabel(season.seasonNumber)
 
             Row(
                 modifier = Modifier
@@ -1017,7 +1099,7 @@ private fun SeasonTextChipScrollRow(
                     )
                 }
                 Text(
-                    text = season.name,
+                    text = label,
                     color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold

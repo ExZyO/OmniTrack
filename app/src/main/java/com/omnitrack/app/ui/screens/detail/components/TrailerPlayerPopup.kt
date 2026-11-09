@@ -177,7 +177,12 @@ fun TrailerPlayerPopup(
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                    customVideoView = view
+                    customVideoView = view?.apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
                     customVideoCallback = callback
                     isFullscreen = true
                 }
@@ -228,6 +233,7 @@ fun TrailerPlayerPopup(
             DisposableEffect(dialogWindow) {
                 dialogWindow?.let { win ->
                     win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    win.setBackgroundDrawableResource(android.R.color.black)
                     val controller = WindowCompat.getInsetsController(win, win.decorView)
                     controller.hide(WindowInsetsCompat.Type.systemBars())
                     controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -250,7 +256,18 @@ fun TrailerPlayerPopup(
                         modifier = Modifier.fillMaxSize(),
                         factory = { _ ->
                             (customVideoView?.parent as? ViewGroup)?.removeView(customVideoView)
-                            customVideoView ?: View(context)
+                            customVideoView?.apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                            } ?: View(context)
+                        },
+                        update = { v ->
+                            v.layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
                         }
                     )
                 } else {
@@ -397,7 +414,6 @@ fun TrailerPlayerPopup(
                         }
                         IconButton(
                             onClick = {
-                                persistentWebView.evaluateJavascript("try { var v = document.querySelector('iframe') || document.querySelector('video'); v?.requestFullscreen?.(); } catch(e){}", null)
                                 isFullscreen = true
                             },
                             modifier = Modifier.size(34.dp)
@@ -455,12 +471,18 @@ private fun EmbeddedYouTubePlayer(
         modifier = modifier,
         factory = { _ ->
             (webView.parent as? ViewGroup)?.removeView(webView)
-            webView
+            webView.apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
         },
         update = { v ->
-            if (v.parent == null) {
-                // View reattached
-            }
+            v.layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
         }
     )
 }

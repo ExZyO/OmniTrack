@@ -296,7 +296,7 @@ class EnrichmentRepository(
         val tmdbScore: Float? = null
     )
 
-    private suspend fun searchTmdbForAnime(title: String, apiKey: String, nativeTitle: String? = null): Pair<Long, Boolean>? =
+    suspend fun searchTmdbForAnime(title: String, apiKey: String, nativeTitle: String? = null): Pair<Long, Boolean>? =
         NetworkPacer.withTmdbPacing {
             try {
                 val cleanTitle = title

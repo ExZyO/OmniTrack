@@ -438,29 +438,28 @@ fun DetailScreen(
 
                 // 1:1 Nuvio Seasons & Episode Tracking Grid
                 if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
-                    if (uiState.realSeasons.isNotEmpty() || uiState.realEpisodes.isNotEmpty()) {
-                        DetailSeriesContent(
-                            seasons = uiState.realSeasons,
-                            episodes = uiState.realEpisodes,
-                            watchedEpisodes = uiState.watchedEpisodes,
-                            selectedSeasonNumber = uiState.selectedSeasonNumber,
-                            fallbackBackdropUrl = item.bannerUrl,
-                            layoutMode = episodeLayoutMode,
-                            layoutScale = episodeLayoutScale,
-                            initialSeasonViewMode = seasonViewMode,
-                            onSeasonViewModeChanged = { next ->
-                                coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
-                            },
-                            onLayoutModeChanged = { next ->
-                                coroutineScope.launch { prefManager.updateEpisodeLayoutMode(next) }
-                            },
-                            onSelectSeason = { viewModel.selectSeason(it) },
-                            onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
-                            onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
-                            onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
+                    DetailSeriesContent(
+                        seasons = uiState.realSeasons,
+                        episodes = uiState.realEpisodes,
+                        episodesBySeason = uiState.episodesBySeason,
+                        watchedEpisodes = uiState.watchedEpisodes,
+                        selectedSeasonNumber = uiState.selectedSeasonNumber,
+                        fallbackBackdropUrl = item.bannerUrl,
+                        layoutMode = episodeLayoutMode,
+                        layoutScale = episodeLayoutScale,
+                        initialSeasonViewMode = seasonViewMode,
+                        onSeasonViewModeChanged = { next ->
+                            coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
+                        },
+                        onLayoutModeChanged = { next ->
+                            coroutineScope.launch { prefManager.updateEpisodeLayoutMode(next) }
+                        },
+                        onSelectSeason = { viewModel.selectSeason(it) },
+                        onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
+                        onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
+                        onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
