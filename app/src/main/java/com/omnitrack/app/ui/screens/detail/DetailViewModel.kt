@@ -381,15 +381,15 @@ class DetailViewModel(
     private var seriesFetchJob: kotlinx.coroutines.Job? = null
 
     private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
-        val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
         val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
 
         if (isShowOrAnime) {
-            launchSeriesFetch(item, tmdbKey)
+            launchSeriesFetch(item)
         }
 
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()
             val castMembers = mutableListOf<CastMember>()
@@ -896,9 +896,10 @@ class DetailViewModel(
         }
     }
 
-    private fun launchSeriesFetch(item: MediaItemEntity, tmdbKey: String) {
+    private fun launchSeriesFetch(item: MediaItemEntity) {
         seriesFetchJob?.cancel()
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             var resolvedTmdbId = item.tmdbId
             val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
             if (resolvedTmdbId == null && isShowOrAnime) {
