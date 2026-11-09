@@ -71,9 +71,9 @@ enum class EpisodeLayoutMode(val displayName: String, val description: String) {
 
     companion object {
         fun fromName(name: String?): EpisodeLayoutMode = when (name?.uppercase()) {
-            "LIST" -> LIST
+            "HORIZONTAL" -> HORIZONTAL
             "VERTICAL_CARD" -> VERTICAL_CARD
-            else -> HORIZONTAL
+            else -> LIST
         }
     }
 }

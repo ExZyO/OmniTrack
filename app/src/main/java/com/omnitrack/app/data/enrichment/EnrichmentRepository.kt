@@ -656,74 +656,184 @@ class EnrichmentRepository(
         }
     }
 
-    suspend fun fetchTvSeasons(tmdbId: Long, apiKey: String, showTitle: String? = null): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
+    suspend fun fetchCinemetaVideos(imdbId: String): List<com.omnitrack.app.data.model.MediaEpisode> = withContext(Dispatchers.IO) {
         try {
-            val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
+            val url = "https://v3-cinemeta.strem.io/meta/series/$imdbId.json"
             val req = Request.Builder().url(url).get().build()
             client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@withTmdbPacing emptyList()
-                val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
                 val root = json.parseToJsonElement(body).jsonObject
-                val seasons = root["seasons"]?.jsonArray ?: return@withTmdbPacing emptyList()
-                seasons.mapNotNull { node ->
+                val meta = root["meta"]?.jsonObject ?: return@withContext emptyList()
+                val videos = meta["videos"]?.jsonArray ?: return@withContext emptyList()
+                videos.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val seasonNumber = obj["season_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val cleanName = if (seasonNumber <= 0) "Specials" else "Season $seasonNumber"
-                    val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                    val posterPath = obj["poster_path"]?.jsonPrimitive?.content
-                    val airDate = obj["air_date"]?.jsonPrimitive?.content
-                    // Retain upcoming/announced seasons (e.g. Frieren Season 2) even before episode counts are locked in TMDb
-                    if (seasonNumber == 0 && epCount <= 0) return@mapNotNull null
-                    com.omnitrack.app.data.model.MediaSeason(
-                        seasonNumber = seasonNumber,
-                        name = cleanName,
-                        episodeCount = epCount,
-                        posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
-                        airDate = airDate
+                    val sNum = obj["season"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                    val epNum = obj["episode"]?.jsonPrimitive?.content?.toIntOrNull()
+                        ?: obj["number"]?.jsonPrimitive?.content?.toIntOrNull()
+                        ?: return@mapNotNull null
+                    val title = obj["name"]?.jsonPrimitive?.content
+                        ?: obj["title"]?.jsonPrimitive?.content
+                        ?: "Episode $epNum"
+                    val desc = obj["overview"]?.jsonPrimitive?.content
+                        ?: obj["description"]?.jsonPrimitive?.content
+                    val thumb = obj["thumbnail"]?.jsonPrimitive?.content
+                    val rel = obj["released"]?.jsonPrimitive?.content
+                        ?: obj["firstAired"]?.jsonPrimitive?.content
+                    val dateOnly = rel?.take(10)
+                    val rawRating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                    val voteAvg = if (rawRating != null && rawRating > 0f) rawRating else null
+
+                    com.omnitrack.app.data.model.MediaEpisode(
+                        id = sNum * 1000L + epNum,
+                        episodeNumber = epNum,
+                        seasonNumber = sNum,
+                        title = title,
+                        overview = desc,
+                        stillUrl = thumb,
+                        airDate = dateOnly,
+                        runtimeMinutes = null,
+                        voteAverage = voteAvg
                     )
                 }
-                .distinctBy { it.seasonNumber }
-                .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
             }
         } catch (_: Exception) {
             emptyList()
         }
     }
 
-    suspend fun fetchTvSeasonEpisodes(tmdbId: Long, seasonNumber: Int, apiKey: String): List<com.omnitrack.app.data.model.MediaEpisode> = NetworkPacer.withTmdbPacing {
-        try {
-            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNumber?api_key=$apiKey"
+    suspend fun fetchTvSeasons(
+        tmdbId: Long,
+        apiKey: String,
+        showTitle: String? = null,
+        imdbId: String? = null
+    ): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
+        val tmdbSeasons = try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
             val req = Request.Builder().url(url).get().build()
             client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@withTmdbPacing emptyList()
-                val body = response.body?.string() ?: return@withTmdbPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val episodes = root["episodes"]?.jsonArray ?: return@withTmdbPacing emptyList()
-                episodes.mapNotNull { node ->
-                    val obj = node.jsonObject
-                    val epNumber = obj["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: (seasonNumber * 1000L + epNumber)
-                    val name = obj["name"]?.jsonPrimitive?.content ?: "Episode $epNumber"
-                    val overview = obj["overview"]?.jsonPrimitive?.content
-                    val stillPath = obj["still_path"]?.jsonPrimitive?.content
-                    val airDate = obj["air_date"]?.jsonPrimitive?.content
-                    val runtime = obj["runtime"]?.jsonPrimitive?.content?.toIntOrNull()
-                    val voteAverage = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
-                    com.omnitrack.app.data.model.MediaEpisode(
-                        id = id,
-                        episodeNumber = epNumber,
-                        seasonNumber = seasonNumber,
-                        title = name,
-                        overview = overview,
-                        stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w500$it" },
-                        airDate = airDate,
-                        runtimeMinutes = runtime,
-                        voteAverage = voteAverage
-                    )
-                }.sortedBy { it.episodeNumber }
+                if (!response.isSuccessful) emptyList()
+                else {
+                    val body = response.body?.string() ?: return@use emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val seasons = root["seasons"]?.jsonArray ?: return@use emptyList()
+                    seasons.mapNotNull { node ->
+                        val obj = node.jsonObject
+                        val seasonNumber = obj["season_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val cleanName = if (seasonNumber <= 0) "Specials" else "Season $seasonNumber"
+                        val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                        val posterPath = obj["poster_path"]?.jsonPrimitive?.content
+                        val airDate = obj["air_date"]?.jsonPrimitive?.content
+                        // Retain upcoming/announced seasons even before episode counts are locked in TMDb
+                        if (seasonNumber == 0 && epCount <= 0) return@mapNotNull null
+                        com.omnitrack.app.data.model.MediaSeason(
+                            seasonNumber = seasonNumber,
+                            name = cleanName,
+                            episodeCount = epCount,
+                            posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                            airDate = airDate
+                        )
+                    }
+                }
             }
         } catch (_: Exception) {
             emptyList()
         }
+
+        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2 with 10 announced/ongoing episodes)
+        val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
+        if (!effectiveImdbId.isNullOrBlank()) {
+            val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
+            if (cinemetaVideos.isNotEmpty()) {
+                val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
+                val mergedList = tmdbSeasons.toMutableList()
+                cinemetaSeasons.forEach { (sNum, eps) ->
+                    val existing = mergedList.find { it.seasonNumber == sNum }
+                    if (existing == null) {
+                        // Season not in TMDb (e.g. Frieren Season 2 in Cinemeta)
+                        val posterUrl = mergedList.firstOrNull { it.posterUrl != null }?.posterUrl
+                        mergedList.add(
+                            com.omnitrack.app.data.model.MediaSeason(
+                                seasonNumber = sNum,
+                                name = if (sNum <= 0) "Specials" else "Season $sNum",
+                                episodeCount = eps.size,
+                                posterUrl = posterUrl,
+                                airDate = eps.firstOrNull()?.airDate
+                            )
+                        )
+                    } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
+                        val idx = mergedList.indexOf(existing)
+                        mergedList[idx] = existing.copy(episodeCount = eps.size)
+                    }
+                }
+                return@withTmdbPacing mergedList
+                    .distinctBy { it.seasonNumber }
+                    .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
+            }
+        }
+
+        return@withTmdbPacing tmdbSeasons
+            .distinctBy { it.seasonNumber }
+            .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
+    }
+
+    suspend fun fetchTvSeasonEpisodes(
+        tmdbId: Long,
+        seasonNumber: Int,
+        apiKey: String,
+        imdbId: String? = null
+    ): List<com.omnitrack.app.data.model.MediaEpisode> = NetworkPacer.withTmdbPacing {
+        val tmdbEpisodes = try {
+            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNumber?api_key=$apiKey"
+            val req = Request.Builder().url(url).get().build()
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) emptyList()
+                else {
+                    val body = response.body?.string() ?: return@use emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val episodes = root["episodes"]?.jsonArray ?: return@use emptyList()
+                    episodes.mapNotNull { node ->
+                        val obj = node.jsonObject
+                        val epNumber = obj["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: (seasonNumber * 1000L + epNumber)
+                        val name = obj["name"]?.jsonPrimitive?.content ?: "Episode $epNumber"
+                        val overview = obj["overview"]?.jsonPrimitive?.content
+                        val stillPath = obj["still_path"]?.jsonPrimitive?.content
+                        val airDate = obj["air_date"]?.jsonPrimitive?.content
+                        val runtime = obj["runtime"]?.jsonPrimitive?.content?.toIntOrNull()
+                        val voteAverage = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
+                        com.omnitrack.app.data.model.MediaEpisode(
+                            id = id,
+                            episodeNumber = epNumber,
+                            seasonNumber = seasonNumber,
+                            title = name,
+                            overview = overview,
+                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                            airDate = airDate,
+                            runtimeMinutes = runtime,
+                            voteAverage = voteAverage
+                        )
+                    }.sortedBy { it.episodeNumber }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+
+        if (tmdbEpisodes.isNotEmpty()) {
+            return@withTmdbPacing tmdbEpisodes
+        }
+
+        // If TMDb has no episodes for this season (e.g. Frieren Season 2), fallback to Cinemeta!
+        val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
+        if (!effectiveImdbId.isNullOrBlank()) {
+            val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
+            val seasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
+            if (seasonEps.isNotEmpty()) {
+                return@withTmdbPacing seasonEps
+            }
+        }
+
+        return@withTmdbPacing emptyList()
     }
 }

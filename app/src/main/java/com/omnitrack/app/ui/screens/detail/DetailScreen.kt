@@ -436,16 +436,7 @@ fun DetailScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Seamless Synopsis with bidirectional overflow-aware toggle
-                if (!item.synopsis.isNullOrBlank()) {
-                    DetailSynopsisSection(
-                        synopsis = item.synopsis,
-                        dominantAccent = dominantAccent
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                }
-
-                // Progress Section (100% Unboxed flowing controls)
+                // 1. Actions / Progress Section (100% Unboxed flowing controls)
                 DetailProgressSection(
                     item = item,
                     onUpdateProgress = { viewModel.updateProgress(it) },
@@ -453,8 +444,54 @@ fun DetailScreen(
                     onTogglePlatform = { viewModel.togglePlatform(it) },
                     onUpdateStatus = { viewModel.updateStatus(it) }
                 )
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // 1:1 Nuvio Seasons & Episode Tracking Grid
+                // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
+                if (!item.synopsis.isNullOrBlank()) {
+                    DetailSynopsisSection(
+                        synopsis = item.synopsis,
+                        dominantAccent = dominantAccent
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // 3. Production / Networks & Companies Section (Clickable)
+                DetailNetworksSection(
+                    item = item,
+                    companies = uiState.companies,
+                    onCompanyClick = { company ->
+                        selectedCompany = company
+                    }
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 4. Cast Section (Avatars + character names)
+                if (uiState.cast.isNotEmpty()) {
+                    DetailCastSection(
+                        cast = uiState.cast,
+                        onCastMemberClick = { member ->
+                            selectedPerson = member
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // 5. Comments Section (Trakt & Jikan Community Reviews Carousel)
+                if (uiState.reviews.isNotEmpty()) {
+                    ReviewsSection(reviews = uiState.reviews)
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // 6. Trailers Section (Trailer video cards)
+                if (uiState.trailers.isNotEmpty()) {
+                    DetailTrailersSection(
+                        trailers = uiState.trailers,
+                        contentTitle = item.title
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+
+                // 7. Episodes Section (1:1 Nuvio Seasons & Episode Tracking Grid)
                 if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
                     DetailSeriesContent(
                         seasons = uiState.realSeasons,
@@ -480,49 +517,11 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Detail Networks & Production Companies Section (Clickable)
-                DetailNetworksSection(
-                    item = item,
-                    companies = uiState.companies,
-                    onCompanyClick = { company ->
-                        selectedCompany = company
-                    }
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Detail Cast Section (Avatars + character names)
-                if (uiState.cast.isNotEmpty()) {
-                    DetailCastSection(
-                        cast = uiState.cast,
-                        onCastMemberClick = { member ->
-                            selectedPerson = member
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-
-                // Detail Trailers Section (Trailer video cards)
-                if (uiState.trailers.isNotEmpty()) {
-                    DetailTrailersSection(
-                        trailers = uiState.trailers,
-                        contentTitle = item.title
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-
-                // Trakt & Jikan Community Reviews Carousel
-                if (uiState.reviews.isNotEmpty()) {
-                    ReviewsSection(reviews = uiState.reviews)
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-
-                // Detail Show & Production Details Section
+                // 8. Details Section (Show & Production Details)
                 DetailShowDetailsSection(item = item)
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // "More Like This" & Franchise Relations Carousel (Preview Mode)
+                // 9. More Like This & Recommendations Section
                 if (uiState.recommendations.isNotEmpty()) {
                     RecommendationsSection(
                         recommendations = uiState.recommendations,

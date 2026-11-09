@@ -104,8 +104,8 @@ fun ReviewsSection(
                         .width(cardWidth)
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF121212))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                        .background(Color(0xFF242424).copy(alpha = 0.50f))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {
@@ -127,9 +127,9 @@ fun ReviewsSection(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(28.dp)
+                                            .size(26.dp)
                                             .clip(CircleShape)
-                                            .background(AccentArctic.copy(alpha = 0.15f)),
+                                            .background(AccentArctic.copy(alpha = 0.20f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
@@ -142,8 +142,8 @@ fun ReviewsSection(
 
                                     Text(
                                         text = rev.author,
-                                        color = TextPrimary,
-                                        fontSize = 14.sp,
+                                        color = Color.White,
+                                        fontSize = 14.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -168,7 +168,7 @@ fun ReviewsSection(
                                         Text(
                                             text = "${rev.rating.toInt()}/10",
                                             color = AccentGold,
-                                            fontSize = 10.5.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -181,7 +181,7 @@ fun ReviewsSection(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(999.dp))
                                         .background(Color(0xFF1B3D2F))
-                                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                                        .padding(horizontal = 10.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = "REVIEW",
@@ -195,8 +195,6 @@ fun ReviewsSection(
                         }
 
                         // Middle Body: Spoiler warning or formatted excerpt
-                        Spacer(modifier = Modifier.height(4.dp))
-
                         if (rev.hasSpoiler) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -204,7 +202,7 @@ fun ReviewsSection(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.15f))
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
                                 Icon(
@@ -223,15 +221,14 @@ fun ReviewsSection(
                         } else {
                             Text(
                                 text = rev.comment,
-                                color = TextSecondary,
-                                fontSize = 12.5.sp,
-                                lineHeight = 18.sp,
-                                maxLines = 4,
-                                overflow = TextOverflow.Ellipsis
+                                color = Color.White.copy(alpha = 0.80f),
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                maxLines = 5,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
                         }
-
-                        Spacer(modifier = Modifier.height(4.dp))
 
                         // Card Footer: Source, Date & Likes
                         Row(
@@ -241,18 +238,18 @@ fun ReviewsSection(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
                                     text = rev.source,
-                                    color = TextMuted,
+                                    color = Color.White.copy(alpha = 0.60f),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium
                                 )
                                 rev.date?.let { d ->
                                     Text(
-                                        text = "•  $d",
-                                        color = TextMuted.copy(alpha = 0.7f),
+                                        text = "• $d",
+                                        color = Color.White.copy(alpha = 0.45f),
                                         fontSize = 10.5.sp
                                     )
                                 }
@@ -271,13 +268,15 @@ fun ReviewsSection(
                                     )
                                     Text(
                                         text = "${rev.likes}",
-                                        color = TextMuted,
+                                        color = Color.White.copy(alpha = 0.70f),
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }
                         }
+                    }
+                }
                     }
                 }
             }

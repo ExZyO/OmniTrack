@@ -108,7 +108,7 @@ fun DetailSeriesContent(
     onToggleSeasonWatched: (Int) -> Unit,
     modifier: Modifier = Modifier,
     episodesBySeason: Map<Int, List<MediaEpisode>> = emptyMap(),
-    layoutMode: EpisodeLayoutMode = EpisodeLayoutMode.HORIZONTAL,
+    layoutMode: EpisodeLayoutMode = EpisodeLayoutMode.LIST,
     layoutScale: Float = 1.0f,
     initialSeasonViewMode: String = "Posters",
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
@@ -418,13 +418,13 @@ fun NuvioAnimatedWatchedBadge(
             modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF22D37C)),
+                .background(Color(0xFFE50914)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Watched",
-                tint = Color.Black,
+                tint = Color.White,
                 modifier = Modifier.size(14.dp)
             )
         }
@@ -698,7 +698,7 @@ private fun EpisodeListColumn(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         episodes.forEach { episode ->
             val isWatched = (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
@@ -734,8 +734,8 @@ private fun EpisodeListCardItem(
             .fillMaxWidth()
             .height(cardHeight)
             .clip(cardShape)
-            .background(Color(0xFF141414))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), cardShape)
+            .background(Color(0xFF242424).copy(alpha = 0.45f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
                 onLongClick = onLongPress

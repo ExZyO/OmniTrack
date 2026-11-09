@@ -249,20 +249,6 @@ fun MediaCard(
                 }
             }
 
-            // Bottom glass scrim for readable progress overlay - only when clearart logo is not displayed at bottom
-            if (!hasClearart && !isLandscape) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(65.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.88f))
-                            )
-                        )
-                )
-            }
 
             // Progress text overlay - positioned neatly at Top-End away from bottom logo
             val progressText = formatProgress(item)

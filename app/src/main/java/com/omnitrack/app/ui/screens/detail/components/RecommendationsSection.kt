@@ -85,7 +85,7 @@ fun RecommendationsSection(
             Text(
                 text = "${recommendations.size} recommendations",
                 fontSize = 11.5.sp,
-                color = TextMuted
+                color = Color.White
             )
         }
 

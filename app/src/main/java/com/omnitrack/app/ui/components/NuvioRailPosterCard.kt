@@ -77,20 +77,6 @@ fun NuvioRailPosterCard(
                 )
             }
 
-            // Top specular light sheen (Nuvio Card Depth preview)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.08f),
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.40f)
-                            )
-                        )
-                    )
-            )
 
             // Rating badge overlay
             if (rating != null && rating > 0f) {

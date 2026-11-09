@@ -903,6 +903,7 @@ class DetailViewModel(
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             var resolvedTmdbId = item.tmdbId
+            var resolvedImdbId = item.imdbId ?: SeriesContentMemoryCache.resolvedImdbIdCache[item.id]
             val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
             if (resolvedTmdbId == null && isShowOrAnime) {
                 resolvedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[item.id]
@@ -924,6 +925,14 @@ class DetailViewModel(
             if (resolvedTmdbId != null && isShowOrAnime) {
                 try {
                     val tmdbId = resolvedTmdbId
+                    if (resolvedImdbId == null) {
+                        resolvedImdbId = enrichmentRepository.fetchTmdbImdbId(tmdbId, false, tmdbKey)
+                        if (resolvedImdbId != null) {
+                            SeriesContentMemoryCache.resolvedImdbIdCache[item.id] = resolvedImdbId
+                            SeriesContentMemoryCache.resolvedImdbIdCache[tmdbId] = resolvedImdbId
+                        }
+                    }
+
                     // Instant 0ms cache retrieval
                     val cachedSeasons = SeriesContentMemoryCache.seasonsCache[tmdbId] ?: SeriesContentMemoryCache.seasonsCache[item.id]
                     val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] ?: SeriesContentMemoryCache.episodesBySeasonCache[item.id]
@@ -939,7 +948,7 @@ class DetailViewModel(
                         }
                     }
 
-                    val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title)
+                    val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title, resolvedImdbId)
                     if (seasons.isNotEmpty()) {
                         val validSeasons = seasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         val sortedSeasons = validSeasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
@@ -963,7 +972,7 @@ class DetailViewModel(
                                     if (cached != null && cached.isNotEmpty()) {
                                         s.seasonNumber to cached
                                     } else {
-                                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey)
+                                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId)
                                         if (eps.isNotEmpty()) {
                                             SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"] = eps
                                         }
@@ -1427,4 +1436,5 @@ internal object SeriesContentMemoryCache {
     val episodesCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
     val episodesBySeasonCache = java.util.concurrent.ConcurrentHashMap<Long, Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>>()
     val resolvedTmdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+    val resolvedImdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, String>()
 }
