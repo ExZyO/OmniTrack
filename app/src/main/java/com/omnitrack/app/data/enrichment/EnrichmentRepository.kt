@@ -269,7 +269,7 @@ class EnrichmentRepository(
             }
         }
 
-    private suspend fun fetchTmdbImdbId(tmdbId: Long, isMovie: Boolean, apiKey: String): String? =
+    suspend fun fetchTmdbImdbId(tmdbId: Long, isMovie: Boolean, apiKey: String): String? =
         NetworkPacer.withTmdbPacing {
             try {
                 val typeStr = if (isMovie) "movie" else "tv"
