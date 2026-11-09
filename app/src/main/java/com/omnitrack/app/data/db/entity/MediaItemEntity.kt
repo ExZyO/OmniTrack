@@ -39,6 +39,7 @@ data class MediaItemEntity(
     val traktId: Long? = null,
     val simklId: Long? = null,
     val tmdbId: Long? = null,
+    val imdbId: String? = null,
     val vndbId: String? = null,
     val comickId: String? = null,
     val hardcoverId: String? = null,

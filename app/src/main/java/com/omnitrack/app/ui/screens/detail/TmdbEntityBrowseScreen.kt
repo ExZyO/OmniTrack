@@ -17,9 +17,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -62,12 +63,18 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+data class EntityRail(
+    val title: String,
+    val items: List<RecommendationItem>
+)
+
 data class EntityBrowseData(
     val id: Long?,
     val name: String,
     val logoUrl: String? = null,
     val originCountry: String? = null,
-    val items: List<RecommendationItem> = emptyList()
+    val kind: String = "network",
+    val rails: List<EntityRail> = emptyList()
 )
 
 /**
@@ -93,17 +100,16 @@ fun TmdbEntityBrowseScreen(
         entityData = withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient()
-                val itemsList = mutableListOf<RecommendationItem>()
+                val railsList = mutableListOf<EntityRail>()
                 var resolvedLogo: String? = null
                 var originCountry: String? = null
 
                 if (entityKind == "anime_studio") {
-                    // AniList GraphQL Studio Media Query
                     val graphqlQuery = """
                         query (${'$'}studio: String) {
                           Studio(search: ${'$'}studio) {
                             name
-                            media(sort: POPULARITY_DESC, perPage: 30) {
+                            media(sort: POPULARITY_DESC, perPage: 40) {
                               nodes {
                                 id
                                 idMal
@@ -133,6 +139,8 @@ fun TmdbEntityBrowseScreen(
                                 val studioObj = root["data"]?.jsonObject?.get("Studio")?.jsonObject
                                 val mediaNodes = studioObj?.get("media")?.jsonObject?.get("nodes")?.jsonArray
                                 if (mediaNodes != null) {
+                                    val seriesItems = mutableListOf<RecommendationItem>()
+                                    val movieItems = mutableListOf<RecommendationItem>()
                                     for (node in mediaNodes) {
                                         val obj = node.jsonObject
                                         val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: continue
@@ -143,29 +151,33 @@ fun TmdbEntityBrowseScreen(
                                         val banner = obj["bannerImage"]?.jsonPrimitive?.content
                                         val score = obj["averageScore"]?.jsonPrimitive?.content?.toFloatOrNull()
                                         val year = obj["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.content
-                                        itemsList.add(
-                                            RecommendationItem(
-                                                title = title,
-                                                coverUrl = cover,
-                                                bannerUrl = banner,
-                                                releaseYear = year,
-                                                rating = score?.let { it / 10f },
-                                                mediaType = MediaType.ANIME,
-                                                anilistId = id,
-                                                malId = malId
-                                            )
+                                        val fmt = obj["format"]?.jsonPrimitive?.content ?: "TV"
+                                        val item = RecommendationItem(
+                                            title = title,
+                                            coverUrl = cover,
+                                            bannerUrl = banner,
+                                            releaseYear = year,
+                                            rating = score?.let { it / 10f },
+                                            mediaType = MediaType.ANIME,
+                                            anilistId = id,
+                                            malId = malId
                                         )
+                                        if (fmt == "MOVIE" || fmt == "OVA" || fmt == "ONA" || fmt == "SPECIAL") {
+                                            movieItems.add(item)
+                                        } else {
+                                            seriesItems.add(item)
+                                        }
                                     }
+                                    if (seriesItems.isNotEmpty()) railsList.add(EntityRail("TV Series • Popular", seriesItems))
+                                    if (movieItems.isNotEmpty()) railsList.add(EntityRail("Movies & Specials", movieItems))
                                 }
                             }
                         }
                     }
                 } else {
-                    // TMDb Network / Company Discover Query
                     val targetId = entityId
                     val isNetwork = entityKind.equals("network", ignoreCase = true)
 
-                    // 1. Fetch details if ID available
                     if (targetId != null && targetId > 0) {
                         val detailsEndpoint = if (isNetwork) "network" else "company"
                         val detailsUrl = "https://api.themoviedb.org/3/$detailsEndpoint/$targetId?api_key=$apiKey"
@@ -183,24 +195,16 @@ fun TmdbEntityBrowseScreen(
                         }
                     }
 
-                    // 2. Discover TV or Movies
-                    val discoverUrl = if (isNetwork && targetId != null && targetId > 0) {
-                        "https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_networks=$targetId&sort_by=popularity.desc"
-                    } else if (targetId != null && targetId > 0) {
-                        "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_companies=$targetId&sort_by=popularity.desc"
-                    } else {
-                        // Search by query text fallback
-                        "https://api.themoviedb.org/3/search/multi?api_key=$apiKey&query=${java.net.URLEncoder.encode(entityName, "UTF-8")}"
-                    }
-
-                    val req = Request.Builder().url(discoverUrl).get().build()
-                    client.newCall(req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val body = resp.body?.string()
-                            if (body != null) {
-                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val results = root["results"]?.jsonArray
-                                if (results != null) {
+                    // Helper to fetch TMDb discover rail
+                    fun fetchTmdbRail(url: String, isTv: Boolean): List<RecommendationItem> {
+                        val list = mutableListOf<RecommendationItem>()
+                        try {
+                            val req = Request.Builder().url(url).get().build()
+                            client.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string() ?: return emptyList()
+                                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                    val results = root["results"]?.jsonArray ?: return emptyList()
                                     for (elem in results) {
                                         val obj = elem.jsonObject
                                         val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: continue
@@ -210,24 +214,47 @@ fun TmdbEntityBrowseScreen(
                                         val backdropPath = obj["backdrop_path"]?.jsonPrimitive?.content
                                         val year = (obj["first_air_date"]?.jsonPrimitive?.content ?: obj["release_date"]?.jsonPrimitive?.content)?.take(4)
                                         val rating = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
-                                        val mediaTypeStr = obj["media_type"]?.jsonPrimitive?.content ?: if (isNetwork) "tv" else "movie"
-                                        val mType = if (mediaTypeStr == "tv") MediaType.SHOW else MediaType.MOVIE
-
-                                        itemsList.add(
+                                        list.add(
                                             RecommendationItem(
                                                 title = title,
                                                 coverUrl = "https://image.tmdb.org/t/p/w500$posterPath",
                                                 bannerUrl = backdropPath?.let { "https://image.tmdb.org/t/p/original$it" },
                                                 releaseYear = year,
                                                 rating = rating,
-                                                mediaType = mType,
+                                                mediaType = if (isTv) MediaType.SHOW else MediaType.MOVIE,
                                                 tmdbId = id
                                             )
                                         )
                                     }
                                 }
                             }
+                        } catch (_: Exception) {}
+                        return list
+                    }
+
+                    if (targetId != null && targetId > 0) {
+                        if (isNetwork) {
+                            val tvPop = fetchTmdbRail("https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_networks=$targetId&sort_by=popularity.desc", true)
+                            if (tvPop.isNotEmpty()) railsList.add(EntityRail("Series • Popular", tvPop))
+
+                            val tvTop = fetchTmdbRail("https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_networks=$targetId&sort_by=vote_average.desc&vote_count.gte=50", true)
+                            if (tvTop.isNotEmpty()) railsList.add(EntityRail("Series • Top Rated", tvTop))
+
+                            val moviePop = fetchTmdbRail("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_companies=$targetId&sort_by=popularity.desc", false)
+                            if (moviePop.isNotEmpty()) railsList.add(EntityRail("Movies • Popular", moviePop))
+                        } else {
+                            val moviePop = fetchTmdbRail("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_companies=$targetId&sort_by=popularity.desc", false)
+                            if (moviePop.isNotEmpty()) railsList.add(EntityRail("Movies • Popular", moviePop))
+
+                            val movieTop = fetchTmdbRail("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_companies=$targetId&sort_by=vote_average.desc&vote_count.gte=100", false)
+                            if (movieTop.isNotEmpty()) railsList.add(EntityRail("Movies • Top Rated", movieTop))
+
+                            val tvPop = fetchTmdbRail("https://api.themoviedb.org/3/discover/tv?api_key=$apiKey&with_companies=$targetId&sort_by=popularity.desc", true)
+                            if (tvPop.isNotEmpty()) railsList.add(EntityRail("Series • Popular", tvPop))
                         }
+                    } else {
+                        val searchItems = fetchTmdbRail("https://api.themoviedb.org/3/search/multi?api_key=$apiKey&query=${java.net.URLEncoder.encode(entityName, "UTF-8")}", isNetwork)
+                        if (searchItems.isNotEmpty()) railsList.add(EntityRail("Titles • Popular", searchItems))
                     }
                 }
 
@@ -236,7 +263,8 @@ fun TmdbEntityBrowseScreen(
                     name = entityName,
                     logoUrl = resolvedLogo,
                     originCountry = originCountry,
-                    items = itemsList
+                    kind = entityKind,
+                    rails = railsList
                 )
             } catch (_: Exception) {
                 null
@@ -279,9 +307,10 @@ fun TmdbEntityBrowseScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    entityData?.items?.size?.let { count ->
+                    val totalTitles = entityData?.rails?.sumOf { it.items.size } ?: 0
+                    if (totalTitles > 0) {
                         Text(
-                            text = "$count titles",
+                            text = "$totalTitles titles across ${entityData?.rails?.size ?: 0} categories",
                             fontSize = 11.5.sp,
                             color = TextMuted
                         )
@@ -300,71 +329,154 @@ fun TmdbEntityBrowseScreen(
                 }
             } else {
                 val data = entityData
-                if (data != null && data.items.isNotEmpty()) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 40.dp, top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                if (data != null && data.rails.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(bottom = 40.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        items(data.items) { item ->
-                            Column(
+                        // Optional Studio/Network Identity Card if logo or country available
+                        if (!data.logoUrl.isNullOrBlank() || !data.originCountry.isNullOrBlank()) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onOpenMediaPreview(item) },
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF121212))
+                                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .aspectRatio(0.67f)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color(0xFF141416))
-                                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                ) {
-                                    if (item.coverUrl.isNotBlank()) {
+                                if (!data.logoUrl.isNullOrBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 80.dp, height = 40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0xE6F5F5F5))
+                                            .padding(6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         AsyncImage(
-                                            model = item.coverUrl,
-                                            contentDescription = item.title,
-                                            contentScale = ContentScale.Crop,
+                                            model = data.logoUrl,
+                                            contentDescription = data.name,
+                                            contentScale = ContentScale.Fit,
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
-                                    if (item.rating != null && item.rating > 0f) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(4.dp)
-                                                .clip(RoundedCornerShape(999.dp))
-                                                .background(AmoledBlack.copy(alpha = 0.85f))
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "★ ${String.format("%.1f", item.rating)}",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFFFB800)
-                                            )
-                                        }
+                                }
+                                Column {
+                                    Text(
+                                        text = data.name,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    if (!data.originCountry.isNullOrBlank()) {
+                                        Text(
+                                            text = "Origin: ${data.originCountry}",
+                                            fontSize = 12.sp,
+                                            color = TextMuted
+                                        )
                                     }
                                 }
+                            }
+                        }
 
-                                Text(
-                                    text = item.title,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                item.releaseYear?.let { yr ->
+                        // 1:1 Nuvio Categorized Horizontal Poster Rails
+                        data.rails.forEach { rail ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = yr,
-                                        fontSize = 10.5.sp,
-                                        color = TextMuted
+                                        text = rail.title,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color.White
                                     )
+                                    Text(
+                                        text = "${rail.items.size}",
+                                        fontSize = 12.sp,
+                                        color = TextMuted,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(rail.items) { item ->
+                                        Column(
+                                            modifier = Modifier
+                                                .width(125.dp)
+                                                .clickable { onOpenMediaPreview(item) },
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(125.dp)
+                                                    .height(185.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(Color(0xFF141416))
+                                                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                                            ) {
+                                                if (item.coverUrl.isNotBlank()) {
+                                                    AsyncImage(
+                                                        model = item.coverUrl,
+                                                        contentDescription = item.title,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                }
+                                                if (item.rating != null && item.rating > 0f) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(4.dp)
+                                                            .clip(RoundedCornerShape(999.dp))
+                                                            .background(AmoledBlack.copy(alpha = 0.85f))
+                                                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "★ ${String.format("%.1f", item.rating)}",
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = Color(0xFFFFB800)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Text(
+                                                text = item.title,
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            item.releaseYear?.let { yr ->
+                                                Text(
+                                                    text = yr,
+                                                    fontSize = 11.sp,
+                                                    color = TextMuted
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

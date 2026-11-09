@@ -98,7 +98,6 @@ fun ReviewsSection(
             itemsIndexed(reviews) { index, rev ->
                 val cardWidth = 280.dp
                 val cardHeight = 190.dp
-                val bodyText = if (rev.hasSpoiler) "Review contains spoilers • Tap to read" else rev.comment
 
                 Box(
                     modifier = Modifier
@@ -106,70 +105,178 @@ fun ReviewsSection(
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF121212))
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {
                     Column(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = rev.author,
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        if (rev.isReview) {
-                            Box(
-                                modifier = Modifier
-                                    .background(
-                                        color = Color.White.copy(alpha = 0.12f),
-                                        shape = RoundedCornerShape(999.dp)
-                                    )
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                        // Top Header inside card
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "Review",
-                                    fontSize = 11.sp,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    maxLines = 1
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(AccentArctic.copy(alpha = 0.15f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = rev.author.take(1).uppercase(),
+                                            color = AccentArctic,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Text(
+                                        text = rev.author,
+                                        color = TextPrimary,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                if (rev.rating != null) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(AccentGold.copy(alpha = 0.15f))
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(11.dp)
+                                        )
+                                        Text(
+                                            text = "${rev.rating.toInt()}/10",
+                                            color = AccentGold,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 1:1 Nuvio Green REVIEW Badge
+                            if (rev.isReview) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color(0xFF1B3D2F))
+                                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "REVIEW",
+                                        color = Color(0xFF00E054),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
                             }
                         }
 
-                        Text(
-                            text = bodyText,
-                            fontSize = 13.5.sp,
-                            lineHeight = 20.sp,
-                            color = if (rev.hasSpoiler) Color(0xFFF59E0B) else Color.White.copy(alpha = 0.75f),
-                            maxLines = 5,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
+                        // Middle Body: Spoiler warning or formatted excerpt
+                        Spacer(modifier = Modifier.height(4.dp))
 
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (rev.rating != null) {
+                        if (rev.hasSpoiler) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFF59E0B).copy(alpha = 0.12f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(14.dp)
+                                )
                                 Text(
-                                    text = "Rating: ${rev.rating.toInt()}/10",
+                                    text = "Contains spoilers • Tap to read",
+                                    color = Color(0xFFF59E0B),
                                     fontSize = 12.sp,
-                                    color = Color.White.copy(alpha = 0.70f),
-                                    maxLines = 1
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
+                        } else {
                             Text(
-                                text = "${rev.likes} likes",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.70f),
-                                maxLines = 1,
+                                text = rev.comment,
+                                color = TextSecondary,
+                                fontSize = 12.5.sp,
+                                lineHeight = 18.sp,
+                                maxLines = 4,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Card Footer: Source, Date & Likes
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = rev.source,
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                rev.date?.let { d ->
+                                    Text(
+                                        text = "•  $d",
+                                        color = TextMuted.copy(alpha = 0.7f),
+                                        fontSize = 10.5.sp
+                                    )
+                                }
+                            }
+
+                            if (rev.likes > 0) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        tint = Color(0xFFED1C24).copy(alpha = 0.85f),
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                    Text(
+                                        text = "${rev.likes}",
+                                        color = TextMuted,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }

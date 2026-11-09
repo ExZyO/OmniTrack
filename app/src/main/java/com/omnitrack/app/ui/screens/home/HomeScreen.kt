@@ -107,6 +107,7 @@ fun HomeScreen(
     val coroutineScope = rememberCoroutineScope()
     val prefManager = remember { PreferenceManager(context) }
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
+    val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
     val uiState by viewModel.uiState.collectAsState()
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
@@ -163,13 +164,16 @@ fun HomeScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AmoledBlack)
-            .statusBarsPadding()
-            .nestedScroll(navScrollState.nestedScrollConnection)
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.omnitrack.app.ui.components.LocalCustomPosterPattern provides customPosterPattern
     ) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(AmoledBlack)
+                .statusBarsPadding()
+                .nestedScroll(navScrollState.nestedScrollConnection)
+        ) {
         // Fluid Tab Content Switcher across destinations (Library, Discover, History, Settings)
         AnimatedContent(
             targetState = currentNavDestination,
@@ -542,5 +546,6 @@ fun HomeScreen(
                 onDismiss = { showUpdateSheet = false }
             )
         }
+    }
     }
 }

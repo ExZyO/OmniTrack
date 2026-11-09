@@ -64,6 +64,7 @@ fun DetailNetworksSection(
         )
 
         FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -86,26 +87,30 @@ private fun ProductionChip(
 ) {
     Box(
         modifier = Modifier
+            .height(36.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFEFEFEF))
+            .background(Color(0xE6F5F5F5))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 7.dp)
-            .height(36.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         if (!item.logoUrl.isNullOrBlank()) {
             AsyncImage(
                 model = item.logoUrl,
                 contentDescription = item.name,
-                modifier = Modifier.height(22.dp),
+                modifier = Modifier
+                    .widthIn(min = 36.dp, max = 74.dp)
+                    .height(22.dp),
                 contentScale = ContentScale.Fit
             )
         } else {
             Text(
                 text = item.name,
-                fontSize = 12.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF222222)
+                color = Color(0xFF222222),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

@@ -25,5 +25,9 @@ data class MediaCardSummary(
     val customBannerPath: String? = null,
     val artworkRole: String = "DEFAULT",
     val communityScore: Float? = null,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val imdbId: String? = null,
+    val tmdbId: Long? = null,
+    val anilistId: Long? = null,
+    val malId: Long? = null
 )

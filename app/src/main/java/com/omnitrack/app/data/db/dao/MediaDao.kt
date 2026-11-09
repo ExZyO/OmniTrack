@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")

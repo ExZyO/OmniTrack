@@ -672,7 +672,8 @@ class EnrichmentRepository(
                     val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
                     val posterPath = obj["poster_path"]?.jsonPrimitive?.content
                     val airDate = obj["air_date"]?.jsonPrimitive?.content
-                    if (epCount <= 0 && seasonNumber > 0) return@mapNotNull null
+                    // Retain upcoming/announced seasons (e.g. Frieren Season 2) even before episode counts are locked in TMDb
+                    if (seasonNumber == 0 && epCount <= 0) return@mapNotNull null
                     com.omnitrack.app.data.model.MediaSeason(
                         seasonNumber = seasonNumber,
                         name = cleanName,

@@ -124,6 +124,7 @@ class PreferenceManager(private val context: Context) {
         val EPISODE_LAYOUT_MODE = stringPreferencesKey("episode_layout_mode")
         val EPISODE_LAYOUT_SCALE = floatPreferencesKey("episode_layout_scale")
         val SEASON_VIEW_MODE = stringPreferencesKey("season_view_mode")
+        val CUSTOM_POSTER_URL_PATTERN = stringPreferencesKey("custom_poster_url_pattern")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -390,6 +391,14 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun updateSeasonViewMode(mode: String) {
         context.dataStore.edit { it[PreferencesKeys.SEASON_VIEW_MODE] = mode }
+    }
+
+    val customPosterUrlPattern: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_POSTER_URL_PATTERN] ?: "" }
+
+    suspend fun updateCustomPosterUrlPattern(pattern: String) {
+        context.dataStore.edit { it[PreferencesKeys.CUSTOM_POSTER_URL_PATTERN] = pattern.trim() }
     }
 
     fun getArtSourcePriority(mediaType: MediaType): Flow<List<String>> {

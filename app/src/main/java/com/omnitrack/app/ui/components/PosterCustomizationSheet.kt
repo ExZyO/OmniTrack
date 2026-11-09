@@ -29,6 +29,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -56,6 +61,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,6 +91,8 @@ fun PosterCustomizationSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val style by preferenceManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
+    val currentCustomPosterPattern by preferenceManager.customPosterUrlPattern.collectAsState(initial = "")
+    var editingPattern by remember(currentCustomPosterPattern) { mutableStateOf(currentCustomPosterPattern) }
 
     var draftEdge by remember(style.cardDepthEdgeStrength) { mutableFloatStateOf(style.cardDepthEdgeStrength.toFloat()) }
     var draftSheen by remember(style.cardDepthSheenStrength) { mutableFloatStateOf(style.cardDepthSheenStrength.toFloat()) }
@@ -733,6 +742,151 @@ fun PosterCustomizationSheet(
                                     )
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            // ----------------------------------------------------
+            // 1:1 NUVIO CUSTOM POSTER URL ENGINE
+            // ----------------------------------------------------
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "CUSTOM POSTER SOURCE",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        letterSpacing = 1.sp
+                    )
+                    if (currentCustomPosterPattern.isNotBlank()) {
+                        Text(
+                            text = "✓ ACTIVE",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentJade
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Provide a poster URL pattern from an external service (e.g. BetterPosters, RPDB). Default remains standard unadorned art. If a placeholder has no value or an image fails to load, the original poster is used automatically. Manually selected covers and banners always override this template.",
+                    fontSize = 11.5.sp,
+                    color = TextMuted,
+                    lineHeight = 16.sp
+                )
+
+                OutlinedTextField(
+                    value = editingPattern,
+                    onValueChange = { editingPattern = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text(
+                            text = "https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg?tag=none&rs=IM",
+                            fontSize = 12.sp,
+                            color = TextMuted.copy(alpha = 0.5f)
+                        )
+                    },
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        color = Color.White
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentJade,
+                        unfocusedBorderColor = GlassBorder,
+                        focusedContainerColor = DarkSurfaceElevated,
+                        unfocusedContainerColor = DarkSurfaceElevated
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    minLines = 2,
+                    maxLines = 4
+                )
+
+                // Quick Token Insert Chips
+                Text(
+                    text = "Tap to insert token:",
+                    fontSize = 10.5.sp,
+                    color = TextSecondary
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("{imdb_id}", "{tmdb_id}", "{type}", "{typed_id}", "{id}", "{anilist_id}", "{mal_id}").forEach { token ->
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(0.5.dp, GlassBorder, RoundedCornerShape(6.dp))
+                                .clickable {
+                                    editingPattern += token
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = token,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = AccentArctic
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                preferenceManager.updateCustomPosterUrlPattern(editingPattern)
+                            }
+                        },
+                        enabled = editingPattern.trim() != currentCustomPosterPattern,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentJade,
+                            contentColor = AmoledBlack
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Save Template",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (currentCustomPosterPattern.isNotBlank()) {
+                        Button(
+                            onClick = {
+                                editingPattern = ""
+                                scope.launch {
+                                    preferenceManager.updateCustomPosterUrlPattern("")
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.White.copy(alpha = 0.12f),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "Clear",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }

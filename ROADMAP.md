@@ -149,6 +149,25 @@ changing vndb cover or banner starts flashing it, flickering, for games it keeps
 
 just continue phase by phase, without stopping, just so u remember, u can copy home page from chimanew, even see its logs and commits on github, later when u get to that part"
 
+### 11. Details Parity, Comments Reversion Fix, Episode List Metrics, Network Categories, Trailer Fullscreen & Frieren S2 (Verbatim)
+> "?? u had fixed comments ui now u reverted it??
+list episode ui is also not the same as nuvio
+networks, it opened for 2, the third 1 wasnt showing fully
+when i open details page, episodes and some other ui still loads a bit slower than nuvio
+also when i open network, the ui is not same as nuvio
+omnitrack shows many shows in same place , nuvio had categories
+trailer doesnt fullscreen like in nuvio either
+frieren now only shows season 1 and specials, no season 2
+tell me what ru doing and anwser my questions from the previous prompt"
+
+### 12. Custom Posters, Frieren S2 & Universal Category Best-in-Class Blueprint (Verbatim)
+> "3. Dont make betterposters default, keep the default, whatever it is in nuvio but copy the custom poster feature from nuvio so i can use betterposters and other sources myself like in nuvio, of course if i choose a cover and banner manually for an individual entry, it should override
+also, frieren season 2 is releasing!
+when i tell u to copy a feature from nuvio or x,y,z app, do it properly
+BEFORE U DO ANYTHING REPLY TO THIS:
+What if we copy anime metadata from apps like dartotsu or whatever the best app is? for each category we can copy the best app that has the most metaata, etc
+so where should we copy from? all of them?"
+
 ---
 
 ## 🏆 Gold-Standard Category Benchmarks & Reference Strategy
@@ -164,13 +183,15 @@ Reverse engineering the single best app for each vertical is an excellent strate
 
 | Media Category | Gold-Standard App | Source Type | Why It's the Best Benchmark |
 | :--- | :--- | :--- | :--- |
-| **TV Shows & Movies** | **Nuvio Mobile / Enhanced + Showly 2.0** | Open Source (Kotlin Compose) | You already have Nuvio locally in `NuvioMobile-Official`. For pure Trakt/TMDb tracking without streaming, Showly 2.0 (`michaldrabik/showly-2.0` on GitHub) is the cleanest open-source Kotlin Compose Trakt app in existence (stats, calendars, collections). |
-| **Anime & Manga** | **Chimanew + Dantotsu** | Open Source (Kotlin Compose) | You have Chimanew locally (`C:\Users\M7 Surface\Documents\Chimanew`). For anime tracking and AniList voice actors/seiyuu, Dantotsu is the benchmark. |
+| **TV Shows & Movies** | **Nuvio Mobile / Enhanced + Showly 2.0** | Open Source (Kotlin Compose) | Baseline 1:1 UI, 296x184dp horizontal episode cards, 120x120dp list cards, categorized network rails, rich comments carousel, fullscreen landscape player, and custom poster URL template engine. For pure Trakt/TMDb tracking without streaming, Showly 2.0 is the cleanest Trakt app in existence. |
+| **Anime (Episodes, Fillers & Countdowns)** | **Dantotsu + Dartotsu (`aayush2622`)** | Open Source (Kotlin / Flutter) | Benchmark for anime episode intelligence: **Canon vs. Filler vs. Recap episode markers**, unified tracker ID bridge (AniList ↔ MAL ↔ TVDB ↔ IMDb ↔ SIMKL), and AniSkip intro/outro timestamp submissions. |
+| **Anime (Deep Metadata & Airing Timers)** | **AniSync (`Marco-9456`) + Animite** | Open Source (Kotlin Compose) | 100% Jetpack Compose implementation of AniList GraphQL v2: **Live Airing Countdowns** (e.g. *Frieren Season 2 countdown timer*), character rosters with Japanese voice actors (Seiyuu), and full franchise relation trees (prequels, sequels, spin-offs). |
+| **Manga, Manhwa & Webtoons** | **Chimanew + Mihon / Komikku** | Open Source (Kotlin Compose) | You have Chimanew locally (`C:\Users\M7 Surface\Documents\Chimanew`). Gold standard for chapter tracking, volume covers, reading history, and tracker scrobbling. |
 | **Books & Literature** | **OpenReads + Hardcover** | Open Source (Kotlin Compose) | OpenReads (`mateusz-bak/openreads-android` on GitHub) is a 100% open-source Jetpack Compose book tracking app. It handles reading logs, pages/chapters, reading speed, and Open Library integration. |
-| **Video Games** | **Playnite (Desktop) / OpenTrack** | Open Source | Playnite has the most complete multi-source game library architecture (Steam, Epic, GOG, IGDB), while OpenTrack provides clean mobile models. |
+| **Video Games** | **Playnite (Desktop) + IGDB (Twitch API)** | Canonical Gaming API | IGDB provides the industry-standard game metadata: platforms, regional release dates, developer studios, publishers, screenshots, and age ratings (ESRB/PEGI). |
 | **Visual Novels** | **VNDB Kana v2** | Canonical Open API | VNDB's Kana REST API is the gold standard; we already communicate directly with it. |
 
-**Verdict**: Whenever we need a feature that Nuvio or Chimanew doesn't have, we benchmark against the open-source Kotlin Compose leader in that category (e.g., Showly for deep Trakt stats/calendar, OpenReads for advanced book progress).
+**Synthesis Strategy**: OmniTrack synthesizes the **1:1 visual craft of Nuvio** with the **deep metadata engines of Dartotsu, AniSync, and Chimanew**, giving every single media category the deepest, most accurate tracking experience available on Android.
 
 ---
 
@@ -326,6 +347,34 @@ flowchart LR
   - `Episode Ratings Visibility`: Always, Only Watched, or Never.
   - `Blur Unwatched Episodes`: Toggle on/off for spoiler protection.
   - `Auto-sync on Mark`: Pushes episode progress to Trakt and Simkl instantly.
+
+### 1.10 Multi-Category Best-of-Breed Synthesis & Nuvio 1:1 Parity Fixes
+- [ ] **1:1 Nuvio Comments Section Full Restoration**:
+  - Restore rich 280x190dp comment card from `DetailCommentsSection.kt`: Author display name (`14.sp` SemiBold), rating star `★`, green "REVIEW" chip, clean unmarkdowned body excerpt (`13.5.sp`, line height `20.sp`, max 5 lines), spoiler warning chip (`#F59E0B`), source badge ("Trakt"), release date, and red like heart with like count.
+  - Bilateral swipeable `CommentDetailSheet`: Spring-animated dynamic resizing (`dampingRatio = 0.9f, stiffness = 500f`), previous/next navigation buttons, spoiler toggle, and full scrollable comment text.
+- [ ] **1:1 Nuvio List Episode Card Phone Metrics**:
+  - Enforce exact phone metrics from `DetailSeriesContent.kt`: `120.dp` card height, `120.dp` square thumbnail with `12.dp` squircle clipping.
+  - `S1 E1` badge pinned at `TopStart` (`11.sp` SemiBold, `4.dp` radius, `6x2.dp` padding, `0.85f` alpha black).
+  - Watched circular checkmark pinned at `TopEnd` (`8.dp` padding).
+  - Right column: Title `15.sp` bold (`18.sp` line height, max 2 lines, no duplicate S1E1), Subtitle row with date (`12.sp`) + IMDb rating badge (`24x12.dp` logo + `12.sp` score), Overview `13.sp` (`18.sp` line height, max 2 lines).
+- [ ] **1:1 Nuvio Networks & Production Companies Categorized Rails**:
+  - Fix horizontal row content padding so the 3rd network pill is not clipped at the screen edge.
+  - In `TmdbEntityBrowseScreen.kt`, organize network/production catalog into categorized horizontal rails (**Popular**, **TV Shows**, **Movies**) matching Nuvio's browse architecture instead of a flat grid.
+- [ ] **1:1 Nuvio Trailer Player Fullscreen Landscape**:
+  - Configure dialog window with `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES` and sensor landscape lock.
+  - Expand player container to full `3120x1440` landscape viewport without portrait constraint letterboxing on Samsung Galaxy S24 Ultra.
+- [ ] **Frieren Season 2 & Upcoming Seasons Preservation**:
+  - Preserve announced/upcoming seasons with valid metadata and an "Upcoming" status badge instead of purging them when TMDb reports 0 aired episodes.
+- [ ] **Custom Poster URL Template Engine (Nuvio Parity)**:
+  - Default remains clean stock posters (Nuvio standard). Betterposters is **not** default.
+  - Add configurable custom poster URL pattern in Settings (e.g. `https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg?tag=none&rs=IM`).
+  - Supported template tokens: `{imdb_id}`, `{tmdb_id}`, `{type}`.
+  - **Manual Artwork Selection Invariant**: Any cover or backdrop selected manually via OmniTrack's Artwork Picker strictly overrides any custom template or default.
+- [ ] **Dartotsu Anime Episode Intelligence (Filler & Recap Labels)**:
+  - Add Canon vs. Filler vs. Recap episode indicators to anime episode cards.
+- [ ] **AniSync / AniList v2 Airing Countdown Timer & Seiyuu Grid**:
+  - Live Airing Countdown timer for upcoming anime episodes (e.g. *Frieren Season 2 countdown*).
+  - Main & Supporting Character roster with Japanese voice actors (Seiyuu).
 
 ### 🧪 On-Device Verification Checklist (Scheduled for Later Testing by Exile)
 - [ ] **Accurate Tracker Scores Normalization (AniList, MAL, Bangumi, Steam, VNDB) Verification**:

@@ -322,38 +322,54 @@ fun DetailSeriesContent(
                 label = "season_episodes_transition"
             ) { (seasonNum, mode) ->
                 val activeSeasonEps = episodesBySeason[seasonNum] ?: episodes.filter { it.seasonNumber == seasonNum }
-                when (mode) {
-                    EpisodeLayoutMode.HORIZONTAL -> {
-                        EpisodeHorizontalRow(
-                            episodes = activeSeasonEps,
-                            watchedEpisodes = watchedEpisodes,
-                            fallbackImageUrl = fallbackBackdropUrl,
-                            scale = layoutScale,
-                            onToggleWatched = onToggleEpisodeWatched,
-                            onLongPress = { activeActionSheetEpisode = it }
+                if (activeSeasonEps.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp, horizontal = 20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Season in production • Episodes will appear as broadcast dates are announced",
+                            color = TextMuted,
+                            fontSize = 13.sp,
+                            textAlign = TextAlign.Center
                         )
                     }
+                } else {
+                    when (mode) {
+                        EpisodeLayoutMode.HORIZONTAL -> {
+                            EpisodeHorizontalRow(
+                                episodes = activeSeasonEps,
+                                watchedEpisodes = watchedEpisodes,
+                                fallbackImageUrl = fallbackBackdropUrl,
+                                scale = layoutScale,
+                                onToggleWatched = onToggleEpisodeWatched,
+                                onLongPress = { activeActionSheetEpisode = it }
+                            )
+                        }
 
-                    EpisodeLayoutMode.LIST -> {
-                        EpisodeListColumn(
-                            episodes = activeSeasonEps,
-                            watchedEpisodes = watchedEpisodes,
-                            fallbackImageUrl = fallbackBackdropUrl,
-                            scale = layoutScale,
-                            onToggleWatched = onToggleEpisodeWatched,
-                            onLongPress = { activeActionSheetEpisode = it }
-                        )
-                    }
+                        EpisodeLayoutMode.LIST -> {
+                            EpisodeListColumn(
+                                episodes = activeSeasonEps,
+                                watchedEpisodes = watchedEpisodes,
+                                fallbackImageUrl = fallbackBackdropUrl,
+                                scale = layoutScale,
+                                onToggleWatched = onToggleEpisodeWatched,
+                                onLongPress = { activeActionSheetEpisode = it }
+                            )
+                        }
 
-                    EpisodeLayoutMode.VERTICAL_CARD -> {
-                        EpisodeVerticalCardColumn(
-                            episodes = activeSeasonEps,
-                            watchedEpisodes = watchedEpisodes,
-                            fallbackImageUrl = fallbackBackdropUrl,
-                            scale = layoutScale,
-                            onToggleWatched = onToggleEpisodeWatched,
-                            onLongPress = { activeActionSheetEpisode = it }
-                        )
+                        EpisodeLayoutMode.VERTICAL_CARD -> {
+                            EpisodeVerticalCardColumn(
+                                episodes = activeSeasonEps,
+                                watchedEpisodes = watchedEpisodes,
+                                fallbackImageUrl = fallbackBackdropUrl,
+                                scale = layoutScale,
+                                onToggleWatched = onToggleEpisodeWatched,
+                                onLongPress = { activeActionSheetEpisode = it }
+                            )
+                        }
                     }
                 }
             }
@@ -384,8 +400,8 @@ fun DetailSeriesContent(
 
 /**
  * 1:1 Nuvio Animated Watched Badge:
- * Delicate hollow stroked ring circle with translucent backing letting the underlying thumbnail
- * show through cleanly. Contains a centered white checkmark when watched. Hidden when unwatched.
+ * Solid 24dp circular badge filled with vibrant emerald accent (0xFF22D37C) and crisp white checkmark icon (14dp).
+ * Fades and scales smoothly on toggle.
  */
 @Composable
 fun NuvioAnimatedWatchedBadge(
@@ -400,21 +416,16 @@ fun NuvioAnimatedWatchedBadge(
     ) {
         Box(
             modifier = Modifier
-                .size(20.dp)
+                .size(24.dp)
                 .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.20f))
-                .border(
-                    width = 1.2.dp,
-                    color = Color(0xFF22D37C).copy(alpha = 0.90f),
-                    shape = CircleShape
-                ),
+                .background(Color(0xFF22D37C)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Watched",
-                tint = Color.White,
-                modifier = Modifier.size(11.dp)
+                tint = Color.Black,
+                modifier = Modifier.size(14.dp)
             )
         }
     }
@@ -723,8 +734,8 @@ private fun EpisodeListCardItem(
             .fillMaxWidth()
             .height(cardHeight)
             .clip(cardShape)
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, cardShape)
+            .background(Color(0xFF141414))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
                 onLongClick = onLongPress
@@ -737,7 +748,7 @@ private fun EpisodeListCardItem(
                     .width(imageWidth)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
-                    .background(DarkSurfaceCard)
+                    .background(Color(0xFF0D0D0D))
             ) {
                 if (!imgModel.isNullOrBlank()) {
                     AsyncImage(
@@ -764,7 +775,7 @@ private fun EpisodeListCardItem(
                     )
                 }
 
-                // 1:1 Nuvio Top-Right Watched Circle (hidden when unwatched)
+                // 1:1 Nuvio Top-Right Watched Circle (solid emerald with checkmark)
                 NuvioAnimatedWatchedBadge(
                     isWatched = isWatched,
                     modifier = Modifier

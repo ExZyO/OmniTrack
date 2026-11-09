@@ -79,8 +79,14 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     customBannerPath = customBannerPath,
     artworkRole = artworkRole,
     communityScore = communityScore,
-    lastUpdated = lastUpdated
+    lastUpdated = lastUpdated,
+    imdbId = imdbId,
+    tmdbId = tmdbId,
+    anilistId = anilistId,
+    malId = malId
 )
+
+val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
 
 @Composable
 fun MediaCard(
@@ -104,14 +110,26 @@ fun MediaCard(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
+    val inheritedPattern = LocalCustomPosterPattern.current
+
+    val customPosterUrl = remember(item, inheritedPattern, isLandscape) {
+        if (inheritedPattern.isNotBlank()) {
+            com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForSummary(item, inheritedPattern, isLandscape)
+        } else null
+    }
+    var customPosterFailed by remember(customPosterUrl) { mutableStateOf(false) }
 
     // In landscape mode, prioritize bannerUrl (16:9 backdrop) over portrait cover
-    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.customCoverPath, item.coverUrl) {
+    // CONTRACT: Manual customBannerPath / customCoverPath strictly takes top priority
+    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.customCoverPath, item.coverUrl, customPosterUrl, customPosterFailed) {
         if (isLandscape) {
             item.customBannerPath?.let { java.io.File(it) }
-                ?: (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
+                ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
+                else (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
         } else {
-            item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+            item.customCoverPath?.let { java.io.File(it) }
+                ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
+                else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
         }
     }
 
@@ -160,6 +178,11 @@ fun MediaCard(
                 contentDescription = item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onError = {
+                    if (customPosterUrl != null && !customPosterFailed) {
+                        customPosterFailed = true
+                    }
+                },
                 onSuccess = {
                     if (activeModel is String && coverCache != null) {
                         val diskCache = coil3.SingletonImageLoader.get(context).diskCache

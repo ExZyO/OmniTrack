@@ -118,7 +118,7 @@ class DetailViewModel(
             val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[mediaId]
                 ?: cachedTmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
             if (!cachedSeasons.isNullOrEmpty()) {
-                val validSeasons = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                val validSeasons = cachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                 _realSeasons.value = validSeasons
                 if (!cachedGrouped.isNullOrEmpty()) {
                     _episodesBySeason.value = cachedGrouped
@@ -134,7 +134,7 @@ class DetailViewModel(
                 val cachedSeasons = tmdbId?.let { SeriesContentMemoryCache.seasonsCache[it] }
                 val cachedGrouped = tmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
                 if (!cachedSeasons.isNullOrEmpty()) {
-                    val validSeasons = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                    val validSeasons = cachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                     _realSeasons.value = validSeasons
                     if (!cachedGrouped.isNullOrEmpty()) {
                         _episodesBySeason.value = cachedGrouped
@@ -195,6 +195,7 @@ class DetailViewModel(
                 val latest = repository.getMediaById(item.id).firstOrNull() ?: item
                 val updated = latest.copy(
                     tmdbId = enrichment.resolvedTmdbId ?: latest.tmdbId,
+                    imdbId = enrichment.resolvedImdbId ?: latest.imdbId,
                     clearartUrl = enrichment.clearartUrl ?: latest.clearartUrl,
                     communityScore = enrichment.communityScore ?: latest.communityScore,
                     imdbScore = enrichment.imdbScore ?: latest.imdbScore,
@@ -219,6 +220,7 @@ class DetailViewModel(
             } else {
                 val updated = item.copy(
                     tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
+                    imdbId = enrichment.resolvedImdbId ?: item.imdbId,
                     clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
                     communityScore = enrichment.communityScore ?: item.communityScore,
                     imdbScore = enrichment.imdbScore ?: item.imdbScore,
@@ -926,7 +928,7 @@ class DetailViewModel(
                     val cachedSeasons = SeriesContentMemoryCache.seasonsCache[tmdbId] ?: SeriesContentMemoryCache.seasonsCache[item.id]
                     val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] ?: SeriesContentMemoryCache.episodesBySeasonCache[item.id]
                     if (cachedSeasons != null && cachedSeasons.isNotEmpty()) {
-                        val validCached = cachedSeasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                        val validCached = cachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         _realSeasons.value = validCached
                         if (!cachedGrouped.isNullOrEmpty()) {
                             _episodesBySeason.value = cachedGrouped
@@ -939,7 +941,7 @@ class DetailViewModel(
 
                     val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title)
                     if (seasons.isNotEmpty()) {
-                        val validSeasons = seasons.filter { it.seasonNumber == 0 || it.episodeCount > 0 }
+                        val validSeasons = seasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         val sortedSeasons = validSeasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
                         SeriesContentMemoryCache.seasonsCache[tmdbId] = sortedSeasons
                         SeriesContentMemoryCache.seasonsCache[item.id] = sortedSeasons

@@ -327,17 +327,35 @@ fun DetailScreen(
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
         } else if (item != null) {
-            // Dynamic Artwork Role Resolution
-            val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
-                item.customCoverPath ?: when (item.artworkRole) {
+            val customPosterPattern by preferenceManager?.customPosterUrlPattern?.collectAsState(initial = "") ?: remember { mutableStateOf("") }
+
+            val customCoverUrl = remember(item, customPosterPattern) {
+                if (customPosterPattern.isNotBlank()) {
+                    com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = false)
+                } else null
+            }
+            var customCoverFailed by remember(customCoverUrl) { mutableStateOf(false) }
+
+            val customBannerUrl = remember(item, customPosterPattern) {
+                if (customPosterPattern.isNotBlank() && "{shape}" in customPosterPattern) {
+                    com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = true)
+                } else null
+            }
+            var customBannerFailed by remember(customBannerUrl) { mutableStateOf(false) }
+
+            // Dynamic Artwork Role Resolution (Manual user artwork selection strictly overrides templates)
+            val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl, customCoverUrl, customCoverFailed) {
+                item.customCoverPath ?: if (!customCoverFailed && customCoverUrl != null) customCoverUrl
+                else when (item.artworkRole) {
                     "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
                     else -> item.coverUrl
                 }
             }
-            val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl) {
+            val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl, customBannerUrl, customBannerFailed) {
                 when {
                     item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
                     item.customBannerPath != null -> item.customBannerPath
+                    !customBannerFailed && customBannerUrl != null -> customBannerUrl
                     item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
                     item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
                     else -> item.bannerUrl ?: item.coverUrl
