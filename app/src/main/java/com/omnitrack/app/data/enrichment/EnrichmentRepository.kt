@@ -56,10 +56,15 @@ class EnrichmentRepository(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .addInterceptor { chain ->
-            val req = chain.request().newBuilder()
-                .header("User-Agent", "OmniTrack/1.0.0 (EnrichmentEngine)")
-                .header("Accept", "application/json")
-                .build()
+            val original = chain.request()
+            val req = original.newBuilder().apply {
+                if (original.header("User-Agent") == null) {
+                    header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                }
+                if (original.header("Accept") == null) {
+                    header("Accept", "application/json")
+                }
+            }.build()
             chain.proceed(req)
         }
         .build()
@@ -871,76 +876,100 @@ class EnrichmentRepository(
     suspend fun fetchKitsuSeasonData(title: String, seasonNumber: Int): KitsuSeasonData? = withContext(Dispatchers.IO) {
         try {
             val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
-            val encoded = java.net.URLEncoder.encode(baseTitle, "UTF-8")
-            val url = "https://kitsu.io/api/edge/anime?filter[text]=$encoded&page[limit]=10"
-            val req = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val body = resp.body?.string() ?: return@withContext null
-                val root = json.parseToJsonElement(body).jsonObject
-                val data = root["data"]?.jsonArray ?: return@withContext null
+            val candidateQueries = listOfNotNull(
+                baseTitle,
+                if (seasonNumber > 1) "$baseTitle Season $seasonNumber" else null,
+                if (seasonNumber > 1) "$baseTitle $seasonNumber" else null,
+                title
+            ).distinct()
 
-                var matchedAnime: kotlinx.serialization.json.JsonObject? = null
+            var matchedAnime: kotlinx.serialization.json.JsonObject? = null
+
+            for (query in candidateQueries) {
+                val encoded = java.net.URLEncoder.encode(query, "UTF-8")
+                val url = "https://kitsu.io/api/edge/anime?filter[text]=$encoded&page[limit]=10"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.api+json")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+
+                val items = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use emptyList()
+                    val body = resp.body?.string() ?: return@use emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    root["data"]?.jsonArray?.mapNotNull { it.jsonObject } ?: emptyList()
+                }
+
+                if (items.isEmpty()) continue
+
                 if (seasonNumber <= 1) {
-                    matchedAnime = data.firstOrNull()?.jsonObject
+                    matchedAnime = items.firstOrNull()
+                    if (matchedAnime != null) break
                 } else {
-                    for (item in data) {
-                        val obj = item.jsonObject
-                        val canonical = obj["attributes"]?.jsonObject?.get("canonicalTitle")?.jsonPrimitive?.content?.lowercase() ?: ""
-                        if (canonical.contains("${seasonNumber}nd") ||
-                            canonical.contains("${seasonNumber}rd") ||
-                            canonical.contains("${seasonNumber}th") ||
-                            canonical.contains("season $seasonNumber") ||
-                            canonical.contains(" $seasonNumber")
-                        ) {
-                            matchedAnime = obj
+                    for (item in items) {
+                        val attrs = item["attributes"]?.jsonObject
+                        val canonical = attrs?.get("canonicalTitle")?.jsonPrimitive?.content?.lowercase() ?: ""
+                        val titlesObj = attrs?.get("titles")?.jsonObject
+                        val allTitles = (titlesObj?.values?.mapNotNull { it.jsonPrimitive.content.lowercase() }.orEmpty() + canonical)
+                        val isSeasonMatch = allTitles.any { t ->
+                            t.contains("${seasonNumber}nd") ||
+                            t.contains("${seasonNumber}rd") ||
+                            t.contains("${seasonNumber}th") ||
+                            t.contains("season $seasonNumber") ||
+                            t.contains(" $seasonNumber") ||
+                            t.contains("第${seasonNumber}期") ||
+                            t.contains("s$seasonNumber")
+                        }
+                        if (isSeasonMatch) {
+                            matchedAnime = item
                             break
                         }
                     }
-                    if (matchedAnime == null && data.isNotEmpty()) {
-                        matchedAnime = data.firstOrNull()?.jsonObject
-                    }
+                    if (matchedAnime != null) break
                 }
-
-                if (matchedAnime == null) return@withContext null
-
-                val animeId = matchedAnime["id"]?.jsonPrimitive?.content ?: return@withContext null
-                val posterObj = matchedAnime["attributes"]?.jsonObject?.get("posterImage")?.jsonObject
-                val posterUrl = posterObj?.get("large")?.jsonPrimitive?.content
-                    ?: posterObj?.get("original")?.jsonPrimitive?.content
-
-                val stills = mutableMapOf<Int, String>()
-                var offset = 0
-                while (offset < 40) {
-                    val epUrl = "https://kitsu.io/api/edge/anime/$animeId/episodes?page[limit]=20&page[offset]=$offset"
-                    val epReq = Request.Builder().url(epUrl).header("User-Agent", "Mozilla/5.0").build()
-                    val items = client.newCall(epReq).execute().use { epResp ->
-                        if (!epResp.isSuccessful) return@use emptyList()
-                        val epBody = epResp.body?.string() ?: return@use emptyList()
-                        val epRoot = json.parseToJsonElement(epBody).jsonObject
-                        epRoot["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
-                    }
-                    if (items.isEmpty()) break
-                    for (ep in items) {
-                        val attrs = ep["attributes"]?.jsonObject
-                        val epNum = attrs?.get("number")?.jsonPrimitive?.content?.toIntOrNull()
-                        val thumbObj = attrs?.get("thumbnail")?.jsonObject
-                        val thumbUrl = thumbObj?.get("large")?.jsonPrimitive?.content
-                            ?: thumbObj?.get("original")?.jsonPrimitive?.content
-                            ?: thumbObj?.get("medium")?.jsonPrimitive?.content
-                        if (epNum != null && !thumbUrl.isNullOrBlank()) {
-                            stills[epNum] = thumbUrl
-                        }
-                    }
-                    if (items.size < 20) break
-                    offset += 20
-                }
-
-                KitsuSeasonData(posterUrl = posterUrl, stills = stills)
             }
+
+            if (matchedAnime == null) return@withContext null
+
+            val animeId = matchedAnime["id"]?.jsonPrimitive?.content ?: return@withContext null
+            val posterObj = matchedAnime["attributes"]?.jsonObject?.get("posterImage")?.jsonObject
+            val posterUrl = posterObj?.get("large")?.jsonPrimitive?.content
+                ?: posterObj?.get("original")?.jsonPrimitive?.content
+                ?: posterObj?.get("medium")?.jsonPrimitive?.content
+
+            val stills = mutableMapOf<Int, String>()
+            var offset = 0
+            while (offset < 60) {
+                val epUrl = "https://kitsu.io/api/edge/anime/$animeId/episodes?page[limit]=20&page[offset]=$offset"
+                val epReq = Request.Builder()
+                    .url(epUrl)
+                    .header("Accept", "application/vnd.api+json")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .build()
+                val items = client.newCall(epReq).execute().use { epResp ->
+                    if (!epResp.isSuccessful) return@use emptyList()
+                    val epBody = epResp.body?.string() ?: return@use emptyList()
+                    val epRoot = json.parseToJsonElement(epBody).jsonObject
+                    epRoot["data"]?.jsonArray?.mapNotNull { it.jsonObject } ?: emptyList()
+                }
+                if (items.isEmpty()) break
+                for (ep in items) {
+                    val attrs = ep["attributes"]?.jsonObject
+                    val epNum = attrs?.get("number")?.jsonPrimitive?.content?.toIntOrNull()
+                    val thumbObj = attrs?.get("thumbnail")?.jsonObject
+                    val thumbUrl = thumbObj?.get("large")?.jsonPrimitive?.content
+                        ?: thumbObj?.get("original")?.jsonPrimitive?.content
+                        ?: thumbObj?.get("medium")?.jsonPrimitive?.content
+                    if (epNum != null && !thumbUrl.isNullOrBlank()) {
+                        stills[epNum] = thumbUrl
+                    }
+                }
+                if (items.size < 20) break
+                offset += 20
+            }
+
+            KitsuSeasonData(posterUrl = posterUrl, stills = stills)
         } catch (_: Exception) {
             null
         }

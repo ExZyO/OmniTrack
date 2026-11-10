@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -573,13 +575,17 @@ fun DetailScreen(
                     )
             )
 
-            // Circle-Free Pure White Back Arrow (Option B: circle-free, statusBarsPadding, soft drop shadow)
-            Box(
+            // 1:1 Nuvio Parity: Top Floating Bar with Back Arrow, Centered Logo/Title, and Watched Checkmark
+            val headerAlpha = ((scrollState.value - 40f) / 160f).coerceIn(0f, 1f)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
+                    .background(Color(0xFF0D0D0D).copy(alpha = headerAlpha * 0.95f))
                     .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
                     onClick = {
@@ -598,6 +604,71 @@ fun DetailScreen(
                             .size(24.dp)
                             .shadow(elevation = 8.dp, shape = CircleShape)
                     )
+                }
+
+                // Center Title / Clearart Logo (smooth fade-in as user scrolls down to seasons & content)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .padding(horizontal = 8.dp)
+                        .graphicsLayer { alpha = headerAlpha },
+                    contentAlignment = Alignment.Center
+                ) {
+                    var headerClearartFailed by remember(item?.clearartUrl) { mutableStateOf(false) }
+                    val clearartUrl = item?.clearartUrl
+                    if (!clearartUrl.isNullOrBlank() && !headerClearartFailed) {
+                        AsyncImage(
+                            model = clearartUrl,
+                            contentDescription = item?.title.orEmpty(),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .widthIn(max = 200.dp),
+                            contentScale = ContentScale.Fit,
+                            onError = { headerClearartFailed = true }
+                        )
+                    } else if (item != null) {
+                        Text(
+                            text = item.title,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                // Top-Right Watched / Completion Checkmark Button (1:1 Nuvio Parity)
+                if (item != null) {
+                    val isCompleted = item.status == TrackingStatus.COMPLETED
+                    IconButton(
+                        onClick = {
+                            val nextStatus = if (isCompleted) {
+                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                                    TrackingStatus.WATCHING
+                                } else {
+                                    TrackingStatus.PLAN_TO_TRACK
+                                }
+                            } else {
+                                TrackingStatus.COMPLETED
+                            }
+                            viewModel.updateStatus(nextStatus)
+                        },
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Toggle Watched Status",
+                            tint = if (isCompleted) Color(0xFFE52E5E) else Color.White,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .shadow(elevation = 8.dp, shape = CircleShape)
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.size(44.dp))
                 }
             }
 

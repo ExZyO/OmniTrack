@@ -1029,7 +1029,9 @@ class DetailViewModel(
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val currentTitle = previewItem?.title
                 ?: repository.getMediaById(_mediaId.value).firstOrNull()?.title
-            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, null, currentTitle)
+            val resolvedImdbId = previewItem?.imdbId
+                ?: repository.getMediaById(_mediaId.value).firstOrNull()?.imdbId
+            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, resolvedImdbId, currentTitle)
             if (eps.isNotEmpty()) {
                 SeriesContentMemoryCache.episodesCache["$resolvedTmdbId:$seasonNumber"] = eps
                 _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to eps)

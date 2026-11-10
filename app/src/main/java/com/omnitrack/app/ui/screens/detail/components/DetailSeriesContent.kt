@@ -416,16 +416,16 @@ fun NuvioAnimatedWatchedBadge(
     ) {
         Box(
             modifier = Modifier
-                .size(24.dp)
+                .size(20.dp)
                 .clip(CircleShape)
-                .background(Color(0xFFE50914)),
+                .background(Brush.linearGradient(listOf(Color(0xFFE52E5E), Color(0xFFC2185B)))),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Watched",
                 tint = Color.White,
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(12.dp)
             )
         }
     }
@@ -438,9 +438,9 @@ fun NuvioAnimatedWatchedBadge(
 private fun ImdbEpisodeRatingBadge(
     rating: Float,
     modifier: Modifier = Modifier,
-    logoWidth: Dp = 22.dp,
-    logoHeight: Dp = 11.dp,
-    textSize: androidx.compose.ui.unit.TextUnit = 10.sp
+    logoWidth: Dp = 24.dp,
+    logoHeight: Dp = 12.dp,
+    textSize: androidx.compose.ui.unit.TextUnit = 12.sp
 ) {
     Row(
         modifier = modifier,
@@ -458,7 +458,7 @@ private fun ImdbEpisodeRatingBadge(
         Text(
             text = String.format(java.util.Locale.US, "%.1f", rating),
             fontSize = textSize,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             color = Color(0xFFF5C518)
         )
     }
@@ -471,11 +471,11 @@ private fun ImdbEpisodeRatingBadge(
 private fun EpisodeCodeBadge(
     text: String,
     modifier: Modifier = Modifier,
-    textSize: androidx.compose.ui.unit.TextUnit = 9.5.sp,
+    textSize: androidx.compose.ui.unit.TextUnit = 10.sp,
     radius: Dp = 4.dp,
-    horizontalPadding: Dp = 5.dp,
-    verticalPadding: Dp = 1.5.dp,
-    backgroundAlpha: Float = 0.35f
+    horizontalPadding: Dp = 6.dp,
+    verticalPadding: Dp = 2.dp,
+    backgroundAlpha: Float = 0.45f
 ) {
     if (text.isBlank()) return
     val badgeShape = RoundedCornerShape(radius)
@@ -483,7 +483,7 @@ private fun EpisodeCodeBadge(
         modifier = modifier
             .clip(badgeShape)
             .background(Color.Black.copy(alpha = backgroundAlpha))
-            .border(0.5.dp, Color.Black.copy(alpha = 0.65f), badgeShape)
+            .border(0.5.dp, Color.Black.copy(alpha = 0.60f), badgeShape)
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         contentAlignment = Alignment.Center
     ) {
@@ -617,7 +617,7 @@ private fun EpisodeHorizontalCard(
             isWatched = isWatched,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(10.dp)
+                .padding(top = 8.dp, end = 8.dp)
         )
 
         // In-Image Content Overlay at Bottom Start (1:1 Nuvio Phone Metrics)
@@ -632,11 +632,11 @@ private fun EpisodeHorizontalCard(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    textSize = 9.5.sp,
+                    textSize = 10.sp,
                     radius = 4.dp,
-                    horizontalPadding = 5.dp,
-                    verticalPadding = 1.5.dp,
-                    backgroundAlpha = 0.35f
+                    horizontalPadding = 6.dp,
+                    verticalPadding = 2.dp,
+                    backgroundAlpha = 0.45f
                 )
             }
 
@@ -716,7 +716,7 @@ private fun EpisodeListColumn(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         episodes.forEach { episode ->
             val isWatched = (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
@@ -752,7 +752,7 @@ private fun EpisodeListCardItem(
             .fillMaxWidth()
             .height(cardHeight)
             .clip(cardShape)
-            .background(Color(0xFF242424).copy(alpha = 0.45f))
+            .background(Color(0xFF222224).copy(alpha = 0.45f))
             .border(1.dp, Color.White.copy(alpha = 0.10f), cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
@@ -799,11 +799,11 @@ private fun EpisodeListCardItem(
                 if (badgeText.isNotBlank()) {
                     EpisodeCodeBadge(
                         text = badgeText,
-                        textSize = 9.5.sp,
+                        textSize = 10.sp,
                         radius = 4.dp,
-                        horizontalPadding = 5.dp,
-                        verticalPadding = 1.5.dp,
-                        backgroundAlpha = 0.35f,
+                        horizontalPadding = 6.dp,
+                        verticalPadding = 2.dp,
+                        backgroundAlpha = 0.45f,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 8.dp, top = 8.dp)
@@ -815,7 +815,7 @@ private fun EpisodeListCardItem(
                     isWatched = isWatched,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
+                        .padding(top = 8.dp, end = 8.dp)
                 )
             }
 
@@ -824,7 +824,7 @@ private fun EpisodeListCardItem(
                 modifier = Modifier
                     .fillMaxHeight()
                     .weight(1f)
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
@@ -835,7 +835,7 @@ private fun EpisodeListCardItem(
                     lineHeight = 18.sp,
                     letterSpacing = 0.sp,
                     color = Color.White,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
 
@@ -850,7 +850,7 @@ private fun EpisodeListCardItem(
                                 text = formattedDate,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color.White.copy(alpha = 0.80f),
+                                color = Color.White.copy(alpha = 0.65f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -871,7 +871,7 @@ private fun EpisodeListCardItem(
                         text = episode.overview,
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
-                        color = Color.White.copy(alpha = 0.70f),
+                        color = Color.White.copy(alpha = 0.60f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -972,7 +972,7 @@ private fun EpisodeVerticalCardItem(
             isWatched = isWatched,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(10.dp)
+                .padding(top = 8.dp, end = 8.dp)
         )
 
         // In-Image Metadata Overlay at Bottom
@@ -987,11 +987,11 @@ private fun EpisodeVerticalCardItem(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    textSize = 9.5.sp,
+                    textSize = 10.sp,
                     radius = 4.dp,
-                    horizontalPadding = 5.dp,
-                    verticalPadding = 1.5.dp,
-                    backgroundAlpha = 0.35f
+                    horizontalPadding = 6.dp,
+                    verticalPadding = 2.dp,
+                    backgroundAlpha = 0.45f
                 )
             }
 
@@ -1084,7 +1084,7 @@ private fun SeasonPosterScrollRow(
                         .background(DarkSurfaceElevated)
                         .border(
                             width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) Color(0xFFE50914) else Color.White.copy(alpha = 0.10f),
+                            color = if (isSelected) Color(0xFFE52E5E) else Color.White.copy(alpha = 0.10f),
                             shape = RoundedCornerShape(8.dp)
                         )
                 ) {
@@ -1116,9 +1116,9 @@ private fun SeasonPosterScrollRow(
 
                 Text(
                     text = label,
-                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
-                    fontSize = 12.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.60f),
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
