@@ -331,16 +331,16 @@ fun TmdbEntityBrowseScreen(
                             .padding(horizontal = 20.dp)
                     ) {
                         val kindLabel = when (data.kind) {
-                            "company" -> "PRODUCTION COMPANY"
-                            "anime_studio" -> "ANIME STUDIO"
-                            else -> "TV NETWORK"
+                            "company" -> "Production Company"
+                            "anime_studio" -> "Animation Studio"
+                            else -> "Network"
                         }
                         Text(
                             text = kindLabel,
-                            fontSize = 12.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
                             letterSpacing = 0.4.sp,
-                            color = Color.White.copy(alpha = 0.65f)
+                            color = Color.White.copy(alpha = 0.70f)
                         )
 
                         Spacer(modifier = Modifier.height(8.dp))
@@ -378,9 +378,9 @@ fun TmdbEntityBrowseScreen(
                         val metaLine = listOfNotNull(
                             data.originCountry?.takeIf { it.isNotBlank() },
                             when (data.kind) {
-                                "company" -> "Production Company"
-                                "anime_studio" -> "Animation Studio"
-                                else -> "Broadcast Television Network"
+                                "company" -> "Company"
+                                "anime_studio" -> "Studio"
+                                else -> "Network"
                             }
                         ).joinToString(" • ")
 

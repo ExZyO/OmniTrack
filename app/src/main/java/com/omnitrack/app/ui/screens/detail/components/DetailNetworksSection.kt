@@ -125,8 +125,13 @@ private fun rememberDisplayCompanies(
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
     if (passedCompanies.isNotEmpty()) {
         val networks = passedCompanies.filter { it.kind == "network" }
-        return if (isSeries && networks.isNotEmpty()) {
-            networks.take(6)
+        return if (isSeries) {
+            if (networks.isNotEmpty()) {
+                networks.take(6)
+            } else {
+                val logosOnly = passedCompanies.filter { !it.logoUrl.isNullOrBlank() }
+                logosOnly.take(6)
+            }
         } else {
             val logosOnly = passedCompanies.filter { !it.logoUrl.isNullOrBlank() }
             (if (logosOnly.isNotEmpty()) logosOnly else passedCompanies).take(6)
@@ -134,10 +139,19 @@ private fun rememberDisplayCompanies(
     }
 
     val studio = item.studioOrNetwork?.trim()?.takeIf { it.isNotBlank() } ?: return emptyList()
-    return studio.split(",").map { name ->
-        NetworkProductionCompany(
-            name = name.trim(),
-            kind = if (isSeries) "network" else "company"
+    return if (isSeries) {
+        listOf(
+            NetworkProductionCompany(
+                name = studio.split(",").first().trim(),
+                kind = "network"
+            )
         )
-    }.take(6)
+    } else {
+        studio.split(",").map { name ->
+            NetworkProductionCompany(
+                name = name.trim(),
+                kind = "company"
+            )
+        }.take(6)
+    }
 }

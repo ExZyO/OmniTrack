@@ -130,7 +130,7 @@ fun DetailCastSection(
                     if (!member.character.isNullOrBlank()) {
                         Text(
                             text = member.character,
-                            color = Color.White.copy(alpha = 0.90f),
+                            color = Color.White,
                             fontSize = 10.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

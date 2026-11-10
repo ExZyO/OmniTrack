@@ -471,11 +471,11 @@ private fun ImdbEpisodeRatingBadge(
 private fun EpisodeCodeBadge(
     text: String,
     modifier: Modifier = Modifier,
-    textSize: androidx.compose.ui.unit.TextUnit = 10.sp,
+    textSize: androidx.compose.ui.unit.TextUnit = 9.5.sp,
     radius: Dp = 4.dp,
-    horizontalPadding: Dp = 6.dp,
-    verticalPadding: Dp = 2.dp,
-    backgroundAlpha: Float = 0.40f
+    horizontalPadding: Dp = 5.dp,
+    verticalPadding: Dp = 1.5.dp,
+    backgroundAlpha: Float = 0.35f
 ) {
     if (text.isBlank()) return
     val badgeShape = RoundedCornerShape(radius)
@@ -483,7 +483,7 @@ private fun EpisodeCodeBadge(
         modifier = modifier
             .clip(badgeShape)
             .background(Color.Black.copy(alpha = backgroundAlpha))
-            .border(0.75.dp, Color.Black.copy(alpha = 0.65f), badgeShape)
+            .border(0.5.dp, Color.Black.copy(alpha = 0.65f), badgeShape)
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         contentAlignment = Alignment.Center
     ) {
@@ -632,11 +632,11 @@ private fun EpisodeHorizontalCard(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    textSize = 10.sp,
+                    textSize = 9.5.sp,
                     radius = 4.dp,
-                    horizontalPadding = 6.dp,
-                    verticalPadding = 2.dp,
-                    backgroundAlpha = 0.40f
+                    horizontalPadding = 5.dp,
+                    verticalPadding = 1.5.dp,
+                    backgroundAlpha = 0.35f
                 )
             }
 
@@ -770,7 +770,7 @@ private fun EpisodeListCardItem(
             ) {
                 var loadFailed by remember(imgModel) { mutableStateOf(false) }
                 val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
-                if (!effectiveUrl.isNullOrBlank()) {
+                if (!effectiveUrl.isNullOrBlank() && !loadFailed) {
                     AsyncImage(
                         model = effectiveUrl,
                         contentDescription = episode.title,
@@ -778,6 +778,20 @@ private fun EpisodeListCardItem(
                         contentScale = ContentScale.Crop,
                         onError = { loadFailed = true }
                     )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF141416)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber),
+                            color = Color.White.copy(alpha = 0.30f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 // 1:1 Nuvio Top-Left Episode Code Badge
@@ -785,11 +799,11 @@ private fun EpisodeListCardItem(
                 if (badgeText.isNotBlank()) {
                     EpisodeCodeBadge(
                         text = badgeText,
-                        textSize = 10.sp,
+                        textSize = 9.5.sp,
                         radius = 4.dp,
-                        horizontalPadding = 6.dp,
-                        verticalPadding = 2.dp,
-                        backgroundAlpha = 0.40f,
+                        horizontalPadding = 5.dp,
+                        verticalPadding = 1.5.dp,
+                        backgroundAlpha = 0.35f,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 8.dp, top = 8.dp)
@@ -973,11 +987,11 @@ private fun EpisodeVerticalCardItem(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    textSize = 10.sp,
+                    textSize = 9.5.sp,
                     radius = 4.dp,
-                    horizontalPadding = 6.dp,
-                    verticalPadding = 2.dp,
-                    backgroundAlpha = 0.40f
+                    horizontalPadding = 5.dp,
+                    verticalPadding = 1.5.dp,
+                    backgroundAlpha = 0.35f
                 )
             }
 

@@ -758,6 +758,7 @@ class EnrichmentRepository(
                         // Season not in TMDb (e.g. Frieren Season 2 in Cinemeta)
                         val aniListPoster = if (!showTitle.isNullOrBlank()) {
                             fetchAniListSeasonPoster(showTitle, sNum)
+                                ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
                         } else null
                         val posterUrl = aniListPoster ?: mergedList.firstOrNull { it.posterUrl != null }?.posterUrl
                         mergedList.add(
@@ -771,7 +772,12 @@ class EnrichmentRepository(
                         )
                     } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
                         val idx = mergedList.indexOf(existing)
-                        mergedList[idx] = existing.copy(episodeCount = eps.size)
+                        val enhancedPoster = if (existing.posterUrl.isNullOrBlank() && !showTitle.isNullOrBlank()) {
+                            fetchAniListSeasonPoster(showTitle, sNum)
+                                ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
+                                ?: existing.posterUrl
+                        } else existing.posterUrl
+                        mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = enhancedPoster)
                     }
                 }
                 return@withTmdbPacing mergedList
@@ -789,7 +795,8 @@ class EnrichmentRepository(
         tmdbId: Long,
         seasonNumber: Int,
         apiKey: String,
-        imdbId: String? = null
+        imdbId: String? = null,
+        showTitle: String? = null
     ): List<com.omnitrack.app.data.model.MediaEpisode> = NetworkPacer.withTmdbPacing {
         val tmdbEpisodes = try {
             val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNumber?api_key=$apiKey"
@@ -838,11 +845,105 @@ class EnrichmentRepository(
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
             val seasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
             if (seasonEps.isNotEmpty()) {
-                return@withTmdbPacing seasonEps
+                val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, seasonNumber) else null
+                val enrichedEps = seasonEps.map { ep ->
+                    val kitsuStill = kitsuData?.stills?.get(ep.episodeNumber)
+                    if (!kitsuStill.isNullOrBlank()) {
+                        ep.copy(stillUrl = kitsuStill)
+                    } else if (ep.stillUrl?.contains("episodes.metahub.space") == true) {
+                        ep.copy(stillUrl = null)
+                    } else {
+                        ep
+                    }
+                }
+                return@withTmdbPacing enrichedEps
             }
         }
 
         return@withTmdbPacing emptyList()
+    }
+
+    data class KitsuSeasonData(
+        val posterUrl: String? = null,
+        val stills: Map<Int, String> = emptyMap()
+    )
+
+    suspend fun fetchKitsuSeasonData(title: String, seasonNumber: Int): KitsuSeasonData? = withContext(Dispatchers.IO) {
+        try {
+            val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
+            val encoded = java.net.URLEncoder.encode(baseTitle, "UTF-8")
+            val url = "https://kitsu.io/api/edge/anime?filter[text]=$encoded&page[limit]=10"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                val root = json.parseToJsonElement(body).jsonObject
+                val data = root["data"]?.jsonArray ?: return@withContext null
+
+                var matchedAnime: kotlinx.serialization.json.JsonObject? = null
+                if (seasonNumber <= 1) {
+                    matchedAnime = data.firstOrNull()?.jsonObject
+                } else {
+                    for (item in data) {
+                        val obj = item.jsonObject
+                        val canonical = obj["attributes"]?.jsonObject?.get("canonicalTitle")?.jsonPrimitive?.content?.lowercase() ?: ""
+                        if (canonical.contains("${seasonNumber}nd") ||
+                            canonical.contains("${seasonNumber}rd") ||
+                            canonical.contains("${seasonNumber}th") ||
+                            canonical.contains("season $seasonNumber") ||
+                            canonical.contains(" $seasonNumber")
+                        ) {
+                            matchedAnime = obj
+                            break
+                        }
+                    }
+                    if (matchedAnime == null && data.isNotEmpty()) {
+                        matchedAnime = data.firstOrNull()?.jsonObject
+                    }
+                }
+
+                if (matchedAnime == null) return@withContext null
+
+                val animeId = matchedAnime["id"]?.jsonPrimitive?.content ?: return@withContext null
+                val posterObj = matchedAnime["attributes"]?.jsonObject?.get("posterImage")?.jsonObject
+                val posterUrl = posterObj?.get("large")?.jsonPrimitive?.content
+                    ?: posterObj?.get("original")?.jsonPrimitive?.content
+
+                val stills = mutableMapOf<Int, String>()
+                var offset = 0
+                while (offset < 40) {
+                    val epUrl = "https://kitsu.io/api/edge/anime/$animeId/episodes?page[limit]=20&page[offset]=$offset"
+                    val epReq = Request.Builder().url(epUrl).header("User-Agent", "Mozilla/5.0").build()
+                    val items = client.newCall(epReq).execute().use { epResp ->
+                        if (!epResp.isSuccessful) return@use emptyList()
+                        val epBody = epResp.body?.string() ?: return@use emptyList()
+                        val epRoot = json.parseToJsonElement(epBody).jsonObject
+                        epRoot["data"]?.jsonArray?.map { it.jsonObject } ?: emptyList()
+                    }
+                    if (items.isEmpty()) break
+                    for (ep in items) {
+                        val attrs = ep["attributes"]?.jsonObject
+                        val epNum = attrs?.get("number")?.jsonPrimitive?.content?.toIntOrNull()
+                        val thumbObj = attrs?.get("thumbnail")?.jsonObject
+                        val thumbUrl = thumbObj?.get("large")?.jsonPrimitive?.content
+                            ?: thumbObj?.get("original")?.jsonPrimitive?.content
+                            ?: thumbObj?.get("medium")?.jsonPrimitive?.content
+                        if (epNum != null && !thumbUrl.isNullOrBlank()) {
+                            stills[epNum] = thumbUrl
+                        }
+                    }
+                    if (items.size < 20) break
+                    offset += 20
+                }
+
+                KitsuSeasonData(posterUrl = posterUrl, stills = stills)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     suspend fun fetchAniListSeasonPoster(title: String, seasonNumber: Int): String? = withContext(Dispatchers.IO) {
@@ -854,8 +955,13 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
+            val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
             val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
             val searchQueries = listOf(
+                "$baseTitle Season $seasonNumber",
+                "$baseTitle ${seasonNumber}nd Season",
+                "$baseTitle ${seasonNumber}rd Season",
+                "$baseTitle ${seasonNumber}th Season",
                 "$cleanTitle Season $seasonNumber",
                 "$cleanTitle ${seasonNumber}nd Season",
                 "$cleanTitle ${seasonNumber}rd Season",

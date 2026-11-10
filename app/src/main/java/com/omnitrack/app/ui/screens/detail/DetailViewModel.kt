@@ -981,7 +981,7 @@ class DetailViewModel(
                                     if (cached != null && cached.isNotEmpty()) {
                                         s.seasonNumber to cached
                                     } else {
-                                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId)
+                                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId, item.title)
                                         if (eps.isNotEmpty()) {
                                             SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"] = eps
                                         }
@@ -1027,7 +1027,9 @@ class DetailViewModel(
                 ?: repository.getMediaById(_mediaId.value).firstOrNull()?.tmdbId
                 ?: return@launch
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
-            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey)
+            val currentTitle = previewItem?.title
+                ?: repository.getMediaById(_mediaId.value).firstOrNull()?.title
+            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, null, currentTitle)
             if (eps.isNotEmpty()) {
                 SeriesContentMemoryCache.episodesCache["$resolvedTmdbId:$seasonNumber"] = eps
                 _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to eps)
