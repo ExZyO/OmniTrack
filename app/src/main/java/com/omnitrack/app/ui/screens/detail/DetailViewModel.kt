@@ -45,6 +45,8 @@ import okhttp3.Request
 
 data class DetailUiState(
     val item: MediaItemEntity? = null,
+    val previousItem: MediaItemEntity? = null,
+    val nextItem: MediaItemEntity? = null,
     val seasons: List<Season> = emptyList(),
     val realSeasons: List<MediaSeason> = emptyList(),
     val realEpisodes: List<MediaEpisode> = emptyList(),
@@ -76,7 +78,9 @@ private data class PreviewAndAux(
     val episodesBySeason: Map<Int, List<MediaEpisode>>,
     val companies: List<NetworkProductionCompany>,
     val collectionName: String? = null,
-    val collectionItems: List<RecommendationItem> = emptyList()
+    val collectionItems: List<RecommendationItem> = emptyList(),
+    val previousItem: MediaItemEntity? = null,
+    val nextItem: MediaItemEntity? = null
 )
 
 class DetailViewModel(
@@ -100,18 +104,46 @@ class DetailViewModel(
     private val _episodesBySeason = MutableStateFlow<Map<Int, List<MediaEpisode>>>(emptyMap())
     private val _collectionName = MutableStateFlow<String?>(null)
     private val _collectionItems = MutableStateFlow<List<RecommendationItem>>(emptyList())
+    private val _previousItem = MutableStateFlow<MediaItemEntity?>(null)
+    private val _nextItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
+
+    private fun updateSiblings(currentId: Long) {
+        val siblings = _stableSiblingIds.value.ifEmpty {
+            ActiveSiblingHolder.activeSiblingIds
+        }
+        if (siblings.size > 1) {
+            val currentIndex = siblings.indexOf(currentId)
+            val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
+            val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
+            val prevId = siblings[prevIndex]
+            val nextId = siblings[nextIndex]
+            viewModelScope.launch(Dispatchers.IO) {
+                _previousItem.value = repository.getMediaById(prevId).firstOrNull()
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                _nextItem.value = repository.getMediaById(nextId).firstOrNull()
+            }
+        } else {
+            _previousItem.value = null
+            _nextItem.value = null
+        }
+    }
 
     init {
         val active = ActiveSiblingHolder.activeSiblingIds
         if (active.isNotEmpty()) {
             _stableSiblingIds.value = active
+            if (mediaId > 0L) {
+                updateSiblings(mediaId)
+            }
         } else if (mediaId > 0L) {
             viewModelScope.launch {
                 val all = repository.getAllMedia().firstOrNull()?.map { it.id }.orEmpty()
                 if (_stableSiblingIds.value.isEmpty() && all.isNotEmpty()) {
                     _stableSiblingIds.value = all
+                    updateSiblings(mediaId)
                 }
             }
         }
@@ -272,7 +304,9 @@ class DetailViewModel(
             _episodesBySeason,
             _companies,
             _collectionName,
-            _collectionItems
+            _collectionItems,
+            _previousItem,
+            _nextItem
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -288,13 +322,17 @@ class DetailViewModel(
             episodesBySeason = args[8] as Map<Int, List<MediaEpisode>>,
             companies = args[9] as List<NetworkProductionCompany>,
             collectionName = args[10] as? String,
-            collectionItems = args[11] as List<RecommendationItem>
+            collectionItems = args[11] as List<RecommendationItem>,
+            previousItem = args[12] as? MediaItemEntity,
+            nextItem = args[13] as? MediaItemEntity
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
             flowOf(
                 DetailUiState(
                     item = aux.previewItem,
+                    previousItem = null,
+                    nextItem = null,
                     seasons = emptyList(),
                     realSeasons = aux.realSeasons,
                     realEpisodes = aux.realEpisodes,
@@ -322,6 +360,7 @@ class DetailViewModel(
                         if (_realSeasons.value.isEmpty()) {
                             loadRecommendationsAndReviews(currentItem)
                         }
+                        updateSiblings(currentItem.id)
                         repository.getEpisodeProgress(currentItem.id).map { progressList ->
                             val siblings = _stableSiblingIds.value.ifEmpty {
                                 ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(currentItem.id) }
@@ -331,6 +370,8 @@ class DetailViewModel(
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
                             DetailUiState(
                                 item = currentItem,
+                                previousItem = aux.previousItem,
+                                nextItem = aux.nextItem,
                                 seasons = emptyList(),
                                 realSeasons = aux.realSeasons,
                                 realEpisodes = aux.realEpisodes,
@@ -1233,6 +1274,7 @@ class DetailViewModel(
             val prevItem = repository.getMediaById(prevId).firstOrNull() ?: return@launch
             _mediaId.value = prevId
             _previewItem.value = null
+            updateSiblings(prevId)
             val cachedSeasons = SeriesContentMemoryCache.seasonsCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.seasonsCache[prevId]
             val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.episodesBySeasonCache[prevId]
             if (cachedSeasons != null) {
@@ -1264,6 +1306,7 @@ class DetailViewModel(
             val nextItem = repository.getMediaById(nextId).firstOrNull() ?: return@launch
             _mediaId.value = nextId
             _previewItem.value = null
+            updateSiblings(nextId)
             val nextCachedSeasons = SeriesContentMemoryCache.seasonsCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.seasonsCache[nextId]
             val nextCachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.episodesBySeasonCache[nextId]
             if (nextCachedSeasons != null) {

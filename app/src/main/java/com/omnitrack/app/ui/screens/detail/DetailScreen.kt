@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.screens.detail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -14,6 +15,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -73,6 +75,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -202,13 +205,8 @@ fun DetailScreen(
     val scrollState = rememberScrollState()
 
     // Kinematic horizontal & vertical swipe physics (bilateral entry switching & Poweramp pull-down to dismiss)
-    var dragOffsetX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val animatableOffsetX = remember { Animatable(0f) }
     var dragOffsetY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    val animatedDragOffsetX by animateFloatAsState(
-        targetValue = dragOffsetX,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "horizontalSwipe"
-    )
     val animatedDragOffsetY by animateFloatAsState(
         targetValue = dragOffsetY,
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
@@ -270,7 +268,7 @@ fun DetailScreen(
     }
 
     LaunchedEffect(item?.id) {
-        dragOffsetX = 0f
+        animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
         scrollState.scrollTo(0)
         if (item != null) {
@@ -278,59 +276,148 @@ fun DetailScreen(
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
-            .graphicsLayer {
-                translationX = animatedDragOffsetX
-                translationY = animatedDragOffsetY.coerceAtLeast(0f)
-                val absX = kotlin.math.abs(animatedDragOffsetX)
-                val absY = animatedDragOffsetY.coerceAtLeast(0f)
-                val totalOffset = kotlin.math.sqrt(absX * absX + absY * absY)
-                val scale = (1f - (totalOffset / 1200f * 0.08f)).coerceIn(0.92f, 1f)
-                scaleX = scale
-                scaleY = scale
-                alpha = (1f - (totalOffset / 1000f * 0.35f)).coerceIn(0.65f, 1f)
-            }
-            .nestedScroll(nestedScrollConnection)
-            .pointerInput(item?.id) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        when {
-                            // Swiping right: navigate to previous sibling entry
-                            dragOffsetX > 80f && uiState.hasPreviousEntry -> {
-                                dragOffsetX = 0f
-                                viewModel.navigateToPrevious()
-                            }
-                            // Swiping left: navigate to next sibling entry
-                            dragOffsetX < -80f && uiState.hasNextEntry -> {
-                                dragOffsetX = 0f
-                                viewModel.navigateToNext()
-                            }
-                            // Swiping right past threshold when at start of single-entry list: return to library
-                            dragOffsetX > 180f && !uiState.hasPreviousEntry -> {
-                                dragOffsetX = 0f
-                                onBack()
-                            }
-                            else -> dragOffsetX = 0f
-                        }
-                    },
-                    onDragCancel = {
-                        dragOffsetX = 0f
-                    },
-                    onHorizontalDrag = { change, dragAmount ->
-                        dragOffsetX += dragAmount
-                        change.consume()
+    ) {
+        val density = LocalDensity.current
+        val screenWidthPx = with(density) { maxWidth.toPx() }
+        val currentOffsetX = animatableOffsetX.value
+
+        // 1. PREVIOUS SIBLING PREVIEW (Slides in from the left when user drags right)
+        if (uiState.hasPreviousEntry && uiState.previousItem != null && currentOffsetX > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = currentOffsetX - screenWidthPx
+                        translationY = animatedDragOffsetY.coerceAtLeast(0f)
                     }
+            ) {
+                SiblingDetailPreview(
+                    item = uiState.previousItem!!,
+                    presentationSettings = presentationSettings
                 )
             }
-    ) {
-        if (uiState.isLoading && item == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+        }
+
+        // 2. NEXT SIBLING PREVIEW (Slides in from the right when user drags left)
+        if (uiState.hasNextEntry && uiState.nextItem != null && currentOffsetX < 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = currentOffsetX + screenWidthPx
+                        translationY = animatedDragOffsetY.coerceAtLeast(0f)
+                    }
+            ) {
+                SiblingDetailPreview(
+                    item = uiState.nextItem!!,
+                    presentationSettings = presentationSettings
+                )
             }
-        } else if (item != null) {
+        }
+
+        // 3. CURRENT ACTIVE ENTRY
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = currentOffsetX
+                    translationY = animatedDragOffsetY.coerceAtLeast(0f)
+                    val dismissScale = (1f - (animatedDragOffsetY.coerceAtLeast(0f) / 1000f * 0.12f)).coerceIn(0.88f, 1f)
+                    val dismissAlpha = (1f - (animatedDragOffsetY.coerceAtLeast(0f) / 800f * 0.35f)).coerceIn(0.65f, 1f)
+                    scaleX = dismissScale
+                    scaleY = dismissScale
+                    alpha = dismissAlpha
+                }
+                .nestedScroll(nestedScrollConnection)
+                .pointerInput(item?.id) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            val currentX = animatableOffsetX.value
+                            val threshold = screenWidthPx * 0.18f
+                            when {
+                                // Swiping right: navigate to previous sibling entry
+                                currentX > threshold && uiState.hasPreviousEntry -> {
+                                    coroutineScope.launch {
+                                        animatableOffsetX.animateTo(
+                                            targetValue = screenWidthPx,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                        viewModel.navigateToPrevious()
+                                        animatableOffsetX.snapTo(0f)
+                                    }
+                                }
+                                // Swiping left: navigate to next sibling entry
+                                currentX < -threshold && uiState.hasNextEntry -> {
+                                    coroutineScope.launch {
+                                        animatableOffsetX.animateTo(
+                                            targetValue = -screenWidthPx,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                        viewModel.navigateToNext()
+                                        animatableOffsetX.snapTo(0f)
+                                    }
+                                }
+                                // Swiping right past threshold when at start of single-entry list: return to library
+                                currentX > 180f && !uiState.hasPreviousEntry -> {
+                                    coroutineScope.launch {
+                                        animatableOffsetX.animateTo(
+                                            targetValue = screenWidthPx,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                        onBack()
+                                    }
+                                }
+                                else -> {
+                                    coroutineScope.launch {
+                                        animatableOffsetX.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            coroutineScope.launch {
+                                animatableOffsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
+                            }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            coroutineScope.launch {
+                                animatableOffsetX.snapTo(animatableOffsetX.value + dragAmount)
+                            }
+                            change.consume()
+                        }
+                    )
+                }
+        ) {
+            if (uiState.isLoading && item == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                }
+            } else if (item != null) {
             val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
 
             val customCoverUrl = remember(item, customPosterPattern) {
@@ -792,6 +879,112 @@ fun DetailScreen(
                     }
                 )
             }
+        }
+    }
+}
+
+/**
+ * Zero-Black-Screen Sibling Detail Preview.
+ * Preloads and renders adjacent library entries during horizontal swiping gestures,
+ * ensuring continuous 120Hz physical transitions with zero black flashes.
+ */
+@Composable
+private fun SiblingDetailPreview(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    presentationSettings: PresentationSettings,
+    modifier: Modifier = Modifier
+) {
+    val effectiveCover = when (item.artworkRole) {
+        "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
+        else -> item.coverUrl
+    }
+    val effectiveBanner = when {
+        item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
+        item.customBannerPath != null -> item.customBannerPath
+        item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
+        item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
+        else -> item.bannerUrl ?: item.coverUrl
+    }
+    val backdropTargetUrl = effectiveBanner
+
+    val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
+    val backdropBitmap = rememberArtworkBackdrop(
+        imageUrl = backdropTargetUrl,
+        enabled = isCinematicBlur
+    )
+    val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
+    val dominantAccent = rememberCoverDominantColor(losslessCover)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AmoledBlack)
+    ) {
+        when (presentationSettings.fallbackBackgroundStyle) {
+            FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                ArtworkBackdrop(
+                    image = backdropBitmap,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                CoverGlowBox(
+                    imageUrl = backdropTargetUrl,
+                    modifier = Modifier.fillMaxSize()
+                ) {}
+            }
+            FallbackBackgroundStyle.SOLID_BLACK -> {}
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                DetailHeroHeaderSection(
+                    item = item,
+                    backdropTargetUrl = backdropTargetUrl,
+                    onOptionsClick = {},
+                    onEditProgress = {},
+                    onEditStatus = {},
+                    onEditScore = {},
+                    onOpenTrackers = {}
+                )
+            } else {
+                DetailClassicHeaderSection(
+                    item = item,
+                    coverImageModel = LosslessCoverMapper.toLosslessUrl(effectiveCover),
+                    backdropTargetUrl = backdropTargetUrl,
+                    onCoverClick = {},
+                    onCoverLoaded = {},
+                    onOptionsClick = {},
+                    onEditProgress = {},
+                    onEditStatus = {},
+                    onEditScore = {},
+                    onOpenTrackers = {}
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            DetailProgressSection(
+                item = item,
+                onUpdateProgress = {},
+                onUpdatePlaytime = {},
+                onTogglePlatform = {},
+                onUpdateStatus = {}
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            if (!item.synopsis.isNullOrBlank()) {
+                DetailSynopsisSection(
+                    synopsis = item.synopsis,
+                    dominantAccent = dominantAccent
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+
+            DetailShowDetailsSection(item = item)
         }
     }
 }
