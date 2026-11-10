@@ -273,229 +273,252 @@ fun TmdbEntityBrowseScreen(
         isLoading = false
     }
 
+    val backgroundUrl = entityData?.rails?.firstOrNull()?.items?.firstOrNull()?.coverUrl
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
     ) {
-        Column(
+        if (!backgroundUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = backgroundUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.10f
+            )
+        }
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-        ) {
-            // Header Top Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
+                .background(
+                    Brush.verticalGradient(
+                        0f to AmoledBlack.copy(alpha = 0.70f),
+                        0.30f to AmoledBlack.copy(alpha = 0.95f),
+                        1f to AmoledBlack
                     )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
-                    Text(
-                        text = entityName,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val totalTitles = entityData?.rails?.sumOf { it.items.size } ?: 0
-                    if (totalTitles > 0) {
-                        Text(
-                            text = "$totalTitles titles across ${entityData?.rails?.size ?: 0} categories",
-                            fontSize = 11.5.sp,
-                            color = TextMuted
-                        )
-                    }
-                }
-            }
+                )
+        )
 
-            if (isLoading) {
-                Box(
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(top = 56.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = AccentArctic, modifier = Modifier.size(36.dp))
+            }
+        } else {
+            val data = entityData
+            if (data != null && data.rails.isNotEmpty()) {
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = 60.dp),
-                    contentAlignment = Alignment.Center
+                        .verticalScroll(rememberScrollState())
+                        .statusBarsPadding()
+                        .padding(top = 56.dp, bottom = 40.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
-                    CircularProgressIndicator(color = AccentArctic, modifier = Modifier.size(36.dp))
-                }
-            } else {
-                val data = entityData
-                if (data != null && data.rails.isNotEmpty()) {
+                    // 1:1 Nuvio EntityHeroSection
                     Column(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(bottom = 40.dp),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
                     ) {
-                        // Optional Studio/Network Identity Card if logo or country available
-                        if (!data.logoUrl.isNullOrBlank() || !data.originCountry.isNullOrBlank()) {
+                        val kindLabel = when (data.kind) {
+                            "company" -> "PRODUCTION COMPANY"
+                            "anime_studio" -> "ANIME STUDIO"
+                            else -> "TV NETWORK"
+                        }
+                        Text(
+                            text = kindLabel,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.4.sp,
+                            color = Color.White.copy(alpha = 0.65f)
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (!data.logoUrl.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .height(60.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = data.logoUrl,
+                                    contentDescription = data.name,
+                                    modifier = Modifier.height(44.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+
+                        Text(
+                            text = data.name,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.5).sp,
+                            lineHeight = 34.sp,
+                            color = Color.White,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        val metaLine = listOfNotNull(
+                            data.originCountry?.takeIf { it.isNotBlank() },
+                            when (data.kind) {
+                                "company" -> "Production Company"
+                                "anime_studio" -> "Animation Studio"
+                                else -> "Broadcast Television Network"
+                            }
+                        ).joinToString(" • ")
+
+                        if (metaLine.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = metaLine,
+                                fontSize = 13.5.sp,
+                                color = Color.White.copy(alpha = 0.65f)
+                            )
+                        }
+                    }
+
+                    // 1:1 Nuvio Categorized Horizontal Poster Rails
+                    data.rails.forEach { rail ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0xFF121212))
-                                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                    .padding(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (!data.logoUrl.isNullOrBlank()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(width = 80.dp, height = 40.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xE6F5F5F5))
-                                            .padding(6.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        AsyncImage(
-                                            model = data.logoUrl,
-                                            contentDescription = data.name,
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                }
-                                Column {
-                                    Text(
-                                        text = data.name,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                    if (!data.originCountry.isNullOrBlank()) {
-                                        Text(
-                                            text = "Origin: ${data.originCountry}",
-                                            fontSize = 12.sp,
-                                            color = TextMuted
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = rail.title,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "${rail.items.size}",
+                                    fontSize = 12.sp,
+                                    color = TextMuted,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
-                        }
 
-                        // 1:1 Nuvio Categorized Horizontal Poster Rails
-                        data.rails.forEach { rail ->
-                            Column(
+                            LazyRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = rail.title,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = "${rail.items.size}",
-                                        fontSize = 12.sp,
-                                        color = TextMuted,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                LazyRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentPadding = PaddingValues(horizontal = 20.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    items(rail.items) { item ->
-                                        Column(
+                                items(rail.items) { item ->
+                                    Column(
+                                        modifier = Modifier
+                                            .width(125.dp)
+                                            .clickable { onOpenMediaPreview(item) },
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Box(
                                             modifier = Modifier
                                                 .width(125.dp)
-                                                .clickable { onOpenMediaPreview(item) },
-                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                .height(185.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0xFF141416))
+                                                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .width(125.dp)
-                                                    .height(185.dp)
-                                                    .clip(RoundedCornerShape(12.dp))
-                                                    .background(Color(0xFF141416))
-                                                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                            ) {
-                                                if (item.coverUrl.isNotBlank()) {
-                                                    AsyncImage(
-                                                        model = item.coverUrl,
-                                                        contentDescription = item.title,
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
-                                                }
-                                                if (item.rating != null && item.rating > 0f) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .align(Alignment.TopEnd)
-                                                            .padding(4.dp)
-                                                            .clip(RoundedCornerShape(999.dp))
-                                                            .background(AmoledBlack.copy(alpha = 0.85f))
-                                                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "★ ${String.format("%.1f", item.rating)}",
-                                                            fontSize = 9.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color(0xFFFFB800)
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Text(
-                                                text = item.title,
-                                                fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color.White,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-
-                                            item.releaseYear?.let { yr ->
-                                                Text(
-                                                    text = yr,
-                                                    fontSize = 11.sp,
-                                                    color = TextMuted
+                                            if (item.coverUrl.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = item.coverUrl,
+                                                    contentDescription = item.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
                                                 )
                                             }
+                                            if (item.rating != null && item.rating > 0f) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(4.dp)
+                                                        .clip(RoundedCornerShape(999.dp))
+                                                        .background(AmoledBlack.copy(alpha = 0.85f))
+                                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "★ ${String.format(java.util.Locale.US, "%.1f", item.rating)}",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFFFFB800)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Text(
+                                            text = item.title,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = Color.White,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        item.releaseYear?.let { yr ->
+                                            Text(
+                                                text = yr,
+                                                fontSize = 11.sp,
+                                                color = TextMuted
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(40.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No titles found for $entityName.",
-                            fontSize = 14.sp,
-                            color = TextMuted
-                        )
-                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .padding(top = 56.dp, start = 40.dp, end = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No titles found for $entityName.",
+                        fontSize = 14.sp,
+                        color = TextMuted
+                    )
                 }
             }
+        }
+
+        // Floating Back Button Aligned Top-Left
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier
+                .statusBarsPadding()
+                .padding(start = 4.dp, top = 4.dp)
+                .align(Alignment.TopStart)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = "Back",
+                tint = Color.White
+            )
         }
     }
 }

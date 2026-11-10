@@ -19,3 +19,4 @@ Other/*
 release-output/
 temp_release/
 TRACKER.md
+build-artifacts/

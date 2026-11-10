@@ -13,6 +13,11 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -751,7 +756,10 @@ class EnrichmentRepository(
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 in Cinemeta)
-                        val posterUrl = mergedList.firstOrNull { it.posterUrl != null }?.posterUrl
+                        val aniListPoster = if (!showTitle.isNullOrBlank()) {
+                            fetchAniListSeasonPoster(showTitle, sNum)
+                        } else null
+                        val posterUrl = aniListPoster ?: mergedList.firstOrNull { it.posterUrl != null }?.posterUrl
                         mergedList.add(
                             com.omnitrack.app.data.model.MediaSeason(
                                 seasonNumber = sNum,
@@ -835,5 +843,52 @@ class EnrichmentRepository(
         }
 
         return@withTmdbPacing emptyList()
+    }
+
+    suspend fun fetchAniListSeasonPoster(title: String, seasonNumber: Int): String? = withContext(Dispatchers.IO) {
+        try {
+            val query = """
+                query (${'$'}search: String) {
+                  Media(search: ${'$'}search, type: ANIME) {
+                    coverImage { extraLarge large }
+                  }
+                }
+            """.trimIndent()
+            val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
+            val searchQueries = listOf(
+                "$cleanTitle Season $seasonNumber",
+                "$cleanTitle ${seasonNumber}nd Season",
+                "$cleanTitle ${seasonNumber}rd Season",
+                "$cleanTitle ${seasonNumber}th Season",
+                "$cleanTitle 2nd Season"
+            )
+            for (sq in searchQueries) {
+                val jsonPayload = buildJsonObject {
+                    put("query", query)
+                    putJsonObject("variables") {
+                        put("search", sq)
+                    }
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return@use
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val media = root["data"]?.jsonObject?.get("Media")?.jsonObject
+                        val cover = media?.get("coverImage")?.jsonObject
+                        val img = cover?.get("extraLarge")?.jsonPrimitive?.content
+                            ?: cover?.get("large")?.jsonPrimitive?.content
+                        if (!img.isNullOrBlank()) return@withContext img
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
     }
 }

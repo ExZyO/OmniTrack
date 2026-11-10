@@ -499,7 +499,7 @@ fun DetailScreen(
                         episodesBySeason = uiState.episodesBySeason,
                         watchedEpisodes = uiState.watchedEpisodes,
                         selectedSeasonNumber = uiState.selectedSeasonNumber,
-                        fallbackBackdropUrl = item.bannerUrl,
+                        fallbackBackdropUrl = item.bannerUrl ?: item.coverUrl,
                         layoutMode = episodeLayoutMode,
                         layoutScale = episodeLayoutScale,
                         initialSeasonViewMode = seasonViewMode,

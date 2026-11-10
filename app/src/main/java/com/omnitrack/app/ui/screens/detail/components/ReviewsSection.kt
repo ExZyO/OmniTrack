@@ -96,16 +96,16 @@ fun ReviewsSection(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             itemsIndexed(reviews) { index, rev ->
-                val cardWidth = 280.dp
-                val cardHeight = 190.dp
+                val cardWidth = 320.dp
+                val cardHeight = 210.dp
 
                 Box(
                     modifier = Modifier
                         .width(cardWidth)
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF242424).copy(alpha = 0.50f))
-                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+                        .background(Color(0xFF242424).copy(alpha = 0.40f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {
@@ -221,9 +221,9 @@ fun ReviewsSection(
                         } else {
                             Text(
                                 text = rev.comment,
-                                color = Color.White.copy(alpha = 0.80f),
-                                fontSize = 13.sp,
-                                lineHeight = 19.sp,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 13.5.sp,
+                                lineHeight = 20.sp,
                                 maxLines = 5,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false)

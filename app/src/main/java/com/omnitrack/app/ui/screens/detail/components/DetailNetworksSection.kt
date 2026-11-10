@@ -122,13 +122,22 @@ private fun rememberDisplayCompanies(
     item: MediaItemEntity,
     passedCompanies: List<NetworkProductionCompany>
 ): List<NetworkProductionCompany> {
-    if (passedCompanies.isNotEmpty()) return passedCompanies.take(6)
+    val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
+    if (passedCompanies.isNotEmpty()) {
+        val networks = passedCompanies.filter { it.kind == "network" }
+        return if (isSeries && networks.isNotEmpty()) {
+            networks.take(6)
+        } else {
+            val logosOnly = passedCompanies.filter { !it.logoUrl.isNullOrBlank() }
+            (if (logosOnly.isNotEmpty()) logosOnly else passedCompanies).take(6)
+        }
+    }
 
     val studio = item.studioOrNetwork?.trim()?.takeIf { it.isNotBlank() } ?: return emptyList()
     return studio.split(",").map { name ->
         NetworkProductionCompany(
             name = name.trim(),
-            kind = if (item.mediaType == MediaType.SHOW) "network" else "company"
+            kind = if (isSeries) "network" else "company"
         )
     }.take(6)
 }

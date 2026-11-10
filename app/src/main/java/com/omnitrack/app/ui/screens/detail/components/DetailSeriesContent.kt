@@ -471,28 +471,42 @@ private fun ImdbEpisodeRatingBadge(
 private fun EpisodeCodeBadge(
     text: String,
     modifier: Modifier = Modifier,
-    textSize: androidx.compose.ui.unit.TextUnit = 9.sp,
-    radius: Dp = 5.dp,
-    horizontalPadding: Dp = 7.dp,
-    verticalPadding: Dp = 3.dp,
-    backgroundAlpha: Float = 0.42f
+    textSize: androidx.compose.ui.unit.TextUnit = 10.sp,
+    radius: Dp = 4.dp,
+    horizontalPadding: Dp = 6.dp,
+    verticalPadding: Dp = 2.dp,
+    backgroundAlpha: Float = 0.40f
 ) {
     if (text.isBlank()) return
+    val badgeShape = RoundedCornerShape(radius)
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(radius))
+            .clip(badgeShape)
             .background(Color.Black.copy(alpha = backgroundAlpha))
+            .border(0.75.dp, Color.Black.copy(alpha = 0.65f), badgeShape)
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             fontSize = textSize,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Medium,
             color = Color.White.copy(alpha = 0.90f),
             letterSpacing = 0.sp,
             maxLines = 1
         )
+    }
+}
+
+private fun formatEpisodeAirDate(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    return try {
+        val trimmed = raw.trim().take(10)
+        val parsed = java.time.LocalDate.parse(trimmed)
+        val formatter = java.time.format.DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.US)
+        formatter.format(parsed)
+    } catch (_: Exception) {
+        raw
     }
 }
 
@@ -570,12 +584,15 @@ private fun EpisodeHorizontalCard(
                 onLongClick = onLongPress
             )
     ) {
-        if (!imgModel.isNullOrBlank()) {
+        var loadFailed by remember(imgModel) { mutableStateOf(false) }
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
-                model = imgModel,
+                model = effectiveUrl,
                 contentDescription = episode.title,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                onError = { loadFailed = true }
             )
         }
 
@@ -615,11 +632,11 @@ private fun EpisodeHorizontalCard(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    textSize = 9.sp,
-                    radius = 5.dp,
-                    horizontalPadding = 7.dp,
-                    verticalPadding = 3.dp,
-                    backgroundAlpha = 0.42f
+                    textSize = 10.sp,
+                    radius = 4.dp,
+                    horizontalPadding = 6.dp,
+                    verticalPadding = 2.dp,
+                    backgroundAlpha = 0.40f
                 )
             }
 
@@ -667,9 +684,10 @@ private fun EpisodeHorizontalCard(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                if (!episode.airDate.isNullOrBlank()) {
+                val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+                if (!formattedDate.isNullOrBlank()) {
                     Text(
-                        text = episode.airDate,
+                        text = formattedDate,
                         fontSize = 10.sp,
                         color = Color.White.copy(alpha = 0.78f)
                     )
@@ -726,7 +744,7 @@ private fun EpisodeListCardItem(
     onToggleWatched: () -> Unit,
     onLongPress: () -> Unit
 ) {
-    val cardShape = RoundedCornerShape(12.dp)
+    val cardShape = RoundedCornerShape(8.dp)
     val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
@@ -747,15 +765,18 @@ private fun EpisodeListCardItem(
                 modifier = Modifier
                     .width(imageWidth)
                     .fillMaxHeight()
-                    .clip(RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
+                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
                     .background(Color(0xFF0D0D0D))
             ) {
-                if (!imgModel.isNullOrBlank()) {
+                var loadFailed by remember(imgModel) { mutableStateOf(false) }
+                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+                if (!effectiveUrl.isNullOrBlank()) {
                     AsyncImage(
-                        model = imgModel,
+                        model = effectiveUrl,
                         contentDescription = episode.title,
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        onError = { loadFailed = true }
                     )
                 }
 
@@ -764,18 +785,18 @@ private fun EpisodeListCardItem(
                 if (badgeText.isNotBlank()) {
                     EpisodeCodeBadge(
                         text = badgeText,
-                        textSize = 11.sp,
+                        textSize = 10.sp,
                         radius = 4.dp,
                         horizontalPadding = 6.dp,
                         verticalPadding = 2.dp,
-                        backgroundAlpha = 0.85f,
+                        backgroundAlpha = 0.40f,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(start = 8.dp, top = 8.dp)
                     )
                 }
 
-                // 1:1 Nuvio Top-Right Watched Circle (solid emerald with checkmark)
+                // 1:1 Nuvio Top-Right Watched Circle (solid crimson/magenta with white checkmark)
                 NuvioAnimatedWatchedBadge(
                     isWatched = isWatched,
                     modifier = Modifier
@@ -804,14 +825,15 @@ private fun EpisodeListCardItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                if (!episode.airDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
+                val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+                if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!episode.airDate.isNullOrBlank()) {
+                        if (!formattedDate.isNullOrBlank()) {
                             Text(
-                                text = episode.airDate,
+                                text = formattedDate,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = Color.White.copy(alpha = 0.80f),
@@ -903,12 +925,15 @@ private fun EpisodeVerticalCardItem(
                 onLongClick = onLongPress
             )
     ) {
-        if (!imgModel.isNullOrBlank()) {
+        var loadFailed by remember(imgModel) { mutableStateOf(false) }
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
-                model = imgModel,
+                model = effectiveUrl,
                 contentDescription = episode.title,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                onError = { loadFailed = true }
             )
         }
 
@@ -948,7 +973,11 @@ private fun EpisodeVerticalCardItem(
             if (badgeText.isNotBlank()) {
                 EpisodeCodeBadge(
                     text = badgeText,
-                    backgroundAlpha = 0.42f
+                    textSize = 10.sp,
+                    radius = 4.dp,
+                    horizontalPadding = 6.dp,
+                    verticalPadding = 2.dp,
+                    backgroundAlpha = 0.40f
                 )
             }
 
@@ -985,8 +1014,9 @@ private fun EpisodeVerticalCardItem(
                     ImdbEpisodeRatingBadge(rating = episode.voteAverage)
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                if (!episode.airDate.isNullOrBlank()) {
-                    Text(text = episode.airDate, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+                if (!formattedDate.isNullOrBlank()) {
+                    Text(text = formattedDate, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
                 }
             }
         }
@@ -1040,17 +1070,20 @@ private fun SeasonPosterScrollRow(
                         .background(DarkSurfaceElevated)
                         .border(
                             width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) AccentJade else Color.White.copy(alpha = 0.10f),
+                            color = if (isSelected) Color(0xFFE50914) else Color.White.copy(alpha = 0.10f),
                             shape = RoundedCornerShape(8.dp)
                         )
                 ) {
                     val posterModel = season.posterUrl ?: fallbackImageUrl
-                    if (!posterModel.isNullOrBlank()) {
+                    var loadFailed by remember(posterModel) { mutableStateOf(false) }
+                    val effectivePoster = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else posterModel
+                    if (!effectivePoster.isNullOrBlank()) {
                         AsyncImage(
-                            model = posterModel,
+                            model = effectivePoster,
                             contentDescription = label,
                             modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                            contentScale = ContentScale.Crop,
+                            onError = { loadFailed = true }
                         )
                     } else {
                         Box(
@@ -1069,7 +1102,7 @@ private fun SeasonPosterScrollRow(
 
                 Text(
                     text = label,
-                    color = if (isSelected) Color.White else TextPrimary,
+                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
                     fontSize = 12.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                     textAlign = TextAlign.Center,

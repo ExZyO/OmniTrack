@@ -513,13 +513,14 @@ class DetailViewModel(
                                     val sRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(sBody).jsonObject
 
                                     // Parse TV Networks and Production Companies with real TMDb IDs & logos
+                                    val netList = mutableListOf<NetworkProductionCompany>()
                                     val netArray = sRoot["networks"]?.jsonArray
                                     netArray?.forEach { nElem ->
                                         val nObj = nElem.jsonObject
                                         val nId = nObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
                                         val nName = nObj["name"]?.jsonPrimitive?.content ?: return@forEach
                                         val nLogo = nObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
-                                        compList.add(
+                                        netList.add(
                                             NetworkProductionCompany(
                                                 id = nId,
                                                 name = nName,
@@ -528,13 +529,14 @@ class DetailViewModel(
                                             )
                                         )
                                     }
+                                    val prodList = mutableListOf<NetworkProductionCompany>()
                                     val prodArray = sRoot["production_companies"]?.jsonArray
                                     prodArray?.forEach { pElem ->
                                         val pObj = pElem.jsonObject
                                         val pId = pObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
                                         val pName = pObj["name"]?.jsonPrimitive?.content ?: return@forEach
                                         val pLogo = pObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
-                                        compList.add(
+                                        prodList.add(
                                             NetworkProductionCompany(
                                                 id = pId,
                                                 name = pName,
@@ -542,6 +544,13 @@ class DetailViewModel(
                                                 kind = "company"
                                             )
                                         )
+                                    }
+                                    // 1:1 Nuvio Rule: TV shows display official broadcasting networks; fall back to companies only if networks empty
+                                    if (netList.isNotEmpty()) {
+                                        compList.addAll(netList)
+                                    } else {
+                                        val logosOnly = prodList.filter { !it.logoUrl.isNullOrBlank() }
+                                        compList.addAll(if (logosOnly.isNotEmpty()) logosOnly else prodList)
                                     }
                                     val seasonsArray = sRoot["seasons"]?.jsonArray
                                     val sNumbers = seasonsArray?.mapNotNull { it.jsonObject["season_number"]?.jsonPrimitive?.content?.toIntOrNull() }
