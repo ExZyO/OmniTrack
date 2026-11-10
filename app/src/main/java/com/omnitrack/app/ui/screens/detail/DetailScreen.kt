@@ -882,6 +882,7 @@ fun DetailScreen(
         }
     }
 }
+}
 
 /**
  * Zero-Black-Screen Sibling Detail Preview.
