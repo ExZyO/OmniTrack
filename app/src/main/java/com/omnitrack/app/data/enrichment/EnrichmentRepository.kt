@@ -43,7 +43,9 @@ data class EnrichmentData(
     val tmdbId: Long? = null,
     val videos: List<MediaTrailer> = emptyList(),
     val resolvedTmdbId: Long? = null,
-    val resolvedImdbId: String? = null
+    val resolvedImdbId: String? = null,
+    val belongsToCollectionId: Long? = null,
+    val belongsToCollectionName: String? = null
 )
 
 /**
@@ -185,6 +187,8 @@ class EnrichmentRepository(
         var lastAirDate: String? = null
         var releaseYear: String? = item.releaseYear
         var videoList: List<MediaTrailer> = emptyList()
+        var belongsToCollectionId: Long? = null
+        var belongsToCollectionName: String? = null
 
         if (effectiveTmdbId != null) {
             val details = fetchTmdbDetails(effectiveTmdbId, isMovie, effectiveTmdbKey)
@@ -201,6 +205,8 @@ class EnrichmentRepository(
                 lastAirDate = details.lastAirDate
                 if (releaseYear == null) releaseYear = details.releaseYear
                 videoList = details.videos
+                belongsToCollectionId = details.belongsToCollectionId
+                belongsToCollectionName = details.belongsToCollectionName
             }
         }
 
@@ -225,7 +231,9 @@ class EnrichmentRepository(
             releaseYear = releaseYear,
             videos = videoList,
             resolvedTmdbId = effectiveTmdbId,
-            resolvedImdbId = resolvedImdbId
+            resolvedImdbId = resolvedImdbId,
+            belongsToCollectionId = belongsToCollectionId,
+            belongsToCollectionName = belongsToCollectionName
         )
     }
 
@@ -560,8 +568,54 @@ class EnrichmentRepository(
         val lastAirDate: String? = null,
         val releaseYear: String? = null,
         val contentRating: String? = null,
-        val videos: List<MediaTrailer> = emptyList()
+        val videos: List<MediaTrailer> = emptyList(),
+        val belongsToCollectionId: Long? = null,
+        val belongsToCollectionName: String? = null
     )
+
+    data class TmdbCollectionData(
+        val name: String,
+        val parts: List<com.omnitrack.app.ui.screens.detail.components.RecommendationItem>
+    )
+
+    suspend fun fetchTmdbCollection(collectionId: Long, tmdbKey: String): TmdbCollectionData? = withContext(Dispatchers.IO) {
+        NetworkPacer.withTmdbPacing {
+            try {
+                val url = "https://api.themoviedb.org/3/collection/$collectionId?api_key=$tmdbKey"
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { response ->
+                    if (!response.isSuccessful) return@withTmdbPacing null
+                    val body = response.body?.string() ?: return@withTmdbPacing null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val name = root["name"]?.jsonPrimitive?.content ?: "Collection"
+                    val partsArray = root["parts"]?.jsonArray ?: return@withTmdbPacing null
+                    val parts = partsArray.mapNotNull { node ->
+                        val obj = node.jsonObject
+                        val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: return@mapNotNull null
+                        val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                        val poster = obj["poster_path"]?.jsonPrimitive?.content
+                        val release = obj["release_date"]?.jsonPrimitive?.content
+                        val rating = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
+                        val backdrop = obj["backdrop_path"]?.jsonPrimitive?.content
+                        val synopsis = obj["overview"]?.jsonPrimitive?.content
+                        com.omnitrack.app.ui.screens.detail.components.RecommendationItem(
+                            title = title,
+                            coverUrl = if (!poster.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$poster" else "",
+                            releaseYear = release?.take(4),
+                            rating = rating,
+                            mediaType = com.omnitrack.app.data.model.MediaType.MOVIE,
+                            synopsis = synopsis,
+                            tmdbId = id,
+                            bannerUrl = backdrop?.let { "https://image.tmdb.org/t/p/original$it" }
+                        )
+                    }.sortedBy { it.releaseYear ?: "" }
+                    TmdbCollectionData(name = name, parts = parts)
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 
     private suspend fun fetchTmdbDetails(tmdbId: Long, isMovie: Boolean, tmdbKey: String): ExtraDetails? {
         return try {
@@ -646,6 +700,10 @@ class EnrichmentRepository(
                     else -> null
                 }
 
+                val belongsToCollObj = if (isMovie) root["belongs_to_collection"]?.let { if (it is kotlinx.serialization.json.JsonObject) it else null } else null
+                val belongsToCollId = belongsToCollObj?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                val belongsToCollName = belongsToCollObj?.get("name")?.jsonPrimitive?.content
+
                 ExtraDetails(
                     trailerKey = trailerKey,
                     studio = studio,
@@ -658,7 +716,9 @@ class EnrichmentRepository(
                     lastAirDate = lastAirDate,
                     releaseYear = releaseYear,
                     contentRating = contentRating,
-                    videos = videoList
+                    videos = videoList,
+                    belongsToCollectionId = belongsToCollId,
+                    belongsToCollectionName = belongsToCollName
                 )
             }
         } catch (_: Exception) {

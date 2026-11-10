@@ -56,6 +56,8 @@ data class DetailUiState(
     val cast: List<CastMember> = emptyList(),
     val trailers: List<MediaTrailer> = emptyList(),
     val companies: List<NetworkProductionCompany> = emptyList(),
+    val collectionName: String? = null,
+    val collectionItems: List<RecommendationItem> = emptyList(),
     val isPreviewMode: Boolean = false,
     val isLoading: Boolean = true,
     val hasPreviousEntry: Boolean = false,
@@ -72,7 +74,9 @@ private data class PreviewAndAux(
     val realEpisodes: List<MediaEpisode>,
     val selectedSeasonNumber: Int,
     val episodesBySeason: Map<Int, List<MediaEpisode>>,
-    val companies: List<NetworkProductionCompany>
+    val companies: List<NetworkProductionCompany>,
+    val collectionName: String? = null,
+    val collectionItems: List<RecommendationItem> = emptyList()
 )
 
 class DetailViewModel(
@@ -94,6 +98,8 @@ class DetailViewModel(
     private val _realEpisodes = MutableStateFlow<List<MediaEpisode>>(emptyList())
     private val _selectedSeasonNumber = MutableStateFlow(1)
     private val _episodesBySeason = MutableStateFlow<Map<Int, List<MediaEpisode>>>(emptyMap())
+    private val _collectionName = MutableStateFlow<String?>(null)
+    private val _collectionItems = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
@@ -242,6 +248,13 @@ class DetailViewModel(
             if (enrichment.videos.isNotEmpty()) {
                 _trailers.value = enrichment.videos
             }
+            if (enrichment.belongsToCollectionId != null && _collectionItems.value.isEmpty()) {
+                val collData = enrichmentRepository.fetchTmdbCollection(enrichment.belongsToCollectionId, tmdbKey)
+                if (collData != null) {
+                    _collectionName.value = collData.name
+                    _collectionItems.value = collData.parts
+                }
+            }
         }
     }
 
@@ -257,7 +270,9 @@ class DetailViewModel(
             _realEpisodes,
             _selectedSeasonNumber,
             _episodesBySeason,
-            _companies
+            _companies,
+            _collectionName,
+            _collectionItems
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -271,7 +286,9 @@ class DetailViewModel(
             realEpisodes = args[6] as List<MediaEpisode>,
             selectedSeasonNumber = args[7] as Int,
             episodesBySeason = args[8] as Map<Int, List<MediaEpisode>>,
-            companies = args[9] as List<NetworkProductionCompany>
+            companies = args[9] as List<NetworkProductionCompany>,
+            collectionName = args[10] as? String,
+            collectionItems = args[11] as List<RecommendationItem>
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -289,6 +306,8 @@ class DetailViewModel(
                     cast = aux.cast,
                     trailers = aux.trailers,
                     companies = aux.companies,
+                    collectionName = aux.collectionName,
+                    collectionItems = aux.collectionItems,
                     isPreviewMode = true,
                     isLoading = false,
                     hasPreviousEntry = false,
@@ -325,6 +344,8 @@ class DetailViewModel(
                                     listOf(MediaTrailer("Official Trailer", currentItem.trailerYoutubeKey))
                                 } else aux.trailers,
                                 companies = aux.companies,
+                                collectionName = aux.collectionName,
+                                collectionItems = aux.collectionItems,
                                 isPreviewMode = false,
                                 isLoading = false,
                                 hasPreviousEntry = siblings.size > 1,
@@ -357,11 +378,25 @@ class DetailViewModel(
             malId = rec.malId,
             status = TrackingStatus.PLAN_TO_TRACK
         )
+        _collectionName.value = null
+        _collectionItems.value = emptyList()
         _previewItem.value = previewEntity
+        loadRecommendationsAndReviews(previewEntity)
+        maybeEnrich(previewEntity)
     }
 
     fun closePreview() {
         EphemeralPreviewHolder.previewItem = null
+        _previewItem.value = null
+        val currentId = _mediaId.value
+        if (currentId > 0L) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val item = repository.getMediaById(currentId).firstOrNull()
+                if (item != null) {
+                    loadRecommendationsAndReviews(item)
+                }
+            }
+        }
     }
 
     override fun onCleared() {
@@ -397,10 +432,39 @@ class DetailViewModel(
             val castMembers = mutableListOf<CastMember>()
             val trailerList = mutableListOf<MediaTrailer>()
             val compList = mutableListOf<NetworkProductionCompany>()
+            var fetchedCollName: String? = null
+            var fetchedCollParts: List<RecommendationItem> = emptyList()
 
             if (item.tmdbId != null) {
                 val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
                 val client = OkHttpClient()
+
+                // Movie Franchise Collection (1:1 Nuvio Parity: e.g. The Dark Knight Collection)
+                if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) {
+                    try {
+                        val movieUrl = "https://api.themoviedb.org/3/movie/${item.tmdbId}?api_key=$tmdbKey"
+                        val movieReq = Request.Builder().url(movieUrl).get().build()
+                        client.newCall(movieReq).execute().use { movieResp ->
+                            if (movieResp.isSuccessful) {
+                                val movieBody = movieResp.body?.string()
+                                if (movieBody != null) {
+                                    val movieRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(movieBody).jsonObject
+                                    val collObj = movieRoot["belongs_to_collection"]?.let {
+                                        if (it is kotlinx.serialization.json.JsonObject) it else null
+                                    }
+                                    val collId = collObj?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                                    if (collId != null) {
+                                        val collData = enrichmentRepository.fetchTmdbCollection(collId, tmdbKey)
+                                        if (collData != null) {
+                                            fetchedCollName = collData.name
+                                            fetchedCollParts = collData.parts
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
 
                 // Recommendations
                 try {
@@ -904,6 +968,8 @@ class DetailViewModel(
             if (compList.isNotEmpty()) {
                 _companies.value = compList.distinctBy { it.name }
             }
+            _collectionName.value = fetchedCollName
+            _collectionItems.value = fetchedCollParts
         }
     }
 

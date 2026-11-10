@@ -108,6 +108,7 @@ import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
+import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailSeriesContent
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
@@ -523,6 +524,16 @@ fun DetailScreen(
                 // 8. Details Section (Show & Production Details)
                 DetailShowDetailsSection(item = item)
                 Spacer(modifier = Modifier.height(20.dp))
+
+                // 8.5. Movie Franchise Collection (1:1 Nuvio Parity: strictly between Details and More Like This)
+                if (item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
+                    DetailCollectionSection(
+                        collectionName = uiState.collectionName ?: "Collection",
+                        items = uiState.collectionItems,
+                        onSelectItem = { viewModel.openPreview(it) }
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
 
                 // 9. More Like This & Recommendations Section
                 if (uiState.recommendations.isNotEmpty()) {
