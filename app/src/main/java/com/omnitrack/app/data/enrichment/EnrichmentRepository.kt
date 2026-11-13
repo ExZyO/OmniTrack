@@ -904,22 +904,71 @@ class EnrichmentRepository(
             return@withTmdbPacing tmdbEpisodes
         }
 
-        // If TMDb has no episodes for this season (e.g. Frieren Season 2), fallback to Cinemeta!
+        // If TMDb has no episodes for this season (e.g. anime split seasons or Frieren Season 2), fallback to Cinemeta!
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         if (!effectiveImdbId.isNullOrBlank()) {
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
             val seasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
             if (seasonEps.isNotEmpty()) {
+                // Cross-reference with TMDb Season 1 for anime using continuous absolute numbering (e.g. Apothecary Diaries S2/S3, Attack on Titan, etc.)
+                val tmdbSeason1Eps = try {
+                    val s1Url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=$apiKey"
+                    val s1Req = Request.Builder().url(s1Url).get().build()
+                    client.newCall(s1Req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val s1Body = resp.body?.string() ?: return@use emptyList()
+                            val s1Root = json.parseToJsonElement(s1Body).jsonObject
+                            val eps = s1Root["episodes"]?.jsonArray ?: return@use emptyList()
+                            eps.mapNotNull { node ->
+                                val o = node.jsonObject
+                                val name = o["name"]?.jsonPrimitive?.content
+                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w500$it" }
+                                val air = o["air_date"]?.jsonPrimitive?.content
+                                val overview = o["overview"]?.jsonPrimitive?.content
+                                val rating = o["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
+                                if (name != null || air != null) {
+                                    com.omnitrack.app.data.model.MediaEpisode(
+                                        id = 0L,
+                                        episodeNumber = o["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
+                                        seasonNumber = 1,
+                                        title = name ?: "",
+                                        overview = overview,
+                                        stillUrl = still,
+                                        airDate = air,
+                                        runtimeMinutes = null,
+                                        voteAverage = rating
+                                    )
+                                } else null
+                            }
+                        } else emptyList()
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+
                 val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, seasonNumber) else null
                 val enrichedEps = seasonEps.map { ep ->
-                    val kitsuStill = kitsuData?.stills?.get(ep.episodeNumber)
-                    if (!kitsuStill.isNullOrBlank()) {
-                        ep.copy(stillUrl = kitsuStill)
-                    } else if (ep.stillUrl?.contains("episodes.metahub.space") == true) {
-                        ep.copy(stillUrl = null)
-                    } else {
-                        ep
+                    // 1. Cross-reference TMDb absolute numbering by exact title or air date
+                    val tmdbMatch = tmdbSeason1Eps.firstOrNull { t ->
+                        !t.title.isBlank() && t.title.trim().equals(ep.title.trim(), ignoreCase = true)
+                    } ?: tmdbSeason1Eps.firstOrNull { t ->
+                        !t.airDate.isNullOrBlank() && !ep.airDate.isNullOrBlank() && t.airDate == ep.airDate
                     }
+
+                    val kitsuStill = kitsuData?.stills?.get(ep.episodeNumber)
+
+                    val resolvedStill = tmdbMatch?.stillUrl
+                        ?: kitsuStill
+                        ?: if (ep.stillUrl?.contains("episodes.metahub.space") == true) null else ep.stillUrl
+
+                    val resolvedOverview = if (ep.overview.isNullOrBlank()) tmdbMatch?.overview else ep.overview
+                    val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
+
+                    ep.copy(
+                        stillUrl = resolvedStill,
+                        overview = resolvedOverview,
+                        voteAverage = resolvedVote
+                    )
                 }
                 return@withTmdbPacing enrichedEps
             }
