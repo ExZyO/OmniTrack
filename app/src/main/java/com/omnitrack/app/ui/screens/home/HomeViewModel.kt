@@ -37,6 +37,15 @@ class HomeViewModel(
     private val _selectedStatus = MutableStateFlow(TrackingStatus.ALL)
     private val _isLoading = MutableStateFlow(true)
 
+    // Persistent Discover Search State (survives navigation to detail screen & back)
+    val discoverSearchQuery = MutableStateFlow("")
+    val discoverSelectedFilter = MutableStateFlow(MediaType.ALL)
+    val discoverSearchResults = MutableStateFlow<List<com.omnitrack.app.data.search.SearchResultItem>>(emptyList())
+    val discoverIsSearching = MutableStateFlow(false)
+    val discoverAiResolutionBanner = MutableStateFlow<String?>(null)
+    var discoverGridScrollIndex: Int = 0
+    var discoverGridScrollOffset: Int = 0
+
     val uiState: StateFlow<HomeUiState> = combine(
         _selectedMediaType,
         _selectedStatus,

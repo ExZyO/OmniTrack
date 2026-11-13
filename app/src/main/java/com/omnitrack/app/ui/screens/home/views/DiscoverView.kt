@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,6 +69,7 @@ import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
+import com.omnitrack.app.ui.screens.home.HomeViewModel
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -78,6 +81,7 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 @Composable
@@ -86,6 +90,7 @@ fun DiscoverView(
     onItemClick: (Long) -> Unit,
     onAddMedia: (SearchResultItem) -> Unit,
     modifier: Modifier = Modifier,
+    homeViewModel: HomeViewModel? = null,
     searchRepository: OmniSearchRepository = remember { OmniSearchRepository() },
     aiEngine: AiQueryEngine = remember { AiQueryEngine() }
 ) {
@@ -99,20 +104,49 @@ fun DiscoverView(
     val aiSearchSetting by prefManager.aiSemanticSearchEnabled.collectAsState(initial = false)
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
 
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf(MediaType.ALL) }
-    var isSearching by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<SearchResultItem>>(emptyList()) }
-    var aiResolutionBanner by remember { mutableStateOf<String?>(null) }
+    val queryFlow = remember(homeViewModel) { homeViewModel?.discoverSearchQuery ?: MutableStateFlow("") }
+    val filterFlow = remember(homeViewModel) { homeViewModel?.discoverSelectedFilter ?: MutableStateFlow(MediaType.ALL) }
+    val isSearchingFlow = remember(homeViewModel) { homeViewModel?.discoverIsSearching ?: MutableStateFlow(false) }
+    val resultsFlow = remember(homeViewModel) { homeViewModel?.discoverSearchResults ?: MutableStateFlow<List<SearchResultItem>>(emptyList()) }
+    val bannerFlow = remember(homeViewModel) { homeViewModel?.discoverAiResolutionBanner ?: MutableStateFlow<String?>(null) }
+
+    val searchQuery by queryFlow.collectAsState()
+    val selectedFilter by filterFlow.collectAsState()
+    val isSearching by isSearchingFlow.collectAsState()
+    val searchResults by resultsFlow.collectAsState()
+    val aiResolutionBanner by bannerFlow.collectAsState()
     var useAiSearch by remember(aiSearchSetting) { mutableStateOf(aiSearchSetting) }
+
+    var lastExecutedQuery by remember { mutableStateOf<String?>(if (resultsFlow.value.isNotEmpty()) queryFlow.value else null) }
+    var lastExecutedFilter by remember { mutableStateOf<MediaType?>(if (resultsFlow.value.isNotEmpty()) filterFlow.value else null) }
+    var lastExecutedAi by remember { mutableStateOf<Boolean?>(if (resultsFlow.value.isNotEmpty()) useAiSearch else null) }
+
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
+        initialFirstVisibleItemScrollOffset = homeViewModel?.discoverGridScrollOffset ?: 0
+    )
+
+    DisposableEffect(gridState) {
+        onDispose {
+            homeViewModel?.discoverGridScrollIndex = gridState.firstVisibleItemIndex
+            homeViewModel?.discoverGridScrollOffset = gridState.firstVisibleItemScrollOffset
+        }
+    }
 
     // Multi-Vertical OmniSearch Trigger
     LaunchedEffect(searchQuery, selectedFilter, useAiSearch) {
         val trimmed = searchQuery.trim()
         if (trimmed.length >= 2) {
+            if (resultsFlow.value.isNotEmpty() && trimmed == lastExecutedQuery && selectedFilter == lastExecutedFilter && useAiSearch == lastExecutedAi) {
+                // Preserved search results restored from previous navigation! Don't re-trigger.
+                return@LaunchedEffect
+            }
             delay(400)
-            isSearching = true
-            aiResolutionBanner = null
+            lastExecutedQuery = trimmed
+            lastExecutedFilter = selectedFilter
+            lastExecutedAi = useAiSearch
+            isSearchingFlow.value = true
+            bannerFlow.value = null
             try {
                 var queryToRun = trimmed
                 var filterToRun = selectedFilter
@@ -125,7 +159,7 @@ fun DiscoverView(
                     )
                     if (aiResult.isAiResolved) {
                         queryToRun = aiResult.resolvedTitle
-                        aiResolutionBanner = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
+                        bannerFlow.value = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
                             (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
                             (aiResult.explanation?.let { " • $it" } ?: "")
                         if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
@@ -144,16 +178,19 @@ fun DiscoverView(
                     filter = filterToRun,
                     tmdbApiKey = tmdbKey.ifBlank { null }
                 )
-                searchResults = results
+                resultsFlow.value = results
             } catch (_: Exception) {
-                searchResults = emptyList()
+                resultsFlow.value = emptyList()
             } finally {
-                isSearching = false
+                isSearchingFlow.value = false
             }
         } else {
-            searchResults = emptyList()
-            aiResolutionBanner = null
-            isSearching = false
+            lastExecutedQuery = null
+            lastExecutedFilter = null
+            lastExecutedAi = null
+            resultsFlow.value = emptyList()
+            bannerFlow.value = null
+            isSearchingFlow.value = false
         }
     }
 
@@ -196,7 +233,7 @@ fun DiscoverView(
             )
             BasicTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = { queryFlow.value = it },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
@@ -244,7 +281,7 @@ fun DiscoverView(
                     tint = TextMuted,
                     modifier = Modifier
                         .size(16.dp)
-                        .clickable { searchQuery = "" }
+                        .clickable { queryFlow.value = "" }
                 )
             }
         }
@@ -275,7 +312,7 @@ fun DiscoverView(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isSelected) AccentArctic else DarkSurfaceElevated)
-                        .clickable { selectedFilter = type }
+                        .clickable { filterFlow.value = type }
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
@@ -340,6 +377,7 @@ fun DiscoverView(
                     GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
                 }
                 LazyVerticalGrid(
+                    state = gridState,
                     columns = discoverColumns,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),

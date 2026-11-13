@@ -184,6 +184,36 @@ class DetailViewModel(
             }
         }
 
+        // 0ms Detail Aux Synchronous Cache Hit (Cast, Trailers, Recommendations, Reviews, Companies, Collection):
+        val cachedAux = if (mediaId > 0L) {
+            DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(mediaId)]
+                ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let {
+                    DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("tv", it)]
+                        ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("movie", it)]
+                }
+        } else if (mediaId == -1L) {
+            val ephemeral = EphemeralPreviewHolder.previewItem
+            if (ephemeral != null) {
+                DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(ephemeral)]
+                    ?: ephemeral.tmdbId?.let {
+                        val t = if (ephemeral.mediaType == MediaType.MOVIE) "movie" else "tv"
+                        DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(t, it)]
+                    }
+            } else null
+        } else null
+
+        if (cachedAux != null) {
+            if (cachedAux.recommendations.isNotEmpty()) _recommendations.value = cachedAux.recommendations
+            if (cachedAux.reviews.isNotEmpty()) _reviews.value = cachedAux.reviews
+            if (cachedAux.cast.isNotEmpty()) _cast.value = cachedAux.cast
+            if (cachedAux.trailers.isNotEmpty()) _trailers.value = cachedAux.trailers
+            if (cachedAux.companies.isNotEmpty()) _companies.value = cachedAux.companies
+            if (cachedAux.collectionName != null) {
+                _collectionName.value = cachedAux.collectionName
+                _collectionItems.value = cachedAux.collectionItems
+            }
+        }
+
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
@@ -465,6 +495,27 @@ class DetailViewModel(
             launchSeriesFetch(item)
         }
 
+        val cacheKey = DetailAuxMemoryCache.getCacheKey(item)
+        val itemTmdbKey = item.tmdbId?.let { DetailAuxMemoryCache.getTmdbCacheKey(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", it) }
+        val idKey = if (item.id > 0L) DetailAuxMemoryCache.getCacheKey(item.id) else null
+
+        // 1. Instant 0ms Memory Cache Hit
+        val existingCached = DetailAuxMemoryCache.cache[cacheKey]
+            ?: (itemTmdbKey?.let { DetailAuxMemoryCache.cache[it] })
+            ?: (idKey?.let { DetailAuxMemoryCache.cache[it] })
+
+        if (existingCached != null) {
+            if (existingCached.recommendations.isNotEmpty()) _recommendations.value = existingCached.recommendations
+            if (existingCached.reviews.isNotEmpty()) _reviews.value = existingCached.reviews
+            if (existingCached.cast.isNotEmpty()) _cast.value = existingCached.cast
+            if (existingCached.trailers.isNotEmpty()) _trailers.value = existingCached.trailers
+            if (existingCached.companies.isNotEmpty()) _companies.value = existingCached.companies
+            if (existingCached.collectionName != null) {
+                _collectionName.value = existingCached.collectionName
+                _collectionItems.value = existingCached.collectionItems
+            }
+        }
+
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
@@ -476,49 +527,97 @@ class DetailViewModel(
             var fetchedCollName: String? = null
             var fetchedCollParts: List<RecommendationItem> = emptyList()
 
+            existingCached?.let {
+                recs.addAll(it.recommendations)
+                revs.addAll(it.reviews)
+                castMembers.addAll(it.cast)
+                trailerList.addAll(it.trailers)
+                compList.addAll(it.companies)
+                fetchedCollName = it.collectionName
+                fetchedCollParts = it.collectionItems
+            }
+
+            fun persistAuxCache() {
+                val aux = CachedDetailAux(
+                    recommendations = _recommendations.value,
+                    reviews = _reviews.value,
+                    cast = _cast.value,
+                    trailers = _trailers.value,
+                    companies = _companies.value,
+                    collectionName = _collectionName.value,
+                    collectionItems = _collectionItems.value
+                )
+                DetailAuxMemoryCache.cache[cacheKey] = aux
+                if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
+                if (idKey != null) DetailAuxMemoryCache.cache[idKey] = aux
+            }
+
             if (item.tmdbId != null) {
                 val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
                 val client = OkHttpClient()
 
-                // Movie Franchise Collection (1:1 Nuvio Parity: e.g. The Dark Knight Collection)
-                if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) {
-                    try {
-                        val movieUrl = "https://api.themoviedb.org/3/movie/${item.tmdbId}?api_key=$tmdbKey"
-                        val movieReq = Request.Builder().url(movieUrl).get().build()
-                        client.newCall(movieReq).execute().use { movieResp ->
-                            if (movieResp.isSuccessful) {
-                                val movieBody = movieResp.body?.string()
-                                if (movieBody != null) {
-                                    val movieRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(movieBody).jsonObject
-                                    val collObj = movieRoot["belongs_to_collection"]?.let {
-                                        if (it is kotlinx.serialization.json.JsonObject) it else null
-                                    }
-                                    val collId = collObj?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
-                                    if (collId != null) {
-                                        val collData = enrichmentRepository.fetchTmdbCollection(collId, tmdbKey)
-                                        if (collData != null) {
-                                            fetchedCollName = collData.name
-                                            fetchedCollParts = collData.parts
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                // Recommendations
+                // Consolidated 1-Shot TMDb append_to_response (~100ms total for ALL details)
                 try {
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/recommendations?api_key=$tmdbKey"
-                    val req = Request.Builder().url(url).get().build()
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string()
+                    val oneShotUrl = "https://api.themoviedb.org/3/$type/${item.tmdbId}?api_key=$tmdbKey&append_to_response=credits,videos,recommendations"
+                    val oneShotReq = Request.Builder().url(oneShotUrl).get().build()
+                    client.newCall(oneShotReq).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string()
                             if (body != null) {
                                 val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val results = root["results"]?.jsonArray
-                                if (results != null) {
-                                    for (elem in results.take(10)) {
+
+                                // 1. Parse Credits (Cast)
+                                val castArray = root["credits"]?.jsonObject?.get("cast")?.jsonArray
+                                if (castArray != null) {
+                                    val newCast = mutableListOf<CastMember>()
+                                    for (elem in castArray.take(15)) {
+                                        val obj = elem.jsonObject
+                                        val name = obj["name"]?.jsonPrimitive?.content ?: continue
+                                        val character = obj["character"]?.jsonPrimitive?.content
+                                        val profilePath = obj["profile_path"]?.jsonPrimitive?.content
+                                        val personId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                        newCast.add(
+                                            CastMember(
+                                                name = name,
+                                                character = character,
+                                                avatarUrl = profilePath?.let { "https://image.tmdb.org/t/p/w185$it" },
+                                                tmdbPersonId = personId
+                                            )
+                                        )
+                                    }
+                                    if (newCast.isNotEmpty()) {
+                                        castMembers.clear()
+                                        castMembers.addAll(newCast)
+                                        _cast.value = castMembers
+                                    }
+                                }
+
+                                // 2. Parse Videos (Trailers & Teasers)
+                                val videoResults = root["videos"]?.jsonObject?.get("results")?.jsonArray
+                                if (videoResults != null) {
+                                    val newTrailers = mutableListOf<MediaTrailer>()
+                                    for (elem in videoResults) {
+                                        val obj = elem.jsonObject
+                                        val site = obj["site"]?.jsonPrimitive?.content ?: ""
+                                        val key = obj["key"]?.jsonPrimitive?.content ?: continue
+                                        val title = obj["name"]?.jsonPrimitive?.content ?: "Official Trailer"
+                                        val typeStr = obj["type"]?.jsonPrimitive?.content ?: "Trailer"
+                                        if (site.equals("YouTube", ignoreCase = true)) {
+                                            newTrailers.add(MediaTrailer(title = title, youtubeKey = key, type = typeStr))
+                                        }
+                                    }
+                                    if (newTrailers.isNotEmpty()) {
+                                        trailerList.clear()
+                                        trailerList.addAll(newTrailers)
+                                        _trailers.value = trailerList
+                                    }
+                                }
+
+                                // 3. Parse Recommendations
+                                val recResults = root["recommendations"]?.jsonObject?.get("results")?.jsonArray
+                                if (recResults != null) {
+                                    val newRecs = mutableListOf<RecommendationItem>()
+                                    for (elem in recResults.take(10)) {
                                         val obj = elem.jsonObject
                                         val title = obj["title"]?.jsonPrimitive?.content ?: obj["name"]?.jsonPrimitive?.content ?: continue
                                         val poster = obj["poster_path"]?.jsonPrimitive?.content ?: continue
@@ -528,7 +627,7 @@ class DetailViewModel(
                                         val synopsis = obj["overview"]?.jsonPrimitive?.content
                                         val recId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
 
-                                        recs.add(
+                                        newRecs.add(
                                             RecommendationItem(
                                                 title = title,
                                                 coverUrl = "https://image.tmdb.org/t/p/w500$poster",
@@ -541,298 +640,218 @@ class DetailViewModel(
                                             )
                                         )
                                     }
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                // Credits (Cast)
-                try {
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/credits?api_key=$tmdbKey"
-                    val req = Request.Builder().url(url).get().build()
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string()
-                            if (body != null) {
-                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val castArray = root["cast"]?.jsonArray
-                                if (castArray != null) {
-                                    for (elem in castArray.take(15)) {
-                                        val obj = elem.jsonObject
-                                        val name = obj["name"]?.jsonPrimitive?.content ?: continue
-                                        val character = obj["character"]?.jsonPrimitive?.content
-                                        val profilePath = obj["profile_path"]?.jsonPrimitive?.content
-                                        val personId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                                        castMembers.add(
-                                            CastMember(
-                                                name = name,
-                                                character = character,
-                                                avatarUrl = profilePath?.let { "https://image.tmdb.org/t/p/w185$it" },
-                                                tmdbPersonId = personId
-                                            )
-                                        )
+                                    if (newRecs.isNotEmpty()) {
+                                        recs.clear()
+                                        recs.addAll(newRecs)
+                                        _recommendations.value = recs
                                     }
                                 }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
 
-                // Videos (Trailers, Teasers, Behind the scenes, Clips)
-                try {
-                    val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/videos?api_key=$tmdbKey&include_video_language=en,ja,null"
-                    val req = Request.Builder().url(url).get().build()
-                    client.newCall(req).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val body = response.body?.string()
-                            if (body != null) {
-                                val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val results = root["results"]?.jsonArray
-                                if (results != null) {
-                                    for (elem in results) {
-                                        val obj = elem.jsonObject
-                                        val site = obj["site"]?.jsonPrimitive?.content ?: ""
-                                        val key = obj["key"]?.jsonPrimitive?.content ?: continue
-                                        val title = obj["name"]?.jsonPrimitive?.content ?: "Official Trailer"
-                                        val typeStr = obj["type"]?.jsonPrimitive?.content ?: "Trailer"
-                                        if (site.equals("YouTube", ignoreCase = true)) {
-                                            trailerList.add(MediaTrailer(title = title, youtubeKey = key, type = typeStr))
+                                // 4. Parse Networks & Production Companies
+                                val netList = mutableListOf<NetworkProductionCompany>()
+                                val netArray = root["networks"]?.jsonArray
+                                netArray?.forEach { nElem ->
+                                    val nObj = nElem.jsonObject
+                                    val nId = nObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                    val nName = nObj["name"]?.jsonPrimitive?.content ?: return@forEach
+                                    val nLogo = nObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
+                                    netList.add(NetworkProductionCompany(id = nId, name = nName, logoUrl = nLogo, kind = "network"))
+                                }
+                                val prodList = mutableListOf<NetworkProductionCompany>()
+                                val prodArray = root["production_companies"]?.jsonArray
+                                prodArray?.forEach { pElem ->
+                                    val pObj = pElem.jsonObject
+                                    val pId = pObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                                    val pName = pObj["name"]?.jsonPrimitive?.content ?: return@forEach
+                                    val pLogo = pObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
+                                    prodList.add(NetworkProductionCompany(id = pId, name = pName, logoUrl = pLogo, kind = "company"))
+                                }
+                                compList.clear()
+                                if (netList.isNotEmpty()) {
+                                    compList.addAll(netList)
+                                } else {
+                                    val logosOnly = prodList.filter { !it.logoUrl.isNullOrBlank() }
+                                    compList.addAll(if (logosOnly.isNotEmpty()) logosOnly else prodList)
+                                }
+                                if (compList.isNotEmpty()) {
+                                    _companies.value = compList
+                                }
+
+                                // 5. Movie Franchise Collection (belongs_to_collection)
+                                if (type == "movie") {
+                                    val collObj = root["belongs_to_collection"]?.let {
+                                        if (it is kotlinx.serialization.json.JsonObject) it else null
+                                    }
+                                    val collId = collObj?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                                    if (collId != null) {
+                                        launch(Dispatchers.IO) {
+                                            val collData = enrichmentRepository.fetchTmdbCollection(collId, tmdbKey)
+                                            if (collData != null) {
+                                                _collectionName.value = collData.name
+                                                _collectionItems.value = collData.parts
+                                                persistAuxCache()
+                                            }
                                         }
                                     }
                                 }
+
+                                persistAuxCache()
                             }
                         }
                     }
                 } catch (_: Exception) {}
 
-                // For TV Shows, also fetch season-level videos (Trailers, Bloopers, Featurettes, Teasers, Clips)
-                if (type == "tv") {
+                // Parallel Background Fetch: Trakt Community Reviews (does NOT block cast or recommendations!)
+                launch(Dispatchers.IO) {
                     try {
-                        val sUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}?api_key=$tmdbKey"
-                        val sReq = Request.Builder().url(sUrl).get().build()
-                        client.newCall(sReq).execute().use { sResp ->
-                            if (sResp.isSuccessful) {
-                                val sBody = sResp.body?.string()
-                                if (sBody != null) {
-                                    val sRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(sBody).jsonObject
+                        val searchType = if (type == "movie") "movie" else "show"
+                        val commentsEndpointType = if (type == "movie") "movies" else "shows"
+                        val traktApiKey = com.omnitrack.app.data.sync.TrackerAccountVerifier.TRAKT_CLIENT_ID
+                        var targetId: String? = null
 
-                                    // Parse TV Networks and Production Companies with real TMDb IDs & logos
-                                    val netList = mutableListOf<NetworkProductionCompany>()
-                                    val netArray = sRoot["networks"]?.jsonArray
-                                    netArray?.forEach { nElem ->
-                                        val nObj = nElem.jsonObject
-                                        val nId = nObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                                        val nName = nObj["name"]?.jsonPrimitive?.content ?: return@forEach
-                                        val nLogo = nObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
-                                        netList.add(
-                                            NetworkProductionCompany(
-                                                id = nId,
-                                                name = nName,
-                                                logoUrl = nLogo,
-                                                kind = "network"
-                                            )
-                                        )
-                                    }
-                                    val prodList = mutableListOf<NetworkProductionCompany>()
-                                    val prodArray = sRoot["production_companies"]?.jsonArray
-                                    prodArray?.forEach { pElem ->
-                                        val pObj = pElem.jsonObject
-                                        val pId = pObj["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                                        val pName = pObj["name"]?.jsonPrimitive?.content ?: return@forEach
-                                        val pLogo = pObj["logo_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
-                                        prodList.add(
-                                            NetworkProductionCompany(
-                                                id = pId,
-                                                name = pName,
-                                                logoUrl = pLogo,
-                                                kind = "company"
-                                            )
-                                        )
-                                    }
-                                    // 1:1 Nuvio Rule: TV shows display official broadcasting networks; fall back to companies only if networks empty
-                                    if (netList.isNotEmpty()) {
-                                        compList.addAll(netList)
-                                    } else {
-                                        val logosOnly = prodList.filter { !it.logoUrl.isNullOrBlank() }
-                                        compList.addAll(if (logosOnly.isNotEmpty()) logosOnly else prodList)
-                                    }
-                                    val seasonsArray = sRoot["seasons"]?.jsonArray
-                                    val sNumbers = seasonsArray?.mapNotNull { it.jsonObject["season_number"]?.jsonPrimitive?.content?.toIntOrNull() }
-                                        ?.filter { it > 0 }?.take(8) ?: emptyList()
-                                    for (sNum in sNumbers) {
-                                        try {
-                                            val svUrl = "https://api.themoviedb.org/3/tv/${item.tmdbId}/season/$sNum/videos?api_key=$tmdbKey&include_video_language=en,ja,null"
-                                            val svReq = Request.Builder().url(svUrl).get().build()
-                                            client.newCall(svReq).execute().use { svResp ->
-                                                if (svResp.isSuccessful) {
-                                                    val svBody = svResp.body?.string()
-                                                    if (svBody != null) {
-                                                        val svRoot = Json { ignoreUnknownKeys = true }.parseToJsonElement(svBody).jsonObject
-                                                        val svResults = svRoot["results"]?.jsonArray
-                                                        if (svResults != null) {
-                                                            for (vElem in svResults) {
-                                                                val vObj = vElem.jsonObject
-                                                                val vSite = vObj["site"]?.jsonPrimitive?.content ?: ""
-                                                                val vKey = vObj["key"]?.jsonPrimitive?.content ?: continue
-                                                                val vTitle = vObj["name"]?.jsonPrimitive?.content ?: "Season $sNum Video"
-                                                                val vType = vObj["type"]?.jsonPrimitive?.content ?: "Trailer"
-                                                                if (vSite.equals("YouTube", ignoreCase = true)) {
-                                                                    trailerList.add(MediaTrailer(title = "S$sNum: $vTitle", youtubeKey = vKey, type = vType))
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        } catch (_: Exception) {}
-                                    }
+                        if (item.tmdbId != null) {
+                            val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
+                            val traktSearchReq = Request.Builder()
+                                .url(traktSearchUrl)
+                                .header("Content-Type", "application/json")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", traktApiKey)
+                                .header("User-Agent", "OmniTrack/1.0.0 (Android)")
+                                .get()
+                                .build()
+
+                            client.newCall(traktSearchReq).execute().use { searchResp ->
+                                if (searchResp.isSuccessful) {
+                                    val searchBody = searchResp.body?.string().orEmpty()
+                                    val searchJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(searchBody).jsonArray
+                                    val firstItem = searchJson.firstOrNull()?.jsonObject
+                                    val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
+                                    val ids = mediaObj?.get("ids")?.jsonObject
+                                    targetId = ids?.get("slug")?.jsonPrimitive?.content
+                                        ?: ids?.get("trakt")?.jsonPrimitive?.content
+                                        ?: ids?.get("imdb")?.jsonPrimitive?.content
                                 }
                             }
                         }
-                    } catch (_: Exception) {}
-                }
 
-                // 1:1 Nuvio Trakt Community Reviews (up to 100 comments with likes, ratings, dates)
-                try {
-                    val searchType = if (type == "movie") "movie" else "show"
-                    val commentsEndpointType = if (type == "movie") "movies" else "shows"
-                    val traktApiKey = com.omnitrack.app.data.sync.TrackerAccountVerifier.TRAKT_CLIENT_ID
+                        if (targetId == null && item.title.isNotBlank()) {
+                            val titleQueryUrl = "https://api.trakt.tv/search/$searchType?query=" + java.net.URLEncoder.encode(item.title, "UTF-8")
+                            val titleSearchReq = Request.Builder()
+                                .url(titleQueryUrl)
+                                .header("Content-Type", "application/json")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", traktApiKey)
+                                .header("User-Agent", "OmniTrack/1.0.0 (Android)")
+                                .get()
+                                .build()
 
-                    var targetId: String? = null
-
-                    // 1. TMDb ID -> Trakt resolution
-                    if (item.tmdbId != null) {
-                        val traktSearchUrl = "https://api.trakt.tv/search/tmdb/${item.tmdbId}?type=$searchType"
-                        val traktSearchReq = Request.Builder()
-                            .url(traktSearchUrl)
-                            .header("Content-Type", "application/json")
-                            .header("trakt-api-version", "2")
-                            .header("trakt-api-key", traktApiKey)
-                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
-                            .get()
-                            .build()
-
-                        client.newCall(traktSearchReq).execute().use { searchResp ->
-                            if (searchResp.isSuccessful) {
-                                val searchBody = searchResp.body?.string().orEmpty()
-                                val searchJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(searchBody).jsonArray
-                                val firstItem = searchJson.firstOrNull()?.jsonObject
-                                val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
-                                val ids = mediaObj?.get("ids")?.jsonObject
-                                targetId = ids?.get("slug")?.jsonPrimitive?.content
-                                    ?: ids?.get("trakt")?.jsonPrimitive?.content
-                                    ?: ids?.get("imdb")?.jsonPrimitive?.content
-                            }
-                        }
-                    }
-
-                    // 3. Title query search fallback
-                    if (targetId == null && item.title.isNotBlank()) {
-                        val titleQueryUrl = "https://api.trakt.tv/search/$searchType?query=" + java.net.URLEncoder.encode(item.title, "UTF-8")
-                        val titleSearchReq = Request.Builder()
-                            .url(titleQueryUrl)
-                            .header("Content-Type", "application/json")
-                            .header("trakt-api-version", "2")
-                            .header("trakt-api-key", traktApiKey)
-                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
-                            .get()
-                            .build()
-
-                        client.newCall(titleSearchReq).execute().use { titleResp ->
-                            if (titleResp.isSuccessful) {
-                                val titleBody = titleResp.body?.string().orEmpty()
-                                val titleJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(titleBody).jsonArray
-                                val firstItem = titleJson.firstOrNull()?.jsonObject
-                                val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
-                                val ids = mediaObj?.get("ids")?.jsonObject
-                                targetId = ids?.get("slug")?.jsonPrimitive?.content
-                                    ?: ids?.get("trakt")?.jsonPrimitive?.content
-                                    ?: ids?.get("imdb")?.jsonPrimitive?.content
-                            }
-                        }
-                    }
-
-                    if (targetId != null) {
-                        val commentsUrl = "https://api.trakt.tv/$commentsEndpointType/$targetId/comments/likes?page=1&limit=100"
-                        val commentsReq = Request.Builder()
-                            .url(commentsUrl)
-                            .header("Content-Type", "application/json")
-                            .header("trakt-api-version", "2")
-                            .header("trakt-api-key", traktApiKey)
-                            .header("User-Agent", "OmniTrack/1.0.0 (Android)")
-                            .get()
-                            .build()
-
-                        client.newCall(commentsReq).execute().use { commentsResp ->
-                            if (commentsResp.isSuccessful) {
-                                val commentsBody = commentsResp.body?.string().orEmpty()
-                                val commentsArray = Json { ignoreUnknownKeys = true }.parseToJsonElement(commentsBody).jsonArray
-                                for (elem in commentsArray) {
-                                    val commentObj = elem.jsonObject
-                                    val commentText = commentObj["comment"]?.jsonPrimitive?.content ?: continue
-                                    val userObj = commentObj["user"]?.jsonObject
-                                    val authorName = userObj?.get("name")?.jsonPrimitive?.content
-                                        ?: userObj?.get("username")?.jsonPrimitive?.content
-                                        ?: "Trakt Member"
-                                    val userRating = commentObj["user_rating"]?.jsonPrimitive?.content?.toFloatOrNull()
-                                    val likes = commentObj["likes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                                    val spoiler = commentObj["spoiler"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
-                                    val reviewFlag = commentObj["review"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
-                                        ?: (commentText.length > 200)
-                                    val date = commentObj["created_at"]?.jsonPrimitive?.content?.take(10)
-
-                                    val sanitized = sanitizeCommunityComment(commentText)
-                                    if (sanitized.isNotBlank()) {
-                                        revs.add(
-                                            CommunityReview(
-                                                author = authorName,
-                                                username = userObj?.get("username")?.jsonPrimitive?.content,
-                                                source = "Trakt",
-                                                rating = userRating,
-                                                comment = sanitized,
-                                                date = date,
-                                                hasSpoiler = spoiler || commentText.contains("[spoiler]", ignoreCase = true),
-                                                isReview = reviewFlag,
-                                                likes = likes
-                                            )
-                                        )
-                                    }
+                            client.newCall(titleSearchReq).execute().use { titleResp ->
+                                if (titleResp.isSuccessful) {
+                                    val titleBody = titleResp.body?.string().orEmpty()
+                                    val titleJson = Json { ignoreUnknownKeys = true }.parseToJsonElement(titleBody).jsonArray
+                                    val firstItem = titleJson.firstOrNull()?.jsonObject
+                                    val mediaObj = firstItem?.get(if (type == "movie") "movie" else "show")?.jsonObject
+                                    val ids = mediaObj?.get("ids")?.jsonObject
+                                    targetId = ids?.get("slug")?.jsonPrimitive?.content
+                                        ?: ids?.get("trakt")?.jsonPrimitive?.content
+                                        ?: ids?.get("imdb")?.jsonPrimitive?.content
                                 }
                             }
                         }
-                    }
-                } catch (_: Exception) {}
 
-                // Fallback to TMDb Community Reviews if Trakt is empty
-                if (revs.isEmpty()) {
-                    try {
-                        val url = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$tmdbKey"
-                        val req = Request.Builder().url(url).get().build()
-                        client.newCall(req).execute().use { response ->
-                            if (response.isSuccessful) {
-                                val body = response.body?.string()
-                                if (body != null) {
-                                    val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    val results = root["results"]?.jsonArray
-                                    if (results != null) {
-                                        for (elem in results.take(15)) {
-                                            val obj = elem.jsonObject
-                                            val author = obj["author"]?.jsonPrimitive?.content ?: "Community Member"
-                                            val content = obj["content"]?.jsonPrimitive?.content ?: continue
-                                            val rating = obj["author_details"]?.jsonObject?.get("rating")?.jsonPrimitive?.content?.toFloatOrNull()
-                                            val hasSpoiler = content.contains("[spoiler]", ignoreCase = true) || content.contains("spoiler alert", ignoreCase = true)
-                                            revs.add(
+                        if (targetId != null) {
+                            val commentsUrl = "https://api.trakt.tv/$commentsEndpointType/$targetId/comments/likes?page=1&limit=100"
+                            val commentsReq = Request.Builder()
+                                .url(commentsUrl)
+                                .header("Content-Type", "application/json")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", traktApiKey)
+                                .header("User-Agent", "OmniTrack/1.0.0 (Android)")
+                                .get()
+                                .build()
+
+                            client.newCall(commentsReq).execute().use { commentsResp ->
+                                if (commentsResp.isSuccessful) {
+                                    val commentsBody = commentsResp.body?.string().orEmpty()
+                                    val commentsArray = Json { ignoreUnknownKeys = true }.parseToJsonElement(commentsBody).jsonArray
+                                    val traktRevs = mutableListOf<CommunityReview>()
+                                    for (elem in commentsArray) {
+                                        val commentObj = elem.jsonObject
+                                        val commentText = commentObj["comment"]?.jsonPrimitive?.content ?: continue
+                                        val userObj = commentObj["user"]?.jsonObject
+                                        val authorName = userObj?.get("name")?.jsonPrimitive?.content
+                                            ?: userObj?.get("username")?.jsonPrimitive?.content
+                                            ?: "Trakt Member"
+                                        val userRating = commentObj["user_rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                                        val likes = commentObj["likes"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                        val spoiler = commentObj["spoiler"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                                        val reviewFlag = commentObj["review"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
+                                            ?: (commentText.length > 200)
+                                        val date = commentObj["created_at"]?.jsonPrimitive?.content?.take(10)
+
+                                        val sanitized = sanitizeCommunityComment(commentText)
+                                        if (sanitized.isNotBlank()) {
+                                            traktRevs.add(
                                                 CommunityReview(
-                                                    author = author,
-                                                    username = obj["author_details"]?.jsonObject?.get("username")?.jsonPrimitive?.content,
-                                                    source = "TMDb Community",
-                                                    rating = rating,
-                                                    comment = sanitizeCommunityComment(content),
-                                                    hasSpoiler = hasSpoiler,
-                                                    isReview = content.length > 150
+                                                    author = authorName,
+                                                    username = userObj?.get("username")?.jsonPrimitive?.content,
+                                                    source = "Trakt",
+                                                    rating = userRating,
+                                                    comment = sanitized,
+                                                    date = date,
+                                                    hasSpoiler = spoiler || commentText.contains("[spoiler]", ignoreCase = true),
+                                                    isReview = reviewFlag,
+                                                    likes = likes
                                                 )
                                             )
+                                        }
+                                    }
+                                    if (traktRevs.isNotEmpty()) {
+                                        revs.clear()
+                                        revs.addAll(traktRevs)
+                                        _reviews.value = revs
+                                        persistAuxCache()
+                                    }
+                                }
+                            }
+                        }
+
+                        // Fallback to TMDb Community Reviews if Trakt is empty
+                        if (revs.isEmpty()) {
+                            val tmdbRevUrl = "https://api.themoviedb.org/3/$type/${item.tmdbId}/reviews?api_key=$tmdbKey"
+                            val req = Request.Builder().url(tmdbRevUrl).get().build()
+                            client.newCall(req).execute().use { response ->
+                                if (response.isSuccessful) {
+                                    val body = response.body?.string()
+                                    if (body != null) {
+                                        val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
+                                        val results = root["results"]?.jsonArray
+                                        if (results != null) {
+                                            val tmdbRevs = mutableListOf<CommunityReview>()
+                                            for (elem in results.take(15)) {
+                                                val obj = elem.jsonObject
+                                                val author = obj["author"]?.jsonPrimitive?.content ?: "Community Member"
+                                                val content = obj["content"]?.jsonPrimitive?.content ?: continue
+                                                val rating = obj["author_details"]?.jsonObject?.get("rating")?.jsonPrimitive?.content?.toFloatOrNull()
+                                                val hasSpoiler = content.contains("[spoiler]", ignoreCase = true) || content.contains("spoiler alert", ignoreCase = true)
+                                                tmdbRevs.add(
+                                                    CommunityReview(
+                                                        author = author,
+                                                        username = obj["author_details"]?.jsonObject?.get("username")?.jsonPrimitive?.content,
+                                                        source = "TMDb Community",
+                                                        rating = rating,
+                                                        comment = sanitizeCommunityComment(content),
+                                                        hasSpoiler = hasSpoiler,
+                                                        isReview = content.length > 150
+                                                    )
+                                                )
+                                            }
+                                            if (tmdbRevs.isNotEmpty()) {
+                                                revs.clear()
+                                                revs.addAll(tmdbRevs)
+                                                _reviews.value = revs
+                                                persistAuxCache()
+                                            }
                                         }
                                     }
                                 }
@@ -1011,6 +1030,7 @@ class DetailViewModel(
             }
             _collectionName.value = fetchedCollName
             _collectionItems.value = fetchedCollParts
+            persistAuxCache()
         }
     }
 
@@ -1288,6 +1308,18 @@ class DetailViewModel(
                 _realEpisodes.value = emptyList()
                 _selectedSeasonNumber.value = 1
             }
+            val cachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevItem)]
+                ?: prevItem.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (prevItem.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
+                ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevId)]
+            if (cachedAux != null) {
+                _recommendations.value = cachedAux.recommendations
+                _reviews.value = cachedAux.reviews
+                _cast.value = cachedAux.cast
+                _trailers.value = cachedAux.trailers
+                _companies.value = cachedAux.companies
+                _collectionName.value = cachedAux.collectionName
+                _collectionItems.value = cachedAux.collectionItems
+            }
             loadRecommendationsAndReviews(prevItem)
         }
         return true
@@ -1319,6 +1351,18 @@ class DetailViewModel(
                 _episodesBySeason.value = emptyMap()
                 _realEpisodes.value = emptyList()
                 _selectedSeasonNumber.value = 1
+            }
+            val nextCachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextItem)]
+                ?: nextItem.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (nextItem.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
+                ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextId)]
+            if (nextCachedAux != null) {
+                _recommendations.value = nextCachedAux.recommendations
+                _reviews.value = nextCachedAux.reviews
+                _cast.value = nextCachedAux.cast
+                _trailers.value = nextCachedAux.trailers
+                _companies.value = nextCachedAux.companies
+                _collectionName.value = nextCachedAux.collectionName
+                _collectionItems.value = nextCachedAux.collectionItems
             }
             loadRecommendationsAndReviews(nextItem)
         }
@@ -1559,4 +1603,30 @@ internal object SeriesContentMemoryCache {
     val episodesBySeasonCache = java.util.concurrent.ConcurrentHashMap<Long, Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>>()
     val resolvedTmdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, Long>()
     val resolvedImdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, String>()
+}
+
+data class CachedDetailAux(
+    val recommendations: List<RecommendationItem> = emptyList(),
+    val reviews: List<CommunityReview> = emptyList(),
+    val cast: List<CastMember> = emptyList(),
+    val trailers: List<MediaTrailer> = emptyList(),
+    val companies: List<NetworkProductionCompany> = emptyList(),
+    val collectionName: String? = null,
+    val collectionItems: List<RecommendationItem> = emptyList()
+)
+
+internal object DetailAuxMemoryCache {
+    val cache = java.util.concurrent.ConcurrentHashMap<String, CachedDetailAux>()
+
+    fun getCacheKey(item: MediaItemEntity): String {
+        return "${item.mediaType}_${item.id}_${item.tmdbId}_${item.anilistId}_${item.malId}"
+    }
+
+    fun getCacheKey(mediaId: Long): String {
+        return "id_$mediaId"
+    }
+
+    fun getTmdbCacheKey(type: String, tmdbId: Long): String {
+        return "tmdb_${type}_$tmdbId"
+    }
 }

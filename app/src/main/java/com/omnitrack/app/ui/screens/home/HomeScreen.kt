@@ -476,7 +476,8 @@ fun HomeScreen(
                     DiscoverView(
                         allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick,
-                        onAddMedia = { viewModel.addMediaFromSearch(it) }
+                        onAddMedia = { viewModel.addMediaFromSearch(it) },
+                        homeViewModel = viewModel
                     )
                 }
 

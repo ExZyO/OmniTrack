@@ -570,7 +570,7 @@ private fun EpisodeHorizontalCard(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(12.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -585,7 +585,7 @@ private fun EpisodeHorizontalCard(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        val effectiveUrl = if (loadFailed) null else imgModel
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -745,7 +745,7 @@ private fun EpisodeListCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(8.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -769,8 +769,8 @@ private fun EpisodeListCardItem(
                     .background(Color(0xFF0D0D0D))
             ) {
                 var loadFailed by remember(imgModel) { mutableStateOf(false) }
-                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
-                if (!effectiveUrl.isNullOrBlank() && !loadFailed) {
+                val effectiveUrl = if (loadFailed) null else imgModel
+                if (!effectiveUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = effectiveUrl,
                         contentDescription = episode.title,
@@ -925,7 +925,7 @@ private fun EpisodeVerticalCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -940,7 +940,7 @@ private fun EpisodeVerticalCardItem(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        val effectiveUrl = if (loadFailed) null else imgModel
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
