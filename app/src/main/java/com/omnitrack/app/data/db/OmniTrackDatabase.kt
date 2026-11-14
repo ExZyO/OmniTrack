@@ -81,6 +81,19 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                 )
                     .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                    .addCallback(object : RoomDatabase.Callback() {
+                        override fun onOpen(db: SupportSQLiteDatabase) {
+                            super.onOpen(db)
+                            try {
+                                db.query("PRAGMA foreign_keys = ON").close()
+                                db.query("PRAGMA journal_mode = WAL").close()
+                                db.query("PRAGMA synchronous = NORMAL").close()
+                                db.query("PRAGMA cache_size = -32000").close()
+                                db.query("PRAGMA temp_store = MEMORY").close()
+                                db.query("PRAGMA mmap_size = 268435456").close()
+                            } catch (_: Exception) {}
+                        }
+                    })
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

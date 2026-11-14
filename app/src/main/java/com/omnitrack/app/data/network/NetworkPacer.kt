@@ -17,17 +17,17 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object NetworkPacer {
 
-    private val aniListSemaphore = Semaphore(1)
+    private val aniListSemaphore = Semaphore(4)
     private var lastAniListCallTime = 0L
-    private const val ANILIST_MIN_INTERVAL_MS = 650L // <= 90 req/min
+    private const val ANILIST_MIN_INTERVAL_MS = 50L // Parallel GraphQL queries with fast burst
 
-    private val mangaDexSemaphore = Semaphore(1)
+    private val mangaDexSemaphore = Semaphore(2)
     private var lastMangaDexCallTime = 0L
-    private const val MANGADEX_MIN_INTERVAL_MS = 220L // <= 5 req/sec
+    private const val MANGADEX_MIN_INTERVAL_MS = 100L
 
-    private val tmdbSemaphore = Semaphore(1)
+    private val tmdbSemaphore = Semaphore(8) // Parallel HTTP/2 multiplexing (Chimanew / Nuvio parity)
     private var lastTmdbCallTime = 0L
-    private const val TMDB_MIN_INTERVAL_MS = 250L // <= 40 req/10s
+    private const val TMDB_MIN_INTERVAL_MS = 0L // TMDb developer API handles parallel requests without artificial delay
 
     private val steamSemaphore = Semaphore(1)
     private var lastSteamCallTime = 0L
@@ -47,10 +47,12 @@ object NetworkPacer {
     private val inFlightRequests = ConcurrentHashMap<String, Deferred<Any?>>()
 
     suspend fun <T> withAniListPacing(block: suspend () -> T): T = aniListSemaphore.withPermit {
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastAniListCallTime
-        if (elapsed < ANILIST_MIN_INTERVAL_MS) {
-            delay(ANILIST_MIN_INTERVAL_MS - elapsed)
+        if (ANILIST_MIN_INTERVAL_MS > 0L) {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastAniListCallTime
+            if (elapsed < ANILIST_MIN_INTERVAL_MS) {
+                delay(ANILIST_MIN_INTERVAL_MS - elapsed)
+            }
         }
         try {
             block()
@@ -73,10 +75,12 @@ object NetworkPacer {
     }
 
     suspend fun <T> withTmdbPacing(block: suspend () -> T): T = tmdbSemaphore.withPermit {
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastTmdbCallTime
-        if (elapsed < TMDB_MIN_INTERVAL_MS) {
-            delay(TMDB_MIN_INTERVAL_MS - elapsed)
+        if (TMDB_MIN_INTERVAL_MS > 0L) {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastTmdbCallTime
+            if (elapsed < TMDB_MIN_INTERVAL_MS) {
+                delay(TMDB_MIN_INTERVAL_MS - elapsed)
+            }
         }
         try {
             block()

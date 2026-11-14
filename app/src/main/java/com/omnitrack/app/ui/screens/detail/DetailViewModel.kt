@@ -1388,7 +1388,22 @@ class DetailViewModel(
                         }
                     }
 
-                    val seasons = enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title, resolvedImdbId)
+                    val targetSeasonToPreload = if (_selectedSeasonNumber.value > 0) _selectedSeasonNumber.value else 1
+
+                    // Parallel Fast Path (Chimanew / EaZy Nuvio+ Architecture):
+                    // Concurrently resolve seasons and prefetch target season episodes over multiplexed HTTP/2 sockets
+                    val (seasons, preloadedEps) = coroutineScope {
+                        val seasonsDeferred = async(Dispatchers.IO) {
+                            enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title, resolvedImdbId)
+                        }
+                        val epsDeferred = async(Dispatchers.IO) {
+                            val cached = SeriesContentMemoryCache.episodesCache["$tmdbId:$targetSeasonToPreload"]
+                            if (!cached.isNullOrEmpty()) cached
+                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, targetSeasonToPreload, tmdbKey, resolvedImdbId, item.title)
+                        }
+                        seasonsDeferred.await() to epsDeferred.await()
+                    }
+
                     if (seasons.isNotEmpty()) {
                         val validSeasons = seasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         val sortedSeasons = validSeasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
@@ -1405,10 +1420,15 @@ class DetailViewModel(
                             defaultSeason.seasonNumber
                         }
 
-                        // 1. FAST PATH: Fetch & emit the SELECTED season's episodes IMMEDIATELY (0-lag open!)
-                        val selectedCached = SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"]
-                        val selectedEps = if (!selectedCached.isNullOrEmpty()) selectedCached
-                        else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title)
+                        // Use the concurrently preloaded episodes if target matches (0ms delay!)
+                        val selectedEps = if (seasonToSelect == targetSeasonToPreload && preloadedEps.isNotEmpty()) {
+                            preloadedEps
+                        } else {
+                            val selectedCached = SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"]
+                            if (!selectedCached.isNullOrEmpty()) selectedCached
+                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title)
+                        }
+
                         if (selectedEps.isNotEmpty()) {
                             SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"] = selectedEps
                             val cur = _episodesBySeason.value.toMutableMap()

@@ -31,17 +31,7 @@ import java.util.concurrent.TimeUnit
  * Every call is strictly paced through [NetworkPacer] to avoid HTTP 429 rate limits.
  */
 class OmniSearchRepository(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(12, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
-            val req = chain.request().newBuilder()
-                .header("User-Agent", "OmniTrack/1.0.0 (Android; native AMOLED tracker)")
-                .header("Accept", "application/json")
-                .build()
-            chain.proceed(req)
-        }
-        .build()
+    private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.getClient()
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 

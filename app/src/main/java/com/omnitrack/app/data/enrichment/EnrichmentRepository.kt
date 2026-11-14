@@ -68,22 +68,7 @@ data class EnrichmentData(
  * (IMDb, TMDb, Trakt, Rotten Tomatoes, Metacritic) for maximum visual fidelity on the Detail canvas.
  */
 class EnrichmentRepository(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
-            val original = chain.request()
-            val req = original.newBuilder().apply {
-                if (original.header("User-Agent") == null) {
-                    header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                }
-                if (original.header("Accept") == null) {
-                    header("Accept", "application/json")
-                }
-            }.build()
-            chain.proceed(req)
-        }
-        .build()
+    private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.getClient()
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -851,11 +836,22 @@ class EnrichmentRepository(
             if (cinemetaVideos.isNotEmpty()) {
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
+
+                // Parallel AniList season poster discovery (Chimanew / Nuvio concurrent async parity)
+                val missingSeasonNumbers = cinemetaSeasons.keys.filter { sNum -> mergedList.none { it.seasonNumber == sNum } }
+                val aniListPosters = if (!showTitle.isNullOrBlank() && missingSeasonNumbers.isNotEmpty()) {
+                    coroutineScope {
+                        missingSeasonNumbers.map { sNum ->
+                            async { sNum to fetchAniListSeasonPoster(showTitle, sNum) }
+                        }.awaitAll().toMap()
+                    }
+                } else emptyMap()
+
                 cinemetaSeasons.forEach { (sNum, eps) ->
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
-                        val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
+                        val aniListPoster = aniListPosters[sNum]
                         val kitsuData = if (aniListPoster.isNullOrBlank() && !showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
                         val resolvedPoster = aniListPoster ?: kitsuData?.posterUrl
 
