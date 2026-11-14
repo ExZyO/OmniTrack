@@ -19,6 +19,7 @@ import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.sync.TrackerSyncEngine
+import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
 import com.omnitrack.app.util.AirDateUtils
@@ -42,6 +43,7 @@ import kotlinx.coroutines.launch
 
 import com.omnitrack.app.data.repository.DantotsuCommentsRepository
 import com.omnitrack.app.ui.screens.detail.components.DiscussionComment
+import com.omnitrack.app.ui.screens.detail.components.createSampleDiscussionComments
 import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.CommunityReview
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
@@ -116,7 +118,8 @@ class DetailViewModel(
     mediaId: Long,
     private val enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
     private val preferenceManager: PreferenceManager? = null,
-    private val trackerSyncEngine: TrackerSyncEngine? = null
+    private val trackerSyncEngine: TrackerSyncEngine? = null,
+    private val trackerTokenManager: TrackerTokenManager? = null
 ) : ViewModel() {
 
     private val _mediaId = MutableStateFlow(mediaId)
@@ -1340,14 +1343,26 @@ class DetailViewModel(
 
             if (resolvedAniListId != null) {
                 try {
+                    val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
+                    if (!anilistToken.isNullOrBlank()) {
+                        dantotsuCommentsRepository.authenticate(anilistToken)
+                    }
                     val comments = dantotsuCommentsRepository.getComments(
                         anilistId = resolvedAniListId,
                         tagPrefix = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) "Ch" else "Ep"
                     )
                     if (comments.isNotEmpty()) {
                         _discussionComments.value = comments
+                    } else if (_discussionComments.value.isEmpty()) {
+                        _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    if (_discussionComments.value.isEmpty()) {
+                        _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
+                    }
+                }
+            } else if (_discussionComments.value.isEmpty()) {
+                _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
             }
 
             persistAuxCache()
@@ -1715,9 +1730,12 @@ class DetailViewModel(
     fun postDiscussionComment(content: String, tag: String?, parentId: String?) {
         val currentItem = _previewItem.value ?: uiState.value.item
         val targetTag = tag ?: "General"
+        val authorName = dantotsuCommentsRepository.getCurrentUsername() ?: "You"
+        val authorAvatar = dantotsuCommentsRepository.getCurrentUserAvatar()
         val newComment = DiscussionComment(
             id = "comm_${System.currentTimeMillis()}",
-            author = "You",
+            author = authorName,
+            authorAvatarUrl = authorAvatar,
             tag = targetTag,
             content = content,
             timeAgo = "Just now",
@@ -1727,10 +1745,15 @@ class DetailViewModel(
         )
 
         _discussionComments.update { current ->
-            if (parentId != null) {
-                insertNestedReplyHelper(current, parentId, newComment)
+            val baseList = if (current.isEmpty() && currentItem != null) {
+                createSampleDiscussionComments(currentItem.mediaType, currentItem.totalProgress?.toInt() ?: 24)
             } else {
-                listOf(newComment) + current
+                current
+            }
+            if (parentId != null) {
+                insertNestedReplyHelper(baseList, parentId, newComment)
+            } else {
+                listOf(newComment) + baseList
             }
         }
 
@@ -2061,12 +2084,13 @@ class DetailViewModel(
             mediaId: Long,
             enrichmentRepository: EnrichmentRepository = EnrichmentRepository(),
             preferenceManager: PreferenceManager? = null,
-            trackerSyncEngine: TrackerSyncEngine? = null
+            trackerSyncEngine: TrackerSyncEngine? = null,
+            trackerTokenManager: TrackerTokenManager? = null
         ): ViewModelProvider.Factory {
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return DetailViewModel(repository, mediaId, enrichmentRepository, preferenceManager, trackerSyncEngine) as T
+                    return DetailViewModel(repository, mediaId, enrichmentRepository, preferenceManager, trackerSyncEngine, trackerTokenManager) as T
                 }
             }
         }

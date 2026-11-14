@@ -146,7 +146,9 @@ fun DetailCommentsSection(
 
     LaunchedEffect(comments) {
         if (!comments.isNullOrEmpty()) {
-            localCommentsList = comments
+            val incomingIds = comments.map { it.id }.toSet()
+            val localOnly = localCommentsList.filter { it.id !in incomingIds }
+            localCommentsList = (comments + localOnly).distinctBy { it.id }
         }
     }
 
@@ -707,7 +709,7 @@ private fun insertNestedReply(
  * High-quality seed discussion thread tree across multiple episodes.
  * Ensures discussions don't stop after episode 1 or 2.
  */
-private fun createSampleDiscussionComments(mediaType: MediaType, totalEpisodes: Int = 24): List<DiscussionComment> {
+internal fun createSampleDiscussionComments(mediaType: MediaType, totalEpisodes: Int = 24): List<DiscussionComment> {
     val isReading = mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL
     val prefix = if (isReading) "Ch" else "Ep"
     val list = mutableListOf<DiscussionComment>()
@@ -850,20 +852,34 @@ private fun createSampleDiscussionComments(mediaType: MediaType, totalEpisodes: 
             )
         )
 
-        // Generate discussions for remaining episodes (up to total episodes or 12)
-        val maxSeed = totalEpisodes.coerceAtMost(12)
+        // Generate discussions for remaining episodes (up to total episodes or 48)
+        val maxSeed = totalEpisodes.coerceIn(1, 48)
+        val samplePrompts = listOf(
+            "Key turning point in the storyline. The subtle hints dropped earlier are starting to connect together seamlessly.",
+            "The cliffhanger at the end of this episode had my jaw on the floor! Next week cannot come fast enough.",
+            "The soundtrack during the climax scene was absolutely chilling. Incredible direction and pacing.",
+            "The character development here compared to the beginning of the arc is so well earned.",
+            "That subtle foreshadowing in the middle of the episode was brilliant. Caught it on a rewatch!",
+            "Easily one of the best episodes of the season so far. The production quality jumped up another level.",
+            "The voice acting performance in this episode gave me genuine goosebumps. Outstanding delivery."
+        )
+        val sampleUsers = listOf(
+            "SakuraBloom", "MidnightWatcher", "GhibliNostalgia", "ChronoTriggered", "EchoKnight", "CrimsonValkyrie", "AetherDrifter"
+        )
         for (ep in 5..maxSeed) {
+            val user = sampleUsers[(ep - 5) % sampleUsers.size]
+            val prompt = samplePrompts[(ep - 5) % samplePrompts.size]
             list.add(
                 DiscussionComment(
                     id = "comm_seed_$ep",
-                    author = "ArchiveViewer",
+                    author = user,
                     authorAvatarUrl = null,
                     anilistUserId = 30000 + ep,
                     tag = "$prefix $ep",
-                    content = "Key turning point in the court intrigue storyline. The subtle hints dropped earlier are starting to connect together seamlessly.",
-                    timeAgo = "${ep * 2}h ago",
-                    upvotes = 80 + ep * 7,
-                    downvotes = 1 + (ep % 3)
+                    content = prompt,
+                    timeAgo = "${(ep * 2) % 24 + 1}h ago",
+                    upvotes = 45 + (ep * 11) % 180,
+                    downvotes = ep % 3
                 )
             )
         }

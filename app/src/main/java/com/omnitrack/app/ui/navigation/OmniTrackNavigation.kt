@@ -110,7 +110,8 @@ fun OmniTrackNavigation(
                     repository = repository,
                     mediaId = mediaId,
                     preferenceManager = prefManager,
-                    trackerSyncEngine = app.trackerSyncEngine
+                    trackerSyncEngine = app.trackerSyncEngine,
+                    trackerTokenManager = app.trackerTokenManager
                 )
             )
 

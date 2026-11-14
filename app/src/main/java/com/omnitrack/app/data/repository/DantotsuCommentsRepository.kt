@@ -48,6 +48,10 @@ class DantotsuCommentsRepository(
     @Volatile
     private var currentUserAvatar: String? = null
 
+    fun getCurrentUsername(): String? = currentUsername
+    fun getCurrentUserAvatar(): String? = currentUserAvatar
+    fun getCurrentUserId(): String? = currentUserId
+
     // In-memory cache for fast tab switches
     private val commentCache = ConcurrentHashMap<String, List<DiscussionComment>>()
 
