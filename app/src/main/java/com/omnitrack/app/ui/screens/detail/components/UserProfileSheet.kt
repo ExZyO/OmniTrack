@@ -95,7 +95,7 @@ import kotlinx.coroutines.launch
  * - Clickable favorite anime & manga posters that open detail previews.
  * - Unboxed statistics matrix, score distribution histogram, and genre breakdowns.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UserProfileSheet(
     username: String?,
