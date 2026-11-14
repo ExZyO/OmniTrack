@@ -1698,5 +1698,4 @@ class EnrichmentRepository(
             null
         }
     }
-    }
 }
