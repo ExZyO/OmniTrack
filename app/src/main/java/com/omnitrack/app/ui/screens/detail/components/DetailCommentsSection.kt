@@ -138,7 +138,7 @@ fun DetailCommentsSection(
 
     // Seed default comments if external comments not provided
     val initialSeed = remember(mediaType, totalCount) {
-        rememberSampleDiscussionComments(mediaType, totalCount)
+        createSampleDiscussionComments(mediaType, totalCount)
     }
 
     // Active working list of comments (optimistic updates on post/reply)
@@ -582,10 +582,10 @@ private fun CommentNodeRow(
                         initialDownvotes = comment.downvotes,
                         allowDownvote = true,
                         showDownvoteCount = true,
-                        onVoteChanged = { voteType ->
+                        onVoteChanged = { voteType, _ ->
                             val score = when (voteType) {
-                                VoteType.UPVOTE -> 1
-                                VoteType.DOWNVOTE -> -1
+                                VoteType.UP -> 1
+                                VoteType.DOWN -> -1
                                 VoteType.NONE -> 0
                             }
                             onVote(score)
@@ -707,13 +707,10 @@ private fun insertNestedReply(
  * High-quality seed discussion thread tree across multiple episodes.
  * Ensures discussions don't stop after episode 1 or 2.
  */
-@Composable
-private fun rememberSampleDiscussionComments(mediaType: MediaType, totalEpisodes: Int = 24): List<DiscussionComment> {
+private fun createSampleDiscussionComments(mediaType: MediaType, totalEpisodes: Int = 24): List<DiscussionComment> {
     val isReading = mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL
     val prefix = if (isReading) "Ch" else "Ep"
-
-    return remember(mediaType, totalEpisodes) {
-        val list = mutableListOf<DiscussionComment>()
+    val list = mutableListOf<DiscussionComment>()
 
         // Episode 1 discussions
         list.add(
@@ -871,6 +868,5 @@ private fun rememberSampleDiscussionComments(mediaType: MediaType, totalEpisodes
             )
         }
 
-        list
-    }
+        return list
 }
