@@ -1544,6 +1544,50 @@ class DetailViewModel(
         }
     }
 
+    private fun calculateCumulativeProgress(targetSeason: Int, targetEpisode: Int): Double {
+        var cumulative = 0
+        val sortedSeasons = _realSeasons.value.filter { it.seasonNumber > 0 }.sortedBy { it.seasonNumber }
+        for (s in sortedSeasons) {
+            if (s.seasonNumber < targetSeason) {
+                val count = _episodesBySeason.value[s.seasonNumber]?.size ?: s.episodeCount
+                cumulative += count
+            } else if (s.seasonNumber == targetSeason) {
+                cumulative += targetEpisode
+                break
+            }
+        }
+        return if (cumulative > 0) cumulative.toDouble() else targetEpisode.toDouble()
+    }
+
+    private fun getEpisodesToMarkWatchedUpTo(targetSeason: Int, targetEpisode: Int): List<Pair<Int, Int>> {
+        val pairs = mutableListOf<Pair<Int, Int>>()
+        val sortedSeasons = _realSeasons.value.filter { it.seasonNumber > 0 }.sortedBy { it.seasonNumber }
+        for (s in sortedSeasons) {
+            if (s.seasonNumber < targetSeason) {
+                val eps = _episodesBySeason.value[s.seasonNumber]
+                if (!eps.isNullOrEmpty()) {
+                    pairs.addAll(eps.map { s.seasonNumber to it.episodeNumber })
+                } else {
+                    val count = s.episodeCount.coerceAtLeast(1)
+                    pairs.addAll((1..count).map { s.seasonNumber to it })
+                }
+            } else if (s.seasonNumber == targetSeason) {
+                val eps = _episodesBySeason.value[s.seasonNumber] ?: _realEpisodes.value
+                val filtered = eps.filter { it.seasonNumber == targetSeason && it.episodeNumber <= targetEpisode }
+                if (filtered.isNotEmpty()) {
+                    pairs.addAll(filtered.map { targetSeason to it.episodeNumber })
+                } else {
+                    pairs.addAll((1..targetEpisode).map { targetSeason to it })
+                }
+                break
+            }
+        }
+        if (pairs.isEmpty()) {
+            pairs.addAll((1..targetEpisode).map { targetSeason to it })
+        }
+        return pairs.distinct()
+    }
+
     fun toggleEpisodeWatched(episode: MediaEpisode) {
         val mediaId = _mediaId.value
         if (mediaId <= 0) return
@@ -1551,18 +1595,11 @@ class DetailViewModel(
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
             if (!isCurrentlyWatched) {
-                // When marking as watched: if user taps Ep 4, mark all prior episodes in this season (1..4) as watched
-                val epsToMark = _realEpisodes.value.filter {
-                    it.seasonNumber == episode.seasonNumber && it.episodeNumber <= episode.episodeNumber
-                }
-                val pairs = if (epsToMark.isNotEmpty()) {
-                    epsToMark.map { it.seasonNumber to it.episodeNumber }
-                } else {
-                    (1..episode.episodeNumber).map { episode.seasonNumber to it }
-                }
+                // When marking as watched: mark all previous episodes in earlier seasons AND in this season up to episode
+                val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
                 repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             } else {
-                // When unwatching: if user unmarks Ep 3, unmark all episodes from 3 upwards in this season
+                // When unwatching: unmark from this episode upwards in this season
                 val epsToUnmark = _realEpisodes.value.filter {
                     it.seasonNumber == episode.seasonNumber && it.episodeNumber >= episode.episodeNumber
                 }
@@ -1574,11 +1611,10 @@ class DetailViewModel(
                 }
                 repository.setMultipleEpisodesWatched(mediaId, pairs, false)
             }
-            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val targetProgress = if (!isCurrentlyWatched) {
-                episode.episodeNumber.toDouble()
+                calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
             } else {
-                (episode.episodeNumber - 1).toDouble().coerceAtLeast(0.0)
+                calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber - 1).coerceAtLeast(0.0)
             }
             val item = repository.getMediaById(mediaId).firstOrNull()
             if (item != null) {
@@ -1601,15 +1637,9 @@ class DetailViewModel(
         val mediaId = _mediaId.value
         if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
-            val epsToMark = _realEpisodes.value.filter { it.episodeNumber <= episode.episodeNumber }
-            val pairs = if (epsToMark.isNotEmpty()) {
-                epsToMark.map { it.seasonNumber to it.episodeNumber }
-            } else {
-                (1..episode.episodeNumber).map { episode.seasonNumber to it }
-            }
+            val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
             repository.setMultipleEpisodesWatched(mediaId, pairs, true)
-            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val targetProgress = episode.episodeNumber.toDouble()
+            val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
             val item = repository.getMediaById(mediaId).firstOrNull()
             if (item != null) {
                 val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {

@@ -390,7 +390,7 @@ fun DetailSeriesContent(
             episode = ep,
             seasonLabel = seasonLabel,
             isEpisodeWatched = isWatched,
-            canMarkPreviousEpisodes = ep.episodeNumber > 1,
+            canMarkPreviousEpisodes = ep.episodeNumber > 1 || ep.seasonNumber > 1,
             isSeasonWatched = isSeasonWatched,
             onDismiss = { activeActionSheetEpisode = null },
             onToggleWatched = { onToggleEpisodeWatched(ep) },

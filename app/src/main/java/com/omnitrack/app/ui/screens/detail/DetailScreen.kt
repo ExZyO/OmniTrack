@@ -737,7 +737,7 @@ fun DetailScreen(
                                     mediaType = item.mediaType,
                                     mediaTitle = item.title,
                                     reviews = uiState.reviews,
-                                    episodeOrChapterCount = item.totalProgress?.toInt() ?: item.totalEpisodes ?: item.totalChapters
+                                    episodeOrChapterCount = item.totalProgress?.toInt()
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
