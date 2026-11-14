@@ -222,7 +222,7 @@ fun ReviewsSection(
                         } else {
                             Text(
                                 text = rev.comment,
-                                color = Color.White.copy(alpha = 0.85f),
+                                color = Color.White,
                                 fontSize = 13.5.sp,
                                 lineHeight = 20.sp,
                                 maxLines = 5,
@@ -243,14 +243,14 @@ fun ReviewsSection(
                             ) {
                                 Text(
                                     text = rev.source,
-                                    color = Color.White.copy(alpha = 0.60f),
+                                    color = Color.White.copy(alpha = 0.85f),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium
                                 )
                                 rev.date?.let { d ->
                                     Text(
                                         text = "• $d",
-                                        color = Color.White.copy(alpha = 0.45f),
+                                        color = Color.White.copy(alpha = 0.80f),
                                         fontSize = 10.5.sp
                                     )
                                 }
@@ -310,7 +310,7 @@ fun UnifiedDiscussionSection(
         ) {
             Text(
                 text = "Discussion",
-                color = if (selectedTab == 0) Color.White else TextMuted,
+                color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.55f),
                 fontSize = 20.sp,
                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
                 modifier = Modifier
@@ -321,7 +321,7 @@ fun UnifiedDiscussionSection(
             if (reviews.isNotEmpty()) {
                 Text(
                     text = "Reviews (${reviews.size})",
-                    color = if (selectedTab == 1) Color.White else TextMuted,
+                    color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
                     fontSize = 20.sp,
                     fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
                     modifier = Modifier

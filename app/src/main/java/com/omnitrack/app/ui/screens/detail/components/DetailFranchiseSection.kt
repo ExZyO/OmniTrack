@@ -60,14 +60,14 @@ fun DetailFranchiseSection(
         ) {
             Text(
                 text = "Franchise & Adaptations",
-                color = TextPrimary,
+                color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
             Text(
                 text = "${relations.size} entries",
-                color = TextSecondary,
+                color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -108,7 +108,7 @@ fun DetailFranchiseSection(
 
                     Text(
                         text = item.title,
-                        color = TextPrimary,
+                        color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -130,7 +130,7 @@ fun DetailFranchiseSection(
 
                     Text(
                         text = subText,
-                        color = TextMuted,
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

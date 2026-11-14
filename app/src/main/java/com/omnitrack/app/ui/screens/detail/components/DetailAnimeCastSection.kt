@@ -63,14 +63,14 @@ fun DetailAnimeCastSection(
         ) {
             Text(
                 text = "Characters & Voice Actors",
-                color = TextPrimary,
+                color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
             Text(
                 text = "${characters.size} cast",
-                color = TextSecondary,
+                color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -143,7 +143,7 @@ fun DetailAnimeCastSection(
                     // Character Name & Voice Actor Name
                     Text(
                         text = item.characterName,
-                        color = TextPrimary,
+                        color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -152,7 +152,7 @@ fun DetailAnimeCastSection(
 
                     Text(
                         text = item.voiceActorName ?: "Unknown VA",
-                        color = TextSecondary,
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis

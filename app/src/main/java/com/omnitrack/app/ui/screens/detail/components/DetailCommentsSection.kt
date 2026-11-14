@@ -313,7 +313,7 @@ fun DetailCommentsSection(
                     if (newCommentText.isEmpty()) {
                         Text(
                             text = if (replyingToComment != null) "Write a reply..." else if (selectedTag != "All") "Add a comment for $selectedTag..." else "Join the discussion...",
-                            color = TextMuted,
+                            color = Color.White.copy(alpha = 0.55f),
                             fontSize = 13.sp
                         )
                     }
@@ -321,7 +321,7 @@ fun DetailCommentsSection(
                         value = newCommentText,
                         onValueChange = { newCommentText = it },
                         textStyle = TextStyle(
-                            color = TextPrimary,
+                            color = Color.White,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Normal
                         ),
@@ -365,13 +365,13 @@ fun DetailCommentsSection(
                 ) {
                     Text(
                         text = "No discussion comments yet for $selectedTag.",
-                        color = TextPrimary,
+                        color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = "Be the first to share your thoughts using the box above!",
-                        color = TextMuted,
+                        color = Color.White.copy(alpha = 0.80f),
                         fontSize = 12.5.sp
                     )
                 }
@@ -541,7 +541,7 @@ private fun CommentNodeRow(
                 // Relative Timestamp
                 Text(
                     text = "• ${comment.timeAgo}",
-                    color = TextMuted,
+                    color = Color.White.copy(alpha = 0.80f),
                     fontSize = 11.5.sp
                 )
 
@@ -549,7 +549,7 @@ private fun CommentNodeRow(
                 if (node.isCollapsed && node.totalChildReplies > 0) {
                     Text(
                         text = "• ${node.totalChildReplies} replies hidden",
-                        color = TextMuted,
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -562,7 +562,7 @@ private fun CommentNodeRow(
                 SelectionContainer {
                     Text(
                         text = comment.content,
-                        color = Color(0xFFEDEDED),
+                        color = Color.White,
                         fontSize = 13.5.sp,
                         lineHeight = 19.sp,
                         modifier = Modifier.padding(start = 28.dp)
@@ -606,12 +606,12 @@ private fun CommentNodeRow(
                         Icon(
                             imageVector = Icons.Default.Reply,
                             contentDescription = "Reply",
-                            tint = TextSecondary,
+                            tint = Color.White.copy(alpha = 0.85f),
                             modifier = Modifier.size(11.dp)
                         )
                         Text(
                             text = "Reply",
-                            color = TextSecondary,
+                            color = Color.White.copy(alpha = 0.85f),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -630,12 +630,12 @@ private fun CommentNodeRow(
                             Icon(
                                 imageVector = Icons.Default.ChatBubbleOutline,
                                 contentDescription = "Replies",
-                                tint = TextMuted,
+                                tint = Color.White.copy(alpha = 0.75f),
                                 modifier = Modifier.size(11.dp)
                             )
                             Text(
                                 text = "${comment.replies.size}",
-                                color = TextMuted,
+                                color = Color.White.copy(alpha = 0.75f),
                                 fontSize = 11.sp
                             )
                         }

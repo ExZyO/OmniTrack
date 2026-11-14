@@ -121,7 +121,7 @@ fun DetailAiringStatusLine(
 
             Text(
                 text = "Episode ${schedule.episodeNumber} in $countdownText",
-                color = TextPrimary,
+                color = Color.White,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.2).sp
@@ -130,14 +130,14 @@ fun DetailAiringStatusLine(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = "•",
-                color = TextMuted.copy(alpha = 0.6f),
+                color = Color.White.copy(alpha = 0.6f),
                 fontSize = 11.sp
             )
             Spacer(modifier = Modifier.width(6.dp))
 
             Text(
                 text = "$dayOfWeek at $timeFormatted",
-                color = TextSecondary,
+                color = Color.White.copy(alpha = 0.85f),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Normal
             )

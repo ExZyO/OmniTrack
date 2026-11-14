@@ -63,14 +63,14 @@ fun DetailAnimeStaffSection(
         ) {
             Text(
                 text = "Staff",
-                color = TextPrimary,
+                color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
             Text(
                 text = "${staff.size} staff",
-                color = TextSecondary,
+                color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -119,7 +119,7 @@ fun DetailAnimeStaffSection(
 
                     Text(
                         text = item.name,
-                        color = TextPrimary,
+                        color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -129,7 +129,7 @@ fun DetailAnimeStaffSection(
 
                     Text(
                         text = item.role,
-                        color = TextSecondary,
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
