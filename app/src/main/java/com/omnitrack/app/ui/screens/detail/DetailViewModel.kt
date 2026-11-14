@@ -234,14 +234,18 @@ class DetailViewModel(
                 if (activeAniListId == anilistId) {
                     if (comments.isNotEmpty()) {
                         discussionCache[cacheKey] = comments
-                        _discussionComments.value = comments
-                    } else {
+                        val current = _discussionComments.value
+                        val merged = (comments + current).distinctBy { it.id }
+                        _discussionComments.value = merged
+                    } else if (tag == null) {
                         discussionCache[cacheKey] = emptyList()
                         _discussionComments.value = emptyList()
                     }
                 }
             } catch (_: Exception) {
-                _discussionComments.value = emptyList()
+                if (tag == null) {
+                    _discussionComments.value = emptyList()
+                }
             }
         }
     }

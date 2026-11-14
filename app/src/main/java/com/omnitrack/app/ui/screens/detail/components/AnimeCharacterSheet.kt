@@ -12,12 +12,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.ImageBitmap
+import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.ArtworkBackdrop
+import com.omnitrack.app.ui.components.CoverGlowBox
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -75,6 +82,9 @@ private fun formatCompactNumber(num: Int?): String? {
 fun AnimeCharacterSheet(
     character: AnimeCharacterItem?,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
     onDismissRequest: () -> Unit,
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null
 ) {
@@ -104,29 +114,57 @@ fun AnimeCharacterSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = Color.Transparent,
         dragHandle = null,
         modifier = Modifier.navigationBarsPadding()
     ) {
-        if (showingVoiceActor && (selectedStaffId != null || character.voiceActorId != null)) {
-            StaffDetailContent(
-                staffId = selectedStaffId ?: character.voiceActorId ?: 0L,
-                fallbackName = selectedStaffFallbackName ?: character.voiceActorName ?: "Voice Actor",
-                fallbackImageUrl = selectedStaffFallbackImage ?: character.voiceActorImageUrl,
-                onBack = { showingVoiceActor = false },
-                onOpenMedia = { item ->
-                    onDismissRequest()
-                    onOpenMediaPreview?.invoke(item)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+        ) {
+            // Background presentation matching detail page
+            when (presentationSettings?.fallbackBackgroundStyle) {
+                FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                    ArtworkBackdrop(
+                        image = backdropBitmap,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
                 }
-            )
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(vertical = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
+                FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                    CoverGlowBox(
+                        imageUrl = backdropTargetUrl,
+                        modifier = Modifier.fillMaxSize()
+                    ) {}
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (showingVoiceActor && (selectedStaffId != null || character.voiceActorId != null)) {
+                    StaffDetailContent(
+                        staffId = selectedStaffId ?: character.voiceActorId ?: 0L,
+                        fallbackName = selectedStaffFallbackName ?: character.voiceActorName ?: "Voice Actor",
+                        fallbackImageUrl = selectedStaffFallbackImage ?: character.voiceActorImageUrl,
+                        onBack = { showingVoiceActor = false },
+                        onOpenMedia = { item ->
+                            onDismissRequest()
+                            onOpenMediaPreview?.invoke(item)
+                        }
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
                 // Character Header (100% Unboxed)
                 Row(
                     modifier = Modifier
@@ -479,6 +517,9 @@ fun AnimeCharacterSheet(
 fun AnimeStaffSheet(
     staff: AnimeStaffItem?,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
     onDismissRequest: () -> Unit,
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null
 ) {
@@ -487,20 +528,50 @@ fun AnimeStaffSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = Color.Transparent,
         dragHandle = null,
         modifier = Modifier.navigationBarsPadding()
     ) {
-        StaffDetailContent(
-            staffId = staff.staffId,
-            fallbackName = staff.name,
-            fallbackImageUrl = staff.imageUrl,
-            onBack = null,
-            onOpenMedia = { item ->
-                onDismissRequest()
-                onOpenMediaPreview?.invoke(item)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+        ) {
+            // Background presentation matching detail page
+            when (presentationSettings?.fallbackBackgroundStyle) {
+                FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                    ArtworkBackdrop(
+                        image = backdropBitmap,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                    CoverGlowBox(
+                        imageUrl = backdropTargetUrl,
+                        modifier = Modifier.fillMaxSize()
+                    ) {}
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                }
             }
-        )
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                StaffDetailContent(
+                    staffId = staff.staffId,
+                    fallbackName = staff.name,
+                    fallbackImageUrl = staff.imageUrl,
+                    onBack = null,
+                    onOpenMedia = { item ->
+                        onDismissRequest()
+                        onOpenMediaPreview?.invoke(item)
+                    }
+                )
+            }
+        }
     }
 }
 

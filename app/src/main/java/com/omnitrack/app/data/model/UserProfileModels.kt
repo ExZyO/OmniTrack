@@ -34,6 +34,8 @@ data class UserActivityItem(
     val type: String,
     val mediaTitle: String? = null,
     val coverUrl: String? = null,
+    val mediaId: Long? = null,
+    val mediaType: MediaType = MediaType.ANIME,
     val text: String,
     val timeAgo: String
 )

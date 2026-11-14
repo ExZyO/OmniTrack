@@ -46,6 +46,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.ui.graphics.ImageBitmap
+import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.ArtworkBackdrop
+import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.theme.AccentArctic
@@ -95,6 +100,9 @@ fun PersonDetailScreen(
     personName: String,
     initialAvatarUrl: String? = null,
     apiKey: String,
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
     onBack: () -> Unit,
     onOpenMediaPreview: (RecommendationItem) -> Unit,
     modifier: Modifier = Modifier
@@ -182,10 +190,28 @@ fun PersonDetailScreen(
     }
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AmoledBlack)
+        modifier = modifier.fillMaxSize()
     ) {
+        // Background presentation matching detail page
+        when (presentationSettings?.fallbackBackgroundStyle) {
+            FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                ArtworkBackdrop(
+                    image = backdropBitmap,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            }
+            FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                CoverGlowBox(
+                    imageUrl = backdropTargetUrl,
+                    modifier = Modifier.fillMaxSize()
+                ) {}
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            }
+            else -> {
+                Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()

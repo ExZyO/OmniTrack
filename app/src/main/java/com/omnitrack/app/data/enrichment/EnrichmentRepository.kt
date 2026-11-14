@@ -2277,6 +2277,8 @@ class EnrichmentRepository(
                     progress
                     createdAt
                     media {
+                      id
+                      type
                       title { userPreferred english }
                       coverImage { medium large }
                     }
@@ -2399,6 +2401,9 @@ class EnrichmentRepository(
                         else -> "${diff / 604800}w ago"
                     }
                     val mObj = aObj["media"]?.jsonObject
+                    val mId = mObj?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                    val mTypeStr = mObj?.get("type").cleanString()
+                    val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) com.omnitrack.app.data.model.MediaType.MANGA else com.omnitrack.app.data.model.MediaType.ANIME
                     val mTitle = mObj?.get("title")?.jsonObject?.get("userPreferred").cleanString()
                         ?: mObj?.get("title")?.jsonObject?.get("english").cleanString()
                     val mCover = mObj?.get("coverImage")?.jsonObject?.get("medium").cleanString()
@@ -2413,7 +2418,7 @@ class EnrichmentRepository(
                         !textBody.isNullOrBlank() -> textBody
                         else -> "Updated library entry"
                     }
-                    actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, text = text, timeAgo = timeAgo))
+                    actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, mediaId = mId, mediaType = mType, text = text, timeAgo = timeAgo))
                 }
 
                 // If opened by username without userId, fetch activities using the resolved user ID
@@ -2430,6 +2435,8 @@ class EnrichmentRepository(
                                     progress
                                     createdAt
                                     media {
+                                      id
+                                      type
                                       title { userPreferred english }
                                       coverImage { medium large }
                                     }
@@ -2482,6 +2489,9 @@ class EnrichmentRepository(
                                                 else -> "${diff / 604800}w ago"
                                             }
                                             val mObj = aObj["media"]?.jsonObject
+                                            val mId = mObj?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                                            val mTypeStr = mObj?.get("type").cleanString()
+                                            val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) com.omnitrack.app.data.model.MediaType.MANGA else com.omnitrack.app.data.model.MediaType.ANIME
                                             val mTitle = mObj?.get("title")?.jsonObject?.get("userPreferred").cleanString()
                                                 ?: mObj?.get("title")?.jsonObject?.get("english").cleanString()
                                             val mCover = mObj?.get("coverImage")?.jsonObject?.get("medium").cleanString()
@@ -2496,7 +2506,7 @@ class EnrichmentRepository(
                                                 !textBody.isNullOrBlank() -> textBody
                                                 else -> "Updated library entry"
                                             }
-                                            actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, text = text, timeAgo = timeAgo))
+                                            actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, mediaId = mId, mediaType = mType, text = text, timeAgo = timeAgo))
                                         }
                                     }
                                 }

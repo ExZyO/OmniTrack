@@ -368,10 +368,10 @@ class DantotsuCommentsRepository(
         val token = dantotsuAuthToken ?: return@withContext false
         try {
             val request = Request.Builder()
-                .url("$BASE_URL/comments/delete/$commentId")
+                .url("$BASE_URL/comments/$commentId")
                 .header("appauth", APP_AUTH_KEY)
                 .header("Authorization", token)
-                .post(FormBody.Builder().build())
+                .delete()
                 .build()
 
             val response = client.newCall(request).execute()

@@ -177,6 +177,13 @@ fun DetailScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val item = uiState.item
+    val effectiveBanner = item?.customBannerPath ?: item?.bannerUrl ?: item?.coverUrl
+    val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
+    val backdropBitmap = rememberArtworkBackdrop(
+        imageUrl = effectiveBanner,
+        enabled = isCinematicBlur
+    )
+
     val coroutineScope = rememberCoroutineScope()
     var showArtworkPicker by remember { mutableStateOf(false) }
     var showOptionsMenu by remember { mutableStateOf(false) }
@@ -218,8 +225,12 @@ fun DetailScreen(
                 anilistUserId = currentSheet.userId,
                 userAuthToken = uiState.anilistAuthToken,
                 currentUsername = uiState.currentUsername,
+                presentationSettings = presentationSettings,
+                backdropBitmap = backdropBitmap,
+                backdropTargetUrl = effectiveBanner,
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
+                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 },
                 onOpenCharacter = { charItem ->
@@ -236,9 +247,13 @@ fun DetailScreen(
         is DetailSheetTarget.AnimeCharacter -> {
             AnimeCharacterSheet(
                 character = currentSheet.character,
+                presentationSettings = presentationSettings,
+                backdropBitmap = backdropBitmap,
+                backdropTargetUrl = effectiveBanner,
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
+                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )
@@ -246,9 +261,13 @@ fun DetailScreen(
         is DetailSheetTarget.AnimeStaff -> {
             AnimeStaffSheet(
                 staff = currentSheet.staff,
+                presentationSettings = presentationSettings,
+                backdropBitmap = backdropBitmap,
+                backdropTargetUrl = effectiveBanner,
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
+                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )
@@ -261,9 +280,13 @@ fun DetailScreen(
                     personName = currentSheet.person.name,
                     initialAvatarUrl = currentSheet.person.avatarUrl,
                     apiKey = tmdbKey,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
                     onBack = { sheetBackStack.removeLastOrNull() },
                     onOpenMediaPreview = { recItem ->
                         viewModel.saveScrollOffset(scrollState.value)
+                        sheetBackStack.clear()
                         viewModel.openPreview(recItem)
                     }
                 )
@@ -277,9 +300,13 @@ fun DetailScreen(
                 entityName = currentSheet.company.name,
                 entityKind = currentSheet.company.kind,
                 apiKey = tmdbKey,
+                presentationSettings = presentationSettings,
+                backdropBitmap = backdropBitmap,
+                backdropTargetUrl = effectiveBanner,
                 onBack = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
+                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )

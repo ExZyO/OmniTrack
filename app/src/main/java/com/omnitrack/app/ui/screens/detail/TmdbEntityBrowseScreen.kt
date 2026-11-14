@@ -45,6 +45,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.ui.graphics.ImageBitmap
+import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.ArtworkBackdrop
+import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.theme.AccentArctic
@@ -89,6 +94,9 @@ fun TmdbEntityBrowseScreen(
     entityId: Long? = null,
     entityKind: String = "network", // "network", "company", or "anime_studio"
     apiKey: String,
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
     onBack: () -> Unit,
     onOpenMediaPreview: (RecommendationItem) -> Unit,
     modifier: Modifier = Modifier
@@ -328,18 +336,36 @@ fun TmdbEntityBrowseScreen(
     val backgroundUrl = entityData?.rails?.firstOrNull()?.items?.firstOrNull()?.coverUrl
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AmoledBlack)
+        modifier = modifier.fillMaxSize()
     ) {
-        if (!backgroundUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = backgroundUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = 0.10f
-            )
+        // Background presentation matching detail page
+        when (presentationSettings?.fallbackBackgroundStyle) {
+            FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                ArtworkBackdrop(
+                    image = backdropBitmap,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            }
+            FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                CoverGlowBox(
+                    imageUrl = backdropTargetUrl ?: backgroundUrl,
+                    modifier = Modifier.fillMaxSize()
+                ) {}
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+            }
+            else -> {
+                Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                if (!backgroundUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = backgroundUrl,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                        alpha = 0.10f
+                    )
+                }
+            }
         }
 
         Box(

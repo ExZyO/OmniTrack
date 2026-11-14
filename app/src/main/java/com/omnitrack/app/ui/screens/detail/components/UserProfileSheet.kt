@@ -5,6 +5,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +27,15 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
+import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.ArtworkBackdrop
+import com.omnitrack.app.ui.components.CoverGlowBox
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -144,6 +155,9 @@ fun UserProfileSheet(
     anilistUserId: Int?,
     userAuthToken: String? = null,
     currentUsername: String? = null,
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
     onOpenCharacter: ((AnimeCharacterItem) -> Unit)? = null,
     onOpenStaff: ((AnimeStaffItem) -> Unit)? = null,
@@ -207,12 +221,46 @@ fun UserProfileSheet(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (browsingMediaListType != null) {
+                browsingMediaListType = null
+            } else {
+                onDismiss()
+            }
+        },
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = Color.Transparent,
         dragHandle = null,
         modifier = Modifier.navigationBarsPadding()
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+        ) {
+            // Background presentation matching detail page
+            when (presentationSettings?.fallbackBackgroundStyle) {
+                FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                    ArtworkBackdrop(
+                        image = backdropBitmap,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                    CoverGlowBox(
+                        imageUrl = backdropTargetUrl,
+                        modifier = Modifier.fillMaxSize()
+                    ) {}
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
         val p = profile
         if (isLoading) {
             Box(
@@ -650,9 +698,9 @@ fun UserProfileSheet(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(text = "📺", fontSize = 13.sp)
                             Text(
                                 text = "Anime List (${p.animeCount})",
                                 color = Color.White,
@@ -673,9 +721,9 @@ fun UserProfileSheet(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(text = "📖", fontSize = 13.sp)
                             Text(
                                 text = "Manga List (${p.mangaCount})",
                                 color = Color.White,
@@ -934,8 +982,8 @@ fun UserProfileSheet(
                                                         RecommendationItem(
                                                             title = act.mediaTitle,
                                                             coverUrl = act.coverUrl ?: "",
-                                                            mediaType = if (act.type.contains("MANGA", ignoreCase = true)) MediaType.MANGA else MediaType.ANIME,
-                                                            anilistId = null
+                                                            mediaType = act.mediaType,
+                                                            anilistId = act.mediaId
                                                         )
                                                     )
                                                 }
@@ -1087,6 +1135,51 @@ fun UserProfileSheet(
 
                         val activeStats = if (analyticsIsAnime) p.animeStats else p.mangaStats
 
+                        // Dartotsu Overview Summary Cards
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val timeStr = if (analyticsIsAnime) "${activeStats.minutesWatched / 60}h" else "${activeStats.chaptersRead} ch"
+                            val timeSub = if (analyticsIsAnime) "Time Watched" else "Chapters Read"
+                            val scoreStr = if (activeStats.meanScore > 0) "${activeStats.meanScore.toInt()}%" else "—"
+
+                            listOf(
+                                "${activeStats.count}" to "Total Titles",
+                                timeStr to timeSub,
+                                scoreStr to "Mean Score",
+                                String.format(Locale.US, "%.1f", activeStats.standardDeviation) to "Std Dev"
+                            ).forEach { (valStr, label) ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = valStr,
+                                            color = Color.White,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = label,
+                                            color = Color.White.copy(alpha = 0.55f),
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Render all 12 Deep Categories
                         val categoryOrder = listOf(
                             "scores" to "SCORE DISTRIBUTION",
@@ -1107,6 +1200,7 @@ fun UserProfileSheet(
                             val entries = activeStats.categories[catKey].orEmpty()
                             if (entries.isNotEmpty()) {
                                 AnalyticsCategoryChart(
+                                    categoryKey = catKey,
                                     title = catTitle,
                                     entries = entries,
                                     metric = analyticsMetric,
@@ -1121,6 +1215,7 @@ fun UserProfileSheet(
             }
         }
     }
+}
 }
 
 /**
@@ -1166,10 +1261,15 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
 
         val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
+        val heatmapScrollState = rememberScrollState()
+        LaunchedEffect(columns) {
+            heatmapScrollState.scrollTo(heatmapScrollState.maxValue)
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
+                .horizontalScroll(heatmapScrollState),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             // Months header
@@ -1236,14 +1336,410 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
 }
 
 /**
- * Single Analytics Category Breakdown Chart:
- * Displays entries sorted by chosen metric with unboxed bars, labels, and percentage badges.
+ * Deep Analytics Multi-Variation Charts:
+ * 1:1 Dartotsu Parity: ColumnChart for Scores, DonutChart for Formats/Statuses/Countries,
+ * LineTrendline for Release/Start Years, RadarChart for Genres, and Ranked Bars for others.
  */
 @Composable
 private fun AnalyticsCategoryChart(
+    categoryKey: String,
     title: String,
     entries: List<UserStatEntry>,
     metric: Int, // 0 = Count, 1 = Time, 2 = Mean Score
+    isAnime: Boolean
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = title,
+            color = AccentArctic,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp
+        )
+
+        when (categoryKey) {
+            "scores" -> ScoreColumnChart(entries = entries, metric = metric, isAnime = isAnime)
+            "formats", "statuses", "countries" -> {
+                if (metric != 2) {
+                    DonutRingChart(entries = entries, metric = metric, isAnime = isAnime)
+                } else {
+                    AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+                }
+            }
+            "releaseYears", "startYears" -> YearTrendlineChart(entries = entries, metric = metric, isAnime = isAnime)
+            "genres" -> {
+                GenreRadarChart(entries = entries, metric = metric, isAnime = isAnime)
+                AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+            }
+            else -> AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+        }
+    }
+}
+
+@Composable
+private fun ScoreColumnChart(
+    entries: List<UserStatEntry>,
+    metric: Int,
+    isAnime: Boolean
+) {
+    val map = remember(entries, metric) {
+        val m = (1..10).associateWith { 0.0 }.toMutableMap()
+        entries.forEach { e ->
+            val scoreVal = e.label.toIntOrNull() ?: 0
+            if (scoreVal in 1..10) {
+                val v = when (metric) {
+                    1 -> if (isAnime) e.minutesWatched / 60.0 else e.chaptersRead.toDouble()
+                    2 -> e.meanScore
+                    else -> e.count.toDouble()
+                }
+                m[scoreVal] = v
+            }
+        }
+        m
+    }
+    val maxVal = map.values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(130.dp)
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        for (score in 1..10) {
+            val v = map[score] ?: 0.0
+            val fraction = (v / maxVal).toFloat().coerceIn(0.04f, 1f)
+            val barColor = when {
+                score >= 8 -> AccentJade
+                score >= 6 -> AccentArctic
+                score >= 4 -> AccentGold
+                else -> AccentRose
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom
+            ) {
+                if (v > 0) {
+                    Text(
+                        text = if (v >= 1000) "${(v / 1000).toInt()}k" else "${v.toInt()}",
+                        color = Color.White.copy(alpha = 0.70f),
+                        fontSize = 9.sp,
+                        maxLines = 1
+                    )
+                }
+                Spacer(modifier = Modifier.height(3.dp))
+                Box(
+                    modifier = Modifier
+                        .width(14.dp)
+                        .fillMaxHeight(fraction * 0.78f)
+                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                        .background(barColor)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "$score",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DonutRingChart(
+    entries: List<UserStatEntry>,
+    metric: Int,
+    isAnime: Boolean
+) {
+    val unitLabel = when (metric) {
+        1 -> if (isAnime) "HOURS" else "CHAPTERS"
+        2 -> "SCORE"
+        else -> "ENTRIES"
+    }
+
+    val palette = listOf(
+        AccentArctic,
+        AccentJade,
+        AccentGold,
+        AccentRose,
+        Color(0xFF818CF8),
+        Color(0xFFF472B6),
+        Color(0xFF38BDF8),
+        Color(0xFFFB923C)
+    )
+
+    val validEntries = remember(entries, metric) {
+        entries.mapNotNull { e ->
+            val v = when (metric) {
+                1 -> if (isAnime) e.minutesWatched / 60.0 else e.chaptersRead.toDouble()
+                2 -> e.meanScore
+                else -> e.count.toDouble()
+            }
+            if (v > 0) e.label to v else null
+        }.sortedByDescending { it.second }.take(8)
+    }
+
+    val total = validEntries.sumOf { it.second }.coerceAtLeast(1.0)
+    val totalStr = when (metric) {
+        1 -> "${total.toInt()}h"
+        2 -> "${(total / validEntries.size.coerceAtLeast(1)).toInt()}%"
+        else -> "${total.toInt()}"
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier.size(160.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                var startAngle = -90f
+                validEntries.forEachIndexed { i, item ->
+                    val sweep = ((item.second / total) * 360f).toFloat()
+                    val color = palette[i % palette.size]
+                    drawArc(
+                        color = color,
+                        startAngle = startAngle,
+                        sweepAngle = (sweep - 2f).coerceAtLeast(1f),
+                        useCenter = false,
+                        style = Stroke(width = 18.dp.toPx(), cap = StrokeCap.Round)
+                    )
+                    startAngle += sweep
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = totalStr,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = unitLabel,
+                    color = Color.White.copy(alpha = 0.50f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Legend Pills
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            validEntries.forEachIndexed { i, item ->
+                val pct = ((item.second / total) * 100).toInt()
+                val color = palette[i % palette.size]
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                    )
+                    Text(
+                        text = "${item.first} ($pct%)",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YearTrendlineChart(
+    entries: List<UserStatEntry>,
+    metric: Int,
+    isAnime: Boolean
+) {
+    val sorted = remember(entries) {
+        entries.mapNotNull { e ->
+            val yr = e.label.toIntOrNull()
+            if (yr != null && yr in 1970..2030) yr to e else null
+        }.sortedBy { it.first }
+    }
+    if (sorted.size < 2) {
+        AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+        return
+    }
+
+    val values = sorted.map { (_, e) ->
+        when (metric) {
+            1 -> if (isAnime) e.minutesWatched / 60.0 else e.chaptersRead.toDouble()
+            2 -> e.meanScore
+            else -> e.count.toDouble()
+        }
+    }
+    val maxV = values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(110.dp)
+                .padding(horizontal = 8.dp)
+        ) {
+            val w = size.width
+            val h = size.height
+            val step = w / (sorted.size - 1).coerceAtLeast(1)
+
+            val path = Path()
+            val fillPath = Path()
+
+            sorted.forEachIndexed { i, _ ->
+                val x = i * step
+                val y = h - ((values[i] / maxV).toFloat() * (h - 14.dp.toPx())) - 7.dp.toPx()
+                if (i == 0) {
+                    path.moveTo(x, y)
+                    fillPath.moveTo(x, h)
+                    fillPath.lineTo(x, y)
+                } else {
+                    path.lineTo(x, y)
+                    fillPath.lineTo(x, y)
+                }
+            }
+            fillPath.lineTo((sorted.size - 1) * step, h)
+            fillPath.close()
+
+            // Gradient fill
+            drawPath(
+                path = fillPath,
+                brush = Brush.verticalGradient(
+                    listOf(AccentArctic.copy(alpha = 0.35f), Color.Transparent)
+                )
+            )
+
+            // Line
+            drawPath(
+                path = path,
+                color = AccentArctic,
+                style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
+            )
+
+            // Circles at points
+            sorted.forEachIndexed { i, _ ->
+                val x = i * step
+                val y = h - ((values[i] / maxV).toFloat() * (h - 14.dp.toPx())) - 7.dp.toPx()
+                drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+            }
+        }
+
+        // Years along bottom
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = "${sorted.first().first}", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+            if (sorted.size > 2) {
+                val mid = sorted[sorted.size / 2].first
+                Text(text = "$mid", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+            }
+            Text(text = "${sorted.last().first}", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun GenreRadarChart(
+    entries: List<UserStatEntry>,
+    metric: Int,
+    isAnime: Boolean
+) {
+    val top = remember(entries, metric) {
+        entries.map { e ->
+            val v = when (metric) {
+                1 -> if (isAnime) e.minutesWatched / 60.0 else e.chaptersRead.toDouble()
+                2 -> e.meanScore
+                else -> e.count.toDouble()
+            }
+            e.label to v
+        }.sortedByDescending { it.second }.take(6)
+    }
+    if (top.size < 3) return
+
+    val maxV = top.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(180.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+            val cx = size.width / 2f
+            val cy = size.height / 2f
+            val r = (size.minDimension / 2f) * 0.85f
+            val n = top.size
+            val angleStep = (2 * Math.PI / n).toFloat()
+
+            // Draw concentric web rings
+            for (level in 1..3) {
+                val ringR = r * (level / 3f)
+                val ringPath = Path()
+                for (i in 0 until n) {
+                    val angle = -Math.PI / 2 + i * angleStep
+                    val x = (cx + ringR * Math.cos(angle)).toFloat()
+                    val y = (cy + ringR * Math.sin(angle)).toFloat()
+                    if (i == 0) ringPath.moveTo(x, y) else ringPath.lineTo(x, y)
+                }
+                ringPath.close()
+                drawPath(path = ringPath, color = Color.White.copy(alpha = 0.08f), style = Stroke(width = 1.dp.toPx()))
+            }
+
+            // Draw data polygon
+            val dataPath = Path()
+            top.forEachIndexed { i, item ->
+                val angle = -Math.PI / 2 + i * angleStep
+                val dataR = r * (item.second / maxV).toFloat().coerceIn(0.1f, 1f)
+                val x = (cx + dataR * Math.cos(angle)).toFloat()
+                val y = (cy + dataR * Math.sin(angle)).toFloat()
+                if (i == 0) dataPath.moveTo(x, y) else dataPath.lineTo(x, y)
+                drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+            }
+            dataPath.close()
+
+            drawPath(
+                path = dataPath,
+                color = AccentArctic.copy(alpha = 0.25f),
+                style = Fill
+            )
+            drawPath(
+                path = dataPath,
+                color = AccentArctic,
+                style = Stroke(width = 2.dp.toPx())
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnalyticsCategoryBars(
+    entries: List<UserStatEntry>,
+    metric: Int,
     isAnime: Boolean
 ) {
     val sorted = remember(entries, metric) {
@@ -1265,83 +1761,70 @@ private fun AnalyticsCategoryChart(
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = title,
-            color = AccentArctic,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp
-        )
+        sorted.forEach { entry ->
+            val metricVal = when (metric) {
+                1 -> if (isAnime) entry.minutesWatched.toDouble() else entry.chaptersRead.toDouble()
+                2 -> entry.meanScore
+                else -> entry.count.toDouble()
+            }
 
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            sorted.forEach { entry ->
-                val metricVal = when (metric) {
-                    1 -> if (isAnime) entry.minutesWatched.toDouble() else entry.chaptersRead.toDouble()
-                    2 -> entry.meanScore
-                    else -> entry.count.toDouble()
-                }
+            val metricStr = when (metric) {
+                1 -> if (isAnime) "${entry.minutesWatched / 60}h" else "${entry.chaptersRead} ch"
+                2 -> if (entry.meanScore > 0) "${entry.meanScore.toInt()}%" else "—"
+                else -> "${entry.count} titles"
+            }
 
-                val metricStr = when (metric) {
-                    1 -> if (isAnime) "${entry.minutesWatched / 60}h" else "${entry.chaptersRead} ch"
-                    2 -> if (entry.meanScore > 0) "${entry.meanScore.toInt()}%" else "—"
-                    else -> "${entry.count} titles"
-                }
+            val barFraction = (metricVal / maxMetricValue).toFloat().coerceIn(0.04f, 1f)
 
-                val barFraction = (metricVal / maxMetricValue).toFloat().coerceIn(0.04f, 1f)
-
-                Column(
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = entry.label,
-                            color = Color.White,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = metricStr,
-                            color = Color.White.copy(alpha = 0.80f),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
+                    Text(
+                        text = entry.label,
+                        color = Color.White,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = metricStr,
+                        color = Color.White.copy(alpha = 0.80f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxWidth(barFraction)
                             .height(5.dp)
                             .clip(RoundedCornerShape(3.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(barFraction)
-                                .height(5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(
-                                    when {
-                                        metric == 2 && entry.meanScore >= 80 -> AccentJade
-                                        metric == 2 && entry.meanScore < 50 -> AccentRose
-                                        else -> AccentArctic
-                                    }
-                                )
-                        )
-                    }
+                            .background(
+                                when {
+                                    metric == 2 && entry.meanScore >= 80 -> AccentJade
+                                    metric == 2 && entry.meanScore < 50 -> AccentRose
+                                    else -> AccentArctic
+                                }
+                            )
+                    )
                 }
             }
         }
@@ -1392,8 +1875,7 @@ private fun UserMediaListSheetView(
 
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .height(580.dp)
+            .fillMaxSize()
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -1429,41 +1911,76 @@ private fun UserMediaListSheetView(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Random Entry Button
-                IconButton(
-                    onClick = {
-                        if (filteredList.isNotEmpty()) {
-                            val randomItem = filteredList.random()
-                            onOpenMediaPreview?.invoke(
-                                RecommendationItem(
-                                    title = randomItem.title,
-                                    coverUrl = randomItem.coverUrl,
-                                    mediaType = randomItem.mediaType,
-                                    anilistId = randomItem.mediaId
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Prominent Random Entry Pill Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentArctic.copy(alpha = 0.15f))
+                        .border(1.dp, AccentArctic.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .clickable {
+                            if (filteredList.isNotEmpty()) {
+                                val randomItem = filteredList.random()
+                                onOpenMediaPreview?.invoke(
+                                    RecommendationItem(
+                                        title = randomItem.title,
+                                        coverUrl = randomItem.coverUrl,
+                                        mediaType = randomItem.mediaType,
+                                        anilistId = randomItem.mediaId
+                                    )
                                 )
-                            )
+                            }
                         }
-                    },
-                    modifier = Modifier.size(32.dp)
+                        .padding(horizontal = 9.dp, vertical = 6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Shuffle,
-                        contentDescription = "Open Random Entry",
-                        tint = AccentArctic
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shuffle,
+                            contentDescription = "Random",
+                            tint = AccentArctic,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "Random",
+                            color = AccentArctic,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 // Reverse Order Toggle Button
-                IconButton(
-                    onClick = { isReverseSort = !isReverseSort },
-                    modifier = Modifier.size(32.dp)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isReverseSort) AccentArctic.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, if (isReverseSort) AccentArctic else GlassBorder, RoundedCornerShape(8.dp))
+                        .clickable { isReverseSort = !isReverseSort }
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = "Reverse Order",
-                        tint = if (isReverseSort) AccentArctic else TextMuted
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = "Reverse Order",
+                            tint = if (isReverseSort) AccentArctic else Color.White.copy(alpha = 0.75f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = if (isReverseSort) "Desc" else "Asc",
+                            color = if (isReverseSort) AccentArctic else Color.White.copy(alpha = 0.75f),
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
         }

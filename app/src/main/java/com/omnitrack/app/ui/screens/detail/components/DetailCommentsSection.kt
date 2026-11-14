@@ -197,8 +197,22 @@ fun DetailCommentsSection(
         val byTag = if (selectedTag == "All") {
             localCommentsList
         } else {
+            val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
             localCommentsList.filter { comment ->
-                comment.tag == selectedTag || comment.replies.any { it.tag == selectedTag }
+                val matchDirect = comment.tag.equals(selectedTag, ignoreCase = true) ||
+                    (tagNumber != null && comment.tag?.endsWith(" $tagNumber") == true) ||
+                    (tagNumber != null && comment.tag == "$tagNumber")
+                val matchReply = comment.replies.any { r ->
+                    r.tag.equals(selectedTag, ignoreCase = true) ||
+                        (tagNumber != null && r.tag?.endsWith(" $tagNumber") == true) ||
+                        (tagNumber != null && r.tag == "$tagNumber")
+                }
+                val matchContent = if (tagNumber != null) {
+                    val regex = Regex("""(?i)\b(?:ep|episode|ch|chapter)\.?\s*#?$tagNumber\b""")
+                    comment.content.contains(regex) || comment.replies.any { it.content.contains(regex) }
+                } else false
+
+                matchDirect || matchReply || matchContent
             }
         }
         when (sortOrder) {
@@ -420,13 +434,13 @@ fun DetailCommentsSection(
             }
         }
 
-        // Top-Anchored Comment Composer with Dartotsu Toolbar
+        // Top-Anchored Comment Composer with Dartotsu Toolbar (Transparent Trakt Style)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.04f))
+                .border(1.dp, GlassBorder.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {

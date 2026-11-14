@@ -113,28 +113,19 @@ private fun CommentMediaBlock(url: String) {
     var isError by remember { mutableStateOf(false) }
 
     if (!isError) {
-        Box(
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(url)
+                .crossfade(true)
+                .build(),
+            contentDescription = "Attachment",
             modifier = Modifier
-                .fillMaxWidth()
                 .padding(vertical = 4.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.04f))
-                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(url)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = "Attachment",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 140.dp, max = 320.dp),
-                contentScale = ContentScale.Fit,
-                onError = { isError = true }
-            )
-        }
+                .clip(RoundedCornerShape(8.dp))
+                .heightIn(max = 240.dp),
+            contentScale = ContentScale.Fit,
+            onError = { isError = true }
+        )
     }
 }
 
@@ -212,14 +203,46 @@ private fun CommentQuoteBlock(quoteText: String) {
     }
 }
 
+fun preprocessAniListHtml(raw: String): String {
+    var s = raw
+    // Replace HTML entities
+    s = s.replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+
+    // Replace <br>, <br/>, <br /> with newlines
+    s = s.replace(Regex("""(?i)<br\s*/?>"""), "\n")
+
+    // Replace <a> tags: <a href="url">text</a> -> [text](url)
+    s = s.replace(Regex("""(?is)<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""")) { m ->
+        val url = m.groupValues[1]
+        val text = m.groupValues[2].replace(Regex("""<[^>]+>"""), "").trim()
+        "[${text.ifEmpty { url }}]($url)"
+    }
+
+    // Replace <img> tags: <img src="url"/> -> img(url)
+    s = s.replace(Regex("""(?is)<img\s+[^>]*src=["']([^"']+)["'][^>]*>""")) { m ->
+        val url = m.groupValues[1]
+        "img($url)"
+    }
+
+    // Strip <div>, <center>, <span>, <p> opening and closing tags (including <div align="center">, <center>, etc.)
+    s = s.replace(Regex("""(?i)</?(?:div|center|span|p|font|header|footer|section)[^>]*>"""), "")
+
+    return s
+}
+
 /**
  * Tokenizes AniList & Dantotsu comments into media, spoilers, quotes, and rich markdown text.
  */
 private fun parseCommentContent(raw: String): List<CommentBlock> {
     if (raw.isBlank()) return emptyList()
 
+    val clean = preprocessAniListHtml(raw)
     val blocks = mutableListOf<CommentBlock>()
-    val lines = raw.trim().split("\n")
+    val lines = clean.trim().split("\n")
     val textBuffer = StringBuilder()
 
     fun flushText() {
