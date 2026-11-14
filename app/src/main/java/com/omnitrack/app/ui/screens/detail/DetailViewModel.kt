@@ -798,6 +798,7 @@ class DetailViewModel(
     private var seriesFetchJob: kotlinx.coroutines.Job? = null
 
     private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
+        _discussionComments.value = emptyList()
         val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
 
         if (isShowOrAnime) {
@@ -1461,18 +1462,12 @@ class DetailViewModel(
                         anilistId = resolvedAniListId,
                         tagPrefix = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) "Ch" else "Ep"
                     )
-                    if (comments.isNotEmpty()) {
-                        _discussionComments.value = comments
-                    } else if (_discussionComments.value.isEmpty()) {
-                        _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
-                    }
+                    _discussionComments.value = comments
                 } catch (_: Exception) {
-                    if (_discussionComments.value.isEmpty()) {
-                        _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
-                    }
+                    _discussionComments.value = emptyList()
                 }
-            } else if (_discussionComments.value.isEmpty()) {
-                _discussionComments.value = createSampleDiscussionComments(item.mediaType, item.totalProgress?.toInt() ?: 24)
+            } else {
+                _discussionComments.value = emptyList()
             }
 
             persistAuxCache()
@@ -1950,20 +1945,22 @@ class DetailViewModel(
         _preferredTitleLanguage.value = pref
         val eng = _englishTitle.value
         val rom = _romajiTitle.value
-        val currentItem = _previewItem.value ?: uiState.value.item ?: return
-        val native = currentItem.nativeTitle
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentItem = _previewItem.value
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+                ?: return@launch
+            val native = currentItem.nativeTitle
 
-        val targetTitle = when (pref) {
-            PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: currentItem.title
-            PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: currentItem.title
-            PreferredTitleLanguage.NATIVE -> native ?: rom ?: eng ?: currentItem.title
-        }
+            val targetTitle = when (pref) {
+                PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: currentItem.title
+                PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: currentItem.title
+                PreferredTitleLanguage.NATIVE -> native ?: rom ?: eng ?: currentItem.title
+            }
 
-        if (targetTitle.isNotBlank() && targetTitle != currentItem.title) {
-            if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(title = targetTitle)
-            } else if (currentItem.id > 0) {
-                viewModelScope.launch(Dispatchers.IO) {
+            if (targetTitle.isNotBlank() && targetTitle != currentItem.title) {
+                if (_previewItem.value != null) {
+                    _previewItem.value = _previewItem.value?.copy(title = targetTitle)
+                } else if (currentItem.id > 0) {
                     val dbItem = repository.getMediaById(currentItem.id).firstOrNull()
                     if (dbItem != null) {
                         repository.updateMedia(dbItem.copy(title = targetTitle))
@@ -1974,29 +1971,31 @@ class DetailViewModel(
     }
 
     fun togglePreferredTitle() {
-        val currentItem = _previewItem.value ?: uiState.value.item ?: return
-        val eng = _englishTitle.value
-        val rom = _romajiTitle.value ?: currentItem.nativeTitle
-        if (eng.isNullOrBlank() && rom.isNullOrBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentItem = _previewItem.value
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+                ?: return@launch
+            val eng = _englishTitle.value
+            val rom = _romajiTitle.value ?: currentItem.nativeTitle
+            if (eng.isNullOrBlank() && rom.isNullOrBlank()) return@launch
 
-        val newTitle = if (!eng.isNullOrBlank() && currentItem.title.equals(eng, ignoreCase = true)) {
-            rom ?: currentItem.title
-        } else {
-            eng ?: currentItem.title
-        }
-
-        if (newTitle == currentItem.title) return
-
-        val newNative = if (newTitle == eng) (rom ?: currentItem.nativeTitle) else (eng ?: currentItem.nativeTitle)
-
-        if (_previewItem.value != null) {
-            val updated = currentItem.copy(title = newTitle, nativeTitle = newNative)
-            _previewItem.value = updated
-            _previewStack.update { stack ->
-                if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+            val newTitle = if (!eng.isNullOrBlank() && currentItem.title.equals(eng, ignoreCase = true)) {
+                rom ?: currentItem.title
+            } else {
+                eng ?: currentItem.title
             }
-        } else if (currentItem.id > 0) {
-            viewModelScope.launch(Dispatchers.IO) {
+
+            if (newTitle == currentItem.title) return@launch
+
+            val newNative = if (newTitle == eng) (rom ?: currentItem.nativeTitle) else (eng ?: currentItem.nativeTitle)
+
+            if (_previewItem.value != null) {
+                val updated = currentItem.copy(title = newTitle, nativeTitle = newNative)
+                _previewItem.value = updated
+                _previewStack.update { stack ->
+                    if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                }
+            } else if (currentItem.id > 0) {
                 val updated = currentItem.copy(title = newTitle, nativeTitle = newNative)
                 repository.updateMedia(updated)
             }
@@ -2190,37 +2189,57 @@ class DetailViewModel(
 
     fun updateCover(newCoverUrl: String) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            repository.updateCover(item.id, newCoverUrl)
-            repository.updateCustomCover(item.id, null)
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            if (item.id > 0) {
+                repository.updateCover(item.id, newCoverUrl)
+                repository.updateCustomCover(item.id, null)
+            }
+            if (_previewItem.value != null) {
+                _previewItem.value = _previewItem.value?.copy(coverUrl = newCoverUrl, customCoverPath = null)
+            }
         }
     }
 
     fun updateBanner(newBannerUrl: String) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            repository.updateBanner(item.id, newBannerUrl)
-            repository.updateCustomBanner(item.id, null)
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            if (item.id > 0) {
+                repository.updateBanner(item.id, newBannerUrl)
+                repository.updateCustomBanner(item.id, null)
+            }
+            if (_previewItem.value != null) {
+                _previewItem.value = _previewItem.value?.copy(bannerUrl = newBannerUrl, customBannerPath = null)
+            }
         }
     }
 
     fun updateCustomCoverPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (!item.customCoverPath.isNullOrBlank() && item.customCoverPath != path) {
                 try { java.io.File(item.customCoverPath).delete() } catch (_: Exception) {}
             }
-            repository.updateMedia(item.copy(customCoverPath = path))
+            if (item.id > 0) {
+                repository.updateMedia(item.copy(customCoverPath = path))
+            }
+            if (_previewItem.value != null) {
+                _previewItem.value = _previewItem.value?.copy(customCoverPath = path)
+            }
         }
     }
 
     fun updateCustomBannerPath(path: String?, context: android.content.Context? = null) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (!item.customBannerPath.isNullOrBlank() && item.customBannerPath != path) {
                 try { java.io.File(item.customBannerPath).delete() } catch (_: Exception) {}
             }
-            repository.updateMedia(item.copy(customBannerPath = path))
+            if (item.id > 0) {
+                repository.updateMedia(item.copy(customBannerPath = path))
+            }
+            if (_previewItem.value != null) {
+                _previewItem.value = _previewItem.value?.copy(customBannerPath = path)
+            }
         }
     }
 

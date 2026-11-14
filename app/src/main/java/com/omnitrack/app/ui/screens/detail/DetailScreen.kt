@@ -114,6 +114,9 @@ import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomShee
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
+import com.omnitrack.app.ui.screens.detail.components.DetailGeneralInfoSection
+import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
+import com.omnitrack.app.ui.screens.detail.components.DetailNamesSynonymsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailSeriesContent
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
@@ -226,6 +229,14 @@ fun DetailScreen(
             onOpenMediaPreview = { recItem ->
                 showUserProfileSheet = false
                 viewModel.openPreview(recItem)
+            },
+            onOpenCharacter = { charItem ->
+                showUserProfileSheet = false
+                selectedAnimeCharacter = charItem
+            },
+            onOpenStaff = { staffItem ->
+                showUserProfileSheet = false
+                selectedAnimeStaff = staffItem
             },
             onDismiss = {
                 showUserProfileSheet = false
@@ -523,11 +534,11 @@ fun DetailScreen(
 
             // Dynamic Artwork Role Resolution (Manual user artwork selection strictly overrides templates)
             val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl, customCoverUrl, customCoverFailed) {
-                item.customCoverPath ?: if (!customCoverFailed && customCoverUrl != null) customCoverUrl
-                else when (item.artworkRole) {
-                    "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-                    else -> item.coverUrl
-                }
+                item.customCoverPath
+                    ?: when (item.artworkRole) {
+                        "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
+                        else -> if (item.coverUrl.isNotBlank()) item.coverUrl else (if (!customCoverFailed) customCoverUrl ?: "" else "")
+                    }
             }
             val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl, customBannerUrl, customBannerFailed) {
                 when {
@@ -752,18 +763,11 @@ fun DetailScreen(
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
                         }
-                        DetailSectionKey.DETAILS_INFO -> {
+                        DetailSectionKey.GENRES_TAGS -> {
                             if (deferredSectionsAllowed) {
-                                DetailShowDetailsSection(
+                                DetailGenresTagsSection(
                                     item = item,
-                                    englishTitle = uiState.englishTitle,
-                                    romajiTitle = uiState.romajiTitle,
-                                    nativeTitle = item.nativeTitle,
-                                    synonyms = uiState.synonyms,
                                     tags = uiState.tags,
-                                    popularity = uiState.popularity,
-                                    favourites = uiState.favourites,
-                                    durationMinutes = uiState.durationMinutes,
                                     onGenreOrTagClick = { name, isTag ->
                                         selectedCompany = NetworkProductionCompany(
                                             id = null,
@@ -772,6 +776,29 @@ fun DetailScreen(
                                             kind = if (isTag) "anime_tag" else "anime_genre"
                                         )
                                     }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.NAMES_SYNONYMS -> {
+                            if (deferredSectionsAllowed) {
+                                DetailNamesSynonymsSection(
+                                    item = item,
+                                    englishTitle = uiState.englishTitle,
+                                    romajiTitle = uiState.romajiTitle,
+                                    nativeTitle = item.nativeTitle,
+                                    synonyms = uiState.synonyms
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.DETAILS_INFO -> {
+                            if (deferredSectionsAllowed) {
+                                DetailGeneralInfoSection(
+                                    item = item,
+                                    popularity = uiState.popularity,
+                                    favourites = uiState.favourites,
+                                    durationMinutes = uiState.durationMinutes
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -796,6 +823,7 @@ fun DetailScreen(
                                     seasons = uiState.realSeasons,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
                                     currentUsername = uiState.currentUsername,
+                                    hasAniList = (item.anilistId != null || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA),
                                     onSeasonSelect = { viewModel.selectSeason(it) },
                                     onPostComment = { content, tag, parentId ->
                                         viewModel.postDiscussionComment(content, tag, parentId)

@@ -2201,6 +2201,14 @@ class EnrichmentRepository(
                       score
                       count
                     }
+                    statuses(limit: 6) {
+                      status
+                      count
+                    }
+                    formats(limit: 6) {
+                      format
+                      count
+                    }
                   }
                   manga {
                     count
@@ -2238,6 +2246,34 @@ class EnrichmentRepository(
                       name { full }
                       image { large }
                     }
+                  }
+                }
+              }
+              Page(page: 1, perPage: 20) {
+                activities(userId: ${'$'}id, sort: ID_DESC) {
+                  ... on ListActivity {
+                    id
+                    type
+                    status
+                    progress
+                    createdAt
+                    media {
+                      title { userPreferred english }
+                      coverImage { medium large }
+                    }
+                  }
+                  ... on TextActivity {
+                    id
+                    type
+                    text(asHtml: false)
+                    createdAt
+                  }
+                  ... on MessageActivity {
+                    id
+                    type
+                    message(asHtml: false)
+                    createdAt
+                    messenger { name }
                   }
                 }
               }
@@ -2299,12 +2335,157 @@ class EnrichmentRepository(
                     if (gName != null) genresList.add(gName to gCnt)
                 }
 
-                val scoreList = mutableListOf<Pair<Int, Int>>()
+                val scoreMap = mutableMapOf<Int, Int>()
+                for (i in 1..10) scoreMap[i] = 0
                 aStats?.get("scores")?.jsonArray.orEmpty().forEach { sElem ->
                     val sObj = sElem.jsonObject
                     val sVal = sObj["score"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
                     val sCnt = sObj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
-                    if (sVal > 0) scoreList.add(sVal to sCnt)
+                    if (sVal > 0 && sCnt > 0) {
+                        val norm = if (sVal > 10) (sVal / 10).coerceIn(1, 10) else sVal.coerceIn(1, 10)
+                        scoreMap[norm] = (scoreMap[norm] ?: 0) + sCnt
+                    }
+                }
+                val scoreList = scoreMap.toList().sortedBy { it.first }
+
+                val statusList = mutableListOf<Pair<String, Int>>()
+                aStats?.get("statuses")?.jsonArray.orEmpty().forEach { sElem ->
+                    val sObj = sElem.jsonObject
+                    val sName = sObj["status"].cleanString() ?: return@forEach
+                    val sCnt = sObj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    statusList.add(sName to sCnt)
+                }
+
+                val formatList = mutableListOf<Pair<String, Int>>()
+                aStats?.get("formats")?.jsonArray.orEmpty().forEach { fElem ->
+                    val fObj = fElem.jsonObject
+                    val fName = fObj["format"].cleanString() ?: return@forEach
+                    val fCnt = fObj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    formatList.add(fName to fCnt)
+                }
+
+                val actList = mutableListOf<com.omnitrack.app.data.model.UserActivityItem>()
+                val activitiesJson = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("activities")?.jsonArray.orEmpty()
+                activitiesJson.forEach { aElem ->
+                    val aObj = aElem.jsonObject
+                    val aId = aObj["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@forEach
+                    val aType = aObj["type"].cleanString() ?: "ACTIVITY"
+                    val aCreated = aObj["createdAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                    val diff = (System.currentTimeMillis() / 1000) - aCreated
+                    val timeAgo = when {
+                        diff < 60 -> "Just now"
+                        diff < 3600 -> "${diff / 60}m ago"
+                        diff < 86400 -> "${diff / 3600}h ago"
+                        diff < 604800 -> "${diff / 86400}d ago"
+                        else -> "${diff / 604800}w ago"
+                    }
+                    val mObj = aObj["media"]?.jsonObject
+                    val mTitle = mObj?.get("title")?.jsonObject?.get("userPreferred").cleanString()
+                        ?: mObj?.get("title")?.jsonObject?.get("english").cleanString()
+                    val mCover = mObj?.get("coverImage")?.jsonObject?.get("medium").cleanString()
+                        ?: mObj?.get("coverImage")?.jsonObject?.get("large").cleanString()
+                    val status = aObj["status"].cleanString()
+                    val progress = aObj["progress"].cleanString()
+                    val textBody = aObj["text"].cleanString() ?: aObj["message"].cleanString()
+
+                    val text = when {
+                        !status.isNullOrBlank() && !progress.isNullOrBlank() -> "${status.replaceFirstChar { it.uppercase() }} $progress of ${mTitle ?: "media"}"
+                        !status.isNullOrBlank() -> "${status.replaceFirstChar { it.uppercase() }} ${mTitle ?: "media"}"
+                        !textBody.isNullOrBlank() -> textBody
+                        else -> "Updated library entry"
+                    }
+                    actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, text = text, timeAgo = timeAgo))
+                }
+
+                // If opened by username without userId, fetch activities using the resolved user ID
+                if (userId == null && id > 0) {
+                    try {
+                        val actQuery = """
+                            query (${'$'}uid: Int) {
+                              Page(page: 1, perPage: 25) {
+                                activities(userId: ${'$'}uid, sort: ID_DESC) {
+                                  ... on ListActivity {
+                                    id
+                                    type
+                                    status
+                                    progress
+                                    createdAt
+                                    media {
+                                      title { userPreferred english }
+                                      coverImage { medium large }
+                                    }
+                                  }
+                                  ... on TextActivity {
+                                    id
+                                    type
+                                    text(asHtml: false)
+                                    createdAt
+                                  }
+                                  ... on MessageActivity {
+                                    id
+                                    type
+                                    message(asHtml: false)
+                                    createdAt
+                                    messenger { name }
+                                  }
+                                }
+                              }
+                            }
+                        """.trimIndent()
+                        val actPayload = buildJsonObject {
+                            put("query", actQuery)
+                            put("variables", buildJsonObject { put("uid", id) })
+                        }.toString()
+                        val actReq = Request.Builder()
+                            .url("https://graphql.anilist.co")
+                            .post(actPayload.toRequestBody("application/json".toMediaType()))
+                            .header("User-Agent", "OmniTrack/1.0")
+                            .build()
+                        client.newCall(actReq).execute().use { actResp ->
+                            if (actResp.isSuccessful) {
+                                val actBody = actResp.body?.string()
+                                if (!actBody.isNullOrBlank()) {
+                                    val actRoot = json.parseToJsonElement(actBody).jsonObject
+                                    val newActs = actRoot["data"]?.jsonObject?.get("Page")?.jsonObject?.get("activities")?.jsonArray.orEmpty()
+                                    if (newActs.isNotEmpty()) {
+                                        actList.clear()
+                                        newActs.forEach { aElem ->
+                                            val aObj = aElem.jsonObject
+                                            val aId = aObj["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@forEach
+                                            val aType = aObj["type"].cleanString() ?: "ACTIVITY"
+                                            val aCreated = aObj["createdAt"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                                            val diff = (System.currentTimeMillis() / 1000) - aCreated
+                                            val timeAgo = when {
+                                                diff < 60 -> "Just now"
+                                                diff < 3600 -> "${diff / 60}m ago"
+                                                diff < 86400 -> "${diff / 3600}h ago"
+                                                diff < 604800 -> "${diff / 86400}d ago"
+                                                else -> "${diff / 604800}w ago"
+                                            }
+                                            val mObj = aObj["media"]?.jsonObject
+                                            val mTitle = mObj?.get("title")?.jsonObject?.get("userPreferred").cleanString()
+                                                ?: mObj?.get("title")?.jsonObject?.get("english").cleanString()
+                                            val mCover = mObj?.get("coverImage")?.jsonObject?.get("medium").cleanString()
+                                                ?: mObj?.get("coverImage")?.jsonObject?.get("large").cleanString()
+                                            val status = aObj["status"].cleanString()
+                                            val progress = aObj["progress"].cleanString()
+                                            val textBody = aObj["text"].cleanString() ?: aObj["message"].cleanString()
+
+                                            val text = when {
+                                                !status.isNullOrBlank() && !progress.isNullOrBlank() -> "${status.replaceFirstChar { it.uppercase() }} $progress of ${mTitle ?: "media"}"
+                                                !status.isNullOrBlank() -> "${status.replaceFirstChar { it.uppercase() }} ${mTitle ?: "media"}"
+                                                !textBody.isNullOrBlank() -> textBody
+                                                else -> "Updated library entry"
+                                            }
+                                            actList.add(com.omnitrack.app.data.model.UserActivityItem(id = aId, type = aType, mediaTitle = mTitle, coverUrl = mCover, text = text, timeAgo = timeAgo))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // ignore and use whatever is in actList
+                    }
                 }
 
                 val favs = userObj["favourites"]?.jsonObject
@@ -2365,6 +2546,9 @@ class EnrichmentRepository(
                     mangaMeanScore = mMean,
                     topGenres = genresList,
                     scoreDistribution = scoreList,
+                    statusBreakdown = statusList,
+                    formatBreakdown = formatList,
+                    activities = actList,
                     favoriteAnime = favAnime,
                     favoriteManga = favManga,
                     favoriteCharacters = favChars,

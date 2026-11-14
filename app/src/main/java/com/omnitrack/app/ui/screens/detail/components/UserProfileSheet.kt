@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -69,12 +73,16 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
+import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.model.AnimeStaffItem
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.UserProfileData
 import com.omnitrack.app.data.model.UserFavoriteMedia
 import com.omnitrack.app.data.model.UserFavoriteCharacter
 import com.omnitrack.app.data.model.UserFavoriteStaff
 import com.omnitrack.app.ui.components.AniListMarkdownText
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.SurfaceCard
@@ -95,6 +103,8 @@ fun UserProfileSheet(
     userAuthToken: String? = null,
     currentUsername: String? = null,
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
+    onOpenCharacter: ((AnimeCharacterItem) -> Unit)? = null,
+    onOpenStaff: ((AnimeStaffItem) -> Unit)? = null,
     enrichmentRepository: EnrichmentRepository = remember { EnrichmentRepository() },
     onDismiss: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -455,16 +465,17 @@ fun UserProfileSheet(
                     }
                 }
 
-                // 2-Tab Switcher
+                // 3-Tab Switcher: Overview, Feed, Scores & Stats
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp)
+                    horizontalArrangement = Arrangement.spacedBy(22.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Overview",
-                        color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.55f),
+                        color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.50f),
                         fontSize = 17.sp,
                         fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
                         modifier = Modifier
@@ -474,16 +485,48 @@ fun UserProfileSheet(
                                 selectedTab = 0
                             }
                     )
-                    Text(
-                        text = "Scores & Analytics",
-                        color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
-                        fontSize = 17.sp,
-                        fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTab = 1
+                            }
+                    ) {
+                        Text(
+                            text = "Feed",
+                            color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.50f),
+                            fontSize = 17.sp,
+                            fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold
+                        )
+                        if (p.activities.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(if (selectedTab == 1) AccentArctic.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.10f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${p.activities.size}",
+                                    color = if (selectedTab == 1) AccentArctic else Color.White.copy(alpha = 0.70f),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = "Scores & Stats",
+                        color = if (selectedTab == 2) Color.White else Color.White.copy(alpha = 0.50f),
+                        fontSize = 17.sp,
+                        fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                selectedTab = 2
                             }
                     )
                 }
@@ -567,7 +610,7 @@ fun UserProfileSheet(
                         )
                     }
 
-                    // Favorite Characters Rail
+                    // Favorite Characters Rail (Clickable!)
                     if (p.favoriteCharacters.isNotEmpty()) {
                         Column(
                             modifier = Modifier
@@ -589,7 +632,18 @@ fun UserProfileSheet(
                             ) {
                                 items(p.favoriteCharacters, key = { it.id }) { char ->
                                     Column(
-                                        modifier = Modifier.width(72.dp),
+                                        modifier = Modifier
+                                            .width(72.dp)
+                                            .clickable {
+                                                onOpenCharacter?.invoke(
+                                                    AnimeCharacterItem(
+                                                        characterId = char.id,
+                                                        characterName = char.name,
+                                                        characterRole = "FAVORITE",
+                                                        characterImageUrl = char.imageUrl
+                                                    )
+                                                )
+                                            },
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
@@ -607,7 +661,7 @@ fun UserProfileSheet(
                                                         .crossfade(true)
                                                         .build(),
                                                     contentDescription = char.name,
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier.fillMaxSize(),
                                                     contentScale = ContentScale.Crop
                                                 )
                                             }
@@ -626,7 +680,7 @@ fun UserProfileSheet(
                         }
                     }
 
-                    // Favorite Staff Rail
+                    // Favorite Staff Rail (Clickable!)
                     if (p.favoriteStaff.isNotEmpty()) {
                         Column(
                             modifier = Modifier
@@ -648,7 +702,18 @@ fun UserProfileSheet(
                             ) {
                                 items(p.favoriteStaff, key = { it.id }) { st ->
                                     Column(
-                                        modifier = Modifier.width(72.dp),
+                                        modifier = Modifier
+                                            .width(72.dp)
+                                            .clickable {
+                                                onOpenStaff?.invoke(
+                                                    AnimeStaffItem(
+                                                        staffId = st.id,
+                                                        name = st.name,
+                                                        role = "FAVORITE",
+                                                        imageUrl = st.imageUrl
+                                                    )
+                                                )
+                                            },
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
@@ -666,7 +731,7 @@ fun UserProfileSheet(
                                                         .crossfade(true)
                                                         .build(),
                                                     contentDescription = st.name,
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier.fillMaxSize(),
                                                     contentScale = ContentScale.Crop
                                                 )
                                             }
@@ -685,54 +750,227 @@ fun UserProfileSheet(
                         }
                     }
 
+                } else if (selectedTab == 1) {
+                    // TAB 1: USER ACTIVITY FEED (Dartotsu 1:1 Parity)
+                    if (p.activities.isEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 40.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.30f),
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Text(
+                                text = "No Recent Activity",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "This user hasn't posted or updated any list entries recently.",
+                                color = Color.White.copy(alpha = 0.55f),
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            p.activities.forEach { act ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.04f))
+                                        .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            if (!act.mediaTitle.isNullOrBlank()) {
+                                                onOpenMediaPreview?.invoke(
+                                                    RecommendationItem(
+                                                        title = act.mediaTitle,
+                                                        coverUrl = act.coverUrl ?: "",
+                                                        mediaType = MediaType.ANIME,
+                                                        anilistId = null
+                                                    )
+                                                )
+                                            }
+                                        }
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    if (!act.coverUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(act.coverUrl)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = act.mediaTitle,
+                                            modifier = Modifier
+                                                .width(48.dp)
+                                                .aspectRatio(2f / 3f)
+                                                .clip(RoundedCornerShape(6.dp)),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = act.type.replace("_", " "),
+                                                color = AccentArctic,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = act.timeAgo,
+                                                color = Color.White.copy(alpha = 0.50f),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                        if (!act.mediaTitle.isNullOrBlank()) {
+                                            Text(
+                                                text = act.mediaTitle,
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = act.text,
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 17.sp,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 } else {
-                    // TAB 1: SCORES & ANALYTICS (Pure Unboxed AMOLED Black)
+                    // TAB 2: SCORES & ANALYTICS (Dartotsu Parity with Score Distribution, Status, Format, and Top Genres)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
+                        verticalArrangement = Arrangement.spacedBy(26.dp)
                     ) {
-                        // Unboxed Score Distribution Histogram
-                        if (p.scoreDistribution.isNotEmpty()) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                        // 1. SCORE DISTRIBUTION HISTOGRAM
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "SCORE DISTRIBUTION",
+                                color = AccentArctic,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                text = "Shows how many anime and manga titles this user rated at each score (1–10 scale).",
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+
+                            // Quick score summary row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.04f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "SCORE DISTRIBUTION",
-                                    color = AccentArctic,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.8.sp
+                                    text = "Mean Score: ${if (p.animeMeanScore > 0) "${p.animeMeanScore.toInt()}%" else "—"}",
+                                    color = Color.White,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
+                                Text(
+                                    text = "Total Scored: ${p.scoreDistribution.sumOf { it.second }} titles",
+                                    color = Color.White.copy(alpha = 0.70f),
+                                    fontSize = 12.sp
+                                )
+                            }
 
-                                val maxCount = (p.scoreDistribution.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
+                            val maxCount = (p.scoreDistribution.maxOfOrNull { it.second } ?: 1).coerceAtLeast(1)
 
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(100.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.Bottom
-                                ) {
-                                    p.scoreDistribution.sortedBy { it.first }.forEach { (score, count) ->
-                                        val barHeightFraction = (count.toFloat() / maxCount).coerceIn(0.08f, 1f)
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            // 10-Score Column Bars (1 through 10)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(130.dp)
+                                    .padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                (1..10).forEach { score ->
+                                    val count = p.scoreDistribution.find { it.first == score }?.second ?: 0
+                                    val barHeightFraction = (count.toFloat() / maxCount).coerceIn(0f, 1f)
+
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        // Exact Count above bar
+                                        Text(
+                                            text = if (count > 0) "$count" else "·",
+                                            color = if (count > 0) Color.White else Color.White.copy(alpha = 0.25f),
+                                            fontSize = 10.sp,
+                                            fontWeight = if (count > 0) FontWeight.Bold else FontWeight.Normal
+                                        )
+
+                                        // The Bar itself
+                                        Box(
+                                            modifier = Modifier
+                                                .width(18.dp)
+                                                .height((80.dp * barHeightFraction).coerceAtLeast(if (count > 0) 6.dp else 2.dp))
+                                                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                                                .background(
+                                                    when {
+                                                        count == 0 -> Color.White.copy(alpha = 0.08f)
+                                                        score >= 8 -> AccentJade
+                                                        score >= 5 -> AccentArctic
+                                                        else -> AccentArctic.copy(alpha = 0.45f)
+                                                    }
+                                                )
+                                        )
+
+                                        // Bottom Score Label
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(1.dp)
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .width(16.dp)
-                                                    .height(80.dp * barHeightFraction)
-                                                    .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                                                    .background(AccentArctic)
-                                            )
                                             Text(
                                                 text = "$score",
                                                 color = Color.White.copy(alpha = 0.85f),
-                                                fontSize = 10.5.sp
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold
                                             )
                                         }
                                     }
@@ -740,11 +978,163 @@ fun UserProfileSheet(
                             }
                         }
 
-                        // Unboxed Top Genres
+                        // 2. STATUS BREAKDOWN (Watching, Completed, Paused, Dropped, Planning)
+                        if (p.statusBreakdown.isNotEmpty()) {
+                            val totalStatus = p.statusBreakdown.sumOf { it.second }.coerceAtLeast(1)
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "STATUS BREAKDOWN",
+                                    color = AccentArctic,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = "Library entries categorized by current viewing status.",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 12.sp
+                                )
+
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    p.statusBreakdown.forEach { (status, count) ->
+                                        val percent = (count * 100) / totalStatus
+                                        val statusColor = when (status.uppercase()) {
+                                            "CURRENT" -> Color(0xFF00E676)
+                                            "COMPLETED" -> Color(0xFF00B0FF)
+                                            "PAUSED" -> Color(0xFFFFD600)
+                                            "DROPPED" -> Color(0xFFFF5252)
+                                            else -> Color(0xFFB0BEC5)
+                                        }
+                                        val displayName = when (status.uppercase()) {
+                                            "CURRENT" -> "Watching"
+                                            "COMPLETED" -> "Completed"
+                                            "PAUSED" -> "Paused"
+                                            "DROPPED" -> "Dropped"
+                                            "PLANNING" -> "Planning"
+                                            else -> status.replaceFirstChar { it.uppercase() }
+                                        }
+
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(statusColor)
+                                                    )
+                                                    Text(
+                                                        text = displayName,
+                                                        color = Color.White,
+                                                        fontSize = 12.5.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                                Text(
+                                                    text = "$count ($percent%)",
+                                                    color = Color.White.copy(alpha = 0.70f),
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(4.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(Color.White.copy(alpha = 0.08f))
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth((count.toFloat() / totalStatus).coerceIn(0.04f, 1f))
+                                                        .height(4.dp)
+                                                        .clip(RoundedCornerShape(2.dp))
+                                                        .background(statusColor)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 3. FORMAT BREAKDOWN (TV, Movie, OVA, Manga, etc.)
+                        if (p.formatBreakdown.isNotEmpty()) {
+                            val totalFormat = p.formatBreakdown.sumOf { it.second }.coerceAtLeast(1)
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "FORMAT BREAKDOWN",
+                                    color = AccentArctic,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = "Media formats in this user's anime library.",
+                                    color = Color.White.copy(alpha = 0.65f),
+                                    fontSize = 12.sp
+                                )
+
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    p.formatBreakdown.forEach { (fmt, count) ->
+                                        val percent = (count * 100) / totalFormat
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.White.copy(alpha = 0.05f))
+                                                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = fmt.replace("_", " "),
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                                Text(
+                                                    text = "$count ($percent%)",
+                                                    color = AccentArctic,
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 4. TOP GENRES
                         if (p.topGenres.isNotEmpty()) {
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text(
                                     text = "TOP GENRES",

@@ -17,10 +17,22 @@ data class UserProfileData(
     val mangaMeanScore: Float = 0f,
     val topGenres: List<Pair<String, Int>> = emptyList(),
     val scoreDistribution: List<Pair<Int, Int>> = emptyList(),
+    val statusBreakdown: List<Pair<String, Int>> = emptyList(),
+    val formatBreakdown: List<Pair<String, Int>> = emptyList(),
+    val activities: List<UserActivityItem> = emptyList(),
     val favoriteAnime: List<UserFavoriteMedia> = emptyList(),
     val favoriteManga: List<UserFavoriteMedia> = emptyList(),
     val favoriteCharacters: List<UserFavoriteCharacter> = emptyList(),
     val favoriteStaff: List<UserFavoriteStaff> = emptyList()
+)
+
+data class UserActivityItem(
+    val id: Int,
+    val type: String,
+    val mediaTitle: String? = null,
+    val coverUrl: String? = null,
+    val text: String,
+    val timeAgo: String
 )
 
 data class UserFavoriteMedia(

@@ -170,20 +170,11 @@ fun DetailCommentsSection(
     var sortOrder by remember { mutableStateOf(CommentSortOrder.NEWEST) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
-    // Seed default comments if external comments not provided
-    val initialSeed = remember(mediaType, totalCount) {
-        createSampleDiscussionComments(mediaType, totalCount)
-    }
-
     // Active working list of comments (optimistic updates on post/reply)
-    var localCommentsList by remember { mutableStateOf(comments?.ifEmpty { initialSeed } ?: initialSeed) }
+    var localCommentsList by remember(comments) { mutableStateOf(comments.orEmpty()) }
 
     LaunchedEffect(comments) {
-        if (!comments.isNullOrEmpty()) {
-            val incomingIds = comments.map { it.id }.toSet()
-            val localOnly = localCommentsList.filter { it.id !in incomingIds }
-            localCommentsList = (comments + localOnly).distinctBy { it.id }
-        }
+        localCommentsList = comments.orEmpty()
     }
 
     // Collapsed Comment State
@@ -210,8 +201,8 @@ fun DetailCommentsSection(
             }
         }
         when (sortOrder) {
-            CommentSortOrder.NEWEST -> byTag // Default order from source
-            CommentSortOrder.OLDEST -> byTag.reversed()
+            CommentSortOrder.NEWEST -> byTag.reversed() // Invert chronological to show newest at top
+            CommentSortOrder.OLDEST -> byTag // Chronological order
             CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
             CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
         }

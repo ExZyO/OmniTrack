@@ -284,6 +284,7 @@ fun ReviewsSection(
  * Unified Discussion & Reviews Section:
  * Houses both the new Dartotsu-grade Threaded Discussion (Reddit Voting Capsule + Collapsible Comments)
  * and the Community Reviews Carousel within a clean, unboxed tab switcher.
+ * Comments / Reviews is on the left and selected by default!
  */
 @Composable
 fun UnifiedDiscussionSection(
@@ -295,6 +296,7 @@ fun UnifiedDiscussionSection(
     seasons: List<com.omnitrack.app.data.model.MediaSeason> = emptyList(),
     selectedSeasonNumber: Int = 1,
     currentUsername: String? = null,
+    hasAniList: Boolean = true,
     onSeasonSelect: ((Int) -> Unit)? = null,
     onPostComment: ((content: String, tag: String?, parentId: String?) -> Unit)? = null,
     onEditComment: ((commentId: String, newContent: String) -> Unit)? = null,
@@ -303,13 +305,13 @@ fun UnifiedDiscussionSection(
     onUserClick: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Discussion, 1: Reviews
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Comments/Reviews (Default), 1: Discussion
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Unboxed Header Tabs
+        // Unboxed Header Tabs: Comments/Reviews first, Discussion second
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -317,8 +319,17 @@ fun UnifiedDiscussionSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
+            val isTrakt = reviews.any { it.source.contains("Trakt", ignoreCase = true) }
+            val commentsLabel = when {
+                reviews.isNotEmpty() && isTrakt -> "Comments (${reviews.size})"
+                reviews.isNotEmpty() -> "Reviews (${reviews.size})"
+                isTrakt -> "Comments"
+                else -> "Reviews"
+            }
+
+            // Tab 0: Comments / Reviews (Left, Default)
             Text(
-                text = "Discussion",
+                text = commentsLabel,
                 color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.55f),
                 fontSize = 20.sp,
                 fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
@@ -327,11 +338,10 @@ fun UnifiedDiscussionSection(
                     .clickable { selectedTab = 0 }
             )
 
-            if (reviews.isNotEmpty()) {
-                val isTrakt = reviews.any { it.source.contains("Trakt", ignoreCase = true) }
-                val tabLabel = if (isTrakt) "Comments (${reviews.size})" else "Reviews (${reviews.size})"
+            // Tab 1: Discussion (Right, only if entry has AniList ID / anime / manga)
+            if (hasAniList) {
                 Text(
-                    text = tabLabel,
+                    text = "Discussion",
                     color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
                     fontSize = 20.sp,
                     fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
@@ -342,7 +352,9 @@ fun UnifiedDiscussionSection(
             }
         }
 
-        if (selectedTab == 0) {
+        if (selectedTab == 0 || !hasAniList) {
+            ReviewsSection(reviews = reviews, showHeader = false)
+        } else {
             DetailCommentsSection(
                 mediaType = mediaType,
                 mediaTitle = mediaTitle,
@@ -358,8 +370,6 @@ fun UnifiedDiscussionSection(
                 onVote = onVote,
                 onUserClick = onUserClick
             )
-        } else {
-            ReviewsSection(reviews = reviews, showHeader = false)
         }
     }
 }
