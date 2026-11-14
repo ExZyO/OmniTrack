@@ -1124,10 +1124,6 @@ class EnrichmentRepository(
             null
         }
     }
-        } catch (_: Exception) {
-            null
-        }
-    }
 
     suspend fun fetchAniListSeasonPoster(title: String, seasonNumber: Int): String? = withContext(Dispatchers.IO) {
         val strippedTitle = title
