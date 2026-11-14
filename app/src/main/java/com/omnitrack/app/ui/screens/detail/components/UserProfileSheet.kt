@@ -859,8 +859,6 @@ private fun FavoriteMediaRail(
                                 RecommendationItem(
                                     title = item.title,
                                     coverUrl = item.coverUrl,
-                                    format = item.format,
-                                    rating = item.score?.let { it / 10f },
                                     mediaType = item.mediaType,
                                     anilistId = item.id
                                 )

@@ -311,7 +311,7 @@ class DetailViewModel(
             viewModelScope.launch(Dispatchers.IO) {
                 trackerTokenManager.tokens.collect { tokens ->
                     _anilistAuthToken.value = tokens.anilistToken
-                    _currentUsername.value = tokens.anilistUsername ?: dantotsuCommentsRepository.getCurrentUsername()
+                    _currentUsername.value = dantotsuCommentsRepository.getCurrentUsername()
                     if (!tokens.anilistToken.isNullOrBlank()) {
                         dantotsuCommentsRepository.authenticate(tokens.anilistToken)
                         if (_currentUsername.value.isNullOrBlank()) {

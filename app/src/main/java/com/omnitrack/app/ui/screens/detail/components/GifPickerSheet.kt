@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.detail.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,9 +73,9 @@ private const val KLIPY_BASE = "https://api.klipy.com/v2"
 @Composable
 fun GifPickerSheet(
     onDismiss: () -> Unit,
-    onGifSelected: (String) -> Unit,
-    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    onGifSelected: (String) -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var gifs by remember { mutableStateOf<List<String>>(emptyList()) }

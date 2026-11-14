@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.detail.components
 
 import android.widget.Toast
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -137,6 +138,7 @@ data class FlattenedCommentNode(
  * - Long-press comment body to copy text to clipboard.
  * - Multi-season comment isolation.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DetailCommentsSection(
     mediaType: MediaType,
