@@ -510,7 +510,6 @@ fun AnimeCharacterSheet(
 }
 }
 }
-}
 
 /**
  * Standalone BottomSheet for viewing any Staff member (Director, Music, Creator, Voice Actor).
