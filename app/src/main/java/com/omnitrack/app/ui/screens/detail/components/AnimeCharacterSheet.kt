@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -508,7 +509,7 @@ fun AnimeCharacterSheet(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(appearances, key = { it.anilistId ?: it.title.hashCode().toLong() }) { appItem ->
+                            itemsIndexed(appearances, key = { index, it -> "${it.anilistId}_${it.title}_$index" }) { _, appItem ->
                                 Column(
                                     modifier = Modifier
                                         .width(96.dp)
@@ -1022,7 +1023,7 @@ private fun StaffDetailContent(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(productions, key = { "${it.mediaId}_${it.staffRole}" }) { prodItem ->
+                    itemsIndexed(productions, key = { index, it -> "${it.mediaId}_${it.staffRole}_$index" }) { _, prodItem ->
                         Column(
                             modifier = Modifier
                                 .width(96.dp)
@@ -1120,7 +1121,7 @@ private fun StaffDetailContent(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(roles, key = { "${it.mediaId}_${it.characterId}" }) { roleItem ->
+                    itemsIndexed(roles, key = { index, it -> "${it.mediaId}_${it.characterId}_$index" }) { _, roleItem ->
                         Column(
                             modifier = Modifier
                                 .width(96.dp)

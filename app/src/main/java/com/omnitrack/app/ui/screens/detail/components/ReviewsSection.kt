@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.ui.components.RedditVoteCapsule
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -255,25 +256,10 @@ fun ReviewsSection(
                                 }
                             }
 
-                            if (rev.likes > 0) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Favorite,
-                                        contentDescription = null,
-                                        tint = Color(0xFFED1C24).copy(alpha = 0.85f),
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Text(
-                                        text = "${rev.likes}",
-                                        color = Color.White.copy(alpha = 0.70f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
+                            RedditVoteCapsule(
+                                initialScore = rev.likes.coerceAtLeast(1),
+                                showDownvoteCount = false
+                            )
                         }
                     }
                 }

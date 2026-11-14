@@ -579,17 +579,22 @@ fun DetailScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // 1. Actions / Progress Section (100% Unboxed flowing controls)
-                DetailProgressSection(
-                    item = item,
-                    onUpdateProgress = { viewModel.updateProgress(it) },
-                    onUpdatePlaytime = { viewModel.updatePlaytime(it) },
-                    onTogglePlatform = { viewModel.togglePlatform(it) },
-                    onUpdateStatus = { viewModel.updateStatus(it) }
-                )
-                Spacer(modifier = Modifier.height(14.dp))
+                // 1. Actions / Progress Section (Only rendered for media types with action cards)
+                val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                if (hasProgressControls) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DetailProgressSection(
+                        item = item,
+                        onUpdateProgress = { viewModel.updateProgress(it) },
+                        onUpdatePlaytime = { viewModel.updatePlaytime(it) },
+                        onTogglePlatform = { viewModel.togglePlatform(it) },
+                        onUpdateStatus = { viewModel.updateStatus(it) }
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                } else {
+                    val hasBackdrop = backdropTargetUrl != null
+                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-18).dp else 8.dp))
+                }
 
                 // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
                 if (!item.synopsis.isNullOrBlank()) {
@@ -597,7 +602,7 @@ fun DetailScreen(
                         synopsis = item.synopsis,
                         dominantAccent = dominantAccent
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
                 }
 
                 // 3. Dynamic Reorderable Sections (configured in Settings > Layout > Details Page)
@@ -1080,24 +1085,28 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            DetailProgressSection(
-                item = item,
-                onUpdateProgress = {},
-                onUpdatePlaytime = {},
-                onTogglePlatform = {},
-                onUpdateStatus = {}
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
+            val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            if (hasProgressControls) {
+                Spacer(modifier = Modifier.height(8.dp))
+                DetailProgressSection(
+                    item = item,
+                    onUpdateProgress = {},
+                    onUpdatePlaytime = {},
+                    onTogglePlatform = {},
+                    onUpdateStatus = {}
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+            } else {
+                val hasBackdrop = backdropTargetUrl != null
+                Spacer(modifier = Modifier.height(if (hasBackdrop) (-18).dp else 8.dp))
+            }
 
             if (!item.synopsis.isNullOrBlank()) {
                 DetailSynopsisSection(
                     synopsis = item.synopsis,
                     dominantAccent = dominantAccent
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
             }
 
             DetailShowDetailsSection(item = item)
@@ -1631,6 +1640,17 @@ private fun DetailSynopsisSection(
     var synopsisExpanded by remember { mutableStateOf(false) }
     var canExpandSynopsis by remember { mutableStateOf(false) }
 
+    val cleanText = remember(synopsis) {
+        synopsis
+            .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("""<[^>]*>"""), "")
+            .replace(Regex("""\n{3,}"""), "\n\n")
+            .replace(Regex("""\s*[\(\[]\s*$"""), "")
+            .trim()
+    }
+
+    if (cleanText.isBlank()) return
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1644,7 +1664,7 @@ private fun DetailSynopsisSection(
             )
     ) {
         Text(
-            text = synopsis,
+            text = cleanText,
             color = Color.White.copy(alpha = 0.90f),
             fontSize = 13.5.sp,
             lineHeight = 20.sp,

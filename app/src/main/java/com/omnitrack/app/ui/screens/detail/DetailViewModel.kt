@@ -1054,8 +1054,19 @@ class DetailViewModel(
                                 if (item.id > 0) {
                                     viewModelScope.launch(Dispatchers.IO) {
                                         val currentItem = repository.getMediaById(item.id).firstOrNull()
-                                        if (currentItem != null && currentItem.anilistId == null) {
-                                            repository.updateMedia(currentItem.copy(anilistId = animeDetails.anilistId))
+                                        if (currentItem != null) {
+                                            val currentSyn = currentItem.synopsis?.trim()
+                                            val needsSynopsisRepair = currentSyn.isNullOrBlank() ||
+                                                currentSyn.endsWith("(") ||
+                                                currentSyn.endsWith("[") ||
+                                                (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
+                                            val updated = currentItem.copy(
+                                                anilistId = currentItem.anilistId ?: animeDetails.anilistId,
+                                                synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentItem.synopsis
+                                            )
+                                            if (updated != currentItem) {
+                                                repository.updateMedia(updated)
+                                            }
                                         }
                                     }
                                 } else if (_previewItem.value != null) {

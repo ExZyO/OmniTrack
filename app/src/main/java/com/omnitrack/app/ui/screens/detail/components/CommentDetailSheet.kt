@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.ui.components.RedditVoteCapsule
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.TextMuted
@@ -350,25 +351,10 @@ fun CommentDetailSheet(
                         }
                     }
 
-                    if (currentReview.likes > 0) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = null,
-                                tint = Color(0xFFED1C24).copy(alpha = 0.85f),
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "${currentReview.likes} likes",
-                                color = TextMuted,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
+                    RedditVoteCapsule(
+                        initialScore = currentReview.likes.coerceAtLeast(1),
+                        showDownvoteCount = true
+                    )
 
                     Text(
                         text = currentReview.source,
