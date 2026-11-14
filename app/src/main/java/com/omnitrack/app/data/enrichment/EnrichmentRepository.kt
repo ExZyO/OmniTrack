@@ -855,17 +855,9 @@ class EnrichmentRepository(
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
-                        val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
                         val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
-                        val s2Poster = mergedList.find { it.seasonNumber == 2 }?.posterUrl
-
-                        val resolvedPoster = when {
-                            // For Season 3+, prioritize dedicated official key visual (e.g. Kitsu TVアニメ 第3期)
-                            // or prevent AniList from duplicating Season 2's cropped visual
-                            sNum >= 3 && !kitsuData?.posterUrl.isNullOrBlank() -> kitsuData.posterUrl
-                            sNum >= 3 && aniListPoster != null && aniListPoster == s2Poster -> kitsuData?.posterUrl ?: aniListPoster
-                            else -> aniListPoster ?: kitsuData?.posterUrl
-                        }
+                        val kitsuData = if (aniListPoster.isNullOrBlank() && !showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
+                        val resolvedPoster = aniListPoster ?: kitsuData?.posterUrl
 
                         val posterUrl = if (sNum <= 0) {
                             mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: resolvedPoster
@@ -890,13 +882,9 @@ class EnrichmentRepository(
                         mergedList[idx] = existing.copy(episodeCount = eps.size)
                     } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
                         val idx = mergedList.indexOf(existing)
-                        val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
                         val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
-                        val resolvedPoster = if (sNum >= 3 && !kitsuData?.posterUrl.isNullOrBlank()) {
-                            kitsuData.posterUrl
-                        } else {
-                            aniListPoster ?: kitsuData?.posterUrl ?: existing.posterUrl
-                        }
+                        val kitsuData = if (aniListPoster.isNullOrBlank() && !showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
+                        val resolvedPoster = aniListPoster ?: kitsuData?.posterUrl ?: existing.posterUrl
                         val enhancedPoster = if (existing.posterUrl.isNullOrBlank()) resolvedPoster else existing.posterUrl
                         mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = enhancedPoster)
                     }
@@ -944,7 +932,7 @@ class EnrichmentRepository(
                             seasonNumber = seasonNumber,
                             title = name,
                             overview = overview,
-                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w300$it" },
+                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                             airDate = airDate,
                             runtimeMinutes = runtime,
                             voteAverage = voteAverage
@@ -990,7 +978,7 @@ class EnrichmentRepository(
                             val mapped = eps.mapNotNull { node ->
                                 val o = node.jsonObject
                                 val name = o["name"]?.jsonPrimitive?.content
-                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
+                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w780$it" }
                                 val air = o["air_date"]?.jsonPrimitive?.content
                                 val overview = o["overview"]?.jsonPrimitive?.content
                                 val rating = o["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
@@ -1018,7 +1006,6 @@ class EnrichmentRepository(
                     emptyList()
                 }
 
-                val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, seasonNumber) else null
                 val enrichedEps = seasonEps.map { ep ->
                     // 1. Cross-reference TMDb absolute numbering by exact title or air date
                     val tmdbMatch = tmdbSeason1Eps.firstOrNull { t ->
@@ -1027,12 +1014,7 @@ class EnrichmentRepository(
                         !t.airDate.isNullOrBlank() && !ep.airDate.isNullOrBlank() && t.airDate == ep.airDate
                     }
 
-                    val kitsuStill = kitsuData?.stills?.get(ep.episodeNumber)
-
-                    val resolvedStill = tmdbMatch?.stillUrl
-                        ?: kitsuStill
-                        ?: if (ep.stillUrl?.contains("episodes.metahub.space") == true) null else ep.stillUrl
-
+                    val resolvedStill = tmdbMatch?.stillUrl ?: ep.stillUrl
                     val resolvedOverview = if (ep.overview.isNullOrBlank()) tmdbMatch?.overview else ep.overview
                     val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
 
@@ -1126,38 +1108,7 @@ class EnrichmentRepository(
                 ?: posterObj?.get("original")?.jsonPrimitive?.content
                 ?: posterObj?.get("medium")?.jsonPrimitive?.content
 
-            val stills = mutableMapOf<Int, String>()
-            var offset = 0
-            while (offset < 60) {
-                val epUrl = "https://kitsu.io/api/edge/anime/$animeId/episodes?page[limit]=20&page[offset]=$offset"
-                val epReq = Request.Builder()
-                    .url(epUrl)
-                    .header("Accept", "application/vnd.api+json")
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .build()
-                val items = client.newCall(epReq).execute().use { epResp ->
-                    if (!epResp.isSuccessful) return@use emptyList()
-                    val epBody = epResp.body?.string() ?: return@use emptyList()
-                    val epRoot = json.parseToJsonElement(epBody).jsonObject
-                    epRoot["data"]?.jsonArray?.mapNotNull { it.jsonObject } ?: emptyList()
-                }
-                if (items.isEmpty()) break
-                for (ep in items) {
-                    val attrs = ep["attributes"]?.jsonObject
-                    val epNum = attrs?.get("number")?.jsonPrimitive?.content?.toIntOrNull()
-                    val thumbObj = attrs?.get("thumbnail")?.jsonObject
-                    val thumbUrl = thumbObj?.get("large")?.jsonPrimitive?.content
-                        ?: thumbObj?.get("original")?.jsonPrimitive?.content
-                        ?: thumbObj?.get("medium")?.jsonPrimitive?.content
-                    if (epNum != null && !thumbUrl.isNullOrBlank()) {
-                        stills[epNum] = thumbUrl
-                    }
-                }
-                if (items.size < 20) break
-                offset += 20
-            }
-
-            val result = KitsuSeasonData(posterUrl = posterUrl, stills = stills)
+            val result = KitsuSeasonData(posterUrl = posterUrl, stills = emptyMap())
             kitsuSeasonDataCache[cacheKey] = result
             result
         } catch (_: Exception) {
@@ -1181,14 +1132,22 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
+            val suffix = when (seasonNumber % 10) {
+                1 -> "st"
+                2 -> "nd"
+                3 -> "rd"
+                else -> "th"
+            }
             val searchQueries = if (seasonNumber <= 1) {
                 listOf(strippedTitle)
             } else {
                 listOf(
                     "$strippedTitle Season $seasonNumber",
+                    "$strippedTitle $seasonNumber$suffix Season",
+                    "$strippedTitle Season $seasonNumber Part 1",
                     "$strippedTitle ${seasonNumber}nd Season",
                     "$strippedTitle ${seasonNumber}rd Season"
-                )
+                ).distinct()
             }
             for (sq in searchQueries) {
                 val jsonPayload = buildJsonObject {
