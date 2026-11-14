@@ -124,13 +124,13 @@ private fun rememberDisplayCompanies(
 ): List<NetworkProductionCompany> {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
     if (passedCompanies.isNotEmpty()) {
-        val networks = passedCompanies.filter { it.kind == "network" }
+        val studiosOrNetworks = passedCompanies.filter { it.kind == "network" || it.kind == "anime_studio" }
         return if (isSeries) {
-            if (networks.isNotEmpty()) {
-                networks.take(6)
+            if (studiosOrNetworks.isNotEmpty()) {
+                studiosOrNetworks.take(6)
             } else {
                 val logosOnly = passedCompanies.filter { !it.logoUrl.isNullOrBlank() }
-                logosOnly.take(6)
+                (if (logosOnly.isNotEmpty()) logosOnly else passedCompanies).take(6)
             }
         } else {
             val logosOnly = passedCompanies.filter { !it.logoUrl.isNullOrBlank() }

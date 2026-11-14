@@ -2,6 +2,10 @@ package com.omnitrack.app.data.enrichment
 
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.AnimeAiringSchedule
+import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.model.AnimeEnrichedDetails
+import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
@@ -1254,6 +1258,254 @@ class EnrichmentRepository(
                     }
                 }
             }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun fetchAnimeDetails(
+        anilistId: Long? = null,
+        malId: Long? = null,
+        title: String? = null,
+        existingSeasonsCount: Int = 1
+    ): AnimeEnrichedDetails? = withContext(Dispatchers.IO) {
+        try {
+            val query = """
+                query (${'$'}id: Int, ${'$'}idMal: Int, ${'$'}search: String) {
+                  Media(id: ${'$'}id, idMal: ${'$'}idMal, search: ${'$'}search, type: ANIME) {
+                    id
+                    idMal
+                    title {
+                      romaji
+                      english
+                      native
+                    }
+                    format
+                    status
+                    nextAiringEpisode {
+                      episode
+                      airingAt
+                      timeUntilAiring
+                    }
+                    characters(sort: [ROLE, RELEVANCE, ID], perPage: 25) {
+                      edges {
+                        role
+                        node {
+                          id
+                          name {
+                            full
+                          }
+                          image {
+                            large
+                          }
+                        }
+                        voiceActors(language: JAPANESE) {
+                          id
+                          name {
+                            full
+                          }
+                          image {
+                            large
+                          }
+                          languageV2
+                        }
+                      }
+                    }
+                    relations {
+                      edges {
+                        relationType
+                        node {
+                          id
+                          idMal
+                          title {
+                            romaji
+                            english
+                          }
+                          format
+                          type
+                          status
+                          startDate {
+                            year
+                          }
+                          coverImage {
+                            large
+                            extraLarge
+                          }
+                        }
+                      }
+                    }
+                    studios(isMain: true) {
+                      edges {
+                        isMain
+                        node {
+                          id
+                          name
+                          isAnimationStudio
+                        }
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+
+            // Safe lookup: Only send ONE mutually exclusive variable to avoid AND-filtering in AniList
+            val candidateVars = mutableListOf<JsonObject>()
+            if (anilistId != null && anilistId > 0) {
+                candidateVars.add(buildJsonObject { put("id", anilistId) })
+            }
+            if (malId != null && malId > 0) {
+                candidateVars.add(buildJsonObject { put("idMal", malId) })
+            }
+            if (!title.isNullOrBlank()) {
+                val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
+                val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
+                candidateVars.add(buildJsonObject { put("search", title.trim()) })
+                if (cleanTitle != title.trim()) candidateVars.add(buildJsonObject { put("search", cleanTitle) })
+                if (baseTitle != title.trim() && baseTitle.length >= 3) candidateVars.add(buildJsonObject { put("search", baseTitle) })
+            }
+
+            for (vars in candidateVars) {
+                val jsonPayload = buildJsonObject {
+                    put("query", query)
+                    put("variables", vars)
+                }.toString()
+
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+
+                val result = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string() ?: return@use null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val media = root["data"]?.jsonObject?.get("Media")?.jsonObject ?: return@use null
+
+                    val resolvedId = media["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                    val resolvedMalId = media["idMal"]?.jsonPrimitive?.content?.toLongOrNull()
+
+                    // 1. Next Airing
+                    val nextAiringObj = media["nextAiringEpisode"]?.let { if (it is JsonObject) it else null }
+                    val airingSchedule = if (nextAiringObj != null) {
+                        val ep = nextAiringObj["episode"]?.jsonPrimitive?.content?.toIntOrNull()
+                        val at = nextAiringObj["airingAt"]?.jsonPrimitive?.content?.toLongOrNull()
+                        if (ep != null && at != null) {
+                            AnimeAiringSchedule(episodeNumber = ep, airingAtEpochSeconds = at)
+                        } else null
+                    } else null
+
+                    // 2. Characters & Seiyuu (sort: [ROLE, RELEVANCE, ID])
+                    val charList = mutableListOf<AnimeCharacterItem>()
+                    val charEdges = media["characters"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in charEdges) {
+                        val edge = edgeElem.jsonObject
+                        val role = edge["role"]?.jsonPrimitive?.content ?: "SUPPORT"
+                        val node = edge["node"]?.jsonObject ?: continue
+                        val charId = node["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: continue
+                        val charName = node["name"]?.jsonObject?.get("full")?.jsonPrimitive?.content ?: continue
+                        val charImg = node["image"]?.jsonObject?.get("large")?.jsonPrimitive?.content
+
+                        val vaEdges = edge["voiceActors"]?.jsonArray.orEmpty()
+                        val primaryVa = vaEdges.firstOrNull()?.jsonObject
+                        val vaId = primaryVa?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                        val vaName = primaryVa?.get("name")?.jsonObject?.get("full")?.jsonPrimitive?.content
+                        val vaImg = primaryVa?.get("image")?.jsonObject?.get("large")?.jsonPrimitive?.content
+                        val vaLang = primaryVa?.get("languageV2")?.jsonPrimitive?.content ?: "Japanese"
+
+                        charList.add(
+                            AnimeCharacterItem(
+                                characterId = charId,
+                                characterName = charName,
+                                characterRole = role,
+                                characterImageUrl = charImg,
+                                voiceActorId = vaId,
+                                voiceActorName = vaName,
+                                voiceActorImageUrl = vaImg,
+                                voiceActorLanguage = if (vaLang.contains("Japan", ignoreCase = true)) "JP" else vaLang.take(2).uppercase()
+                            )
+                        )
+                    }
+
+                    // 3. Franchise & Relations with smart season deduplication
+                    val relationList = mutableListOf<AnimeRelationItem>()
+                    val relEdges = media["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    val baseTitleNorm = (title ?: "").lowercase().replace(Regex("[^a-z0-9]"), "")
+
+                    for (edgeElem in relEdges) {
+                        val edge = edgeElem.jsonObject
+                        val relType = edge["relationType"]?.jsonPrimitive?.content ?: continue
+                        val node = edge["node"]?.jsonObject ?: continue
+                        val relId = node["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: continue
+                        val relFormat = node["format"]?.jsonPrimitive?.content ?: "TV"
+                        val relTypeCategory = node["type"]?.jsonPrimitive?.content ?: "ANIME"
+                        val relTitle = node["title"]?.jsonObject?.get("english")?.jsonPrimitive?.content
+                            ?: node["title"]?.jsonObject?.get("romaji")?.jsonPrimitive?.content
+                            ?: "Unknown Title"
+                        val cover = node["coverImage"]?.jsonObject?.get("extraLarge")?.jsonPrimitive?.content
+                            ?: node["coverImage"]?.jsonObject?.get("large")?.jsonPrimitive?.content
+                        val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.content?.toIntOrNull()
+
+                        // Determine Target MediaType
+                        val targetMediaType = when (relTypeCategory.uppercase()) {
+                            "MANGA" -> if (relFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
+                            else -> if (relFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
+                        }
+
+                        // Smart Season Deduplication (Safeguard 3):
+                        // If multi-season TMDb data exists (existingSeasonsCount > 1), filter out TV relations where
+                        // relType is SEQUEL, PREQUEL, or PARENT UNLESS the base franchise title differs (e.g. Naruto -> Boruto).
+                        if (existingSeasonsCount > 1 && relFormat.equals("TV", ignoreCase = true)) {
+                            val isStandardSeasonRel = relType in listOf("SEQUEL", "PREQUEL", "PARENT")
+                            if (isStandardSeasonRel) {
+                                val relTitleNorm = relTitle.lowercase().replace(Regex("[^a-z0-9]"), "")
+                                val isSameFranchiseBase = relTitleNorm.startsWith(baseTitleNorm) || baseTitleNorm.startsWith(relTitleNorm)
+                                if (isSameFranchiseBase) {
+                                    // Skip redundant season already handled by seasons dropdown
+                                    continue
+                                }
+                            }
+                        }
+
+                        relationList.add(
+                            AnimeRelationItem(
+                                id = relId,
+                                title = relTitle,
+                                relationType = relType,
+                                format = relFormat,
+                                coverUrl = cover,
+                                year = year,
+                                mediaType = targetMediaType
+                            )
+                        )
+                    }
+
+                    // 4. Studios (Filtered by isAnimationStudio == true per Safeguard 6)
+                    val studioList = mutableListOf<String>()
+                    val studioEdges = media["studios"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in studioEdges) {
+                        val node = edgeElem.jsonObject["node"]?.jsonObject ?: continue
+                        val isAnim = node["isAnimationStudio"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
+                        val studioName = node["name"]?.jsonPrimitive?.content
+                        if (isAnim && !studioName.isNullOrBlank()) {
+                            studioList.add(studioName)
+                        }
+                    }
+
+                    AnimeEnrichedDetails(
+                        anilistId = resolvedId,
+                        malId = resolvedMalId,
+                        characters = charList,
+                        relations = relationList,
+                        nextAiring = airingSchedule,
+                        animationStudios = studioList
+                    )
+                }
+
+                if (result != null) return@withContext result
+            }
+
             null
         } catch (_: Exception) {
             null

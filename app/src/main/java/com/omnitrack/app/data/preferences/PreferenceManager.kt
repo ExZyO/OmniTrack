@@ -14,6 +14,9 @@ import com.omnitrack.app.data.model.MediaType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.io.IOException
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
@@ -92,6 +95,7 @@ class PreferenceManager(private val context: Context) {
         val BANNER_SIZING = stringPreferencesKey("banner_sizing")
         val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
+        val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
@@ -441,6 +445,30 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateDisabledArtSources(mediaType: MediaType, disabled: Set<String>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.disabledSourcesKey(mediaType)] = disabled.joinToString(",")
+        }
+    }
+
+    val detailsPageSectionOrder: Flow<List<DetailSectionItem>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER]
+            if (raw.isNullOrBlank()) {
+                DetailsPageLayoutDefaults.defaultSections
+            } else {
+                try {
+                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<DetailSectionItem>>(raw)
+                    val existingKeys = parsed.map { it.key }.toSet()
+                    val missing = DetailsPageLayoutDefaults.defaultSections.filter { it.key !in existingKeys }
+                    parsed + missing
+                } catch (_: Exception) {
+                    DetailsPageLayoutDefaults.defaultSections
+                }
+            }
+        }
+
+    suspend fun setDetailsPageSectionOrder(items: List<DetailSectionItem>) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER] = Json.encodeToString(items)
         }
     }
 

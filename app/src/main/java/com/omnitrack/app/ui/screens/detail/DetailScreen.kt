@@ -124,6 +124,12 @@ import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
 import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
 import com.omnitrack.app.ui.screens.detail.components.statusColor
+import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.preferences.DetailSectionKey
+import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
+import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
+import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
+import com.omnitrack.app.ui.screens.detail.components.DetailFranchiseSection
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -162,6 +168,7 @@ fun DetailScreen(
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
     var selectedPerson by remember { mutableStateOf<CastMember?>(null) }
     var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
+    var selectedAnimeCharacter by remember { mutableStateOf<AnimeCharacterItem?>(null) }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
@@ -179,6 +186,20 @@ fun DetailScreen(
     }
     BackHandler(enabled = selectedCompany != null) {
         selectedCompany = null
+    }
+    BackHandler(enabled = selectedAnimeCharacter != null) {
+        selectedAnimeCharacter = null
+    }
+
+    if (selectedAnimeCharacter != null) {
+        AnimeCharacterSheet(
+            character = selectedAnimeCharacter,
+            onDismissRequest = { selectedAnimeCharacter = null },
+            onOpenMediaPreview = { recItem ->
+                selectedAnimeCharacter = null
+                viewModel.openPreview(recItem)
+            }
+        )
     }
 
     if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
@@ -558,92 +579,128 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
-                if (deferredSectionsAllowed) {
-                    // 3. Production / Networks & Companies Section (Clickable)
-                    DetailNetworksSection(
-                        item = item,
-                        companies = uiState.companies,
-                        onCompanyClick = { company ->
-                            selectedCompany = company
-                        }
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // 4. Cast Section (Avatars + character names)
-                    if (uiState.cast.isNotEmpty()) {
-                        DetailCastSection(
-                            cast = uiState.cast,
-                            onCastMemberClick = { member ->
-                                selectedPerson = member
+                // 3. Dynamic Reorderable Sections (configured in Settings > Layout > Details Page)
+                val enabledSections = uiState.sectionOrder.filter { it.isEnabled }
+                enabledSections.forEach { sectionItem ->
+                    when (sectionItem.key) {
+                        DetailSectionKey.AIRING_STATUS -> {
+                            if (uiState.animeAiring != null) {
+                                DetailAiringStatusLine(
+                                    schedule = uiState.animeAiring,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
                             }
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-
-                    // 5. Comments Section (Trakt & Jikan Community Reviews Carousel)
-                    if (uiState.reviews.isNotEmpty()) {
-                        ReviewsSection(reviews = uiState.reviews)
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-
-                    // 6. Trailers Section (Trailer video cards)
-                    if (uiState.trailers.isNotEmpty()) {
-                        DetailTrailersSection(
-                            trailers = uiState.trailers,
-                            contentTitle = item.title
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-                }
-
-                // 7. Episodes Section (1:1 Nuvio Seasons & Episode Tracking Grid)
-                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
-                    DetailSeriesContent(
-                        seasons = uiState.realSeasons,
-                        episodes = uiState.realEpisodes,
-                        episodesBySeason = uiState.episodesBySeason,
-                        watchedEpisodes = uiState.watchedEpisodes,
-                        selectedSeasonNumber = uiState.selectedSeasonNumber,
-                        fallbackBackdropUrl = item.bannerUrl,
-                        layoutMode = episodeLayoutMode,
-                        layoutScale = episodeLayoutScale,
-                        initialSeasonViewMode = seasonViewMode,
-                        onSeasonViewModeChanged = { next ->
-                            coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
-                        },
-                        onLayoutModeChanged = { next ->
-                            coroutineScope.launch { prefManager.updateEpisodeLayoutMode(next) }
-                        },
-                        onSelectSeason = { viewModel.selectSeason(it) },
-                        onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
-                        onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
-                        onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
-
-                if (deferredSectionsAllowed) {
-                    // 8. Details Section (Show & Production Details)
-                    DetailShowDetailsSection(item = item)
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // 8.5. Movie Franchise Collection (1:1 Nuvio Parity: strictly between Details and More Like This)
-                    if (item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
-                        DetailCollectionSection(
-                            collectionName = uiState.collectionName ?: "Collection",
-                            items = uiState.collectionItems,
-                            onSelectItem = { viewModel.openPreview(it) }
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
-                    }
-
-                    // 9. More Like This & Recommendations Section
-                    if (uiState.recommendations.isNotEmpty()) {
-                        RecommendationsSection(
-                            recommendations = uiState.recommendations,
-                            onSelectRecommendation = { viewModel.openPreview(it) }
-                        )
-                        Spacer(modifier = Modifier.height(20.dp))
+                        }
+                        DetailSectionKey.EPISODES -> {
+                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                                DetailSeriesContent(
+                                    seasons = uiState.realSeasons,
+                                    episodes = uiState.realEpisodes,
+                                    episodesBySeason = uiState.episodesBySeason,
+                                    watchedEpisodes = uiState.watchedEpisodes,
+                                    selectedSeasonNumber = uiState.selectedSeasonNumber,
+                                    fallbackBackdropUrl = item.bannerUrl,
+                                    layoutMode = episodeLayoutMode,
+                                    layoutScale = episodeLayoutScale,
+                                    initialSeasonViewMode = seasonViewMode,
+                                    onSeasonViewModeChanged = { next ->
+                                        coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
+                                    },
+                                    onLayoutModeChanged = { next ->
+                                        coroutineScope.launch { prefManager.updateEpisodeLayoutMode(next) }
+                                    },
+                                    onSelectSeason = { viewModel.selectSeason(it) },
+                                    onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
+                                    onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
+                                    onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.FRANCHISE -> {
+                            if (deferredSectionsAllowed && uiState.animeRelations.isNotEmpty()) {
+                                DetailFranchiseSection(
+                                    relations = uiState.animeRelations,
+                                    onRelationClick = { relation ->
+                                        viewModel.openRelationPreview(relation)
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.CAST -> {
+                            if (deferredSectionsAllowed) {
+                                if (item.mediaType == MediaType.ANIME && uiState.animeCharacters.isNotEmpty()) {
+                                    DetailAnimeCastSection(
+                                        characters = uiState.animeCharacters,
+                                        onCharacterClick = { character ->
+                                            selectedAnimeCharacter = character
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                } else if (uiState.cast.isNotEmpty()) {
+                                    DetailCastSection(
+                                        cast = uiState.cast,
+                                        onCastMemberClick = { member ->
+                                            selectedPerson = member
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                }
+                            }
+                        }
+                        DetailSectionKey.NETWORKS -> {
+                            if (deferredSectionsAllowed) {
+                                DetailNetworksSection(
+                                    item = item,
+                                    companies = uiState.companies,
+                                    onCompanyClick = { company ->
+                                        selectedCompany = company
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.DETAILS_INFO -> {
+                            if (deferredSectionsAllowed) {
+                                DetailShowDetailsSection(item = item)
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.TRAILERS -> {
+                            if (deferredSectionsAllowed && uiState.trailers.isNotEmpty()) {
+                                DetailTrailersSection(
+                                    trailers = uiState.trailers,
+                                    contentTitle = item.title
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.REVIEWS -> {
+                            if (deferredSectionsAllowed && uiState.reviews.isNotEmpty()) {
+                                ReviewsSection(reviews = uiState.reviews)
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.COLLECTION -> {
+                            if (deferredSectionsAllowed && item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
+                                DetailCollectionSection(
+                                    collectionName = uiState.collectionName ?: "Collection",
+                                    items = uiState.collectionItems,
+                                    onSelectItem = { viewModel.openPreview(it) }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.RECOMMENDATIONS -> {
+                            if (deferredSectionsAllowed && uiState.recommendations.isNotEmpty()) {
+                                RecommendationsSection(
+                                    recommendations = uiState.recommendations,
+                                    onSelectRecommendation = { viewModel.openPreview(it) }
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
                     }
                 }
 

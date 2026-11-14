@@ -9,6 +9,11 @@ import com.omnitrack.app.data.model.MediaEpisode
 import com.omnitrack.app.data.model.MediaSeason
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.NextAiringEpisode
+import com.omnitrack.app.data.model.AnimeAiringSchedule
+import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.model.AnimeRelationItem
+import com.omnitrack.app.data.preferences.DetailSectionItem
+import com.omnitrack.app.data.preferences.DetailsPageLayoutDefaults
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
@@ -67,7 +72,11 @@ data class DetailUiState(
     val isLoading: Boolean = true,
     val hasPreviousEntry: Boolean = false,
     val hasNextEntry: Boolean = false,
-    val nextAiringEpisode: NextAiringEpisode? = null
+    val nextAiringEpisode: NextAiringEpisode? = null,
+    val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeRelations: List<AnimeRelationItem> = emptyList(),
+    val animeAiring: AnimeAiringSchedule? = null,
+    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
 )
 
 private data class PreviewAndAux(
@@ -85,7 +94,11 @@ private data class PreviewAndAux(
     val collectionItems: List<RecommendationItem> = emptyList(),
     val previousItem: MediaItemEntity? = null,
     val nextItem: MediaItemEntity? = null,
-    val nextAiringEpisode: NextAiringEpisode? = null
+    val nextAiringEpisode: NextAiringEpisode? = null,
+    val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeRelations: List<AnimeRelationItem> = emptyList(),
+    val animeAiring: AnimeAiringSchedule? = null,
+    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
 )
 
 class DetailViewModel(
@@ -112,6 +125,10 @@ class DetailViewModel(
     private val _previousItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _nextItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _nextAiringEpisode = MutableStateFlow<NextAiringEpisode?>(null)
+    private val _animeCharacters = MutableStateFlow<List<AnimeCharacterItem>>(emptyList())
+    private val _animeRelations = MutableStateFlow<List<AnimeRelationItem>>(emptyList())
+    private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
+    private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
@@ -138,6 +155,13 @@ class DetailViewModel(
     }
 
     init {
+        if (preferenceManager != null) {
+            viewModelScope.launch {
+                preferenceManager.detailsPageSectionOrder.collect {
+                    _sectionOrder.value = it
+                }
+            }
+        }
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
@@ -226,6 +250,10 @@ class DetailViewModel(
                 _collectionName.value = cachedAux.collectionName
                 _collectionItems.value = cachedAux.collectionItems
             }
+            if (cachedAux.animeCharacters.isNotEmpty()) _animeCharacters.value = cachedAux.animeCharacters
+            if (cachedAux.animeRelations.isNotEmpty()) _animeRelations.value = cachedAux.animeRelations
+            if (cachedAux.animeAiring != null) _animeAiring.value = cachedAux.animeAiring
+            if (cachedAux.nextAiringEpisode != null) _nextAiringEpisode.value = cachedAux.nextAiringEpisode
         }
 
         if (mediaId == -1L) {
@@ -351,7 +379,11 @@ class DetailViewModel(
             _collectionItems,
             _previousItem,
             _nextItem,
-            _nextAiringEpisode
+            _nextAiringEpisode,
+            _animeCharacters,
+            _animeRelations,
+            _animeAiring,
+            _sectionOrder
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -370,7 +402,11 @@ class DetailViewModel(
             collectionItems = args[11] as List<RecommendationItem>,
             previousItem = args[12] as? MediaItemEntity,
             nextItem = args[13] as? MediaItemEntity,
-            nextAiringEpisode = args[14] as? NextAiringEpisode
+            nextAiringEpisode = args[14] as? NextAiringEpisode,
+            animeCharacters = args[15] as List<AnimeCharacterItem>,
+            animeRelations = args[16] as List<AnimeRelationItem>,
+            animeAiring = args[17] as? AnimeAiringSchedule,
+            sectionOrder = args[18] as List<DetailSectionItem>
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null && _mediaId.value == -1L) {
@@ -396,7 +432,11 @@ class DetailViewModel(
                     isLoading = false,
                     hasPreviousEntry = false,
                     hasNextEntry = false,
-                    nextAiringEpisode = aux.nextAiringEpisode
+                    nextAiringEpisode = aux.nextAiringEpisode,
+                    animeCharacters = aux.animeCharacters,
+                    animeRelations = aux.animeRelations,
+                    animeAiring = aux.animeAiring,
+                    sectionOrder = aux.sectionOrder
                 )
             )
         } else {
@@ -440,7 +480,11 @@ class DetailViewModel(
                                 isLoading = false,
                                 hasPreviousEntry = siblings.size > 1,
                                 hasNextEntry = siblings.size > 1,
-                                nextAiringEpisode = aux.nextAiringEpisode
+                                nextAiringEpisode = aux.nextAiringEpisode,
+                                animeCharacters = aux.animeCharacters,
+                                animeRelations = aux.animeRelations,
+                                animeAiring = aux.animeAiring,
+                                sectionOrder = aux.sectionOrder
                             )
                         }
                     } else {
@@ -470,6 +514,24 @@ class DetailViewModel(
             tmdbId = rec.tmdbId,
             anilistId = rec.anilistId,
             malId = rec.malId,
+            status = TrackingStatus.PLAN_TO_TRACK
+        )
+        _collectionName.value = null
+        _collectionItems.value = emptyList()
+        _previewItem.value = previewEntity
+        loadRecommendationsAndReviews(previewEntity)
+        maybeEnrich(previewEntity)
+    }
+
+    fun openRelationPreview(relation: AnimeRelationItem) {
+        val previewEntity = MediaItemEntity(
+            id = -1L,
+            title = relation.title,
+            coverUrl = relation.coverUrl ?: "",
+            bannerUrl = relation.coverUrl,
+            mediaType = relation.mediaType,
+            anilistId = relation.id,
+            releaseYear = relation.year?.toString(),
             status = TrackingStatus.PLAN_TO_TRACK
         )
         _collectionName.value = null
@@ -559,6 +621,10 @@ class DetailViewModel(
                 compList.addAll(it.companies)
                 fetchedCollName = it.collectionName
                 fetchedCollParts = it.collectionItems
+                if (it.animeCharacters.isNotEmpty()) _animeCharacters.value = it.animeCharacters
+                if (it.animeRelations.isNotEmpty()) _animeRelations.value = it.animeRelations
+                if (it.animeAiring != null) _animeAiring.value = it.animeAiring
+                if (it.nextAiringEpisode != null) _nextAiringEpisode.value = it.nextAiringEpisode
             }
 
             fun persistAuxCache() {
@@ -569,7 +635,11 @@ class DetailViewModel(
                     trailers = _trailers.value,
                     companies = _companies.value,
                     collectionName = _collectionName.value,
-                    collectionItems = _collectionItems.value
+                    collectionItems = _collectionItems.value,
+                    nextAiringEpisode = _nextAiringEpisode.value,
+                    animeCharacters = _animeCharacters.value,
+                    animeRelations = _animeRelations.value,
+                    animeAiring = _animeAiring.value
                 )
                 DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
@@ -885,9 +955,55 @@ class DetailViewModel(
                 }
             }
 
+            // Anime Enrichment: Next Airing, Characters & Seiyuu, Franchise Relations, Animation Studios
+            var resolvedAniListId = item.anilistId
+            if (item.mediaType == MediaType.ANIME || item.anilistId != null) {
+                try {
+                    val animeDetails = enrichmentRepository.fetchAnimeDetails(
+                        anilistId = item.anilistId,
+                        malId = item.malId,
+                        title = item.title,
+                        existingSeasonsCount = _realSeasons.value.size.coerceAtLeast(1)
+                    )
+                    if (animeDetails != null) {
+                        _animeCharacters.value = animeDetails.characters
+                        _animeRelations.value = animeDetails.relations
+                        _animeAiring.value = animeDetails.nextAiring
+                        if (animeDetails.animationStudios.isNotEmpty()) {
+                            val studioEntries = animeDetails.animationStudios.map { studioName ->
+                                NetworkProductionCompany(
+                                    id = null,
+                                    name = studioName,
+                                    logoUrl = null,
+                                    kind = "anime_studio"
+                                )
+                            }
+                            compList.addAll(0, studioEntries)
+                            _companies.value = compList.distinctBy { it.name }
+                        }
+                        if (animeDetails.anilistId != null) {
+                            resolvedAniListId = animeDetails.anilistId
+                            if (item.anilistId == null) {
+                                if (item.id > 0) {
+                                    viewModelScope.launch(Dispatchers.IO) {
+                                        val currentItem = repository.getMediaById(item.id).firstOrNull()
+                                        if (currentItem != null && currentItem.anilistId == null) {
+                                            repository.updateMedia(currentItem.copy(anilistId = animeDetails.anilistId))
+                                        }
+                                    }
+                                } else if (_previewItem.value != null) {
+                                    _previewItem.value = _previewItem.value?.copy(anilistId = animeDetails.anilistId)
+                                }
+                            }
+                        }
+                        persistAuxCache()
+                    }
+                } catch (_: Exception) {}
+            }
+
             // Keyless AniList / Jikan Recommendations, Cast & Reviews for Anime / Manga
-            if (item.anilistId != null || item.malId != null) {
-                if (item.anilistId != null) {
+            if (resolvedAniListId != null || item.malId != null) {
+                if (resolvedAniListId != null) {
                     try {
                         val query = """
                             query (${'$'}id: Int) {
@@ -941,7 +1057,7 @@ class DetailViewModel(
                         """.trimIndent()
 
                         val escapedQuery = query.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-                        val bodyJson = """{"query":"$escapedQuery","variables":{"id":${item.anilistId}}}"""
+                        val bodyJson = """{"query":"$escapedQuery","variables":{"id":$resolvedAniListId}}"""
 
                         val req = Request.Builder()
                             .url("https://graphql.anilist.co")
@@ -1396,6 +1512,10 @@ class DetailViewModel(
                 _companies.value = cachedAux.companies
                 _collectionName.value = cachedAux.collectionName
                 _collectionItems.value = cachedAux.collectionItems
+                _animeCharacters.value = cachedAux.animeCharacters
+                _animeRelations.value = cachedAux.animeRelations
+                _animeAiring.value = cachedAux.animeAiring
+                _nextAiringEpisode.value = cachedAux.nextAiringEpisode
             }
             loadRecommendationsAndReviews(prevItem)
         }
@@ -1440,6 +1560,10 @@ class DetailViewModel(
                 _companies.value = nextCachedAux.companies
                 _collectionName.value = nextCachedAux.collectionName
                 _collectionItems.value = nextCachedAux.collectionItems
+                _animeCharacters.value = nextCachedAux.animeCharacters
+                _animeRelations.value = nextCachedAux.animeRelations
+                _animeAiring.value = nextCachedAux.animeAiring
+                _nextAiringEpisode.value = nextCachedAux.nextAiringEpisode
             }
             loadRecommendationsAndReviews(nextItem)
         }
@@ -1690,7 +1814,10 @@ data class CachedDetailAux(
     val companies: List<NetworkProductionCompany> = emptyList(),
     val collectionName: String? = null,
     val collectionItems: List<RecommendationItem> = emptyList(),
-    val nextAiringEpisode: NextAiringEpisode? = null
+    val nextAiringEpisode: NextAiringEpisode? = null,
+    val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeRelations: List<AnimeRelationItem> = emptyList(),
+    val animeAiring: AnimeAiringSchedule? = null
 )
 
 internal object DetailAuxMemoryCache {

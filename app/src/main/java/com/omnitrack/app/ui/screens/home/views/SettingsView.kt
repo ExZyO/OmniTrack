@@ -66,6 +66,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
+import com.omnitrack.app.ui.components.DetailsPageLayoutSheet
 import com.omnitrack.app.ui.components.PosterCustomizationSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.screens.detail.components.EpisodeLayoutSheet
@@ -99,6 +100,7 @@ fun SettingsView(
     var showTrackerAccountsSheet by remember { mutableStateOf(false) }
     var showPosterCustomizationSheet by remember { mutableStateOf(false) }
     var showEpisodeLayoutSheet by remember { mutableStateOf(false) }
+    var showDetailsPageLayoutSheet by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -182,6 +184,14 @@ fun SettingsView(
                 title = "Episode Layout & Sizing",
                 subtitle = "Horizontal carousel, compact list, or vertical cards with adjustable size",
                 onClick = { showEpisodeLayoutSheet = true }
+            )
+            SectionDivider()
+            GroupedSettingRow(
+                icon = Icons.Default.Tune,
+                iconTint = AccentArctic,
+                title = "Details Page Sections & Order",
+                subtitle = "Reorder sections and toggle visibility: Episodes, Cast, Franchise, Studios, Trailers",
+                onClick = { showDetailsPageLayoutSheet = true }
             )
         }
 
@@ -303,6 +313,13 @@ fun SettingsView(
         EpisodeLayoutSheet(
             preferenceManager = prefManager,
             onDismiss = { showEpisodeLayoutSheet = false }
+        )
+    }
+
+    if (showDetailsPageLayoutSheet) {
+        DetailsPageLayoutSheet(
+            preferenceManager = prefManager,
+            onDismiss = { showDetailsPageLayoutSheet = false }
         )
     }
 }
