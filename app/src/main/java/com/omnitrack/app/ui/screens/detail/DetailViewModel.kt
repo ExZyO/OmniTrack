@@ -263,6 +263,25 @@ class DetailViewModel(
             if (cachedAux.nextAiringEpisode != null) _nextAiringEpisode.value = cachedAux.nextAiringEpisode
         }
 
+        // 0ms Synchronous Series Seasons & Episodes Cache Hit (Nuvio 0-lag parity):
+        val initCachedSeasons = (if (mediaId > 0L) SeriesContentMemoryCache.seasonsCache[mediaId] else null)
+            ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.seasonsCache[it] }
+            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { SeriesContentMemoryCache.seasonsCache[it.id] ?: it.tmdbId?.let { tid -> SeriesContentMemoryCache.seasonsCache[tid] } } else null)
+        val initCachedGrouped = (if (mediaId > 0L) SeriesContentMemoryCache.episodesBySeasonCache[mediaId] else null)
+            ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
+            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { SeriesContentMemoryCache.episodesBySeasonCache[it.id] ?: it.tmdbId?.let { tid -> SeriesContentMemoryCache.episodesBySeasonCache[tid] } } else null)
+
+        if (!initCachedSeasons.isNullOrEmpty()) {
+            val valid = initCachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
+            _realSeasons.value = valid
+            if (!initCachedGrouped.isNullOrEmpty()) {
+                _episodesBySeason.value = initCachedGrouped
+                val defaultSeason = valid.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: valid.first().seasonNumber
+                _selectedSeasonNumber.value = defaultSeason
+                _realEpisodes.value = initCachedGrouped[defaultSeason].orEmpty()
+            }
+        }
+
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
@@ -554,6 +573,19 @@ class DetailViewModel(
 
     fun openPreview(previewEntity: MediaItemEntity) {
         resetAuxFields()
+        val pTmdb = previewEntity.tmdbId
+        val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: SeriesContentMemoryCache.seasonsCache[previewEntity.id]
+        val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: SeriesContentMemoryCache.episodesBySeasonCache[previewEntity.id]
+        if (!pSeasons.isNullOrEmpty()) {
+            val valid = pSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
+            _realSeasons.value = valid
+            if (!pGrouped.isNullOrEmpty()) {
+                _episodesBySeason.value = pGrouped
+                val defaultSeason = valid.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: valid.first().seasonNumber
+                _selectedSeasonNumber.value = defaultSeason
+                _realEpisodes.value = pGrouped[defaultSeason].orEmpty()
+            }
+        }
         _previewStack.update { it + previewEntity }
         _previewItem.value = previewEntity
         loadRecommendationsAndReviews(previewEntity)
@@ -1314,6 +1346,7 @@ class DetailViewModel(
                             _selectedSeasonNumber.value = target
                             _realEpisodes.value = cachedGrouped[target].orEmpty()
                             refreshNextAiringEpisode(item)
+                            return@launch
                         }
                     }
 

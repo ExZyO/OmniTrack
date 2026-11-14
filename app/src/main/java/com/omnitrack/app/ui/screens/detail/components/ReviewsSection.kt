@@ -258,6 +258,7 @@ fun ReviewsSection(
 
                             RedditVoteCapsule(
                                 initialScore = rev.likes.coerceAtLeast(1),
+                                allowDownvote = rev.source != "Trakt",
                                 showDownvoteCount = false
                             )
                         }

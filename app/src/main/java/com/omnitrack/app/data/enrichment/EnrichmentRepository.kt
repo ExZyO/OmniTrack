@@ -3,6 +3,9 @@ package com.omnitrack.app.data.enrichment
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.AnimeAiringSchedule
+import com.omnitrack.app.data.model.AnimeCharacterDetail
+import com.omnitrack.app.data.model.AnimeCharacterAppearance
+import com.omnitrack.app.data.model.AnimeCharacterVoiceActor
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeEnrichedDetails
 import com.omnitrack.app.data.model.AnimeRelationItem
@@ -821,7 +824,7 @@ class EnrichmentRepository(
                             seasonNumber = seasonNumber,
                             name = cleanName,
                             episodeCount = epCount,
-                            posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                            posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w342$it" },
                             airDate = airDate
                         )
                     }
@@ -829,6 +832,13 @@ class EnrichmentRepository(
             }
         } catch (_: Exception) {
             emptyList()
+        }
+
+        // Fast path: if TMDb returned seasons with episodes, return immediately (Nuvio 0-lag parity)
+        if (tmdbSeasons.isNotEmpty() && tmdbSeasons.any { it.seasonNumber > 0 && it.episodeCount > 0 }) {
+            return@withTmdbPacing tmdbSeasons
+                .distinctBy { it.seasonNumber }
+                .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
         }
 
         // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2 with 10 announced/ongoing episodes)
@@ -927,7 +937,7 @@ class EnrichmentRepository(
                             seasonNumber = seasonNumber,
                             title = name,
                             overview = overview,
-                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w500$it" },
+                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w300$it" },
                             airDate = airDate,
                             runtimeMinutes = runtime,
                             voteAverage = voteAverage
@@ -961,7 +971,7 @@ class EnrichmentRepository(
                             val mapped = eps.mapNotNull { node ->
                                 val o = node.jsonObject
                                 val name = o["name"]?.jsonPrimitive?.content
-                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w500$it" }
+                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w300$it" }
                                 val air = o["air_date"]?.jsonPrimitive?.content
                                 val overview = o["overview"]?.jsonPrimitive?.content
                                 val rating = o["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
@@ -1590,257 +1600,521 @@ class EnrichmentRepository(
         }
     }
 
-    suspend fun fetchVoiceActorDetails(staffId: Long): AnimeVoiceActorDetail? = withContext(Dispatchers.IO) {
-        try {
-            val query = """
-                query (${'$'}id: Int) {
-                  Staff(id: ${'$'}id) {
-                    id
-                    name {
-                      full
-                      native
-                    }
-                    image {
-                      large
-                    }
-                    description
-                    age
-                    dateOfBirth {
-                      year
-                      month
-                      day
-                    }
-                    gender
-                    yearsActive
-                    homeTown
-                    bloodType
-                    languageV2
-                    favourites
-                    primaryOccupations
-                    characterMedia(sort: [FAVOURITES_DESC], page: 1, perPage: 25) {
-                      edges {
-                        characters {
-                          id
-                          name {
-                            full
-                          }
-                          image {
-                            large
+    private val characterDetailCache = java.util.concurrent.ConcurrentHashMap<Long, AnimeCharacterDetail>()
+    private val voiceActorDetailCache = java.util.concurrent.ConcurrentHashMap<Long, AnimeVoiceActorDetail>()
+
+    private fun formatAniListDate(year: Int?, month: Int?, day: Int?): String? {
+        if (year == null && month == null && day == null) return null
+        val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        val mStr = if (month != null && month in 1..12) months[month - 1] else null
+        return buildList {
+            mStr?.let { add(it) }
+            day?.let { add(it.toString()) }
+            year?.let { add(it.toString()) }
+        }.joinToString(" ")
+    }
+
+    suspend fun fetchAnimeCharacterDetail(characterId: Long): AnimeCharacterDetail? = withContext(Dispatchers.IO) {
+        characterDetailCache[characterId]?.let { return@withContext it }
+        NetworkPacer.withAniListPacing {
+            try {
+                val query = """
+                    query (${'$'}id: Int) {
+                      Character(id: ${'$'}id) {
+                        id
+                        name {
+                          full
+                          native
+                          alternative
+                          userPreferred
+                        }
+                        image {
+                          large
+                          medium
+                        }
+                        description
+                        gender
+                        dateOfBirth {
+                          year
+                          month
+                          day
+                        }
+                        age
+                        bloodType
+                        favourites
+                        anime: media(type: ANIME, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                          edges {
+                            characterRole
+                            voiceActors(sort: [RELEVANCE, ID]) {
+                              id
+                              name {
+                                full
+                                native
+                                userPreferred
+                              }
+                              image {
+                                large
+                                medium
+                              }
+                              languageV2
+                            }
+                            node {
+                              id
+                              idMal
+                              title {
+                                romaji
+                                english
+                                userPreferred
+                              }
+                              coverImage {
+                                extraLarge
+                                large
+                              }
+                              bannerImage
+                              format
+                              averageScore
+                              startDate {
+                                year
+                              }
+                            }
                           }
                         }
-                        characterRole
-                        node {
-                          id
-                          title {
-                            romaji
-                            english
-                            userPreferred
+                        manga: media(type: MANGA, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                          edges {
+                            characterRole
+                            node {
+                              id
+                              idMal
+                              title {
+                                romaji
+                                english
+                                userPreferred
+                              }
+                              coverImage {
+                                extraLarge
+                                large
+                              }
+                              bannerImage
+                              format
+                              averageScore
+                              startDate {
+                                year
+                              }
+                            }
                           }
-                          coverImage {
-                            extraLarge
-                            large
-                          }
-                          format
-                          startDate {
-                            year
-                          }
-                          type
                         }
                       }
                     }
-                    anime: staffMedia(type: ANIME, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
-                      edges {
-                        staffRole
-                        node {
-                          id
-                          title {
-                            romaji
-                            english
-                            userPreferred
-                          }
-                          coverImage {
-                            extraLarge
-                            large
-                          }
-                          format
-                          startDate {
-                            year
-                          }
-                          type
+                """.trimIndent()
+
+                val jsonPayload = buildJsonObject {
+                    put("query", query)
+                    put("variables", buildJsonObject { put("id", characterId) })
+                }.toString()
+
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string() ?: return@use null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val charObj = root["data"]?.jsonObject?.get("Character")?.jsonObject ?: return@use null
+
+                    val name = charObj["name"]?.jsonObject?.get("userPreferred").cleanString()
+                        ?: charObj["name"]?.jsonObject?.get("full").cleanString() ?: "Unknown"
+                    val nativeName = charObj["name"]?.jsonObject?.get("native").cleanString()
+                    val altNames = charObj["name"]?.jsonObject?.get("alternative")?.jsonArray.orEmpty()
+                        .mapNotNull { it.cleanString() }
+                    val img = charObj["image"]?.jsonObject?.get("large").cleanString()
+                        ?: charObj["image"]?.jsonObject?.get("medium").cleanString()
+                    val bio = charObj["description"].cleanString()
+                    val gender = charObj["gender"].cleanString()
+                    val age = charObj["age"].cleanString()
+                    val bloodType = charObj["bloodType"].cleanString()
+                    val favourites = charObj["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+                    val dobObj = charObj["dateOfBirth"]?.let { if (it is JsonObject) it else null }
+                    val dy = dobObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dm = dobObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dd = dobObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dobStr = formatAniListDate(dy, dm, dd)
+
+                    val vaMap = mutableMapOf<Long, AnimeCharacterVoiceActor>()
+                    val appearancesList = mutableListOf<AnimeCharacterAppearance>()
+
+                    val animeEdges = charObj["anime"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in animeEdges) {
+                        val edge = edgeElem.jsonObject
+                        val charRole = edge["characterRole"].cleanString() ?: "SUPPORT"
+                        val voiceActors = edge["voiceActors"]?.jsonArray.orEmpty()
+                        for (vaElem in voiceActors) {
+                            val va = vaElem.jsonObject
+                            val vaId = va["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                            if (!vaMap.containsKey(vaId)) {
+                                val vaName = va["name"]?.jsonObject?.get("userPreferred").cleanString()
+                                    ?: va["name"]?.jsonObject?.get("full").cleanString() ?: "Voice Actor"
+                                val vaNative = va["name"]?.jsonObject?.get("native").cleanString()
+                                val vaImg = va["image"]?.jsonObject?.get("large").cleanString()
+                                    ?: va["image"]?.jsonObject?.get("medium").cleanString()
+                                val vaLang = va["languageV2"].cleanString() ?: "Japanese"
+                                vaMap[vaId] = AnimeCharacterVoiceActor(
+                                    staffId = vaId,
+                                    name = vaName,
+                                    nativeName = vaNative,
+                                    imageUrl = vaImg,
+                                    language = vaLang
+                                )
+                            }
                         }
-                      }
-                    }
-                    manga: staffMedia(type: MANGA, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
-                      edges {
-                        staffRole
-                        node {
-                          id
-                          title {
-                            romaji
-                            english
-                            userPreferred
-                          }
-                          coverImage {
-                            extraLarge
-                            large
-                          }
-                          format
-                          startDate {
-                            year
-                          }
-                          type
-                        }
-                      }
-                    }
-                  }
-                }
-            """.trimIndent()
 
-            val jsonPayload = buildJsonObject {
-                put("query", query)
-                put("variables", buildJsonObject { put("id", staffId) })
-            }.toString()
+                        val node = edge["node"]?.jsonObject ?: continue
+                        val id = node["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val malId = node["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val eng = node["title"]?.jsonObject?.get("english").cleanString()
+                        val rom = node["title"]?.jsonObject?.get("romaji").cleanString()
+                        val usr = node["title"]?.jsonObject?.get("userPreferred").cleanString()
+                        val title = eng ?: usr ?: rom ?: continue
+                        val cover = node["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: node["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
+                        val banner = node["bannerImage"].cleanString()
+                        val score = node["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull
+                        val fmt = node["format"].cleanString() ?: "TV"
 
-            val req = Request.Builder()
-                .url("https://graphql.anilist.co")
-                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
-                .header("User-Agent", "OmniTrack/1.0")
-                .build()
-
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string() ?: return@use null
-                val root = json.parseToJsonElement(body).jsonObject
-                val staff = root["data"]?.jsonObject?.get("Staff")?.jsonObject ?: return@use null
-
-                val sId = staff["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: staffId
-                val name = staff["name"]?.jsonObject?.get("full").cleanString() ?: "Unknown"
-                val nativeName = staff["name"]?.jsonObject?.get("native").cleanString()
-                val img = staff["image"]?.jsonObject?.get("large").cleanString()
-                val rawBio = staff["description"].cleanString()
-
-                val age = staff["age"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val dobObj = staff["dateOfBirth"]?.let { if (it is JsonObject) it else null }
-                val y = dobObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val m = dobObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val d = dobObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val dobStr = if (y != null && m != null && d != null) "$y-$m-$d" else if (m != null && d != null) "$m-$d" else null
-                val gender = staff["gender"].cleanString()
-                val home = staff["homeTown"].cleanString()
-                val blood = staff["bloodType"].cleanString()
-                val lang = staff["languageV2"].cleanString()
-                val favs = staff["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val occupations = staff["primaryOccupations"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
-
-                val yearsList = staff["yearsActive"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
-                val yearsStr = when {
-                    yearsList.size >= 2 -> "${yearsList.first()} – ${yearsList.last()}"
-                    yearsList.size == 1 -> "${yearsList.first()} – present"
-                    else -> null
-                }
-
-                // 1. Voiced Character Roles
-                val rolesList = mutableListOf<VoiceActorRoleItem>()
-                val edges = staff["characterMedia"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
-                for (edgeElem in edges) {
-                    val edge = edgeElem.jsonObject
-                    val role = edge["characterRole"].cleanString() ?: "SUPPORT"
-                    val charObj = edge["characters"]?.jsonArray?.firstOrNull()?.jsonObject
-                    val charId = charObj?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
-                    val charName = charObj["name"]?.jsonObject?.get("full").cleanString() ?: "Character"
-                    val charImg = charObj["image"]?.jsonObject?.get("large").cleanString()
-
-                    val mediaNode = edge["node"]?.jsonObject ?: continue
-                    val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
-                    val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
-                    val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
-                    val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
-                    val mTitle = eng ?: usr ?: rom ?: "Media"
-                    val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
-                        ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
-                    val mFormat = mediaNode["format"].cleanString() ?: "TV"
-                    val mYear = mediaNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                    val mTypeStr = mediaNode["type"].cleanString() ?: "ANIME"
-                    val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) {
-                        if (mFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
-                    } else {
-                        if (mFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
-                    }
-
-                    rolesList.add(
-                        VoiceActorRoleItem(
-                            characterId = charId,
-                            characterName = charName,
-                            characterImageUrl = charImg,
-                            characterRole = role,
-                            mediaId = mId,
-                            mediaTitle = mTitle,
-                            mediaCoverUrl = mCover,
-                            mediaFormat = mFormat,
-                            mediaYear = mYear,
-                            mediaType = mType
+                        appearancesList.add(
+                            AnimeCharacterAppearance(
+                                id = id,
+                                malId = malId,
+                                title = title,
+                                coverUrl = cover,
+                                bannerUrl = banner,
+                                mediaType = if (fmt.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME,
+                                format = fmt,
+                                score = score?.let { it / 10f },
+                                releaseYear = year,
+                                characterRole = charRole
+                            )
                         )
-                    )
-                }
-
-                // 2. Production Staff Credits (Anime & Manga)
-                val productionCredits = mutableListOf<StaffProductionCreditItem>()
-                val animeProdEdges = staff["anime"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
-                val mangaProdEdges = staff["manga"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
-                for (edgeElem in (animeProdEdges + mangaProdEdges)) {
-                    val edge = edgeElem.jsonObject
-                    val staffRole = edge["staffRole"].cleanString() ?: continue
-                    val mediaNode = edge["node"]?.jsonObject ?: continue
-                    val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
-                    val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
-                    val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
-                    val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
-                    val mTitle = eng ?: usr ?: rom ?: "Media"
-                    val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
-                        ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
-                    val mFormat = mediaNode["format"].cleanString() ?: "TV"
-                    val mYear = mediaNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                    val mTypeStr = mediaNode["type"].cleanString() ?: "ANIME"
-                    val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) {
-                        if (mFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
-                    } else {
-                        if (mFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
                     }
 
-                    productionCredits.add(
-                        StaffProductionCreditItem(
-                            mediaId = mId,
-                            mediaTitle = mTitle,
-                            mediaCoverUrl = mCover,
-                            mediaFormat = mFormat,
-                            mediaYear = mYear,
-                            staffRole = staffRole,
-                            mediaType = mType
-                        )
-                    )
-                }
+                    val mangaEdges = charObj["manga"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in mangaEdges) {
+                        val edge = edgeElem.jsonObject
+                        val charRole = edge["characterRole"].cleanString() ?: "SUPPORT"
+                        val node = edge["node"]?.jsonObject ?: continue
+                        val id = node["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val malId = node["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val eng = node["title"]?.jsonObject?.get("english").cleanString()
+                        val rom = node["title"]?.jsonObject?.get("romaji").cleanString()
+                        val usr = node["title"]?.jsonObject?.get("userPreferred").cleanString()
+                        val title = eng ?: usr ?: rom ?: continue
+                        val cover = node["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: node["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
+                        val banner = node["bannerImage"].cleanString()
+                        val score = node["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull
+                        val fmt = node["format"].cleanString() ?: "MANGA"
 
-                AnimeVoiceActorDetail(
-                    staffId = sId,
-                    name = name,
-                    nativeName = nativeName,
-                    imageUrl = img,
-                    biography = rawBio,
-                    age = age,
-                    dateOfBirth = dobStr,
-                    homeTown = home,
-                    primaryOccupations = occupations,
-                    roles = rolesList,
-                    gender = gender,
-                    yearsActive = yearsStr,
-                    bloodType = blood,
-                    language = lang,
-                    favourites = favs,
-                    productionCredits = productionCredits
-                )
+                        appearancesList.add(
+                            AnimeCharacterAppearance(
+                                id = id,
+                                malId = malId,
+                                title = title,
+                                coverUrl = cover,
+                                bannerUrl = banner,
+                                mediaType = if (fmt.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA,
+                                format = fmt,
+                                score = score?.let { it / 10f },
+                                releaseYear = year,
+                                characterRole = charRole
+                            )
+                        )
+                    }
+
+                    val detail = AnimeCharacterDetail(
+                        characterId = characterId,
+                        name = name,
+                        nativeName = nativeName,
+                        alternativeNames = altNames,
+                        imageUrl = img,
+                        biography = bio,
+                        gender = gender,
+                        age = age,
+                        dateOfBirth = dobStr,
+                        bloodType = bloodType,
+                        favourites = favourites,
+                        appearances = appearancesList,
+                        voiceActors = vaMap.values.toList()
+                    )
+                    characterDetailCache[characterId] = detail
+                    detail
+                }
+            } catch (_: Exception) {
+                null
             }
-        } catch (_: Exception) {
-            null
+        }
+    }
+
+    suspend fun fetchVoiceActorDetails(staffId: Long): AnimeVoiceActorDetail? = withContext(Dispatchers.IO) {
+        voiceActorDetailCache[staffId]?.let { return@withContext it }
+        NetworkPacer.withAniListPacing {
+            try {
+                val query = """
+                    query (${'$'}id: Int) {
+                      Staff(id: ${'$'}id) {
+                        id
+                        name {
+                          full
+                          native
+                        }
+                        image {
+                          large
+                        }
+                        description
+                        age
+                        dateOfBirth {
+                          year
+                          month
+                          day
+                        }
+                        gender
+                        yearsActive
+                        homeTown
+                        bloodType
+                        languageV2
+                        favourites
+                        primaryOccupations
+                        characterMedia(sort: [FAVOURITES_DESC], page: 1, perPage: 25) {
+                          edges {
+                            characters {
+                              id
+                              name {
+                                full
+                              }
+                              image {
+                                large
+                              }
+                            }
+                            characterRole
+                            node {
+                              id
+                              title {
+                                romaji
+                                english
+                                userPreferred
+                              }
+                              coverImage {
+                                extraLarge
+                                large
+                              }
+                              format
+                              startDate {
+                                year
+                              }
+                              type
+                            }
+                          }
+                        }
+                        anime: staffMedia(type: ANIME, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                          edges {
+                            staffRole
+                            node {
+                              id
+                              title {
+                                romaji
+                                english
+                                userPreferred
+                              }
+                              coverImage {
+                                extraLarge
+                                large
+                              }
+                              format
+                              startDate {
+                                year
+                              }
+                              type
+                            }
+                          }
+                        }
+                        manga: staffMedia(type: MANGA, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                          edges {
+                            staffRole
+                            node {
+                              id
+                              title {
+                                romaji
+                                english
+                                userPreferred
+                              }
+                              coverImage {
+                                extraLarge
+                                large
+                              }
+                              format
+                              startDate {
+                                year
+                              }
+                              type
+                            }
+                          }
+                        }
+                      }
+                    }
+                """.trimIndent()
+
+                val jsonPayload = buildJsonObject {
+                    put("query", query)
+                    put("variables", buildJsonObject { put("id", staffId) })
+                }.toString()
+
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string() ?: return@use null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val staff = root["data"]?.jsonObject?.get("Staff")?.jsonObject ?: return@use null
+
+                    val sId = staff["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: staffId
+                    val name = staff["name"]?.jsonObject?.get("full").cleanString() ?: "Unknown"
+                    val nativeName = staff["name"]?.jsonObject?.get("native").cleanString()
+                    val img = staff["image"]?.jsonObject?.get("large").cleanString()
+                    val rawBio = staff["description"].cleanString()
+
+                    val age = staff["age"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dobObj = staff["dateOfBirth"]?.let { if (it is JsonObject) it else null }
+                    val y = dobObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val m = dobObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val d = dobObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dobStr = formatAniListDate(y, m, d)
+                    val gender = staff["gender"].cleanString()
+                    val home = staff["homeTown"].cleanString()
+                    val blood = staff["bloodType"].cleanString()
+                    val lang = staff["languageV2"].cleanString()
+                    val favs = staff["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val occupations = staff["primaryOccupations"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
+
+                    val yearsList = staff["yearsActive"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                    val yearsStr = when {
+                        yearsList.size >= 2 -> "${yearsList.first()} – ${yearsList.last()}"
+                        yearsList.size == 1 -> "${yearsList.first()} – present"
+                        else -> null
+                    }
+
+                    // 1. Voiced Character Roles
+                    val rolesList = mutableListOf<VoiceActorRoleItem>()
+                    val edges = staff["characterMedia"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in edges) {
+                        val edge = edgeElem.jsonObject
+                        val role = edge["characterRole"].cleanString() ?: "SUPPORT"
+                        val charObj = edge["characters"]?.jsonArray?.firstOrNull()?.jsonObject
+                        val charId = charObj?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val charName = charObj["name"]?.jsonObject?.get("full").cleanString() ?: "Character"
+                        val charImg = charObj["image"]?.jsonObject?.get("large").cleanString()
+
+                        val mediaNode = edge["node"]?.jsonObject ?: continue
+                        val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
+                        val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
+                        val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
+                        val mTitle = eng ?: usr ?: rom ?: "Media"
+                        val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
+                        val mFormat = mediaNode["format"].cleanString() ?: "TV"
+                        val mYear = mediaNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        val mTypeStr = mediaNode["type"].cleanString() ?: "ANIME"
+                        val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) {
+                            if (mFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
+                        } else {
+                            if (mFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
+                        }
+
+                        rolesList.add(
+                            VoiceActorRoleItem(
+                                characterId = charId,
+                                characterName = charName,
+                                characterImageUrl = charImg,
+                                characterRole = role,
+                                mediaId = mId,
+                                mediaTitle = mTitle,
+                                mediaCoverUrl = mCover,
+                                mediaFormat = mFormat,
+                                mediaYear = mYear,
+                                mediaType = mType
+                            )
+                        )
+                    }
+
+                    // 2. Production Staff Credits (Anime & Manga)
+                    val productionCredits = mutableListOf<StaffProductionCreditItem>()
+                    val animeProdEdges = staff["anime"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    val mangaProdEdges = staff["manga"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in (animeProdEdges + mangaProdEdges)) {
+                        val edge = edgeElem.jsonObject
+                        val staffRole = edge["staffRole"].cleanString() ?: continue
+                        val mediaNode = edge["node"]?.jsonObject ?: continue
+                        val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
+                        val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
+                        val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
+                        val mTitle = eng ?: usr ?: rom ?: "Media"
+                        val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
+                        val mFormat = mediaNode["format"].cleanString() ?: "TV"
+                        val mYear = mediaNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        val mTypeStr = mediaNode["type"].cleanString() ?: "ANIME"
+                        val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) {
+                            if (mFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
+                        } else {
+                            if (mFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
+                        }
+
+                        productionCredits.add(
+                            StaffProductionCreditItem(
+                                mediaId = mId,
+                                mediaTitle = mTitle,
+                                mediaCoverUrl = mCover,
+                                mediaFormat = mFormat,
+                                mediaYear = mYear,
+                                staffRole = staffRole,
+                                mediaType = mType
+                            )
+                        )
+                    }
+
+                    val detail = AnimeVoiceActorDetail(
+                        staffId = sId,
+                        name = name,
+                        nativeName = nativeName,
+                        imageUrl = img,
+                        biography = rawBio,
+                        age = age,
+                        dateOfBirth = dobStr,
+                        homeTown = home,
+                        primaryOccupations = occupations,
+                        roles = rolesList,
+                        gender = gender,
+                        yearsActive = yearsStr,
+                        bloodType = blood,
+                        language = lang,
+                        favourites = favs,
+                        productionCredits = productionCredits
+                    )
+                    voiceActorDetailCache[staffId] = detail
+                    detail
+                }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 }

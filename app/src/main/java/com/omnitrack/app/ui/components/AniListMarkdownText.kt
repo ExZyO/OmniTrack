@@ -1,10 +1,10 @@
 package com.omnitrack.app.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -13,10 +13,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -58,27 +57,38 @@ fun parseAniListMarkdownToAnnotatedString(
         .replace("&mdash;", "—")
         .replace("&nbsp;", " ")
         .replace("&eacute;", "é")
+        .replace("&rsquo;", "'")
+        .replace("&lsquo;", "'")
+        .replace("&ldquo;", "\"")
+        .replace("&rdquo;", "\"")
 
-    // 2. Normalize HTML formatting into uniform markdown
+    // 2. Clean out media tags (images/webm/youtube) that clutter descriptions
     var text = decoded
+        // AniList image syntax: img(url), img300(url), etc.
+        .replace(Regex("""(img\d*|webm|youtube)\((https?://[^\s)]+)\)""", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("""<img[^>]*>""", RegexOption.IGNORE_CASE), "")
         // HTML line breaks
         .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
         // HTML bold
-        .replace(Regex("""<(b|strong)>(.*?)</\1>""", RegexOption.IGNORE_CASE)) { "**${it.groupValues[2]}**" }
+        .replace(Regex("""<(b|strong)>(.*?)</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))) { "**${it.groupValues[2]}**" }
         // HTML italics
-        .replace(Regex("""<(i|em)>(.*?)</\1>""", RegexOption.IGNORE_CASE)) { "*${it.groupValues[2]}*" }
-        // HTML links
-        .replace(Regex("""<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""", RegexOption.IGNORE_CASE)) {
-            val href = it.groupValues[1]
-            val anchor = it.groupValues[2].replace(Regex("""<.*?>"""), "")
+        .replace(Regex("""<(i|em)>(.*?)</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))) { "*${it.groupValues[2]}*" }
+        // HTML links: <a href="...">label</a>
+        .replace(Regex("""<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))) {
+            val href = it.groupValues[1].trim()
+            val anchor = it.groupValues[2].replace(Regex("""<.*?>"""), "").trim()
             "[$anchor]($href)"
         }
         // AniList HTML spoilers <span class="markdown_spoiler">...</span>
-        .replace(Regex("""<span[^>]*class=['"]?markdown_spoiler['"]?[^>]*>(.*?)</span>""", RegexOption.IGNORE_CASE)) {
+        .replace(Regex("""<span[^>]*class=['"]?markdown_spoiler['"]?[^>]*>(.*?)</span>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))) {
             "~!${it.groupValues[1]}!~"
         }
+        // Headings (#, ##, ###) -> **Heading**
+        .replace(Regex("""(?m)^#{1,6}\s*(.+)$""")) { "**${it.groupValues[1].trim()}**" }
+        // Horizontal dividers
+        .replace(Regex("""(?m)^[_\-*]{3,}\s*$"""), "\n")
         // Underline bold __text__ -> **text**
-        .replace(Regex("""__(.*?)__""")) { "**${it.groupValues[1]}**" }
+        .replace(Regex("""__(.*?)__""", RegexOption.DOT_MATCHES_ALL)) { "**${it.groupValues[1]}**" }
         // Strip any remaining unhandled HTML tags
         .replace(Regex("""<.*?>"""), "")
         // Normalize consecutive newlines
@@ -86,12 +96,14 @@ fun parseAniListMarkdownToAnnotatedString(
         .trim()
 
     // 3. Tokenize inline tokens:
-    // - Markdown links: [Label](url)
-    // - Spoilers: ~!...~!
+    // - Markdown links: [Label](url) where url can be absolute or relative (/character/...)
+    // - Spoilers: ~!...~! (including multiline)
     // - Bold: **...**
     // - Italics: *...*
-    // - Bare URLs: https://...
-    val tokenRegex = Regex("""(~!(.*?)!~|\[([^\]]+)\]\((https?://[^\s)]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|(https?://[^\s)]+))""")
+    // - Bare URLs: https://... or http://...
+    val tokenRegex = Regex(
+        pattern = """(~![\s\S]*?!~|\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|\*([^*]+)\*|(https?://[^\s)]+))"""
+    )
 
     return buildAnnotatedString {
         var lastIdx = 0
@@ -128,10 +140,16 @@ fun parseAniListMarkdownToAnnotatedString(
                 // Markdown Link: [Label](url)
                 fullMatch.startsWith("[") && fullMatch.contains("](") && fullMatch.endsWith(")") -> {
                     val label = fullMatch.substringAfter("[").substringBefore("](")
-                    val url = fullMatch.substringAfter("](").removeSuffix(")")
+                    val rawUrl = fullMatch.substringAfter("](").removeSuffix(")").trim()
+                    val resolvedUrl = when {
+                        rawUrl.startsWith("/") -> "https://anilist.co$rawUrl"
+                        rawUrl.startsWith("http://") || rawUrl.startsWith("https://") -> rawUrl
+                        else -> "https://$rawUrl"
+                    }
+
                     withLink(
                         LinkAnnotation.Url(
-                            url = url,
+                            url = resolvedUrl,
                             styles = TextLinkStyles(
                                 style = SpanStyle(
                                     color = linkColor,
@@ -203,6 +221,7 @@ fun AniListMarkdownText(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var revealSpoilers by remember { mutableStateOf(false) }
+    val hasSpoilers = remember(text) { text.contains("~!") || text.contains("markdown_spoiler") }
 
     val annotatedString = remember(text, revealSpoilers) {
         parseAniListMarkdownToAnnotatedString(
@@ -220,27 +239,40 @@ fun AniListMarkdownText(
             lineHeight = lineHeight,
             maxLines = if (expanded) Int.MAX_VALUE else collapsedMaxLines,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .animateContentSize()
-                .clickable {
-                    expanded = !expanded
-                    if (expanded) revealSpoilers = true
-                }
+            modifier = Modifier.animateContentSize()
         )
 
-        if (text.length > 180) {
-            Text(
-                text = if (expanded) "Show Less" else "Read More",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = AccentArctic,
-                modifier = Modifier
-                    .padding(top = 4.dp)
-                    .clickable {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (text.length > 180) {
+                Text(
+                    text = if (expanded) "Show Less" else "Read More",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccentArctic,
+                    modifier = Modifier.clickable {
                         expanded = !expanded
                         if (expanded) revealSpoilers = true
                     }
-            )
+                )
+            }
+
+            if (hasSpoilers) {
+                Text(
+                    text = if (revealSpoilers) "Hide Spoilers" else "Reveal Spoilers",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextMuted,
+                    modifier = Modifier.clickable {
+                        revealSpoilers = !revealSpoilers
+                    }
+                )
+            }
         }
     }
 }

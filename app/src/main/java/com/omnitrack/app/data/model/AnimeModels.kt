@@ -77,6 +77,43 @@ data class AnimeVoiceActorDetail(
     val productionCredits: List<StaffProductionCreditItem> = emptyList()
 )
 
+data class AnimeCharacterVoiceActor(
+    val staffId: Long,
+    val name: String,
+    val nativeName: String? = null,
+    val imageUrl: String? = null,
+    val language: String = "Japanese"
+)
+
+data class AnimeCharacterAppearance(
+    val id: Long,
+    val malId: Long? = null,
+    val title: String,
+    val coverUrl: String,
+    val bannerUrl: String? = null,
+    val mediaType: MediaType = MediaType.ANIME,
+    val format: String = "TV",
+    val score: Float? = null,
+    val releaseYear: String? = null,
+    val characterRole: String = "MAIN"
+)
+
+data class AnimeCharacterDetail(
+    val characterId: Long,
+    val name: String,
+    val nativeName: String? = null,
+    val alternativeNames: List<String> = emptyList(),
+    val imageUrl: String? = null,
+    val biography: String? = null,
+    val gender: String? = null,
+    val age: String? = null,
+    val dateOfBirth: String? = null,
+    val bloodType: String? = null,
+    val favourites: Int? = null,
+    val appearances: List<AnimeCharacterAppearance> = emptyList(),
+    val voiceActors: List<AnimeCharacterVoiceActor> = emptyList()
+)
+
 data class AnimeEnrichedDetails(
     val anilistId: Long?,
     val malId: Long?,

@@ -656,7 +656,7 @@ fun DetailScreen(
                         }
                         DetailSectionKey.CAST -> {
                             if (deferredSectionsAllowed) {
-                                if (item.mediaType == MediaType.ANIME && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())) {
+                                if (item.mediaType == MediaType.ANIME) {
                                     if (uiState.animeCharacters.isNotEmpty()) {
                                         DetailAnimeCastSection(
                                             characters = uiState.animeCharacters,
@@ -676,7 +676,9 @@ fun DetailScreen(
                                         )
                                     }
                                     if (uiState.animeStaff.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.height(16.dp))
+                                        if (uiState.animeCharacters.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
                                         DetailAnimeStaffSection(
                                             staff = uiState.animeStaff,
                                             onStaffClick = { staff ->
@@ -684,7 +686,9 @@ fun DetailScreen(
                                             }
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(20.dp))
+                                    if (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
                                 } else if (uiState.cast.isNotEmpty()) {
                                     DetailCastSection(
                                         cast = uiState.cast,

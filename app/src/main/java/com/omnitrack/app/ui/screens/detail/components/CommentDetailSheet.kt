@@ -353,7 +353,8 @@ fun CommentDetailSheet(
 
                     RedditVoteCapsule(
                         initialScore = currentReview.likes.coerceAtLeast(1),
-                        showDownvoteCount = true
+                        allowDownvote = currentReview.source != "Trakt",
+                        showDownvoteCount = false
                     )
 
                     Text(
