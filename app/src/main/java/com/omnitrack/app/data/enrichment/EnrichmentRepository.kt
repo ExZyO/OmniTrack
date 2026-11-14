@@ -1135,4 +1135,81 @@ class EnrichmentRepository(
             null
         }
     }
+
+    suspend fun fetchAniListNextAiring(title: String, seasonNumber: Int? = null): com.omnitrack.app.data.model.NextAiringEpisode? = withContext(Dispatchers.IO) {
+        try {
+            val query = """
+                query (${'$'}search: String) {
+                  Page(page: 1, perPage: 8) {
+                    media(search: ${'$'}search, type: ANIME) {
+                      id
+                      title { romaji english }
+                      status
+                      episodes
+                      nextAiringEpisode {
+                        airingAt
+                        timeUntilAiring
+                        episode
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+
+            val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
+            val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
+            val searchQueries = mutableListOf<String>()
+            if (seasonNumber != null && seasonNumber > 1) {
+                searchQueries.add("$baseTitle Season $seasonNumber")
+                searchQueries.add("$cleanTitle Season $seasonNumber")
+            }
+            searchQueries.add(title)
+            searchQueries.add(cleanTitle)
+            searchQueries.add(baseTitle)
+
+            for (sq in searchQueries.distinct()) {
+                val jsonPayload = buildJsonObject {
+                    put("query", query)
+                    putJsonObject("variables") {
+                        put("search", sq)
+                    }
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return@use
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray.orEmpty()
+                        for (itemElem in mediaList) {
+                            val mediaObj = itemElem.jsonObject
+                            val nextAiring = mediaObj["nextAiringEpisode"]?.let { if (it is kotlinx.serialization.json.JsonObject) it else null }
+                            if (nextAiring != null) {
+                                val ep = nextAiring["episode"]?.jsonPrimitive?.intOrNull ?: continue
+                                val airingAt = nextAiring["airingAt"]?.jsonPrimitive?.longOrNull
+                                val timeUntil = nextAiring["timeUntilAiring"]?.jsonPrimitive?.longOrNull
+                                val mediaTitle = mediaObj["title"]?.jsonObject?.get("english")?.jsonPrimitive?.content
+                                    ?: mediaObj["title"]?.jsonObject?.get("romaji")?.jsonPrimitive?.content
+
+                                return@withContext com.omnitrack.app.data.model.NextAiringEpisode(
+                                    seasonNumber = seasonNumber,
+                                    episodeNumber = ep,
+                                    title = mediaTitle,
+                                    airingAtEpochSec = airingAt,
+                                    timeUntilAiringSec = timeUntil
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
 }

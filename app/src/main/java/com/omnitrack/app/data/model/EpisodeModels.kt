@@ -20,3 +20,12 @@ data class MediaEpisode(
     val voteAverage: Float? = null,
     val isWatched: Boolean = false
 )
+
+data class NextAiringEpisode(
+    val seasonNumber: Int?,
+    val episodeNumber: Int,
+    val title: String? = null,
+    val airDate: String? = null,
+    val airingAtEpochSec: Long? = null,
+    val timeUntilAiringSec: Long? = null
+)

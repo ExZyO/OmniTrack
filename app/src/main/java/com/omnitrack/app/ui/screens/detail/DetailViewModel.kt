@@ -8,12 +8,14 @@ import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.MediaEpisode
 import com.omnitrack.app.data.model.MediaSeason
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.NextAiringEpisode
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
+import com.omnitrack.app.util.AirDateUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -63,7 +65,8 @@ data class DetailUiState(
     val isPreviewMode: Boolean = false,
     val isLoading: Boolean = true,
     val hasPreviousEntry: Boolean = false,
-    val hasNextEntry: Boolean = false
+    val hasNextEntry: Boolean = false,
+    val nextAiringEpisode: NextAiringEpisode? = null
 )
 
 private data class PreviewAndAux(
@@ -80,7 +83,8 @@ private data class PreviewAndAux(
     val collectionName: String? = null,
     val collectionItems: List<RecommendationItem> = emptyList(),
     val previousItem: MediaItemEntity? = null,
-    val nextItem: MediaItemEntity? = null
+    val nextItem: MediaItemEntity? = null,
+    val nextAiringEpisode: NextAiringEpisode? = null
 )
 
 class DetailViewModel(
@@ -106,6 +110,7 @@ class DetailViewModel(
     private val _collectionItems = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _previousItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _nextItem = MutableStateFlow<MediaItemEntity?>(null)
+    private val _nextAiringEpisode = MutableStateFlow<NextAiringEpisode?>(null)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedIds = mutableSetOf<Long>()
 
@@ -163,6 +168,7 @@ class DetailViewModel(
                     val target = validSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validSeasons.first().seasonNumber
                     _selectedSeasonNumber.value = target
                     _realEpisodes.value = cachedGrouped[target].orEmpty()
+                    refreshNextAiringEpisode()
                 }
             }
         } else if (mediaId == -1L) {
@@ -179,6 +185,7 @@ class DetailViewModel(
                         val target = validSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validSeasons.first().seasonNumber
                         _selectedSeasonNumber.value = target
                         _realEpisodes.value = cachedGrouped[target].orEmpty()
+                        refreshNextAiringEpisode(ephemeral)
                     }
                 }
             }
@@ -336,7 +343,8 @@ class DetailViewModel(
             _collectionName,
             _collectionItems,
             _previousItem,
-            _nextItem
+            _nextItem,
+            _nextAiringEpisode
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -354,7 +362,8 @@ class DetailViewModel(
             collectionName = args[10] as? String,
             collectionItems = args[11] as List<RecommendationItem>,
             previousItem = args[12] as? MediaItemEntity,
-            nextItem = args[13] as? MediaItemEntity
+            nextItem = args[13] as? MediaItemEntity,
+            nextAiringEpisode = args[14] as? NextAiringEpisode
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -379,7 +388,8 @@ class DetailViewModel(
                     isPreviewMode = true,
                     isLoading = false,
                     hasPreviousEntry = false,
-                    hasNextEntry = false
+                    hasNextEntry = false,
+                    nextAiringEpisode = aux.nextAiringEpisode
                 )
             )
         } else {
@@ -420,7 +430,8 @@ class DetailViewModel(
                                 isPreviewMode = false,
                                 isLoading = false,
                                 hasPreviousEntry = siblings.size > 1,
-                                hasNextEntry = siblings.size > 1
+                                hasNextEntry = siblings.size > 1,
+                                nextAiringEpisode = aux.nextAiringEpisode
                             )
                         }
                     } else {
@@ -1081,6 +1092,7 @@ class DetailViewModel(
                             else validCached.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validCached.first().seasonNumber
                             _selectedSeasonNumber.value = target
                             _realEpisodes.value = cachedGrouped[target].orEmpty()
+                            refreshNextAiringEpisode(item)
                         }
                     }
 
@@ -1122,8 +1134,51 @@ class DetailViewModel(
                         SeriesContentMemoryCache.episodesBySeasonCache[item.id] = allEpisodes
                         _episodesBySeason.value = allEpisodes
                         _realEpisodes.value = allEpisodes[seasonToSelect].orEmpty()
+                        refreshNextAiringEpisode(item)
                     }
                 } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun refreshNextAiringEpisode(item: MediaItemEntity? = null) {
+        val allEpisodes = _episodesBySeason.value.values.flatten()
+        if (allEpisodes.isEmpty()) return
+
+        val todayIso = AirDateUtils.todayIsoDate()
+        val futureEpisodes = allEpisodes.filter { ep ->
+            val date = ep.airDate ?: return@filter false
+            val days = AirDateUtils.daysUntilExplicitRelease(todayIso, date)
+            days != null && days >= 0
+        }.sortedWith(compareBy(
+            { AirDateUtils.daysUntilExplicitRelease(todayIso, it.airDate) ?: Int.MAX_VALUE },
+            { it.seasonNumber },
+            { it.episodeNumber }
+        ))
+
+        val candidate = futureEpisodes.firstOrNull()
+        if (candidate != null) {
+            val daysUntil = AirDateUtils.daysUntilExplicitRelease(todayIso, candidate.airDate) ?: 0
+            _nextAiringEpisode.value = NextAiringEpisode(
+                seasonNumber = candidate.seasonNumber,
+                episodeNumber = candidate.episodeNumber,
+                title = candidate.title.takeIf { it.isNotBlank() },
+                airDate = candidate.airDate,
+                timeUntilAiringSec = daysUntil.toLong() * 86400L
+            )
+        }
+
+        val targetItem = item ?: _previewItem.value
+        if (targetItem != null && targetItem.mediaType == MediaType.ANIME) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val aniListNext = enrichmentRepository.fetchAniListNextAiring(targetItem.title, candidate?.seasonNumber)
+                if (aniListNext != null) {
+                    _nextAiringEpisode.value = _nextAiringEpisode.value?.copy(
+                        airingAtEpochSec = aniListNext.airingAtEpochSec,
+                        timeUntilAiringSec = aniListNext.timeUntilAiringSec,
+                        title = _nextAiringEpisode.value?.title ?: aniListNext.title
+                    ) ?: aniListNext
+                }
             }
         }
     }
@@ -1612,7 +1667,8 @@ data class CachedDetailAux(
     val trailers: List<MediaTrailer> = emptyList(),
     val companies: List<NetworkProductionCompany> = emptyList(),
     val collectionName: String? = null,
-    val collectionItems: List<RecommendationItem> = emptyList()
+    val collectionItems: List<RecommendationItem> = emptyList(),
+    val nextAiringEpisode: NextAiringEpisode? = null
 )
 
 internal object DetailAuxMemoryCache {

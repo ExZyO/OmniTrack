@@ -118,6 +118,7 @@ import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
 import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
+import com.omnitrack.app.ui.screens.detail.components.NextAiringEpisodeBanner
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
@@ -584,6 +585,19 @@ fun DetailScreen(
 
                 // 7. Episodes Section (1:1 Nuvio Seasons & Episode Tracking Grid)
                 if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                    uiState.nextAiringEpisode?.let { nextAiring ->
+                        NextAiringEpisodeBanner(
+                            nextAiring = nextAiring,
+                            backdropUrl = item.bannerUrl,
+                            onBannerClick = {
+                                nextAiring.seasonNumber?.let { sNum ->
+                                    viewModel.selectSeason(sNum)
+                                }
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+
                     DetailSeriesContent(
                         seasons = uiState.realSeasons,
                         episodes = uiState.realEpisodes,

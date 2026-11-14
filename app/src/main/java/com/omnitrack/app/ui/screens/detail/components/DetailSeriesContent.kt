@@ -15,8 +15,10 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import com.omnitrack.app.util.AirDateUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -570,7 +572,7 @@ private fun EpisodeHorizontalCard(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(12.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -585,7 +587,7 @@ private fun EpisodeHorizontalCard(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed) null else imgModel
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -629,15 +631,36 @@ private fun EpisodeHorizontalCard(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
-            if (badgeText.isNotBlank()) {
-                EpisodeCodeBadge(
-                    text = badgeText,
-                    textSize = 10.sp,
-                    radius = 4.dp,
-                    horizontalPadding = 6.dp,
-                    verticalPadding = 2.dp,
-                    backgroundAlpha = 0.45f
-                )
+            val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (badgeText.isNotBlank()) {
+                    EpisodeCodeBadge(
+                        text = badgeText,
+                        textSize = 10.sp,
+                        radius = 4.dp,
+                        horizontalPadding = 6.dp,
+                        verticalPadding = 2.dp,
+                        backgroundAlpha = 0.45f
+                    )
+                }
+                if (airBadgeText != null) {
+                    androidx.compose.material3.Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF00D2FF).copy(alpha = 0.22f),
+                        border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
+                    ) {
+                        Text(
+                            text = airBadgeText,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00D2FF),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                        )
+                    }
+                }
             }
 
             val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
@@ -745,7 +768,7 @@ private fun EpisodeListCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(8.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -769,7 +792,7 @@ private fun EpisodeListCardItem(
                     .background(Color(0xFF0D0D0D))
             ) {
                 var loadFailed by remember(imgModel) { mutableStateOf(false) }
-                val effectiveUrl = if (loadFailed) null else imgModel
+                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
                 if (!effectiveUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = effectiveUrl,
@@ -840,11 +863,27 @@ private fun EpisodeListCardItem(
                 )
 
                 val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-                if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
+                val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
+                if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0) || airBadgeText != null) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        if (airBadgeText != null) {
+                            androidx.compose.material3.Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF00D2FF).copy(alpha = 0.22f),
+                                border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
+                            ) {
+                                Text(
+                                    text = airBadgeText,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00D2FF),
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                )
+                            }
+                        }
                         if (!formattedDate.isNullOrBlank()) {
                             Text(
                                 text = formattedDate,
@@ -925,7 +964,7 @@ private fun EpisodeVerticalCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -940,7 +979,7 @@ private fun EpisodeVerticalCardItem(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed) null else imgModel
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -984,15 +1023,36 @@ private fun EpisodeVerticalCardItem(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
-            if (badgeText.isNotBlank()) {
-                EpisodeCodeBadge(
-                    text = badgeText,
-                    textSize = 10.sp,
-                    radius = 4.dp,
-                    horizontalPadding = 6.dp,
-                    verticalPadding = 2.dp,
-                    backgroundAlpha = 0.45f
-                )
+            val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (badgeText.isNotBlank()) {
+                    EpisodeCodeBadge(
+                        text = badgeText,
+                        textSize = 10.sp,
+                        radius = 4.dp,
+                        horizontalPadding = 6.dp,
+                        verticalPadding = 2.dp,
+                        backgroundAlpha = 0.45f
+                    )
+                }
+                if (airBadgeText != null) {
+                    androidx.compose.material3.Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFF00D2FF).copy(alpha = 0.22f),
+                        border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
+                    ) {
+                        Text(
+                            text = airBadgeText,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00D2FF),
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                        )
+                    }
+                }
             }
 
             val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
