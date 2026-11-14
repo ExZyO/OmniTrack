@@ -54,7 +54,6 @@ import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeVoiceActorDetail
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VoiceActorRoleItem
-import com.omnitrack.app.ui.screens.detail.RecommendationItem
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.GlassBorder

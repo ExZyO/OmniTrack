@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 import com.omnitrack.app.ui.screens.detail.components.CastMember
@@ -557,7 +558,7 @@ class DetailViewModel(
         val format = relation.format.uppercase()
         val targetType = when {
             format == "MANGA" -> MediaType.MANGA
-            format == "NOVEL" -> MediaType.LIGHT_NOVEL
+            format == "NOVEL" -> MediaType.NOVEL
             format == "MOVIE" -> MediaType.MOVIE
             else -> MediaType.ANIME
         }

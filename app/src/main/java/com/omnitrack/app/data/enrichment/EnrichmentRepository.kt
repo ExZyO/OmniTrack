@@ -6,12 +6,17 @@ import com.omnitrack.app.data.model.AnimeAiringSchedule
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeEnrichedDetails
 import com.omnitrack.app.data.model.AnimeRelationItem
+import com.omnitrack.app.data.model.AnimeVoiceActorDetail
+import com.omnitrack.app.data.model.VoiceActorRoleItem
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
