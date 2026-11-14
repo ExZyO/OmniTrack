@@ -23,10 +23,7 @@ sealed class VerificationState {
 
 object TrackerAccountVerifier {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
+    private val client = com.omnitrack.app.data.network.NetworkClient.sharedClient
 
     private val json = Json { ignoreUnknownKeys = true }
 

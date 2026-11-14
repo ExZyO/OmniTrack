@@ -31,7 +31,7 @@ data class AiQueryResult(
  * using Google Gemini or OpenRouter semantic LLMs, with instant local heuristic fallback.
  */
 class AiQueryEngine(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.sharedClient.newBuilder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(12, TimeUnit.SECONDS)
         .build()

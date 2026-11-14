@@ -46,11 +46,18 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         AppLogger.init(this)
-        com.omnitrack.app.data.network.NetworkClient.getClient(this)
+
+        // Chimanew / Tachiyomi Startup Preloading: Warm up Dispatchers.Main service loader ahead of time
+        kotlin.concurrent.thread(name = "MainDispatcherPreload") { Dispatchers.Main }
+
         com.omnitrack.app.updater.AppUpdateNotifier.createNotificationChannel(this)
 
         val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         appScope.launch {
+            // Asynchronously warm up SQLite database engine and Network client off the main thread
+            database.openHelper.writableDatabase
+            com.omnitrack.app.data.network.NetworkClient.getClient(this@OmniTrackApplication)
+
             launch { preferenceManager.customTraktClientId.collect { TrackerAccountVerifier.customTraktClientId = it } }
             launch { preferenceManager.customTraktClientSecret.collect { TrackerAccountVerifier.customTraktClientSecret = it } }
             launch { preferenceManager.customMalClientId.collect { TrackerAccountVerifier.customMalClientId = it } }

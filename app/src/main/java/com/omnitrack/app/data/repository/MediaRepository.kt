@@ -12,6 +12,7 @@ import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 
 class MediaRepository(
@@ -21,7 +22,7 @@ class MediaRepository(
     private val episodeProgressDao: EpisodeProgressDao? = null
 ) {
     fun getEpisodeProgress(mediaId: Long): Flow<List<EpisodeProgressEntity>> =
-        episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()
+        (episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
     suspend fun setEpisodeWatched(mediaId: Long, seasonNumber: Int, episodeNumber: Int, isWatched: Boolean) {
         if (episodeProgressDao == null) return
@@ -49,22 +50,22 @@ class MediaRepository(
         }
         episodeProgressDao.insertOrUpdateAll(list)
     }
-    fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia()
+    fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia().distinctUntilChanged()
 
-    fun getAllMediaSummaries(): Flow<List<MediaCardSummary>> = mediaDao.getAllMediaSummaries()
+    fun getAllMediaSummaries(): Flow<List<MediaCardSummary>> = mediaDao.getAllMediaSummaries().distinctUntilChanged()
 
-    fun getMediaById(id: Long): Flow<MediaItemEntity?> = mediaDao.getMediaById(id)
+    fun getMediaById(id: Long): Flow<MediaItemEntity?> = mediaDao.getMediaById(id).distinctUntilChanged()
 
     fun getFilteredMedia(type: MediaType, status: TrackingStatus): Flow<List<MediaItemEntity>> =
-        if (type == MediaType.ALL && status == TrackingStatus.ALL) {
+        (if (type == MediaType.ALL && status == TrackingStatus.ALL) {
             mediaDao.getAllMedia()
         } else {
             mediaDao.getFilteredMedia(type, status)
-        }
+        }).distinctUntilChanged()
 
-    fun searchMedia(query: String): Flow<List<MediaItemEntity>> = mediaDao.searchMedia(query)
+    fun searchMedia(query: String): Flow<List<MediaItemEntity>> = mediaDao.searchMedia(query).distinctUntilChanged()
 
-    fun getVisibleCategories(): Flow<List<CategoryEntity>> = categoryDao.getVisibleCategories()
+    fun getVisibleCategories(): Flow<List<CategoryEntity>> = categoryDao.getVisibleCategories().distinctUntilChanged()
 
     suspend fun insertMedia(item: MediaItemEntity): Long = mediaDao.insertMedia(item)
 

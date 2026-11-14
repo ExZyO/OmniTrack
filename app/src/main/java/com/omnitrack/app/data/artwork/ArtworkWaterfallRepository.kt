@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
 
 class ArtworkWaterfallRepository(
     private val preferenceManager: PreferenceManager? = null,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.sharedClient.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .addInterceptor { chain ->

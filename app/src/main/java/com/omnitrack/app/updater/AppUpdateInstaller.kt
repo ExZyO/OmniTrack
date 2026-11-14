@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 
 object AppUpdateInstaller {
 
-    private val client = OkHttpClient.Builder()
+    private val client = com.omnitrack.app.data.network.NetworkClient.sharedClient.newBuilder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
