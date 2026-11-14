@@ -1703,6 +1703,7 @@ private fun YearTrendlineChart(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GenreRadarChart(
     entries: List<UserStatEntry>,
