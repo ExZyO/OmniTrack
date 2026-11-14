@@ -123,11 +123,11 @@ fun MediaCard(
     // CONTRACT: Manual customBannerPath / customCoverPath strictly takes top priority
     val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.customCoverPath, item.coverUrl, customPosterUrl, customPosterFailed) {
         if (isLandscape) {
-            item.customBannerPath?.let { java.io.File(it) }
+            item.customBannerPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
                 else (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
         } else {
-            item.customCoverPath?.let { java.io.File(it) }
+            item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
                 else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
         }

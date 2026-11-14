@@ -57,7 +57,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+
+sealed class DetailSheetTarget {
+    data class UserProfile(val username: String?, val userId: Int?) : DetailSheetTarget()
+    data class AnimeCharacter(val character: AnimeCharacterItem) : DetailSheetTarget()
+    data class AnimeStaff(val staff: AnimeStaffItem) : DetailSheetTarget()
+    data class Person(val person: CastMember) : DetailSheetTarget()
+    data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
+}
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -176,13 +185,7 @@ fun DetailScreen(
     var showStatusPickerSheet by remember { mutableStateOf(false) }
     var showScoreRatingSheet by remember { mutableStateOf(false) }
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
-    var selectedPerson by remember { mutableStateOf<CastMember?>(null) }
-    var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
-    var selectedAnimeCharacter by remember { mutableStateOf<AnimeCharacterItem?>(null) }
-    var selectedAnimeStaff by remember { mutableStateOf<AnimeStaffItem?>(null) }
-    var showUserProfileSheet by remember { mutableStateOf(false) }
-    var activeProfileUsername by remember { mutableStateOf<String?>(null) }
-    var activeProfileUserId by remember { mutableStateOf<Int?>(null) }
+    val sheetBackStack = remember { mutableStateListOf<DetailSheetTarget>() }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
@@ -195,112 +198,95 @@ fun DetailScreen(
         }
     }
 
-    val isAnySheetOpen = selectedPerson != null ||
-        selectedCompany != null ||
-        selectedAnimeCharacter != null ||
-        selectedAnimeStaff != null ||
-        showUserProfileSheet
-
-    BackHandler(enabled = isAnySheetOpen || uiState.isPreviewMode) {
-        when {
-            showUserProfileSheet -> {
-                showUserProfileSheet = false
-                activeProfileUsername = null
-                activeProfileUserId = null
-            }
-            selectedPerson != null -> selectedPerson = null
-            selectedCompany != null -> selectedCompany = null
-            selectedAnimeCharacter != null -> selectedAnimeCharacter = null
-            selectedAnimeStaff != null -> selectedAnimeStaff = null
-            else -> {
-                if (!viewModel.closePreview()) {
-                    onBack()
-                }
+    BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
+        if (sheetBackStack.isNotEmpty()) {
+            sheetBackStack.removeAt(sheetBackStack.lastIndex)
+        } else {
+            if (!viewModel.closePreview()) {
+                onBack()
             }
         }
     }
 
-    if (showUserProfileSheet && (activeProfileUsername != null || activeProfileUserId != null)) {
-        UserProfileSheet(
-            username = activeProfileUsername,
-            anilistUserId = activeProfileUserId,
-            userAuthToken = uiState.anilistAuthToken,
-            currentUsername = uiState.currentUsername,
-            onOpenMediaPreview = { recItem ->
-                showUserProfileSheet = false
-                viewModel.openPreview(recItem)
-            },
-            onOpenCharacter = { charItem ->
-                showUserProfileSheet = false
-                selectedAnimeCharacter = charItem
-            },
-            onOpenStaff = { staffItem ->
-                showUserProfileSheet = false
-                selectedAnimeStaff = staffItem
-            },
-            onDismiss = {
-                showUserProfileSheet = false
-                activeProfileUsername = null
-                activeProfileUserId = null
-            }
-        )
-    }
-
-    if (selectedAnimeCharacter != null) {
-        AnimeCharacterSheet(
-            character = selectedAnimeCharacter,
-            onDismissRequest = { selectedAnimeCharacter = null },
-            onOpenMediaPreview = { recItem ->
-                selectedAnimeCharacter = null
-                viewModel.openPreview(recItem)
-            }
-        )
-    }
-
-    if (selectedAnimeStaff != null) {
-        AnimeStaffSheet(
-            staff = selectedAnimeStaff,
-            onDismissRequest = { selectedAnimeStaff = null },
-            onOpenMediaPreview = { recItem ->
-                selectedAnimeStaff = null
-                viewModel.openPreview(recItem)
-            }
-        )
-    }
-
-    if (selectedPerson != null && selectedPerson!!.tmdbPersonId != null) {
-        val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
-        PersonDetailScreen(
-            personId = selectedPerson!!.tmdbPersonId!!,
-            personName = selectedPerson!!.name,
-            initialAvatarUrl = selectedPerson!!.avatarUrl,
-            apiKey = tmdbKey,
-            onBack = { selectedPerson = null },
-            onOpenMediaPreview = { recItem ->
-                selectedPerson = null
-                viewModel.openPreview(recItem)
-            }
-        )
-        return
-    }
-
-    if (selectedCompany != null) {
-        val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
-        TmdbEntityBrowseScreen(
-            entityId = selectedCompany!!.id,
-            entityName = selectedCompany!!.name,
-            entityKind = selectedCompany!!.kind,
-            apiKey = tmdbKey,
-            onBack = { selectedCompany = null },
-            onOpenMediaPreview = { recItem ->
-                selectedCompany = null
-                viewModel.openPreview(recItem)
-            }
-        )
-        return
-    }
-
     val scrollState = rememberScrollState()
+
+    val currentSheet = sheetBackStack.lastOrNull()
+    when (currentSheet) {
+        is DetailSheetTarget.UserProfile -> {
+            UserProfileSheet(
+                username = currentSheet.username,
+                anilistUserId = currentSheet.userId,
+                userAuthToken = uiState.anilistAuthToken,
+                currentUsername = uiState.currentUsername,
+                onOpenMediaPreview = { recItem ->
+                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.openPreview(recItem)
+                },
+                onOpenCharacter = { charItem ->
+                    sheetBackStack.add(DetailSheetTarget.AnimeCharacter(charItem))
+                },
+                onOpenStaff = { staffItem ->
+                    sheetBackStack.add(DetailSheetTarget.AnimeStaff(staffItem))
+                },
+                onDismiss = {
+                    sheetBackStack.removeLastOrNull()
+                }
+            )
+        }
+        is DetailSheetTarget.AnimeCharacter -> {
+            AnimeCharacterSheet(
+                character = currentSheet.character,
+                onDismissRequest = { sheetBackStack.removeLastOrNull() },
+                onOpenMediaPreview = { recItem ->
+                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.openPreview(recItem)
+                }
+            )
+        }
+        is DetailSheetTarget.AnimeStaff -> {
+            AnimeStaffSheet(
+                staff = currentSheet.staff,
+                onDismissRequest = { sheetBackStack.removeLastOrNull() },
+                onOpenMediaPreview = { recItem ->
+                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.openPreview(recItem)
+                }
+            )
+        }
+        is DetailSheetTarget.Person -> {
+            if (currentSheet.person.tmdbPersonId != null) {
+                val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+                PersonDetailScreen(
+                    personId = currentSheet.person.tmdbPersonId!!,
+                    personName = currentSheet.person.name,
+                    initialAvatarUrl = currentSheet.person.avatarUrl,
+                    apiKey = tmdbKey,
+                    onBack = { sheetBackStack.removeLastOrNull() },
+                    onOpenMediaPreview = { recItem ->
+                        viewModel.saveScrollOffset(scrollState.value)
+                        viewModel.openPreview(recItem)
+                    }
+                )
+                return
+            }
+        }
+        is DetailSheetTarget.Company -> {
+            val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+            TmdbEntityBrowseScreen(
+                entityId = currentSheet.company.id,
+                entityName = currentSheet.company.name,
+                entityKind = currentSheet.company.kind,
+                apiKey = tmdbKey,
+                onBack = { sheetBackStack.removeLastOrNull() },
+                onOpenMediaPreview = { recItem ->
+                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.openPreview(recItem)
+                }
+            )
+            return
+        }
+        null -> {}
+    }
 
     // Kinematic horizontal & vertical swipe physics (bilateral entry switching & Poweramp pull-down to dismiss)
     val animatableOffsetX = remember { Animatable(0f) }
@@ -368,7 +354,12 @@ fun DetailScreen(
     LaunchedEffect(item?.id) {
         animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
-        scrollState.scrollTo(0)
+        val restoredOffset = viewModel.popScrollOffset()
+        if (restoredOffset != null) {
+            scrollState.scrollTo(restoredOffset)
+        } else if (!uiState.isPreviewMode) {
+            scrollState.scrollTo(0)
+        }
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
         }
@@ -553,7 +544,8 @@ fun DetailScreen(
 
             val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
             val coverImageModel = remember(effectiveCover, item.customCoverPath) {
-                item.customCoverPath?.let { java.io.File(it) } ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
+                item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
+                    ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
             }
 
             val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
@@ -699,6 +691,7 @@ fun DetailScreen(
                                 DetailFranchiseSection(
                                     relations = uiState.animeRelations,
                                     onRelationClick = { relation ->
+                                        viewModel.saveScrollOffset(scrollState.value)
                                         viewModel.openRelationPreview(relation)
                                     }
                                 )
@@ -712,15 +705,19 @@ fun DetailScreen(
                                         DetailAnimeCastSection(
                                             characters = uiState.animeCharacters,
                                             onCharacterClick = { character ->
-                                                selectedAnimeCharacter = character
+                                                sheetBackStack.add(DetailSheetTarget.AnimeCharacter(character))
                                             },
                                             onVoiceActorClick = { char ->
                                                 if (char.voiceActorId != null) {
-                                                    selectedAnimeStaff = AnimeStaffItem(
-                                                        staffId = char.voiceActorId,
-                                                        name = char.voiceActorName ?: "Voice Actor",
-                                                        role = "Voice Actor",
-                                                        imageUrl = char.voiceActorImageUrl
+                                                    sheetBackStack.add(
+                                                        DetailSheetTarget.AnimeStaff(
+                                                            AnimeStaffItem(
+                                                                staffId = char.voiceActorId,
+                                                                name = char.voiceActorName ?: "Voice Actor",
+                                                                role = "Voice Actor",
+                                                                imageUrl = char.voiceActorImageUrl
+                                                            )
+                                                        )
                                                     )
                                                 }
                                             }
@@ -733,7 +730,7 @@ fun DetailScreen(
                                         DetailAnimeStaffSection(
                                             staff = uiState.animeStaff,
                                             onStaffClick = { staff ->
-                                                selectedAnimeStaff = staff
+                                                sheetBackStack.add(DetailSheetTarget.AnimeStaff(staff))
                                             }
                                         )
                                     }
@@ -744,7 +741,7 @@ fun DetailScreen(
                                     DetailCastSection(
                                         cast = uiState.cast,
                                         onCastMemberClick = { member ->
-                                            selectedPerson = member
+                                            sheetBackStack.add(DetailSheetTarget.Person(member))
                                         }
                                     )
                                     Spacer(modifier = Modifier.height(20.dp))
@@ -757,7 +754,7 @@ fun DetailScreen(
                                     item = item,
                                     companies = uiState.companies,
                                     onCompanyClick = { company ->
-                                        selectedCompany = company
+                                        sheetBackStack.add(DetailSheetTarget.Company(company))
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -769,11 +766,15 @@ fun DetailScreen(
                                     item = item,
                                     tags = uiState.tags,
                                     onGenreOrTagClick = { name, isTag ->
-                                        selectedCompany = NetworkProductionCompany(
-                                            id = null,
-                                            name = name,
-                                            logoUrl = null,
-                                            kind = if (isTag) "anime_tag" else "anime_genre"
+                                        sheetBackStack.add(
+                                            DetailSheetTarget.Company(
+                                                NetworkProductionCompany(
+                                                    id = null,
+                                                    name = name,
+                                                    logoUrl = null,
+                                                    kind = if (isTag) "anime_tag" else "anime_genre"
+                                                )
+                                            )
                                         )
                                     }
                                 )
@@ -823,8 +824,9 @@ fun DetailScreen(
                                     seasons = uiState.realSeasons,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
                                     currentUsername = uiState.currentUsername,
-                                    hasAniList = (item.anilistId != null || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA),
+                                    hasAniList = ((item.anilistId != null && item.anilistId > 0) || (uiState.item?.anilistId != null && (uiState.item?.anilistId ?: 0) > 0)),
                                     onSeasonSelect = { viewModel.selectSeason(it) },
+                                    onTagSelect = { tag -> viewModel.selectDiscussionTag(tag) },
                                     onPostComment = { content, tag, parentId ->
                                         viewModel.postDiscussionComment(content, tag, parentId)
                                     },
@@ -838,9 +840,7 @@ fun DetailScreen(
                                         viewModel.voteDiscussionComment(commentId, voteType)
                                     },
                                     onUserClick = { username, anilistUserId ->
-                                        activeProfileUsername = username
-                                        activeProfileUserId = anilistUserId
-                                        showUserProfileSheet = true
+                                        sheetBackStack.add(DetailSheetTarget.UserProfile(username, anilistUserId))
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -851,7 +851,10 @@ fun DetailScreen(
                                 DetailCollectionSection(
                                     collectionName = uiState.collectionName ?: "Collection",
                                     items = uiState.collectionItems,
-                                    onSelectItem = { viewModel.openPreview(it) }
+                                    onSelectItem = {
+                                        viewModel.saveScrollOffset(scrollState.value)
+                                        viewModel.openPreview(it)
+                                    }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -860,7 +863,10 @@ fun DetailScreen(
                             if (deferredSectionsAllowed && uiState.recommendations.isNotEmpty()) {
                                 RecommendationsSection(
                                     recommendations = uiState.recommendations,
-                                    onSelectRecommendation = { viewModel.openPreview(it) }
+                                    onSelectRecommendation = {
+                                        viewModel.saveScrollOffset(scrollState.value)
+                                        viewModel.openPreview(it)
+                                    }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -1048,7 +1054,7 @@ fun DetailScreen(
                     currentRole = item.artworkRole,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
-                        if (newUrl.startsWith("/") || newUrl.startsWith("file:")) {
+                        if (newUrl.startsWith("/") || newUrl.startsWith("file:") || newUrl.startsWith("content:")) {
                             viewModel.updateCustomCoverPath(newUrl, context)
                         } else {
                             viewModel.updateCover(newUrl)

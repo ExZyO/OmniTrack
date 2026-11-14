@@ -141,7 +141,7 @@ class DantotsuCommentsRepository(
                 val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
                 val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                 val content = if (isDeleted) "[deleted]" else rawContent
-                val tagNum = c["tag"]?.jsonPrimitive?.intOrNull
+                val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val tagStr = when {
                     tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
                     tagNum == 0 -> "General"
@@ -222,7 +222,7 @@ class DantotsuCommentsRepository(
                 val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
                 val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                 val content = if (isDeleted) "[deleted]" else rawContent
-                val tagNum = c["tag"]?.jsonPrimitive?.intOrNull
+                val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val tagStr = when {
                     tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
                     tagNum == 0 -> "General"

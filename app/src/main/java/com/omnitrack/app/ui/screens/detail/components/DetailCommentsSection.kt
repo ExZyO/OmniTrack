@@ -154,6 +154,7 @@ fun DetailCommentsSection(
     onDeleteComment: ((commentId: String) -> Unit)? = null,
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
+    onTagSelect: ((Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -201,8 +202,8 @@ fun DetailCommentsSection(
             }
         }
         when (sortOrder) {
-            CommentSortOrder.NEWEST -> byTag.reversed() // Invert chronological to show newest at top
-            CommentSortOrder.OLDEST -> byTag // Chronological order
+            CommentSortOrder.NEWEST -> byTag // API arrives with newest first
+            CommentSortOrder.OLDEST -> byTag.reversed() // Invert to show oldest first
             CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
             CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
         }
@@ -399,6 +400,12 @@ fun DetailCommentsSection(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = tag
+                                val tagNum = when {
+                                    tag == "All" -> null
+                                    tag == "General" -> 0
+                                    else -> tag.replace(Regex("[^0-9]"), "").toIntOrNull()
+                                }
+                                onTagSelect?.invoke(tagNum)
                             }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {

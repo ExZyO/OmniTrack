@@ -37,12 +37,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -52,12 +55,13 @@ import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.GlassBorder
 
 /**
- * Rich Content Block for Dantotsu & AniList Threaded Comments.
+ * Rich Content Block for Dantotsu & AniList Threaded Comments and Bios.
  * Formats:
- * - Images and animated GIFs: img(url), ![alt](url), or raw image URLs (.gif, .png, .jpg, .webp, tenor, giphy)
+ * - Images and animated GIFs: img(url), img300(url), ![alt](url), <img src="url">, or raw image URLs (.gif, .png, .jpg, .webp, tenor, giphy)
  * - Clickable Spoilers: ~!hidden text/media!~ and [spoiler]...[/spoiler]
  * - Quotes: lines starting with >
- * - Markdown: **bold**, *italic*, ~~strikethrough~~, `code`, @mentions, and [links](url)
+ * - Clickable Markdown links: [label](url) and bare URLs https://...
+ * - Styling: **bold**, *italic*, ~~strikethrough~~, `code`, and @mentions
  */
 sealed class CommentBlock {
     data class Text(val text: AnnotatedString) : CommentBlock()
@@ -74,7 +78,7 @@ fun CommentRichContent(
     val blocks = remember(content) { parseCommentContent(content) }
 
     Column(
-        modifier = modifier,
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         blocks.forEach { block ->
@@ -85,7 +89,7 @@ fun CommentRichContent(
                             text = block.text,
                             color = Color.White,
                             fontSize = 13.5.sp,
-                            lineHeight = 19.sp
+                            lineHeight = 19.5.sp
                         )
                     }
                 }
@@ -106,17 +110,32 @@ fun CommentRichContent(
 @Composable
 private fun CommentMediaBlock(url: String) {
     val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context)
-            .data(url)
-            .crossfade(true)
-            .build(),
-        contentDescription = "Comment attachment",
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .heightIn(max = 240.dp),
-        contentScale = ContentScale.Fit
-    )
+    var isError by remember { mutableStateOf(false) }
+
+    if (!isError) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = 0.04f))
+                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(url)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = "Attachment",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 140.dp, max = 320.dp),
+                contentScale = ContentScale.Fit,
+                onError = { isError = true }
+            )
+        }
+    }
 }
 
 @Composable
@@ -125,7 +144,7 @@ private fun CommentSpoilerBlock(spoilerContent: String) {
 
     Column(
         modifier = Modifier
-            .fillMaxWidth(0.95f)
+            .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(if (isRevealed) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.08f))
             .border(
@@ -185,7 +204,7 @@ private fun CommentQuoteBlock(quoteText: String) {
         )
         Text(
             text = quoteText,
-            color = Color.White.copy(alpha = 0.82f),
+            color = Color.White.copy(alpha = 0.85f),
             fontSize = 13.sp,
             fontStyle = FontStyle.Italic,
             lineHeight = 18.sp
@@ -194,101 +213,57 @@ private fun CommentQuoteBlock(quoteText: String) {
 }
 
 /**
- * Tokenizes AniList & Dantotsu comments into media, spoilers, quotes, and markdown spans.
+ * Tokenizes AniList & Dantotsu comments into media, spoilers, quotes, and rich markdown text.
  */
 private fun parseCommentContent(raw: String): List<CommentBlock> {
     if (raw.isBlank()) return emptyList()
 
     val blocks = mutableListOf<CommentBlock>()
-    var remaining = raw.trim()
-
-    // Regular expressions for AniList/Dantotsu syntax
-    // img(...) or img200(...) or img(200)(...)
-    val imgRegex = Regex("""(?i)img(?:\(\d+\)|\d+)?\((https?://[^\s\)]+)\)""")
-    // Markdown image: ![alt](url)
-    val mdImgRegex = Regex("""!\[.*?\]\((https?://[^\s\)]+)\)""")
-    // AniList spoiler: ~!...text...!~ or [spoiler]...[/spoiler]
-    val spoilerRegex = Regex("""(?s)~!(.*?)!~|\[spoiler\](.*?)\[/spoiler\]""")
-
-    // Split by lines to check for quotes or standalone media URLs
-    val lines = remaining.split("\n")
+    val lines = raw.trim().split("\n")
     val textBuffer = StringBuilder()
 
     fun flushText() {
         if (textBuffer.isNotBlank()) {
-            val parsedSpans = parseMarkdownSpans(textBuffer.toString().trim())
-            blocks.add(CommentBlock.Text(parsedSpans))
+            val content = textBuffer.toString().trim()
+            val fragmented = fragmentInlineBlocks(content)
+            blocks.addAll(fragmented)
             textBuffer.clear()
         }
     }
 
     for (line in lines) {
-        val trimmedLine = line.trim()
+        val trimmed = line.trim()
 
         // 1. Check for Quote
-        if (trimmedLine.startsWith(">")) {
+        if (trimmed.startsWith(">")) {
             flushText()
-            val quoteContent = trimmedLine.removePrefix(">").trim()
+            val quoteContent = trimmed.removePrefix(">").trim()
             blocks.add(CommentBlock.Quote(quoteContent))
             continue
         }
 
-        // 2. Check for Standalone Image / GIF URL on its own line
-        val isDirectMediaUrl = trimmedLine.matches(
-            Regex("""(?i)https?://[^\s]+(?:\.(?:gif|png|jpg|jpeg|webp)|tenor\.com/[^\s]+|giphy\.com/[^\s]+)(?:\?[^\s]*)?""")
+        // 2. Direct media link on its own line
+        val isDirectMedia = trimmed.matches(
+            Regex("""(?i)^https?://[^\s]+(?:\.(?:gif|png|jpg|jpeg|webp)|tenor\.com/[^\s]+|giphy\.com/[^\s]+)(?:\?[^\s]*)?$""")
         )
-        if (isDirectMediaUrl) {
+        if (isDirectMedia) {
             flushText()
-            blocks.add(CommentBlock.Media(trimmedLine))
+            blocks.add(CommentBlock.Media(trimmed))
             continue
         }
 
-        // 3. Check for img(...) or ![...](...) tag on line
-        val imgMatch = imgRegex.find(trimmedLine) ?: mdImgRegex.find(trimmedLine)
-        if (imgMatch != null && trimmedLine == imgMatch.value.trim()) {
-            flushText()
-            val url = imgMatch.groupValues[1]
-            blocks.add(CommentBlock.Media(url))
-            continue
-        }
-
-        // 4. Check for full-line Spoiler ~!...text...!~
-        val spoilerMatch = spoilerRegex.find(trimmedLine)
-        if (spoilerMatch != null && trimmedLine == spoilerMatch.value.trim()) {
-            flushText()
-            val spoilerBody = spoilerMatch.groupValues[1].ifEmpty { spoilerMatch.groupValues[2] }
-            blocks.add(CommentBlock.Spoiler(spoilerBody))
-            continue
-        }
-
-        // Otherwise append to text buffer
         textBuffer.appendLine(line)
     }
 
     flushText()
-
-    // If textBuffer had embedded img() or spoiler tags inside a multiline block, parse them
-    val finalBlocks = mutableListOf<CommentBlock>()
-    for (b in blocks) {
-        if (b is CommentBlock.Text) {
-            val textStr = b.text.text
-            if (imgRegex.containsMatchIn(textStr) || spoilerRegex.containsMatchIn(textStr)) {
-                // Fragment further
-                finalBlocks.addAll(fragmentInlineBlocks(textStr))
-            } else {
-                finalBlocks.add(b)
-            }
-        } else {
-            finalBlocks.add(b)
-        }
-    }
-
-    return finalBlocks.ifEmpty { listOf(CommentBlock.Text(parseMarkdownSpans(raw))) }
+    return blocks.ifEmpty { listOf(CommentBlock.Text(parseMarkdownSpans(raw))) }
 }
 
 private fun fragmentInlineBlocks(text: String): List<CommentBlock> {
     val result = mutableListOf<CommentBlock>()
-    val pattern = Regex("""(?s)(?i)img(?:\(\d+\)|\d+)?\((https?://[^\s\)]+)\)|!\[.*?\]\((https?://[^\s\)]+)\)|~!(.*?)!~|\[spoiler\](.*?)\[/spoiler\]""")
+    val pattern = Regex(
+        """(?is)(?:img(?:\(\d+\)|\d+)?\((https?://[^\s\)]+)\)|!\[.*?\]\((https?://[^\s\)]+)\)|<img\s+[^>]*src=["'](https?://[^"']+)["'][^>]*>|~!(.*?)!~|\[spoiler\](.*?)\[/spoiler\])"""
+    )
     var lastIndex = 0
 
     for (match in pattern.findAll(text)) {
@@ -299,8 +274,8 @@ private fun fragmentInlineBlocks(text: String): List<CommentBlock> {
             }
         }
 
-        val mediaUrl = match.groupValues[1].ifEmpty { match.groupValues[2] }
-        val spoilerContent = match.groupValues[3].ifEmpty { match.groupValues[4] }
+        val mediaUrl = match.groupValues[1].ifEmpty { match.groupValues[2] }.ifEmpty { match.groupValues[3] }
+        val spoilerContent = match.groupValues[4].ifEmpty { match.groupValues[5] }
 
         if (mediaUrl.isNotEmpty()) {
             result.add(CommentBlock.Media(mediaUrl))
@@ -322,15 +297,24 @@ private fun fragmentInlineBlocks(text: String): List<CommentBlock> {
 }
 
 /**
- * Parses Markdown bold (**), italic (*), strikethrough (~~), code (`), and @mentions into an AnnotatedString.
+ * Parses Markdown bold (**), italic (*), strikethrough (~~), code (`), @mentions, and clickable links into an AnnotatedString.
  */
 private fun parseMarkdownSpans(raw: String): AnnotatedString {
     return buildAnnotatedString {
         var cursor = 0
-        val tokenRegex = Regex("""(\*\*|__)(.*?)\1|(\*|_)(.*?)\3|(~~)(.*?)\5|(`)(.*?)\7|(@\w+)|\[(.*?)\]\((https?://[^\s\)]+)\)""")
+        // Match:
+        // 1 & 2: **bold** or __bold__
+        // 3 & 4: *italic* or _italic_
+        // 5 & 6: ~~strike~~
+        // 7 & 8: `code`
+        // 9: @mention
+        // 10 & 11: [link](url)
+        // 12: bare url (http:// or https://)
+        val tokenRegex = Regex(
+            """(\*\*|__)(.*?)\1|(\*|_)(.*?)\3|(~~)(.*?)\5|(`)(.*?)\7|(@\w+)|\[(.*?)\]\((https?://[^\s\)]+)\)|(https?://[^\s\)]+)"""
+        )
 
         for (match in tokenRegex.findAll(raw)) {
-            // Append plain text before match
             if (match.range.first > cursor) {
                 append(raw.substring(cursor, match.range.first))
             }
@@ -340,7 +324,7 @@ private fun parseMarkdownSpans(raw: String): AnnotatedString {
                 match.groupValues[2].isNotEmpty() -> {
                     val start = length
                     append(match.groupValues[2])
-                    addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
+                    addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color.White), start, length)
                 }
                 // Italic: *text* or _text_
                 match.groupValues[4].isNotEmpty() -> {
@@ -352,7 +336,14 @@ private fun parseMarkdownSpans(raw: String): AnnotatedString {
                 match.groupValues[6].isNotEmpty() -> {
                     val start = length
                     append(match.groupValues[6])
-                    addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough, color = Color.White.copy(alpha = 0.6f)), start, length)
+                    addStyle(
+                        SpanStyle(
+                            textDecoration = TextDecoration.LineThrough,
+                            color = Color.White.copy(alpha = 0.6f)
+                        ),
+                        start,
+                        length
+                    )
                 }
                 // Code: `code`
                 match.groupValues[8].isNotEmpty() -> {
@@ -361,7 +352,7 @@ private fun parseMarkdownSpans(raw: String): AnnotatedString {
                     addStyle(
                         SpanStyle(
                             fontFamily = FontFamily.Monospace,
-                            background = Color.White.copy(alpha = 0.1f),
+                            background = Color.White.copy(alpha = 0.12f),
                             fontSize = 12.5.sp
                         ),
                         start,
@@ -381,25 +372,47 @@ private fun parseMarkdownSpans(raw: String): AnnotatedString {
                         length
                     )
                 }
-                // Markdown Link: [text](url)
+                // Markdown Link: [text](url) -> Clickable!
                 match.groupValues[10].isNotEmpty() -> {
-                    val start = length
-                    append(match.groupValues[10])
-                    addStyle(
-                        SpanStyle(
-                            color = AccentArctic,
-                            textDecoration = TextDecoration.Underline
-                        ),
-                        start,
-                        length
-                    )
+                    val label = match.groupValues[10]
+                    val url = match.groupValues[11]
+                    withLink(
+                        LinkAnnotation.Url(
+                            url = url,
+                            styles = TextLinkStyles(
+                                style = SpanStyle(
+                                    color = AccentArctic,
+                                    textDecoration = TextDecoration.Underline,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            )
+                        )
+                    ) {
+                        append(label)
+                    }
+                }
+                // Bare URL: https://... -> Clickable!
+                match.groupValues[12].isNotEmpty() -> {
+                    val url = match.groupValues[12]
+                    withLink(
+                        LinkAnnotation.Url(
+                            url = url,
+                            styles = TextLinkStyles(
+                                style = SpanStyle(
+                                    color = AccentArctic,
+                                    textDecoration = TextDecoration.Underline
+                                )
+                            )
+                        )
+                    ) {
+                        append(url)
+                    }
                 }
             }
 
             cursor = match.range.last + 1
         }
 
-        // Append trailing plain text
         if (cursor < raw.length) {
             append(raw.substring(cursor))
         }

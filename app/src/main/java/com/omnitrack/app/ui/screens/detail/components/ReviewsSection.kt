@@ -303,6 +303,7 @@ fun UnifiedDiscussionSection(
     onDeleteComment: ((commentId: String) -> Unit)? = null,
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
+    onTagSelect: ((Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Comments/Reviews (Default), 1: Discussion
@@ -319,12 +320,9 @@ fun UnifiedDiscussionSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            val isTrakt = reviews.any { it.source.contains("Trakt", ignoreCase = true) }
             val commentsLabel = when {
-                reviews.isNotEmpty() && isTrakt -> "Comments (${reviews.size})"
-                reviews.isNotEmpty() -> "Reviews (${reviews.size})"
-                isTrakt -> "Comments"
-                else -> "Reviews"
+                reviews.isNotEmpty() -> "Comments (${reviews.size})"
+                else -> "Comments"
             }
 
             // Tab 0: Comments / Reviews (Left, Default)
@@ -368,7 +366,8 @@ fun UnifiedDiscussionSection(
                 onEditComment = onEditComment,
                 onDeleteComment = onDeleteComment,
                 onVote = onVote,
-                onUserClick = onUserClick
+                onUserClick = onUserClick,
+                onTagSelect = onTagSelect
             )
         }
     }

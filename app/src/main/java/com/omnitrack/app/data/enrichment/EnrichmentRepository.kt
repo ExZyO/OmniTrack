@@ -17,6 +17,10 @@ import com.omnitrack.app.data.model.UserProfileData
 import com.omnitrack.app.data.model.UserFavoriteMedia
 import com.omnitrack.app.data.model.UserFavoriteCharacter
 import com.omnitrack.app.data.model.UserFavoriteStaff
+import com.omnitrack.app.data.model.UserActivityDay
+import com.omnitrack.app.data.model.UserStatSet
+import com.omnitrack.app.data.model.UserStatEntry
+import com.omnitrack.app.data.model.UserMediaListItem
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
@@ -2187,33 +2191,48 @@ class EnrichmentRepository(
                 bannerImage
                 isFollowing
                 isFollower
+                stats {
+                  activityHistory {
+                    date
+                    amount
+                    level
+                  }
+                }
                 statistics {
                   anime {
                     count
                     meanScore
+                    standardDeviation
                     minutesWatched
                     episodesWatched
-                    genres(limit: 5, sort: COUNT_DESC) {
-                      genre
-                      count
-                    }
-                    scores(limit: 10) {
-                      score
-                      count
-                    }
-                    statuses(limit: 6) {
-                      status
-                      count
-                    }
-                    formats(limit: 6) {
-                      format
-                      count
-                    }
+                    scores(limit: 30) { count meanScore minutesWatched chaptersRead score }
+                    formats(limit: 20) { count meanScore minutesWatched chaptersRead format }
+                    statuses(limit: 10) { count meanScore minutesWatched chaptersRead status }
+                    lengths(limit: 20) { count meanScore minutesWatched chaptersRead length }
+                    releaseYears(limit: 30) { count meanScore minutesWatched chaptersRead releaseYear }
+                    startYears(limit: 30) { count meanScore minutesWatched chaptersRead startYear }
+                    genres(limit: 30) { count meanScore minutesWatched chaptersRead genre }
+                    tags(limit: 30) { count meanScore minutesWatched chaptersRead tag { id name } }
+                    countries(limit: 15) { count meanScore minutesWatched chaptersRead country }
+                    voiceActors(limit: 25) { count meanScore minutesWatched chaptersRead voiceActor { id name { userPreferred full } } }
+                    staff(limit: 25) { count meanScore minutesWatched chaptersRead staff { id name { userPreferred full } } }
+                    studios(limit: 25) { count meanScore minutesWatched chaptersRead studio { id name } }
                   }
                   manga {
                     count
                     meanScore
+                    standardDeviation
                     chaptersRead
+                    volumesRead
+                    scores(limit: 30) { count meanScore minutesWatched chaptersRead score }
+                    formats(limit: 20) { count meanScore minutesWatched chaptersRead format }
+                    statuses(limit: 10) { count meanScore minutesWatched chaptersRead status }
+                    releaseYears(limit: 30) { count meanScore minutesWatched chaptersRead releaseYear }
+                    startYears(limit: 30) { count meanScore minutesWatched chaptersRead startYear }
+                    genres(limit: 30) { count meanScore minutesWatched chaptersRead genre }
+                    tags(limit: 30) { count meanScore minutesWatched chaptersRead tag { id name } }
+                    countries(limit: 15) { count meanScore minutesWatched chaptersRead country }
+                    staff(limit: 25) { count meanScore minutesWatched chaptersRead staff { id name { userPreferred full } } }
                   }
                 }
                 favourites {
@@ -2249,7 +2268,7 @@ class EnrichmentRepository(
                   }
                 }
               }
-              Page(page: 1, perPage: 20) {
+              Page(page: 1, perPage: 25) {
                 activities(userId: ${'$'}id, sort: ID_DESC) {
                   ... on ListActivity {
                     id
@@ -2529,6 +2548,19 @@ class EnrichmentRepository(
                     favStaff.add(UserFavoriteStaff(id = sId, name = sName, imageUrl = sImg))
                 }
 
+                val historyList = mutableListOf<UserActivityDay>()
+                val histArray = userObj["stats"]?.jsonObject?.get("activityHistory")?.jsonArray
+                histArray.orEmpty().forEach { hElem ->
+                    val h = hElem.jsonObject
+                    val date = h["date"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                    val amount = h["amount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    val level = h["level"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    historyList.add(UserActivityDay(dateEpochSeconds = date, amount = amount, level = level))
+                }
+
+                val animeStats = parseUserStatSet(aStats)
+                val mangaStats = parseUserStatSet(mStats)
+
                 UserProfileData(
                     userId = id,
                     username = name,
@@ -2549,6 +2581,9 @@ class EnrichmentRepository(
                     statusBreakdown = statusList,
                     formatBreakdown = formatList,
                     activities = actList,
+                    activityHistory = historyList,
+                    animeStats = animeStats,
+                    mangaStats = mangaStats,
                     favoriteAnime = favAnime,
                     favoriteManga = favManga,
                     favoriteCharacters = favChars,
@@ -2557,6 +2592,184 @@ class EnrichmentRepository(
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun parseUserStatSet(json: JsonObject?): UserStatSet {
+        if (json == null) return UserStatSet()
+        val count = json["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        val meanScore = json["meanScore"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+        val stdDev = json["standardDeviation"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+        val minutesWatched = json["minutesWatched"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        val eps = json["episodesWatched"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        val chaps = json["chaptersRead"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+        val vols = json["volumesRead"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+
+        val catMap = mutableMapOf<String, List<UserStatEntry>>()
+        val categoryKeys = listOf(
+            "scores" to "score",
+            "formats" to "format",
+            "statuses" to "status",
+            "lengths" to "length",
+            "releaseYears" to "releaseYear",
+            "startYears" to "startYear",
+            "genres" to "genre",
+            "tags" to "tag",
+            "countries" to "country",
+            "voiceActors" to "voiceActor",
+            "staff" to "staff",
+            "studios" to "studio"
+        )
+
+        for ((key, field) in categoryKeys) {
+            val array = json[key]?.jsonArray ?: continue
+            val entries = mutableListOf<UserStatEntry>()
+            for (elem in array) {
+                val obj = elem.jsonObject
+                val c = obj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val mScore = obj["meanScore"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 0.0
+                val mins = obj["minutesWatched"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val ch = obj["chaptersRead"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+
+                var label = ""
+                var id: String? = null
+                val rawVal = obj[field]
+                if (rawVal is JsonObject) {
+                    id = rawVal["id"]?.jsonPrimitive?.contentOrNull
+                    val nameObj = rawVal["name"]
+                    if (nameObj is JsonObject) {
+                        label = nameObj["userPreferred"].cleanString()
+                            ?: nameObj["full"].cleanString()
+                            ?: ""
+                    } else if (nameObj != null) {
+                        label = nameObj.cleanString() ?: ""
+                    } else {
+                        label = rawVal["name"].cleanString() ?: ""
+                    }
+                } else {
+                    label = rawVal.cleanString() ?: ""
+                }
+
+                if (label.isNotBlank()) {
+                    entries.add(
+                        UserStatEntry(
+                            id = id,
+                            label = label.replace("_", " "),
+                            count = c,
+                            meanScore = mScore,
+                            minutesWatched = mins,
+                            chaptersRead = ch
+                        )
+                    )
+                }
+            }
+            if (entries.isNotEmpty()) {
+                catMap[key] = entries
+            }
+        }
+
+        return UserStatSet(
+            count = count,
+            meanScore = meanScore,
+            standardDeviation = stdDev,
+            minutesWatched = minutesWatched,
+            episodesWatched = eps,
+            chaptersRead = chaps,
+            volumesRead = vols,
+            categories = catMap
+        )
+    }
+
+    suspend fun fetchUserMediaList(userId: Int, isAnime: Boolean): List<UserMediaListItem> = withContext(Dispatchers.IO) {
+        if (userId <= 0) return@withContext emptyList()
+        val mediaTypeStr = if (isAnime) "ANIME" else "MANGA"
+        val query = """
+            query (${'$'}userId: Int, ${'$'}type: MediaType) {
+              MediaListCollection(userId: ${'$'}userId, type: ${'$'}type) {
+                lists {
+                  status
+                  entries {
+                    id
+                    status
+                    score(format: POINT_10_DECIMAL)
+                    progress
+                    mediaId
+                    media {
+                      id
+                      title { userPreferred english romaji }
+                      coverImage { extraLarge large }
+                      format
+                      type
+                      episodes
+                      chapters
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val jsonPayload = buildJsonObject {
+            put("query", query)
+            put("variables", buildJsonObject {
+                put("userId", userId)
+                put("type", mediaTypeStr)
+            })
+        }.toString()
+
+        try {
+            val req = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "OmniTrack/1.0")
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use emptyList()
+                val body = resp.body?.string() ?: return@use emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val lists = root["data"]?.jsonObject?.get("MediaListCollection")?.jsonObject?.get("lists")?.jsonArray.orEmpty()
+                val result = mutableListOf<UserMediaListItem>()
+                for (lElem in lists) {
+                    val entries = lElem.jsonObject["entries"]?.jsonArray.orEmpty()
+                    for (eElem in entries) {
+                        val e = eElem.jsonObject
+                        val id = e["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val mediaId = e["mediaId"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val status = e["status"].cleanString() ?: "PLANNING"
+                        val score = e["score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                        val progress = e["progress"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                        val media = e["media"]?.jsonObject ?: continue
+                        val title = media["title"]?.jsonObject?.get("userPreferred").cleanString()
+                            ?: media["title"]?.jsonObject?.get("english").cleanString()
+                            ?: media["title"]?.jsonObject?.get("romaji").cleanString()
+                            ?: "Title"
+                        val cover = media["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: media["coverImage"]?.jsonObject?.get("large").cleanString()
+                            ?: ""
+                        val format = media["format"].cleanString()
+                        val eps = media["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        val chaps = media["chapters"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        result.add(
+                            UserMediaListItem(
+                                id = id,
+                                mediaId = mediaId,
+                                title = title,
+                                coverUrl = cover,
+                                status = status,
+                                score = score,
+                                progress = progress,
+                                totalProgress = if (isAnime) eps else chaps,
+                                format = format,
+                                mediaType = if (isAnime) MediaType.ANIME else MediaType.MANGA
+                            )
+                        )
+                    }
+                }
+                result.distinctBy { it.mediaId }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

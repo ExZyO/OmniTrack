@@ -179,6 +179,70 @@ class DetailViewModel(
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedKeys = mutableSetOf<String>()
+    private var discussionFetchJob: kotlinx.coroutines.Job? = null
+    private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
+    private val scrollOffsetStack = mutableListOf<Int>()
+
+    fun saveScrollOffset(offset: Int) {
+        scrollOffsetStack.add(offset)
+    }
+
+    fun popScrollOffset(): Int? {
+        return if (scrollOffsetStack.isNotEmpty()) scrollOffsetStack.removeAt(scrollOffsetStack.lastIndex) else null
+    }
+
+    fun selectDiscussionTag(tag: Int?) {
+        val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null) ?: return
+        val anilistId = currentItem.anilistId ?: return
+        loadDiscussionComments(anilistId, tag)
+    }
+
+    fun loadDiscussionComments(anilistId: Long, tag: Int? = null) {
+        if (anilistId <= 0L) {
+            _discussionComments.value = emptyList()
+            return
+        }
+        val cacheKey = "${anilistId}_${tag ?: 0}"
+        val cached = discussionCache[cacheKey]
+        if (cached != null) {
+            _discussionComments.value = cached
+            return
+        }
+
+        discussionFetchJob?.cancel()
+        discussionFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+                val isManga = currentItem?.mediaType == MediaType.MANGA || currentItem?.mediaType == MediaType.NOVEL
+                val tagPrefix = if (isManga) "Ch" else "Ep"
+
+                val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
+                if (!anilistToken.isNullOrBlank()) {
+                    dantotsuCommentsRepository.authenticate(anilistToken)
+                }
+
+                val comments = dantotsuCommentsRepository.getComments(
+                    anilistId = anilistId,
+                    tag = tag,
+                    tagPrefix = tagPrefix,
+                    sort = "newest"
+                )
+
+                val activeAniListId = _previewItem.value?.anilistId ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+                if (activeAniListId == anilistId) {
+                    if (comments.isNotEmpty()) {
+                        discussionCache[cacheKey] = comments
+                        _discussionComments.value = comments
+                    } else {
+                        discussionCache[cacheKey] = emptyList()
+                        _discussionComments.value = emptyList()
+                    }
+                }
+            } catch (_: Exception) {
+                _discussionComments.value = emptyList()
+            }
+        }
+    }
 
     private fun updateSiblings(currentId: Long) {
         val siblings = _stableSiblingIds.value.ifEmpty {
@@ -648,6 +712,7 @@ class DetailViewModel(
     )
 
     private fun resetAuxFields() {
+        discussionFetchJob?.cancel()
         _collectionName.value = null
         _collectionItems.value = emptyList()
         _realSeasons.value = emptyList()
@@ -1453,19 +1518,7 @@ class DetailViewModel(
             _collectionItems.value = fetchedCollParts
 
             if (resolvedAniListId != null) {
-                try {
-                    val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
-                    if (!anilistToken.isNullOrBlank()) {
-                        dantotsuCommentsRepository.authenticate(anilistToken)
-                    }
-                    val comments = dantotsuCommentsRepository.getComments(
-                        anilistId = resolvedAniListId,
-                        tagPrefix = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) "Ch" else "Ep"
-                    )
-                    _discussionComments.value = comments
-                } catch (_: Exception) {
-                    _discussionComments.value = emptyList()
-                }
+                loadDiscussionComments(resolvedAniListId)
             } else {
                 _discussionComments.value = emptyList()
             }
@@ -1926,18 +1979,7 @@ class DetailViewModel(
                 match?.id ?: currentAniListId
             }
 
-            try {
-                val tagPrefix = if (currentItem.mediaType == MediaType.MANGA || currentItem.mediaType == MediaType.NOVEL) "Ch" else "Ep"
-                val comments = dantotsuCommentsRepository.getComments(
-                    anilistId = targetAniListId,
-                    tagPrefix = tagPrefix
-                )
-                if (comments.isNotEmpty()) {
-                    _discussionComments.value = comments
-                } else {
-                    _discussionComments.value = createSampleDiscussionComments(currentItem.mediaType, currentItem.totalProgress?.toInt() ?: 24)
-                }
-            } catch (_: Exception) {}
+            loadDiscussionComments(targetAniListId)
         }
     }
 
@@ -2192,10 +2234,10 @@ class DetailViewModel(
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (item.id > 0) {
                 repository.updateCover(item.id, newCoverUrl)
-                repository.updateCustomCover(item.id, null)
+                repository.updateCustomCover(item.id, newCoverUrl)
             }
             if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(coverUrl = newCoverUrl, customCoverPath = null)
+                _previewItem.value = _previewItem.value?.copy(coverUrl = newCoverUrl, customCoverPath = newCoverUrl)
             }
         }
     }
@@ -2205,10 +2247,10 @@ class DetailViewModel(
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (item.id > 0) {
                 repository.updateBanner(item.id, newBannerUrl)
-                repository.updateCustomBanner(item.id, null)
+                repository.updateCustomBanner(item.id, newBannerUrl)
             }
             if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(bannerUrl = newBannerUrl, customBannerPath = null)
+                _previewItem.value = _previewItem.value?.copy(bannerUrl = newBannerUrl, customBannerPath = newBannerUrl)
             }
         }
     }

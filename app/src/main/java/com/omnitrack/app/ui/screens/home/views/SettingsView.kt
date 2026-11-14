@@ -190,7 +190,7 @@ fun SettingsView(
                 icon = Icons.Default.Tune,
                 iconTint = AccentArctic,
                 title = "Details Page Sections & Order",
-                subtitle = "Reorder sections and toggle visibility: Episodes, Cast, Franchise, Studios, Trailers",
+                subtitle = "Reorder sections and toggle visibility: Airing, Episodes, Cast, Genres & Tags, Details, Synonyms, Reviews",
                 onClick = { showDetailsPageLayoutSheet = true }
             )
         }
