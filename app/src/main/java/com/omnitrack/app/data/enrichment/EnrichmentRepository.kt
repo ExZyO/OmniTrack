@@ -1287,6 +1287,12 @@ class EnrichmentRepository(
         return if (str.equals("null", ignoreCase = true) || str.isBlank()) null else str
     }
 
+    private fun String?.cleanString(): String? {
+        if (this == null) return null
+        val trimmed = this.trim()
+        return if (trimmed.equals("null", ignoreCase = true) || trimmed.isBlank()) null else trimmed
+    }
+
     suspend fun fetchAnimeDetails(
         anilistId: Long? = null,
         malId: Long? = null,
@@ -1782,7 +1788,7 @@ class EnrichmentRepository(
                             ?: node["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
                         val banner = node["bannerImage"].cleanString()
                         val score = node["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
-                        val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull
+                        val year = node["startDate"]?.jsonObject?.get("year").cleanString()
                         val fmt = node["format"].cleanString() ?: "TV"
 
                         appearancesList.add(
@@ -1816,7 +1822,7 @@ class EnrichmentRepository(
                             ?: node["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
                         val banner = node["bannerImage"].cleanString()
                         val score = node["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
-                        val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull
+                        val year = node["startDate"]?.jsonObject?.get("year").cleanString()
                         val fmt = node["format"].cleanString() ?: "MANGA"
 
                         appearancesList.add(

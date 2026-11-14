@@ -185,20 +185,23 @@ fun DetailScreen(
         }
     }
 
-    BackHandler(enabled = selectedPerson != null) {
-        selectedPerson = null
-    }
-    BackHandler(enabled = selectedCompany != null) {
-        selectedCompany = null
-    }
-    BackHandler(enabled = selectedAnimeCharacter != null) {
-        selectedAnimeCharacter = null
-    }
-    BackHandler(enabled = selectedAnimeStaff != null) {
-        selectedAnimeStaff = null
-    }
-    BackHandler(enabled = uiState.isPreviewMode) {
-        viewModel.closePreview()
+    val isAnySheetOpen = selectedPerson != null ||
+        selectedCompany != null ||
+        selectedAnimeCharacter != null ||
+        selectedAnimeStaff != null
+
+    BackHandler(enabled = isAnySheetOpen || uiState.isPreviewMode) {
+        when {
+            selectedPerson != null -> selectedPerson = null
+            selectedCompany != null -> selectedCompany = null
+            selectedAnimeCharacter != null -> selectedAnimeCharacter = null
+            selectedAnimeStaff != null -> selectedAnimeStaff = null
+            else -> {
+                if (!viewModel.closePreview()) {
+                    onBack()
+                }
+            }
+        }
     }
 
     if (selectedAnimeCharacter != null) {

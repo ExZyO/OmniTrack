@@ -127,6 +127,12 @@ class OmniSearchRepository(
         return if (str.equals("null", ignoreCase = true) || str.isBlank()) null else str
     }
 
+    private fun String?.cleanString(): String? {
+        if (this == null) return null
+        val trimmed = this.trim()
+        return if (trimmed.equals("null", ignoreCase = true) || trimmed.isBlank()) null else trimmed
+    }
+
     private suspend fun searchAniList(
         query: String,
         isAnime: Boolean,
@@ -241,25 +247,25 @@ class OmniSearchRepository(
 
                 data.mapNotNull { item ->
                     val obj = item.jsonObject
-                    val mangaId = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val mangaId = obj["id"].cleanString() ?: return@mapNotNull null
                     val attrs = obj["attributes"]?.jsonObject ?: return@mapNotNull null
 
                     val titleMap = attrs["title"]?.jsonObject
-                    val title = titleMap?.get("en")?.jsonPrimitive?.content
-                        ?: titleMap?.values?.firstOrNull()?.jsonPrimitive?.content
+                    val title = titleMap?.get("en").cleanString()
+                        ?: titleMap?.values?.firstNotNullOfOrNull { it.cleanString() }
                         ?: return@mapNotNull null
 
                     val altTitles = attrs["altTitles"]?.jsonArray
-                    val nativeTitle = altTitles?.firstOrNull()?.jsonObject?.values?.firstOrNull()?.jsonPrimitive?.content
+                    val nativeTitle = altTitles?.firstNotNullOfOrNull { it.jsonObject.values.firstNotNullOfOrNull { v -> v.cleanString() } }
 
-                    val synopsis = cleanSynopsis(attrs["description"]?.jsonObject?.get("en")?.jsonPrimitive?.content)
-                    val year = attrs["year"]?.jsonPrimitive?.content
+                    val synopsis = cleanSynopsis(attrs["description"]?.jsonObject?.get("en").cleanString())
+                    val year = attrs["year"].cleanString()
 
                     var coverFile: String? = null
                     val relationships = obj["relationships"]?.jsonArray ?: emptyList()
                     for (rel in relationships) {
-                        if (rel.jsonObject["type"]?.jsonPrimitive?.content == "cover_art") {
-                            coverFile = rel.jsonObject["attributes"]?.jsonObject?.get("fileName")?.jsonPrimitive?.content
+                        if (rel.jsonObject["type"].cleanString() == "cover_art") {
+                            coverFile = rel.jsonObject["attributes"]?.jsonObject?.get("fileName").cleanString()
                             if (coverFile != null) break
                         }
                     }
@@ -304,21 +310,21 @@ class OmniSearchRepository(
 
                 list.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: return@mapNotNull null
-                    val nameCn = obj["name_cn"]?.jsonPrimitive?.content
-                    val nameOrig = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                    val nameCn = obj["name_cn"].cleanString()
+                    val nameOrig = obj["name"].cleanString() ?: return@mapNotNull null
                     val title = if (!nameCn.isNullOrBlank()) nameCn else nameOrig
                     val nativeTitle = if (nameCn != null && nameCn != nameOrig) nameOrig else null
 
                     val images = obj["images"]?.jsonObject
-                    val cover = images?.get("large")?.jsonPrimitive?.content
-                        ?: images?.get("common")?.jsonPrimitive?.content
+                    val cover = images?.get("large").cleanString()
+                        ?: images?.get("common").cleanString()
                         ?: return@mapNotNull null
 
-                    val summary = cleanSynopsis(obj["summary"]?.jsonPrimitive?.content)
-                    val score = obj["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.content?.toFloatOrNull()
-                    val airDate = obj["air_date"]?.jsonPrimitive?.content
-                    val year = airDate?.split("-")?.firstOrNull()
+                    val summary = cleanSynopsis(obj["summary"].cleanString())
+                    val score = obj["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val airDate = obj["air_date"].cleanString()
+                    val year = airDate?.split("-")?.firstOrNull()?.cleanString()
 
                     SearchResultItem(
                         title = title,
@@ -373,15 +379,15 @@ class OmniSearchRepository(
 
                 metas.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val title = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val rawPoster = obj["poster"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val rawBanner = obj["background"]?.jsonPrimitive?.content
+                    val title = obj["name"].cleanString() ?: return@mapNotNull null
+                    val rawPoster = obj["poster"].cleanString() ?: return@mapNotNull null
+                    val rawBanner = obj["background"].cleanString()
                     // Upgrade metahub /small/ thumbnails to /medium/ for crystal clear poster resolution
                     val poster = rawPoster.replace("/small/", "/medium/")
                     val banner = rawBanner?.replace("/small/", "/medium/")
-                    val year = obj["releaseInfo"]?.jsonPrimitive?.content ?: obj["year"]?.jsonPrimitive?.content
-                    val score = obj["imdbRating"]?.jsonPrimitive?.content?.toFloatOrNull()
-                    val desc = cleanSynopsis(obj["description"]?.jsonPrimitive?.content)
+                    val year = obj["releaseInfo"].cleanString() ?: obj["year"].cleanString()
+                    val score = obj["imdbRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val desc = cleanSynopsis(obj["description"].cleanString())
 
                     SearchResultItem(
                         title = title,
@@ -424,7 +430,7 @@ class OmniSearchRepository(
 
                 results.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val mediaTypeStr = obj["media_type"]?.jsonPrimitive?.content
+                    val mediaTypeStr = obj["media_type"].cleanString()
                     val type = when {
                         preferType != null -> preferType
                         mediaTypeStr == "tv" -> MediaType.SHOW
@@ -432,24 +438,24 @@ class OmniSearchRepository(
                         else -> MediaType.SHOW
                     }
 
-                    val title = obj["name"]?.jsonPrimitive?.content
-                        ?: obj["title"]?.jsonPrimitive?.content
+                    val title = obj["name"].cleanString()
+                        ?: obj["title"].cleanString()
                         ?: return@mapNotNull null
 
-                    val nativeTitle = obj["original_name"]?.jsonPrimitive?.content
-                        ?: obj["original_title"]?.jsonPrimitive?.content
+                    val nativeTitle = obj["original_name"].cleanString()
+                        ?: obj["original_title"].cleanString()
 
-                    val posterPath = obj["poster_path"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val backdropPath = obj["backdrop_path"]?.jsonPrimitive?.content
+                    val posterPath = obj["poster_path"].cleanString() ?: return@mapNotNull null
+                    val backdropPath = obj["backdrop_path"].cleanString()
                     val cover = "https://image.tmdb.org/t/p/original$posterPath"
                     val banner = backdropPath?.let { "https://image.tmdb.org/t/p/original$it" }
 
-                    val synopsis = cleanSynopsis(obj["overview"]?.jsonPrimitive?.content)
-                    val score = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
-                    val date = obj["first_air_date"]?.jsonPrimitive?.content
-                        ?: obj["release_date"]?.jsonPrimitive?.content
-                    val year = date?.split("-")?.firstOrNull()
-                    val tmdbId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
+                    val synopsis = cleanSynopsis(obj["overview"].cleanString())
+                    val score = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val date = obj["first_air_date"].cleanString()
+                        ?: obj["release_date"].cleanString()
+                    val year = date?.split("-")?.firstOrNull()?.cleanString()
+                    val tmdbId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
 
                     SearchResultItem(
                         title = title,
@@ -485,16 +491,16 @@ class OmniSearchRepository(
 
                 list.mapNotNull { node ->
                     val show = node.jsonObject["show"]?.jsonObject ?: return@mapNotNull null
-                    val title = show["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val title = show["name"].cleanString() ?: return@mapNotNull null
                     val image = show["image"]?.jsonObject
-                    val cover = image?.get("original")?.jsonPrimitive?.content
-                        ?: image?.get("medium")?.jsonPrimitive?.content
+                    val cover = image?.get("original").cleanString()
+                        ?: image?.get("medium").cleanString()
                         ?: return@mapNotNull null
 
-                    val summary = cleanSynopsis(show["summary"]?.jsonPrimitive?.content)
-                    val score = show["rating"]?.jsonObject?.get("average")?.jsonPrimitive?.content?.toFloatOrNull()
-                    val premiered = show["premiered"]?.jsonPrimitive?.content
-                    val year = premiered?.split("-")?.firstOrNull()
+                    val summary = cleanSynopsis(show["summary"].cleanString())
+                    val score = show["rating"]?.jsonObject?.get("average")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val premiered = show["premiered"].cleanString()
+                    val year = premiered?.split("-")?.firstOrNull()?.cleanString()
 
                     SearchResultItem(
                         title = title,
@@ -528,8 +534,8 @@ class OmniSearchRepository(
 
                 items.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val appId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: return@mapNotNull null
-                    val name = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val appId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                    val name = obj["name"].cleanString() ?: return@mapNotNull null
 
                     // High-res Steam 600x900 vertical capsule artwork
                     val cover = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg"
@@ -570,16 +576,16 @@ class OmniSearchRepository(
 
                 results.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val altTitle = obj["alttitle"]?.jsonPrimitive?.content
+                    val id = obj["id"].cleanString() ?: return@mapNotNull null
+                    val title = obj["title"].cleanString() ?: return@mapNotNull null
+                    val altTitle = obj["alttitle"].cleanString()
                     val imageObj = obj["image"]?.jsonObject
-                    val cover = imageObj?.get("url")?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val cover = imageObj?.get("url").cleanString() ?: return@mapNotNull null
                     val screenshots = obj["screenshots"]?.jsonArray
-                    val firstScreenshot = screenshots?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content
+                    val firstScreenshot = screenshots?.firstOrNull()?.jsonObject?.get("url").cleanString()
 
-                    val rating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it / 10f }
-                    val desc = cleanSynopsis(obj["description"]?.jsonPrimitive?.content?.replace(Regex("\\[[^\\]]*\\]"), ""))
+                    val rating = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                    val desc = cleanSynopsis(obj["description"].cleanString()?.replace(Regex("\\[[^\\]]*\\]"), ""))
 
                     SearchResultItem(
                         title = title,
@@ -813,19 +819,19 @@ class OmniSearchRepository(
 
                 items.mapNotNull { item ->
                     val volumeInfo = item.jsonObject["volumeInfo"]?.jsonObject ?: return@mapNotNull null
-                    val title = volumeInfo["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val authors = volumeInfo["authors"]?.jsonArray?.mapNotNull { it.jsonPrimitive.content }?.joinToString(", ")
-                    val desc = cleanSynopsis(volumeInfo["description"]?.jsonPrimitive?.content)
-                    val date = volumeInfo["publishedDate"]?.jsonPrimitive?.content
-                    val year = date?.split("-")?.firstOrNull()
-                    val pages = volumeInfo["pageCount"]?.jsonPrimitive?.content?.toDoubleOrNull()
-                    val score = volumeInfo["averageRating"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it * 2f }
+                    val title = volumeInfo["title"].cleanString() ?: return@mapNotNull null
+                    val authors = volumeInfo["authors"]?.jsonArray?.mapNotNull { it.cleanString() }?.joinToString(", ")
+                    val desc = cleanSynopsis(volumeInfo["description"].cleanString())
+                    val date = volumeInfo["publishedDate"].cleanString()
+                    val year = date?.split("-")?.firstOrNull()?.cleanString()
+                    val pages = volumeInfo["pageCount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val score = volumeInfo["averageRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it * 2f }
 
                     val imageLinks = volumeInfo["imageLinks"]?.jsonObject
-                    val thumb = imageLinks?.get("extraLarge")?.jsonPrimitive?.content
-                        ?: imageLinks?.get("large")?.jsonPrimitive?.content
-                        ?: imageLinks?.get("medium")?.jsonPrimitive?.content
-                        ?: imageLinks?.get("thumbnail")?.jsonPrimitive?.content
+                    val thumb = imageLinks?.get("extraLarge").cleanString()
+                        ?: imageLinks?.get("large").cleanString()
+                        ?: imageLinks?.get("medium").cleanString()
+                        ?: imageLinks?.get("thumbnail").cleanString()
                         ?: return@mapNotNull null
 
                     val highRes = thumb.replace("http://", "https://").replace(Regex("&zoom=[1-5]"), "&zoom=0")
@@ -860,12 +866,12 @@ class OmniSearchRepository(
 
                 docs.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val coverId = obj["cover_i"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val title = obj["title"].cleanString() ?: return@mapNotNull null
+                    val coverId = obj["cover_i"].cleanString() ?: return@mapNotNull null
                     val coverUrl = "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
-                    val year = obj["first_publish_year"]?.jsonPrimitive?.content
-                    val author = obj["author_name"]?.jsonArray?.firstOrNull()?.jsonPrimitive?.content
-                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                    val year = obj["first_publish_year"].cleanString()
+                    val author = obj["author_name"]?.jsonArray?.firstOrNull().cleanString()
+                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
 
                     SearchResultItem(
                         title = title,

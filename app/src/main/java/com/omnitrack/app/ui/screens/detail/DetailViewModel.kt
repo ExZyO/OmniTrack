@@ -136,7 +136,7 @@ class DetailViewModel(
     private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
-    private val enrichedIds = mutableSetOf<Long>()
+    private val enrichedKeys = mutableSetOf<String>()
 
     private fun updateSiblings(currentId: Long) {
         val siblings = _stableSiblingIds.value.ifEmpty {
@@ -301,8 +301,9 @@ class DetailViewModel(
     }
 
     private fun maybeEnrich(item: MediaItemEntity, force: Boolean = false) {
-        if (!force && enrichedIds.contains(item.id)) return
-        enrichedIds.add(item.id)
+        val cacheKey = if (item.id > 0) "id_${item.id}" else "preview_${item.mediaType}_${item.anilistId ?: item.tmdbId ?: item.title}"
+        if (!force && enrichedKeys.contains(cacheKey)) return
+        enrichedKeys.add(cacheKey)
 
         val isVideoMedia = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.ANIME
         val hasStaleRatings = isVideoMedia && (item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null))
@@ -589,7 +590,7 @@ class DetailViewModel(
         _previewStack.update { it + previewEntity }
         _previewItem.value = previewEntity
         loadRecommendationsAndReviews(previewEntity)
-        maybeEnrich(previewEntity)
+        maybeEnrich(previewEntity, force = true)
         if (previewEntity.mediaType == MediaType.SHOW || previewEntity.mediaType == MediaType.ANIME) {
             launchSeriesFetch(previewEntity)
         }
@@ -625,6 +626,19 @@ class DetailViewModel(
             val newTop = _previewStack.value.last()
             _previewItem.value = newTop
             resetAuxFields()
+            val pTmdb = newTop.tmdbId
+            val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: SeriesContentMemoryCache.seasonsCache[newTop.id]
+            val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: SeriesContentMemoryCache.episodesBySeasonCache[newTop.id]
+            if (!pSeasons.isNullOrEmpty()) {
+                val valid = pSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
+                _realSeasons.value = valid
+                if (!pGrouped.isNullOrEmpty()) {
+                    _episodesBySeason.value = pGrouped
+                    val defaultSeason = valid.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: valid.first().seasonNumber
+                    _selectedSeasonNumber.value = defaultSeason
+                    _realEpisodes.value = pGrouped[defaultSeason].orEmpty()
+                }
+            }
             loadRecommendationsAndReviews(newTop)
             maybeEnrich(newTop)
             if (newTop.mediaType == MediaType.SHOW || newTop.mediaType == MediaType.ANIME) {
@@ -645,8 +659,9 @@ class DetailViewModel(
                     launchSeriesFetch(item)
                 }
             }
+            return true
         }
-        return true
+        return false
     }
 
     override fun onCleared() {
@@ -887,6 +902,18 @@ class DetailViewModel(
                                     }
                                 }
 
+                                val tmdbOverview = root["overview"]?.jsonPrimitive?.contentOrNull?.trim()
+                                if (!tmdbOverview.isNullOrBlank() && item.id <= 0 && _previewItem.value != null) {
+                                    val cur = _previewItem.value!!
+                                    if (cur.synopsis.isNullOrBlank()) {
+                                        val updated = cur.copy(synopsis = tmdbOverview)
+                                        _previewItem.value = updated
+                                        _previewStack.update { stack ->
+                                            if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                                        }
+                                    }
+                                }
+
                                 persistAuxCache()
                             }
                         }
@@ -1082,40 +1109,43 @@ class DetailViewModel(
                         }
                         if (animeDetails.anilistId != null) {
                             resolvedAniListId = animeDetails.anilistId
-                            if (item.anilistId == null) {
-                                if (item.id > 0) {
-                                    viewModelScope.launch(Dispatchers.IO) {
-                                        val currentItem = repository.getMediaById(item.id).firstOrNull()
-                                        if (currentItem != null) {
-                                            val currentSyn = currentItem.synopsis?.trim()
-                                            val needsSynopsisRepair = currentSyn.isNullOrBlank() ||
-                                                currentSyn.endsWith("(") ||
-                                                currentSyn.endsWith("[") ||
-                                                (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
-                                            val updated = currentItem.copy(
-                                                anilistId = currentItem.anilistId ?: animeDetails.anilistId,
-                                                synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentItem.synopsis
-                                            )
-                                            if (updated != currentItem) {
-                                                repository.updateMedia(updated)
-                                            }
-                                        }
-                                    }
-                                } else if (_previewItem.value != null) {
-                                    val currentTop = _previewItem.value!!
-                                    val enriched = currentTop.copy(
-                                        anilistId = animeDetails.anilistId ?: currentTop.anilistId,
-                                        synopsis = animeDetails.synopsis ?: currentTop.synopsis,
-                                        bannerUrl = animeDetails.bannerUrl ?: currentTop.bannerUrl,
-                                        coverUrl = if (currentTop.coverUrl.isBlank()) animeDetails.coverUrl ?: currentTop.coverUrl else currentTop.coverUrl,
-                                        communityScore = animeDetails.averageScore ?: currentTop.communityScore,
-                                        totalProgress = if (currentTop.totalProgress == null || currentTop.totalProgress == 0.0) {
-                                            animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentTop.totalProgress
-                                        } else currentTop.totalProgress
+                        }
+                        if (item.id <= 0 && _previewItem.value != null) {
+                            val currentTop = _previewItem.value!!
+                            val currentSyn = currentTop.synopsis?.trim()
+                            val needsSynopsisRepair = currentSyn.isNullOrBlank() ||
+                                currentSyn.endsWith("(") ||
+                                currentSyn.endsWith("[") ||
+                                (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
+                            val enriched = currentTop.copy(
+                                anilistId = animeDetails.anilistId ?: currentTop.anilistId,
+                                synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentTop.synopsis,
+                                bannerUrl = animeDetails.bannerUrl ?: currentTop.bannerUrl,
+                                coverUrl = if (currentTop.coverUrl.isBlank()) animeDetails.coverUrl ?: currentTop.coverUrl else currentTop.coverUrl,
+                                communityScore = animeDetails.averageScore ?: currentTop.communityScore,
+                                totalProgress = if (currentTop.totalProgress == null || currentTop.totalProgress == 0.0) {
+                                    animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentTop.totalProgress
+                                } else currentTop.totalProgress
+                            )
+                            _previewItem.value = enriched
+                            _previewStack.update { stack ->
+                                if (stack.isNotEmpty()) stack.dropLast(1) + enriched else listOf(enriched)
+                            }
+                        } else if (item.id > 0) {
+                            viewModelScope.launch(Dispatchers.IO) {
+                                val currentItem = repository.getMediaById(item.id).firstOrNull()
+                                if (currentItem != null) {
+                                    val currentSyn = currentItem.synopsis?.trim()
+                                    val needsSynopsisRepair = currentSyn.isNullOrBlank() ||
+                                        currentSyn.endsWith("(") ||
+                                        currentSyn.endsWith("[") ||
+                                        (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
+                                    val updated = currentItem.copy(
+                                        anilistId = currentItem.anilistId ?: animeDetails.anilistId,
+                                        synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentItem.synopsis
                                     )
-                                    _previewItem.value = enriched
-                                    _previewStack.update { stack ->
-                                        if (stack.isNotEmpty()) stack.dropLast(1) + enriched else listOf(enriched)
+                                    if (updated != currentItem) {
+                                        repository.updateMedia(updated)
                                     }
                                 }
                             }
@@ -1316,6 +1346,13 @@ class DetailViewModel(
                             val cur = repository.getMediaById(item.id).firstOrNull()
                             if (cur != null && cur.tmdbId == null) {
                                 repository.updateMedia(cur.copy(tmdbId = resolvedTmdbId))
+                            }
+                        } else if (_previewItem.value != null && _previewItem.value?.tmdbId == null) {
+                            val cur = _previewItem.value!!
+                            val updated = cur.copy(tmdbId = resolvedTmdbId)
+                            _previewItem.value = updated
+                            _previewStack.update { stack ->
+                                if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
                             }
                         }
                     }
