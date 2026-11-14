@@ -6,7 +6,9 @@ import com.omnitrack.app.data.model.AnimeAiringSchedule
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeEnrichedDetails
 import com.omnitrack.app.data.model.AnimeRelationItem
+import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.model.AnimeVoiceActorDetail
+import com.omnitrack.app.data.model.StaffProductionCreditItem
 import com.omnitrack.app.data.model.VoiceActorRoleItem
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
@@ -1333,6 +1335,21 @@ class EnrichmentRepository(
                         }
                       }
                     }
+                    staff(sort: [RELEVANCE, ID], perPage: 25) {
+                      edges {
+                        role
+                        node {
+                          id
+                          name {
+                            full
+                            native
+                          }
+                          image {
+                            large
+                          }
+                        }
+                      }
+                    }
                     relations {
                       edges {
                         relationType
@@ -1458,6 +1475,29 @@ class EnrichmentRepository(
                         )
                     }
 
+                    // 2b. Production Staff (Director, Original Creator, Music, Character Design, etc.)
+                    val staffList = mutableListOf<AnimeStaffItem>()
+                    val staffEdges = media["staff"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                    for (edgeElem in staffEdges) {
+                        val edge = edgeElem.jsonObject
+                        val sRole = edge["role"].cleanString() ?: continue
+                        val node = edge["node"]?.jsonObject ?: continue
+                        val sId = node["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val sName = node["name"]?.jsonObject?.get("full").cleanString() ?: continue
+                        val sNative = node["name"]?.jsonObject?.get("native").cleanString()
+                        val sImg = node["image"]?.jsonObject?.get("large").cleanString()
+
+                        staffList.add(
+                            AnimeStaffItem(
+                                staffId = sId,
+                                name = sName,
+                                nativeName = sNative,
+                                role = sRole,
+                                imageUrl = sImg
+                            )
+                        )
+                    }
+
                     // 3. Franchise & Relations with smart season deduplication
                     val relationList = mutableListOf<AnimeRelationItem>()
                     val relEdges = media["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
@@ -1527,6 +1567,7 @@ class EnrichmentRepository(
                         anilistId = resolvedId,
                         malId = resolvedMalId,
                         characters = charList,
+                        staff = staffList,
                         relations = relationList,
                         nextAiring = airingSchedule,
                         animationStudios = studioList,
@@ -1569,7 +1610,12 @@ class EnrichmentRepository(
                       month
                       day
                     }
+                    gender
+                    yearsActive
                     homeTown
+                    bloodType
+                    languageV2
+                    favourites
                     primaryOccupations
                     characterMedia(sort: [FAVOURITES_DESC], page: 1, perPage: 25) {
                       edges {
@@ -1588,6 +1634,51 @@ class EnrichmentRepository(
                           title {
                             romaji
                             english
+                            userPreferred
+                          }
+                          coverImage {
+                            extraLarge
+                            large
+                          }
+                          format
+                          startDate {
+                            year
+                          }
+                          type
+                        }
+                      }
+                    }
+                    anime: staffMedia(type: ANIME, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                      edges {
+                        staffRole
+                        node {
+                          id
+                          title {
+                            romaji
+                            english
+                            userPreferred
+                          }
+                          coverImage {
+                            extraLarge
+                            large
+                          }
+                          format
+                          startDate {
+                            year
+                          }
+                          type
+                        }
+                      }
+                    }
+                    manga: staffMedia(type: MANGA, sort: [POPULARITY_DESC], page: 1, perPage: 25) {
+                      edges {
+                        staffRole
+                        node {
+                          id
+                          title {
+                            romaji
+                            english
+                            userPreferred
                           }
                           coverImage {
                             extraLarge
@@ -1627,13 +1718,6 @@ class EnrichmentRepository(
                 val nativeName = staff["name"]?.jsonObject?.get("native").cleanString()
                 val img = staff["image"]?.jsonObject?.get("large").cleanString()
                 val rawBio = staff["description"].cleanString()
-                val cleanBio = rawBio
-                    ?.replace(Regex("""__.*?__""")) { it.value.removeSurrounding("__") }
-                    ?.replace(Regex("""\*\*.*?\*\*""")) { it.value.removeSurrounding("**") }
-                    ?.replace(Regex("""~{2,}.*?~{2,}"""), "")
-                    ?.replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-                    ?.replace(Regex("""<.*?>"""), "")
-                    ?.trim()
 
                 val age = staff["age"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val dobObj = staff["dateOfBirth"]?.let { if (it is JsonObject) it else null }
@@ -1641,9 +1725,21 @@ class EnrichmentRepository(
                 val m = dobObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val d = dobObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val dobStr = if (y != null && m != null && d != null) "$y-$m-$d" else if (m != null && d != null) "$m-$d" else null
+                val gender = staff["gender"].cleanString()
                 val home = staff["homeTown"].cleanString()
+                val blood = staff["bloodType"].cleanString()
+                val lang = staff["languageV2"].cleanString()
+                val favs = staff["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                 val occupations = staff["primaryOccupations"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
 
+                val yearsList = staff["yearsActive"]?.jsonArray.orEmpty().mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }
+                val yearsStr = when {
+                    yearsList.size >= 2 -> "${yearsList.first()} – ${yearsList.last()}"
+                    yearsList.size == 1 -> "${yearsList.first()} – present"
+                    else -> null
+                }
+
+                // 1. Voiced Character Roles
                 val rolesList = mutableListOf<VoiceActorRoleItem>()
                 val edges = staff["characterMedia"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
                 for (edgeElem in edges) {
@@ -1658,7 +1754,8 @@ class EnrichmentRepository(
                     val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
                     val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
                     val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
-                    val mTitle = eng ?: rom ?: "Media"
+                    val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
+                    val mTitle = eng ?: usr ?: rom ?: "Media"
                     val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
                         ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
                     val mFormat = mediaNode["format"].cleanString() ?: "TV"
@@ -1686,21 +1783,65 @@ class EnrichmentRepository(
                     )
                 }
 
+                // 2. Production Staff Credits (Anime & Manga)
+                val productionCredits = mutableListOf<StaffProductionCreditItem>()
+                val animeProdEdges = staff["anime"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                val mangaProdEdges = staff["manga"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                for (edgeElem in (animeProdEdges + mangaProdEdges)) {
+                    val edge = edgeElem.jsonObject
+                    val staffRole = edge["staffRole"].cleanString() ?: continue
+                    val mediaNode = edge["node"]?.jsonObject ?: continue
+                    val mId = mediaNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                    val eng = mediaNode["title"]?.jsonObject?.get("english").cleanString()
+                    val rom = mediaNode["title"]?.jsonObject?.get("romaji").cleanString()
+                    val usr = mediaNode["title"]?.jsonObject?.get("userPreferred").cleanString()
+                    val mTitle = eng ?: usr ?: rom ?: "Media"
+                    val mCover = mediaNode["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                        ?: mediaNode["coverImage"]?.jsonObject?.get("large").cleanString()
+                    val mFormat = mediaNode["format"].cleanString() ?: "TV"
+                    val mYear = mediaNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mTypeStr = mediaNode["type"].cleanString() ?: "ANIME"
+                    val mType = if (mTypeStr.equals("MANGA", ignoreCase = true)) {
+                        if (mFormat.equals("NOVEL", ignoreCase = true)) MediaType.NOVEL else MediaType.MANGA
+                    } else {
+                        if (mFormat.equals("MOVIE", ignoreCase = true)) MediaType.MOVIE else MediaType.ANIME
+                    }
+
+                    productionCredits.add(
+                        StaffProductionCreditItem(
+                            mediaId = mId,
+                            mediaTitle = mTitle,
+                            mediaCoverUrl = mCover,
+                            mediaFormat = mFormat,
+                            mediaYear = mYear,
+                            staffRole = staffRole,
+                            mediaType = mType
+                        )
+                    )
+                }
+
                 AnimeVoiceActorDetail(
                     staffId = sId,
                     name = name,
                     nativeName = nativeName,
                     imageUrl = img,
-                    biography = cleanBio,
+                    biography = rawBio,
                     age = age,
                     dateOfBirth = dobStr,
                     homeTown = home,
                     primaryOccupations = occupations,
-                    roles = rolesList
+                    roles = rolesList,
+                    gender = gender,
+                    yearsActive = yearsStr,
+                    bloodType = blood,
+                    language = lang,
+                    favourites = favs,
+                    productionCredits = productionCredits
                 )
             }
         } catch (_: Exception) {
             null
         }
+    }
     }
 }

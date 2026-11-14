@@ -125,10 +125,13 @@ import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
 import com.omnitrack.app.ui.screens.detail.components.statusColor
 import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
+import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
+import com.omnitrack.app.ui.screens.detail.components.DetailAnimeStaffSection
 import com.omnitrack.app.ui.screens.detail.components.DetailFranchiseSection
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
@@ -169,6 +172,7 @@ fun DetailScreen(
     var selectedPerson by remember { mutableStateOf<CastMember?>(null) }
     var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
     var selectedAnimeCharacter by remember { mutableStateOf<AnimeCharacterItem?>(null) }
+    var selectedAnimeStaff by remember { mutableStateOf<AnimeStaffItem?>(null) }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
@@ -190,6 +194,9 @@ fun DetailScreen(
     BackHandler(enabled = selectedAnimeCharacter != null) {
         selectedAnimeCharacter = null
     }
+    BackHandler(enabled = selectedAnimeStaff != null) {
+        selectedAnimeStaff = null
+    }
     BackHandler(enabled = uiState.isPreviewMode) {
         viewModel.closePreview()
     }
@@ -200,6 +207,17 @@ fun DetailScreen(
             onDismissRequest = { selectedAnimeCharacter = null },
             onOpenMediaPreview = { recItem ->
                 selectedAnimeCharacter = null
+                viewModel.openPreview(recItem)
+            }
+        )
+    }
+
+    if (selectedAnimeStaff != null) {
+        AnimeStaffSheet(
+            staff = selectedAnimeStaff,
+            onDismissRequest = { selectedAnimeStaff = null },
+            onOpenMediaPreview = { recItem ->
+                selectedAnimeStaff = null
                 viewModel.openPreview(recItem)
             }
         )
@@ -633,13 +651,34 @@ fun DetailScreen(
                         }
                         DetailSectionKey.CAST -> {
                             if (deferredSectionsAllowed) {
-                                if (item.mediaType == MediaType.ANIME && uiState.animeCharacters.isNotEmpty()) {
-                                    DetailAnimeCastSection(
-                                        characters = uiState.animeCharacters,
-                                        onCharacterClick = { character ->
-                                            selectedAnimeCharacter = character
-                                        }
-                                    )
+                                if (item.mediaType == MediaType.ANIME && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())) {
+                                    if (uiState.animeCharacters.isNotEmpty()) {
+                                        DetailAnimeCastSection(
+                                            characters = uiState.animeCharacters,
+                                            onCharacterClick = { character ->
+                                                selectedAnimeCharacter = character
+                                            },
+                                            onVoiceActorClick = { char ->
+                                                if (char.voiceActorId != null) {
+                                                    selectedAnimeStaff = AnimeStaffItem(
+                                                        staffId = char.voiceActorId,
+                                                        name = char.voiceActorName ?: "Voice Actor",
+                                                        role = "Voice Actor",
+                                                        imageUrl = char.voiceActorImageUrl
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
+                                    if (uiState.animeStaff.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        DetailAnimeStaffSection(
+                                            staff = uiState.animeStaff,
+                                            onStaffClick = { staff ->
+                                                selectedAnimeStaff = staff
+                                            }
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(20.dp))
                                 } else if (uiState.cast.isNotEmpty()) {
                                     DetailCastSection(

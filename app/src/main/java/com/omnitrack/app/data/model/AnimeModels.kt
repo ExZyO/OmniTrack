@@ -40,6 +40,24 @@ data class VoiceActorRoleItem(
     val mediaType: MediaType = MediaType.ANIME
 )
 
+data class AnimeStaffItem(
+    val staffId: Long,
+    val name: String,
+    val nativeName: String? = null,
+    val role: String, // e.g. "Director", "Original Creator", "Music"
+    val imageUrl: String? = null
+)
+
+data class StaffProductionCreditItem(
+    val mediaId: Long,
+    val mediaTitle: String,
+    val mediaCoverUrl: String?,
+    val mediaFormat: String?,
+    val mediaYear: Int?,
+    val staffRole: String, // e.g. "Director", "Music", "Original Creator"
+    val mediaType: MediaType = MediaType.ANIME
+)
+
 data class AnimeVoiceActorDetail(
     val staffId: Long,
     val name: String,
@@ -50,13 +68,20 @@ data class AnimeVoiceActorDetail(
     val dateOfBirth: String?,
     val homeTown: String?,
     val primaryOccupations: List<String> = emptyList(),
-    val roles: List<VoiceActorRoleItem> = emptyList()
+    val roles: List<VoiceActorRoleItem> = emptyList(),
+    val gender: String? = null,
+    val yearsActive: String? = null,
+    val bloodType: String? = null,
+    val language: String? = null,
+    val favourites: Int? = null,
+    val productionCredits: List<StaffProductionCreditItem> = emptyList()
 )
 
 data class AnimeEnrichedDetails(
     val anilistId: Long?,
     val malId: Long?,
     val characters: List<AnimeCharacterItem> = emptyList(),
+    val staff: List<AnimeStaffItem> = emptyList(),
     val relations: List<AnimeRelationItem> = emptyList(),
     val nextAiring: AnimeAiringSchedule? = null,
     val animationStudios: List<String> = emptyList(),

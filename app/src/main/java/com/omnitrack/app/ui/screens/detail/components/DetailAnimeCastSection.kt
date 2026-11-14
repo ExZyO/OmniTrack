@@ -44,7 +44,8 @@ import com.omnitrack.app.ui.theme.TextSecondary
 fun DetailAnimeCastSection(
     characters: List<AnimeCharacterItem>,
     modifier: Modifier = Modifier,
-    onCharacterClick: ((AnimeCharacterItem) -> Unit)? = null
+    onCharacterClick: ((AnimeCharacterItem) -> Unit)? = null,
+    onVoiceActorClick: ((AnimeCharacterItem) -> Unit)? = null
 ) {
     if (characters.isEmpty()) return
     val context = LocalContext.current
@@ -124,6 +125,7 @@ fun DetailAnimeCastSection(
                                     .clip(CircleShape)
                                     .background(Color(0xFF000000))
                                     .border(2.dp, Color(0xFF000000), CircleShape)
+                                    .then(if (onVoiceActorClick != null && item.voiceActorId != null) Modifier.clickable { onVoiceActorClick(item) } else Modifier)
                             ) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)

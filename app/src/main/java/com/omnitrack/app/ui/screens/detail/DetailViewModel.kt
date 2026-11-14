@@ -12,6 +12,7 @@ import com.omnitrack.app.data.model.NextAiringEpisode
 import com.omnitrack.app.data.model.AnimeAiringSchedule
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeRelationItem
+import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.preferences.DetailSectionItem
 import com.omnitrack.app.data.preferences.DetailsPageLayoutDefaults
 import com.omnitrack.app.data.model.TrackingStatus
@@ -75,6 +76,7 @@ data class DetailUiState(
     val hasNextEntry: Boolean = false,
     val nextAiringEpisode: NextAiringEpisode? = null,
     val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
     val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
@@ -97,6 +99,7 @@ private data class PreviewAndAux(
     val nextItem: MediaItemEntity? = null,
     val nextAiringEpisode: NextAiringEpisode? = null,
     val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
     val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
@@ -128,6 +131,7 @@ class DetailViewModel(
     private val _nextItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _nextAiringEpisode = MutableStateFlow<NextAiringEpisode?>(null)
     private val _animeCharacters = MutableStateFlow<List<AnimeCharacterItem>>(emptyList())
+    private val _animeStaff = MutableStateFlow<List<AnimeStaffItem>>(emptyList())
     private val _animeRelations = MutableStateFlow<List<AnimeRelationItem>>(emptyList())
     private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
@@ -388,6 +392,7 @@ class DetailViewModel(
             _nextItem,
             _nextAiringEpisode,
             _animeCharacters,
+            _animeStaff,
             _animeRelations,
             _animeAiring,
             _sectionOrder
@@ -411,9 +416,10 @@ class DetailViewModel(
             nextItem = args[13] as? MediaItemEntity,
             nextAiringEpisode = args[14] as? NextAiringEpisode,
             animeCharacters = args[15] as List<AnimeCharacterItem>,
-            animeRelations = args[16] as List<AnimeRelationItem>,
-            animeAiring = args[17] as? AnimeAiringSchedule,
-            sectionOrder = args[18] as List<DetailSectionItem>
+            animeStaff = args[16] as List<AnimeStaffItem>,
+            animeRelations = args[17] as List<AnimeRelationItem>,
+            animeAiring = args[18] as? AnimeAiringSchedule,
+            sectionOrder = args[19] as List<DetailSectionItem>
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -441,6 +447,7 @@ class DetailViewModel(
                     hasNextEntry = false,
                     nextAiringEpisode = aux.nextAiringEpisode,
                     animeCharacters = aux.animeCharacters,
+                    animeStaff = aux.animeStaff,
                     animeRelations = aux.animeRelations,
                     animeAiring = aux.animeAiring,
                     sectionOrder = aux.sectionOrder
@@ -489,6 +496,7 @@ class DetailViewModel(
                                 hasNextEntry = siblings.size > 1,
                                 nextAiringEpisode = aux.nextAiringEpisode,
                                 animeCharacters = aux.animeCharacters,
+                                animeStaff = aux.animeStaff,
                                 animeRelations = aux.animeRelations,
                                 animeAiring = aux.animeAiring,
                                 sectionOrder = aux.sectionOrder
@@ -521,6 +529,7 @@ class DetailViewModel(
         _trailers.value = emptyList()
         _companies.value = emptyList()
         _animeCharacters.value = emptyList()
+        _animeStaff.value = emptyList()
         _animeRelations.value = emptyList()
         _animeAiring.value = null
         _nextAiringEpisode.value = null
@@ -677,6 +686,7 @@ class DetailViewModel(
                 fetchedCollName = it.collectionName
                 fetchedCollParts = it.collectionItems
                 if (it.animeCharacters.isNotEmpty()) _animeCharacters.value = it.animeCharacters
+                if (it.animeStaff.isNotEmpty()) _animeStaff.value = it.animeStaff
                 if (it.animeRelations.isNotEmpty()) _animeRelations.value = it.animeRelations
                 if (it.animeAiring != null) _animeAiring.value = it.animeAiring
                 if (it.nextAiringEpisode != null) _nextAiringEpisode.value = it.nextAiringEpisode
@@ -693,6 +703,7 @@ class DetailViewModel(
                     collectionItems = _collectionItems.value,
                     nextAiringEpisode = _nextAiringEpisode.value,
                     animeCharacters = _animeCharacters.value,
+                    animeStaff = _animeStaff.value,
                     animeRelations = _animeRelations.value,
                     animeAiring = _animeAiring.value
                 )
@@ -1022,6 +1033,7 @@ class DetailViewModel(
                     )
                     if (animeDetails != null) {
                         _animeCharacters.value = animeDetails.characters
+                        _animeStaff.value = animeDetails.staff
                         _animeRelations.value = animeDetails.relations
                         _animeAiring.value = animeDetails.nextAiring
                         if (animeDetails.animationStudios.isNotEmpty()) {
@@ -1582,6 +1594,7 @@ class DetailViewModel(
                 _collectionName.value = cachedAux.collectionName
                 _collectionItems.value = cachedAux.collectionItems
                 _animeCharacters.value = cachedAux.animeCharacters
+                _animeStaff.value = cachedAux.animeStaff
                 _animeRelations.value = cachedAux.animeRelations
                 _animeAiring.value = cachedAux.animeAiring
                 _nextAiringEpisode.value = cachedAux.nextAiringEpisode
@@ -1630,6 +1643,7 @@ class DetailViewModel(
                 _collectionName.value = nextCachedAux.collectionName
                 _collectionItems.value = nextCachedAux.collectionItems
                 _animeCharacters.value = nextCachedAux.animeCharacters
+                _animeStaff.value = nextCachedAux.animeStaff
                 _animeRelations.value = nextCachedAux.animeRelations
                 _animeAiring.value = nextCachedAux.animeAiring
                 _nextAiringEpisode.value = nextCachedAux.nextAiringEpisode
@@ -1885,6 +1899,7 @@ data class CachedDetailAux(
     val collectionItems: List<RecommendationItem> = emptyList(),
     val nextAiringEpisode: NextAiringEpisode? = null,
     val animeCharacters: List<AnimeCharacterItem> = emptyList(),
+    val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null
 )
