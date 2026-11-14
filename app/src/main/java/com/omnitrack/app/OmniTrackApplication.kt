@@ -8,6 +8,7 @@ import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import coil3.request.allowRgb565
 import coil3.request.crossfade
 import com.omnitrack.app.data.ai.AiQueryEngine
 import com.omnitrack.app.data.cache.CoverCache
@@ -80,6 +81,9 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
                     .build()
             }
             .crossfade(true)
+            .allowRgb565(true)
+            .fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(16))
+            .decoderCoroutineContext(Dispatchers.IO.limitedParallelism(6))
             .build()
     }
 }

@@ -16,6 +16,9 @@ import com.omnitrack.app.data.model.VoiceActorRoleItem
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -839,7 +842,7 @@ class EnrichmentRepository(
 
                 // Parallel AniList season poster discovery (Chimanew / Nuvio concurrent async parity)
                 val missingSeasonNumbers = cinemetaSeasons.keys.filter { sNum -> mergedList.none { it.seasonNumber == sNum } }
-                val aniListPosters = if (!showTitle.isNullOrBlank() && missingSeasonNumbers.isNotEmpty()) {
+                val aniListPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && missingSeasonNumbers.isNotEmpty()) {
                     coroutineScope {
                         missingSeasonNumbers.map { sNum ->
                             async { sNum to fetchAniListSeasonPoster(showTitle, sNum) }
