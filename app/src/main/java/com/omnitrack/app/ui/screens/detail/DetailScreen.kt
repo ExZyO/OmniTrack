@@ -59,14 +59,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-
-sealed class DetailSheetTarget {
-    data class UserProfile(val username: String?, val userId: Int?) : DetailSheetTarget()
-    data class AnimeCharacter(val character: AnimeCharacterItem) : DetailSheetTarget()
-    data class AnimeStaff(val staff: AnimeStaffItem) : DetailSheetTarget()
-    data class Person(val person: CastMember) : DetailSheetTarget()
-    data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
-}
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -160,6 +152,14 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.launch
+
+sealed class DetailSheetTarget {
+    data class UserProfile(val username: String?, val userId: Int?) : DetailSheetTarget()
+    data class AnimeCharacter(val character: AnimeCharacterItem) : DetailSheetTarget()
+    data class AnimeStaff(val staff: AnimeStaffItem) : DetailSheetTarget()
+    data class Person(val person: CastMember) : DetailSheetTarget()
+    data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
