@@ -1113,28 +1113,37 @@ class DetailViewModel(
                             defaultSeason.seasonNumber
                         }
 
-                        val allEpisodes = coroutineScope {
-                            sortedSeasons.map { s ->
-                                async(Dispatchers.IO) {
-                                    val cached = SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"]
-                                    if (cached != null && cached.isNotEmpty()) {
-                                        s.seasonNumber to cached
-                                    } else {
-                                        val eps = enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId, item.title)
-                                        if (eps.isNotEmpty()) {
-                                            SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"] = eps
-                                        }
-                                        s.seasonNumber to eps
-                                    }
-                                }
-                            }.awaitAll().toMap()
+                        // 1. FAST PATH: Fetch & emit the SELECTED season's episodes IMMEDIATELY (0-lag open!)
+                        val selectedCached = SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"]
+                        val selectedEps = if (!selectedCached.isNullOrEmpty()) selectedCached
+                        else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title)
+                        if (selectedEps.isNotEmpty()) {
+                            SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"] = selectedEps
+                            val cur = _episodesBySeason.value.toMutableMap()
+                            cur[seasonToSelect] = selectedEps
+                            _episodesBySeason.value = cur
+                            _realEpisodes.value = selectedEps
+                            refreshNextAiringEpisode(item)
                         }
 
-                        SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] = allEpisodes
-                        SeriesContentMemoryCache.episodesBySeasonCache[item.id] = allEpisodes
-                        _episodesBySeason.value = allEpisodes
-                        _realEpisodes.value = allEpisodes[seasonToSelect].orEmpty()
-                        refreshNextAiringEpisode(item)
+                        // 2. BACKGROUND PATH: Progressively load remaining seasons without blocking UI!
+                        launch(Dispatchers.IO) {
+                            val remaining = sortedSeasons.filter { it.seasonNumber != seasonToSelect }
+                            remaining.forEach { s ->
+                                val cached = SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"]
+                                val eps = if (!cached.isNullOrEmpty()) cached
+                                else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId, item.title)
+                                if (eps.isNotEmpty()) {
+                                    SeriesContentMemoryCache.episodesCache["$tmdbId:${s.seasonNumber}"] = eps
+                                    val cur = _episodesBySeason.value.toMutableMap()
+                                    cur[s.seasonNumber] = eps
+                                    _episodesBySeason.value = cur
+                                }
+                            }
+                            SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] = _episodesBySeason.value
+                            SeriesContentMemoryCache.episodesBySeasonCache[item.id] = _episodesBySeason.value
+                            refreshNextAiringEpisode(item)
+                        }
                     }
                 } catch (_: Exception) {}
             }

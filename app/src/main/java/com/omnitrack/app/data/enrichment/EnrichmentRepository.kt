@@ -73,6 +73,10 @@ class EnrichmentRepository(
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
+    private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
+    private val aniListSeasonPosterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     suspend fun enrich(
         item: MediaItemEntity,
         fanartApiKey: String? = null,
@@ -727,6 +731,7 @@ class EnrichmentRepository(
     }
 
     suspend fun fetchCinemetaVideos(imdbId: String): List<com.omnitrack.app.data.model.MediaEpisode> = withContext(Dispatchers.IO) {
+        cinemetaVideosCache[imdbId]?.let { return@withContext it }
         try {
             val url = "https://v3-cinemeta.strem.io/meta/series/$imdbId.json"
             val req = Request.Builder().url(url).get().build()
@@ -736,7 +741,7 @@ class EnrichmentRepository(
                 val root = json.parseToJsonElement(body).jsonObject
                 val meta = root["meta"]?.jsonObject ?: return@withContext emptyList()
                 val videos = meta["videos"]?.jsonArray ?: return@withContext emptyList()
-                videos.mapNotNull { node ->
+                val result = videos.mapNotNull { node ->
                     val obj = node.jsonObject
                     val sNum = obj["season"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
                     val epNum = obj["episode"]?.jsonPrimitive?.content?.toIntOrNull()
@@ -766,6 +771,10 @@ class EnrichmentRepository(
                         voteAverage = voteAvg
                     )
                 }
+                if (result.isNotEmpty()) {
+                    cinemetaVideosCache[imdbId] = result
+                }
+                result
             }
         } catch (_: Exception) {
             emptyList()
@@ -827,8 +836,11 @@ class EnrichmentRepository(
                         } else null
                         val posterUrl = if (sNum <= 0) {
                             mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: aniListPoster
+                        } else if (sNum == 1) {
+                            mergedList.find { it.seasonNumber == 1 }?.posterUrl ?: aniListPoster
                         } else {
-                            aniListPoster ?: mergedList.firstOrNull { it.seasonNumber > 0 && !it.posterUrl.isNullOrBlank() }?.posterUrl
+                            // Distinct season poster for Season 2, Season 3, etc. NEVER fall back to Season 1!
+                            aniListPoster
                         }
                         mergedList.add(
                             com.omnitrack.app.data.model.MediaSeason(
@@ -915,7 +927,7 @@ class EnrichmentRepository(
             val seasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
             if (seasonEps.isNotEmpty()) {
                 // Cross-reference with TMDb Season 1 for anime using continuous absolute numbering (e.g. Apothecary Diaries S2/S3, Attack on Titan, etc.)
-                val tmdbSeason1Eps = try {
+                val tmdbSeason1Eps = tmdbSeason1StillsCache[tmdbId] ?: try {
                     val s1Url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=$apiKey"
                     val s1Req = Request.Builder().url(s1Url).get().build()
                     client.newCall(s1Req).execute().use { resp ->
@@ -923,7 +935,7 @@ class EnrichmentRepository(
                             val s1Body = resp.body?.string() ?: return@use emptyList()
                             val s1Root = json.parseToJsonElement(s1Body).jsonObject
                             val eps = s1Root["episodes"]?.jsonArray ?: return@use emptyList()
-                            eps.mapNotNull { node ->
+                            val mapped = eps.mapNotNull { node ->
                                 val o = node.jsonObject
                                 val name = o["name"]?.jsonPrimitive?.content
                                 val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w500$it" }
@@ -944,6 +956,10 @@ class EnrichmentRepository(
                                     )
                                 } else null
                             }
+                            if (mapped.isNotEmpty()) {
+                                tmdbSeason1StillsCache[tmdbId] = mapped
+                            }
+                            mapped
                         } else emptyList()
                     }
                 } catch (_: Exception) {
@@ -1089,6 +1105,13 @@ class EnrichmentRepository(
     }
 
     suspend fun fetchAniListSeasonPoster(title: String, seasonNumber: Int): String? = withContext(Dispatchers.IO) {
+        val strippedTitle = title
+            .replace(Regex("(?i)\\s*(?:season|\\d+(?:st|nd|rd|th)\\s+season|part)\\s*\\d*.*"), "")
+            .split(":", "-", "–").firstOrNull()?.trim()
+            ?.takeIf { it.isNotBlank() } ?: title
+        val cacheKey = "$strippedTitle:$seasonNumber"
+        aniListSeasonPosterCache[cacheKey]?.let { return@withContext it }
+
         try {
             val query = """
                 query (${'$'}search: String) {
@@ -1097,23 +1120,15 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
-            val strippedTitle = title
-                .replace(Regex("(?i)\\s*(?:season|\\d+(?:st|nd|rd|th)\\s+season|part)\\s*\\d*.*"), "")
-                .split(":", "-", "–").firstOrNull()?.trim()
-                ?.takeIf { it.isNotBlank() } ?: title
-            val baseTitle = strippedTitle
-            val cleanTitle = strippedTitle.replace(Regex("[:\\-_–]"), " ").trim()
-            val searchQueries = listOfNotNull(
-                "$baseTitle Season $seasonNumber",
-                "$cleanTitle Season $seasonNumber",
-                "$baseTitle ${seasonNumber}nd Season",
-                "$baseTitle ${seasonNumber}rd Season",
-                "$baseTitle ${seasonNumber}th Season",
-                "$cleanTitle ${seasonNumber}nd Season",
-                "$cleanTitle ${seasonNumber}rd Season",
-                "$cleanTitle ${seasonNumber}th Season",
-                if (seasonNumber == 1) baseTitle else null
-            )
+            val searchQueries = if (seasonNumber <= 1) {
+                listOf(strippedTitle)
+            } else {
+                listOf(
+                    "$strippedTitle Season $seasonNumber",
+                    "$strippedTitle ${seasonNumber}nd Season",
+                    "$strippedTitle ${seasonNumber}rd Season"
+                )
+            }
             for (sq in searchQueries) {
                 val jsonPayload = buildJsonObject {
                     put("query", query)
@@ -1134,7 +1149,10 @@ class EnrichmentRepository(
                         val cover = media?.get("coverImage")?.jsonObject
                         val img = cover?.get("extraLarge")?.jsonPrimitive?.content
                             ?: cover?.get("large")?.jsonPrimitive?.content
-                        if (!img.isNullOrBlank()) return@withContext img
+                        if (!img.isNullOrBlank()) {
+                            aniListSeasonPosterCache[cacheKey] = img
+                            return@withContext img
+                        }
                     }
                 }
             }
