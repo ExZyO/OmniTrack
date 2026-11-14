@@ -480,7 +480,7 @@ fun UserProfileSheet(
                             )
                             AniListMarkdownText(
                                 text = p.bio,
-                                color = Color.White,
+                                primaryColor = Color.White,
                                 fontSize = 13.5.sp,
                                 lineHeight = 19.sp
                             )
