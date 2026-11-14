@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+import com.omnitrack.app.data.model.AnimeTagItem
+import com.omnitrack.app.data.preferences.PreferredTitleLanguage
 import com.omnitrack.app.data.repository.DantotsuCommentsRepository
 import com.omnitrack.app.ui.screens.detail.components.DiscussionComment
 import com.omnitrack.app.ui.screens.detail.components.createSampleDiscussionComments
@@ -89,7 +91,14 @@ data class DetailUiState(
     val discussionComments: List<DiscussionComment> = emptyList(),
     val englishTitle: String? = null,
     val romajiTitle: String? = null,
-    val anilistAuthToken: String? = null
+    val anilistAuthToken: String? = null,
+    val currentUsername: String? = null,
+    val synonyms: List<String> = emptyList(),
+    val tags: List<AnimeTagItem> = emptyList(),
+    val popularity: Int? = null,
+    val favourites: Int? = null,
+    val durationMinutes: Int? = null,
+    val preferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
 )
 
 private data class PreviewAndAux(
@@ -116,7 +125,13 @@ private data class PreviewAndAux(
     val discussionComments: List<DiscussionComment> = emptyList(),
     val englishTitle: String? = null,
     val romajiTitle: String? = null,
-    val anilistAuthToken: String? = null
+    val anilistAuthToken: String? = null,
+    val currentUsername: String? = null,
+    val synonyms: List<String> = emptyList(),
+    val tags: List<AnimeTagItem> = emptyList(),
+    val popularity: Int? = null,
+    val favourites: Int? = null,
+    val durationMinutes: Int? = null
 )
 
 class DetailViewModel(
@@ -137,6 +152,7 @@ class DetailViewModel(
     private val _englishTitle = MutableStateFlow<String?>(null)
     private val _romajiTitle = MutableStateFlow<String?>(null)
     private val _anilistAuthToken = MutableStateFlow<String?>(null)
+    private val _currentUsername = MutableStateFlow<String?>(null)
     private val dantotsuCommentsRepository = DantotsuCommentsRepository()
     private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
@@ -152,6 +168,12 @@ class DetailViewModel(
     private val _nextAiringEpisode = MutableStateFlow<NextAiringEpisode?>(null)
     private val _animeCharacters = MutableStateFlow<List<AnimeCharacterItem>>(emptyList())
     private val _animeStaff = MutableStateFlow<List<AnimeStaffItem>>(emptyList())
+    private val _synonyms = MutableStateFlow<List<String>>(emptyList())
+    private val _tags = MutableStateFlow<List<AnimeTagItem>>(emptyList())
+    private val _popularity = MutableStateFlow<Int?>(null)
+    private val _favourites = MutableStateFlow<Int?>(null)
+    private val _durationMinutes = MutableStateFlow<Int?>(null)
+    private val _preferredTitleLanguage = MutableStateFlow(PreferredTitleLanguage.ROMAJI)
     private val _animeRelations = MutableStateFlow<List<AnimeRelationItem>>(emptyList())
     private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
@@ -289,9 +311,21 @@ class DetailViewModel(
             viewModelScope.launch(Dispatchers.IO) {
                 trackerTokenManager.tokens.collect { tokens ->
                     _anilistAuthToken.value = tokens.anilistToken
+                    _currentUsername.value = tokens.anilistUsername ?: dantotsuCommentsRepository.getCurrentUsername()
                     if (!tokens.anilistToken.isNullOrBlank()) {
                         dantotsuCommentsRepository.authenticate(tokens.anilistToken)
+                        if (_currentUsername.value.isNullOrBlank()) {
+                            _currentUsername.value = dantotsuCommentsRepository.getCurrentUsername()
+                        }
                     }
+                }
+            }
+        }
+
+        if (preferenceManager != null) {
+            viewModelScope.launch {
+                preferenceManager.preferredTitleLanguage.collect { langPref ->
+                    applyPreferredTitleLanguage(langPref)
                 }
             }
         }
@@ -452,7 +486,14 @@ class DetailViewModel(
             _discussionComments,
             _englishTitle,
             _romajiTitle,
-            _anilistAuthToken
+            _anilistAuthToken,
+            _currentUsername,
+            _synonyms,
+            _tags,
+            _popularity,
+            _favourites,
+            _durationMinutes,
+            _preferredTitleLanguage
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -480,7 +521,13 @@ class DetailViewModel(
             discussionComments = args[20] as List<DiscussionComment>,
             englishTitle = args[21] as? String,
             romajiTitle = args[22] as? String,
-            anilistAuthToken = args[23] as? String
+            anilistAuthToken = args[23] as? String,
+            currentUsername = args[24] as? String,
+            synonyms = args[25] as List<String>,
+            tags = args[26] as List<AnimeTagItem>,
+            popularity = args[27] as? Int,
+            favourites = args[28] as? Int,
+            durationMinutes = args[29] as? Int
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -515,7 +562,14 @@ class DetailViewModel(
                     discussionComments = aux.discussionComments,
                     englishTitle = aux.englishTitle,
                     romajiTitle = aux.romajiTitle,
-                    anilistAuthToken = aux.anilistAuthToken
+                    anilistAuthToken = aux.anilistAuthToken,
+                    currentUsername = aux.currentUsername,
+                    synonyms = aux.synonyms,
+                    tags = aux.tags,
+                    popularity = aux.popularity,
+                    favourites = aux.favourites,
+                    durationMinutes = aux.durationMinutes,
+                    preferredTitleLanguage = _preferredTitleLanguage.value
                 )
             )
         } else {
@@ -568,7 +622,14 @@ class DetailViewModel(
                                 discussionComments = aux.discussionComments,
                                 englishTitle = aux.englishTitle,
                                 romajiTitle = aux.romajiTitle,
-                                anilistAuthToken = aux.anilistAuthToken
+                                anilistAuthToken = aux.anilistAuthToken,
+                                currentUsername = aux.currentUsername,
+                                synonyms = aux.synonyms,
+                                tags = aux.tags,
+                                popularity = aux.popularity,
+                                favourites = aux.favourites,
+                                durationMinutes = aux.durationMinutes,
+                                preferredTitleLanguage = _preferredTitleLanguage.value
                             )
                         }
                     } else {
@@ -1155,6 +1216,11 @@ class DetailViewModel(
                         _animeStaff.value = animeDetails.staff
                         _animeRelations.value = animeDetails.relations
                         _animeAiring.value = animeDetails.nextAiring
+                        _synonyms.value = animeDetails.synonyms
+                        _tags.value = animeDetails.tags
+                        _popularity.value = animeDetails.popularity
+                        _favourites.value = animeDetails.favourites
+                        _durationMinutes.value = animeDetails.durationMinutes
                         if (animeDetails.animationStudios.isNotEmpty()) {
                             val studioEntries = animeDetails.animationStudios.map { studioName ->
                                 NetworkProductionCompany(
@@ -1592,6 +1658,7 @@ class DetailViewModel(
 
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
+        reloadCommentsForSeason(seasonNumber)
         val inMemory = _episodesBySeason.value[seasonNumber]
         if (!inMemory.isNullOrEmpty()) {
             _realEpisodes.value = inMemory
@@ -1842,6 +1909,66 @@ class DetailViewModel(
         if (cid != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 dantotsuCommentsRepository.deleteComment(cid)
+            }
+        }
+    }
+
+    fun reloadCommentsForSeason(seasonNumber: Int) {
+        val currentItem = _previewItem.value ?: uiState.value.item ?: return
+        val currentAniListId = currentItem.anilistId ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            val targetAniListId = if (seasonNumber == 1) {
+                currentAniListId
+            } else {
+                val relations = _animeRelations.value
+                val match = relations.firstOrNull { rel ->
+                    rel.title.contains("Season $seasonNumber", ignoreCase = true) ||
+                    rel.title.contains("${seasonNumber}nd Season", ignoreCase = true) ||
+                    rel.title.contains("${seasonNumber}rd Season", ignoreCase = true) ||
+                    rel.title.contains("${seasonNumber}th Season", ignoreCase = true) ||
+                    (seasonNumber == 2 && rel.relationType == "SEQUEL")
+                }
+                match?.id ?: currentAniListId
+            }
+
+            try {
+                val tagPrefix = if (currentItem.mediaType == MediaType.MANGA || currentItem.mediaType == MediaType.NOVEL) "Ch" else "Ep"
+                val comments = dantotsuCommentsRepository.getComments(
+                    anilistId = targetAniListId,
+                    tagPrefix = tagPrefix
+                )
+                if (comments.isNotEmpty()) {
+                    _discussionComments.value = comments
+                } else {
+                    _discussionComments.value = createSampleDiscussionComments(currentItem.mediaType, currentItem.totalProgress?.toInt() ?: 24)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun applyPreferredTitleLanguage(pref: PreferredTitleLanguage) {
+        _preferredTitleLanguage.value = pref
+        val eng = _englishTitle.value
+        val rom = _romajiTitle.value
+        val currentItem = _previewItem.value ?: uiState.value.item ?: return
+        val native = currentItem.nativeTitle
+
+        val targetTitle = when (pref) {
+            PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: currentItem.title
+            PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: currentItem.title
+            PreferredTitleLanguage.NATIVE -> native ?: rom ?: eng ?: currentItem.title
+        }
+
+        if (targetTitle.isNotBlank() && targetTitle != currentItem.title) {
+            if (_previewItem.value != null) {
+                _previewItem.value = _previewItem.value?.copy(title = targetTitle)
+            } else if (currentItem.id > 0) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val dbItem = repository.getMediaById(currentItem.id).firstOrNull()
+                    if (dbItem != null) {
+                        repository.updateMedia(dbItem.copy(title = targetTitle))
+                    }
+                }
             }
         }
     }

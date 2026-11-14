@@ -105,8 +105,11 @@ fun TmdbEntityBrowseScreen(
                 var resolvedLogo: String? = null
                 var originCountry: String? = null
 
-                if (entityKind == "anime_studio") {
-                    val graphqlQuery = """
+                if (entityKind == "anime_studio" || entityKind == "anime_genre" || entityKind == "anime_tag") {
+                    val isStudio = entityKind == "anime_studio"
+                    val isGenre = entityKind == "anime_genre"
+                    val graphqlQuery = if (isStudio) {
+                        """
                         query (${'$'}studio: String) {
                           Studio(search: ${'$'}studio) {
                             name
@@ -124,9 +127,51 @@ fun TmdbEntityBrowseScreen(
                             }
                           }
                         }
-                    """.trimIndent()
+                        """.trimIndent()
+                    } else if (isGenre) {
+                        """
+                        query (${'$'}genre: String) {
+                          Page(perPage: 40) {
+                            media(genre: ${'$'}genre, sort: POPULARITY_DESC, type: ANIME) {
+                              id
+                              idMal
+                              title { userPreferred }
+                              coverImage { extraLarge large }
+                              bannerImage
+                              averageScore
+                              startDate { year }
+                              format
+                            }
+                          }
+                        }
+                        """.trimIndent()
+                    } else {
+                        """
+                        query (${'$'}tag: String) {
+                          Page(perPage: 40) {
+                            media(tag: ${'$'}tag, sort: POPULARITY_DESC, type: ANIME) {
+                              id
+                              idMal
+                              title { userPreferred }
+                              coverImage { extraLarge large }
+                              bannerImage
+                              averageScore
+                              startDate { year }
+                              format
+                            }
+                          }
+                        }
+                        """.trimIndent()
+                    }
 
-                    val jsonPayload = """{"query":${Json.encodeToString(kotlinx.serialization.serializer(), graphqlQuery)},"variables":{"studio":"$entityName"}}"""
+                    val variables = if (isStudio) {
+                        """{"studio":${Json.encodeToString(kotlinx.serialization.serializer(), entityName)}}"""
+                    } else if (isGenre) {
+                        """{"genre":${Json.encodeToString(kotlinx.serialization.serializer(), entityName)}}"""
+                    } else {
+                        """{"tag":${Json.encodeToString(kotlinx.serialization.serializer(), entityName)}}"""
+                    }
+                    val jsonPayload = """{"query":${Json.encodeToString(kotlinx.serialization.serializer(), graphqlQuery)},"variables":$variables}"""
                     val req = Request.Builder()
                         .url("https://graphql.anilist.co")
                         .post(jsonPayload.toRequestBody("application/json".toMediaType()))
@@ -137,8 +182,13 @@ fun TmdbEntityBrowseScreen(
                             val body = resp.body?.string()
                             if (body != null) {
                                 val root = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                val studioObj = root["data"]?.jsonObject?.get("Studio")?.jsonObject
-                                val mediaNodes = studioObj?.get("media")?.jsonObject?.get("nodes")?.jsonArray
+                                val mediaNodes = if (isStudio) {
+                                    val studioObj = root["data"]?.jsonObject?.get("Studio")?.jsonObject
+                                    studioObj?.get("media")?.jsonObject?.get("nodes")?.jsonArray
+                                } else {
+                                    val pageObj = root["data"]?.jsonObject?.get("Page")?.jsonObject
+                                    pageObj?.get("media")?.jsonArray
+                                }
                                 if (mediaNodes != null) {
                                     val seriesItems = mutableListOf<RecommendationItem>()
                                     val movieItems = mutableListOf<RecommendationItem>()
@@ -169,7 +219,8 @@ fun TmdbEntityBrowseScreen(
                                             seriesItems.add(item)
                                         }
                                     }
-                                    if (seriesItems.isNotEmpty()) railsList.add(EntityRail("TV Series • Popular", seriesItems))
+                                    val sectionTitle = if (isStudio) "TV Series • Popular" else "Popular Anime • $entityName"
+                                    if (seriesItems.isNotEmpty()) railsList.add(EntityRail(sectionTitle, seriesItems))
                                     if (movieItems.isNotEmpty()) railsList.add(EntityRail("Movies & Specials", movieItems))
                                 }
                             }

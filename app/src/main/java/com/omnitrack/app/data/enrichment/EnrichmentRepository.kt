@@ -1293,6 +1293,10 @@ class EnrichmentRepository(
                     }
                     format
                     status
+                    synonyms
+                    duration
+                    popularity
+                    favourites
                     description(asHtml: false)
                     bannerImage
                     coverImage {
@@ -1303,6 +1307,13 @@ class EnrichmentRepository(
                     episodes
                     chapters
                     genres
+                    tags {
+                      id
+                      name
+                      rank
+                      isMediaSpoiler
+                      isGeneralSpoiler
+                    }
                     nextAiringEpisode {
                       episode
                       airingAt
@@ -1434,6 +1445,30 @@ class EnrichmentRepository(
                     val mediaEpisodes = media["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaChapters = media["chapters"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaGenres = media["genres"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
+                    val mediaSynonyms = media["synonyms"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
+                    val mediaPopularity = media["popularity"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaFavourites = media["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaDuration = media["duration"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+                    val tagList = mutableListOf<com.omnitrack.app.data.model.AnimeTagItem>()
+                    val tagsArray = media["tags"]?.jsonArray.orEmpty()
+                    for (tElem in tagsArray) {
+                        val tObj = tElem.jsonObject
+                        val tId = tObj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val tName = tObj["name"].cleanString() ?: continue
+                        val tRank = tObj["rank"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        val isMediaSpoiler = tObj["isMediaSpoiler"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        val isGeneralSpoiler = tObj["isGeneralSpoiler"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        tagList.add(
+                            com.omnitrack.app.data.model.AnimeTagItem(
+                                id = tId,
+                                name = tName,
+                                rank = tRank,
+                                isMediaSpoiler = isMediaSpoiler,
+                                isGeneralSpoiler = isGeneralSpoiler
+                            )
+                        )
+                    }
 
                     // 1. Next Airing
                     val nextAiringObj = media["nextAiringEpisode"]?.let { if (it is JsonObject) it else null }
@@ -1571,6 +1606,7 @@ class EnrichmentRepository(
                         englishTitle = mediaEnglishTitle,
                         romajiTitle = mediaRomajiTitle,
                         nativeTitle = mediaNativeTitle,
+                        synonyms = mediaSynonyms,
                         characters = charList,
                         staff = staffList,
                         relations = relationList,
@@ -1580,9 +1616,13 @@ class EnrichmentRepository(
                         bannerUrl = mediaBanner,
                         coverUrl = mediaCover,
                         averageScore = mediaScore,
+                        popularity = mediaPopularity,
+                        favourites = mediaFavourites,
+                        durationMinutes = mediaDuration,
                         totalEpisodes = mediaEpisodes,
                         totalChapters = mediaChapters,
-                        genres = mediaGenres
+                        genres = mediaGenres,
+                        tags = tagList
                     )
                 }
 

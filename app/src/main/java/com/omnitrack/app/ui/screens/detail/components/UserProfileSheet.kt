@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -80,12 +81,11 @@ import com.omnitrack.app.ui.theme.SurfaceCard
 import kotlinx.coroutines.launch
 
 /**
- * Phase 4: Dartotsu User Profile Sheet & Social Engine.
- * Features:
- * - Banner backdrop + Circular avatar with verified ring
- * - AniList Follow / Unfollow mutation
- * - Direct Message composer bar with instant dispatch
- * - 2 Tabs: Overview (Bio, stats matrix, favorite rails) & Scores (Histogram & top genres)
+ * 1:1 Dartotsu User Profile Sheet & Social Engine:
+ * - 100% Unboxed Pure AMOLED Black `#000000` design (zero boxy containers).
+ * - Identifies `isSelf`: hides follow & DM buttons, shows "Your Profile" badge.
+ * - Clickable favorite anime & manga posters that open detail previews.
+ * - Unboxed statistics matrix, score distribution histogram, and genre breakdowns.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,6 +93,8 @@ fun UserProfileSheet(
     username: String?,
     anilistUserId: Int?,
     userAuthToken: String? = null,
+    currentUsername: String? = null,
+    onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
     enrichmentRepository: EnrichmentRepository = remember { EnrichmentRepository() },
     onDismiss: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -110,6 +112,12 @@ fun UserProfileSheet(
     var showMessageInput by remember { mutableStateOf(false) }
     var messageText by remember { mutableStateOf("") }
     var isSendingMessage by remember { mutableStateOf(false) }
+
+    val isSelf = remember(username, profile?.username, currentUsername) {
+        val target = profile?.username ?: username
+        !target.isNullOrBlank() && !currentUsername.isNullOrBlank() &&
+            target.equals(currentUsername, ignoreCase = true)
+    }
 
     BackHandler(enabled = true) {
         onDismiss()
@@ -224,7 +232,7 @@ fun UserProfileSheet(
                     )
                 }
 
-                // Avatar, Info & Follow Row
+                // Avatar, Info & Follow / Self Badge Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -274,82 +282,100 @@ fun UserProfileSheet(
                         )
                     }
 
-                    // Follow Button
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isFollowing) Color.White.copy(alpha = 0.12f) else AccentArctic)
-                            .border(
-                                1.dp,
-                                if (isFollowing) GlassBorder else AccentArctic,
-                                RoundedCornerShape(999.dp)
-                            )
-                            .clickable(enabled = !isSendingFollow) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                if (userAuthToken.isNullOrBlank()) {
-                                    Toast.makeText(context, "Log in with AniList in Settings to follow users", Toast.LENGTH_SHORT).show()
-                                    return@clickable
-                                }
-                                scope.launch {
-                                    isSendingFollow = true
-                                    val success = enrichmentRepository.toggleFollowUser(p.userId, userAuthToken)
-                                    if (success) {
-                                        isFollowing = !isFollowing
-                                    }
-                                    isSendingFollow = false
-                                }
-                            }
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    if (isSelf) {
+                        // User's own profile: show subtle clean badge instead of Follow / DM
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
-                            Icon(
-                                imageVector = if (isFollowing) Icons.Default.Check else Icons.Default.PersonAdd,
-                                contentDescription = null,
-                                tint = if (isFollowing) Color.White else Color.Black,
-                                modifier = Modifier.size(13.dp)
-                            )
                             Text(
-                                text = if (isFollowing) "Following" else "Follow",
-                                color = if (isFollowing) Color.White else Color.Black,
+                                text = "Your Profile",
+                                color = AccentArctic,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                    }
+                    } else {
+                        // Other user's profile: Follow Button
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (isFollowing) Color.White.copy(alpha = 0.12f) else AccentArctic)
+                                .border(
+                                    1.dp,
+                                    if (isFollowing) GlassBorder else AccentArctic,
+                                    RoundedCornerShape(999.dp)
+                                )
+                                .clickable(enabled = !isSendingFollow) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (userAuthToken.isNullOrBlank()) {
+                                        Toast.makeText(context, "Log in with AniList in Settings to follow users", Toast.LENGTH_SHORT).show()
+                                        return@clickable
+                                    }
+                                    scope.launch {
+                                        isSendingFollow = true
+                                        val success = enrichmentRepository.toggleFollowUser(p.userId, userAuthToken)
+                                        if (success) {
+                                            isFollowing = !isFollowing
+                                        }
+                                        isSendingFollow = false
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 7.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isFollowing) Icons.Default.Check else Icons.Default.PersonAdd,
+                                    contentDescription = null,
+                                    tint = if (isFollowing) Color.White else Color.Black,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (isFollowing) "Following" else "Follow",
+                                    color = if (isFollowing) Color.White else Color.Black,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
 
-                    // Message Action Button
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(1.dp, GlassBorder, CircleShape)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showMessageInput = !showMessageInput
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mail,
-                            contentDescription = "Message",
-                            tint = Color.White,
-                            modifier = Modifier.size(15.dp)
-                        )
+                        // Message Action Button
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(1.dp, GlassBorder, CircleShape)
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    showMessageInput = !showMessageInput
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Mail,
+                                contentDescription = "Message",
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
                 }
 
-                // Direct Message Inline Composer
-                if (showMessageInput) {
+                // Direct Message Inline Composer (for other users)
+                if (showMessageInput && !isSelf) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                             .clip(RoundedCornerShape(999.dp))
-                            .background(DarkSurfaceElevated)
+                            .background(Color.White.copy(alpha = 0.06f))
                             .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -487,21 +513,17 @@ fun UserProfileSheet(
                         }
                     }
 
-                    // User Stats Matrix
+                    // Pure Unboxed Statistics Matrix (zero enclosing box)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 10.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Text(
                             text = "STATISTICS",
                             color = AccentArctic,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp
                         )
@@ -527,14 +549,22 @@ fun UserProfileSheet(
                         }
                     }
 
-                    // Favorite Anime Rail
+                    // Favorite Anime Rail (Clickable!)
                     if (p.favoriteAnime.isNotEmpty()) {
-                        FavoriteMediaRail(title = "Favorite Anime", list = p.favoriteAnime)
+                        FavoriteMediaRail(
+                            title = "Favorite Anime",
+                            list = p.favoriteAnime,
+                            onOpenMediaPreview = onOpenMediaPreview
+                        )
                     }
 
-                    // Favorite Manga Rail
+                    // Favorite Manga Rail (Clickable!)
                     if (p.favoriteManga.isNotEmpty()) {
-                        FavoriteMediaRail(title = "Favorite Manga", list = p.favoriteManga)
+                        FavoriteMediaRail(
+                            title = "Favorite Manga",
+                            list = p.favoriteManga,
+                            onOpenMediaPreview = onOpenMediaPreview
+                        )
                     }
 
                     // Favorite Characters Rail
@@ -656,28 +686,23 @@ fun UserProfileSheet(
                     }
 
                 } else {
-                    // TAB 1: SCORES & ANALYTICS
+                    // TAB 1: SCORES & ANALYTICS (Pure Unboxed AMOLED Black)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
-                        // Score Distribution Histogram
+                        // Unboxed Score Distribution Histogram
                         if (p.scoreDistribution.isNotEmpty()) {
                             Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(DarkSurfaceElevated)
-                                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text(
                                     text = "SCORE DISTRIBUTION",
                                     color = AccentArctic,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 0.8.sp
                                 )
@@ -715,21 +740,16 @@ fun UserProfileSheet(
                             }
                         }
 
-                        // Top Genres
+                        // Unboxed Top Genres
                         if (p.topGenres.isNotEmpty()) {
                             Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(DarkSurfaceElevated)
-                                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text(
                                     text = "TOP GENRES",
                                     color = AccentArctic,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 0.8.sp
                                 )
@@ -806,7 +826,11 @@ private fun StatCell(title: String, value: String) {
 }
 
 @Composable
-private fun FavoriteMediaRail(title: String, list: List<com.omnitrack.app.data.model.UserFavoriteMedia>) {
+private fun FavoriteMediaRail(
+    title: String,
+    list: List<com.omnitrack.app.data.model.UserFavoriteMedia>,
+    onOpenMediaPreview: ((RecommendationItem) -> Unit)?
+) {
     val context = LocalContext.current
     Column(
         modifier = Modifier
@@ -828,7 +852,20 @@ private fun FavoriteMediaRail(title: String, list: List<com.omnitrack.app.data.m
         ) {
             items(list, key = { it.id }) { item ->
                 Column(
-                    modifier = Modifier.width(96.dp),
+                    modifier = Modifier
+                        .width(96.dp)
+                        .clickable {
+                            onOpenMediaPreview?.invoke(
+                                RecommendationItem(
+                                    title = item.title,
+                                    coverUrl = item.coverUrl,
+                                    format = item.format,
+                                    rating = item.score?.let { it / 10f },
+                                    mediaType = item.mediaType,
+                                    anilistId = item.id
+                                )
+                            )
+                        },
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Box(
@@ -845,7 +882,7 @@ private fun FavoriteMediaRail(title: String, list: List<com.omnitrack.app.data.m
                                 .crossfade(true)
                                 .build(),
                             contentDescription = item.title,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
                     }

@@ -44,7 +44,9 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.ViewCarousel
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -220,6 +222,11 @@ fun DetailScreen(
             username = activeProfileUsername,
             anilistUserId = activeProfileUserId,
             userAuthToken = uiState.anilistAuthToken,
+            currentUsername = uiState.currentUsername,
+            onOpenMediaPreview = { recItem ->
+                showUserProfileSheet = false
+                viewModel.openPreview(recItem)
+            },
             onDismiss = {
                 showUserProfileSheet = false
                 activeProfileUsername = null
@@ -747,7 +754,25 @@ fun DetailScreen(
                         }
                         DetailSectionKey.DETAILS_INFO -> {
                             if (deferredSectionsAllowed) {
-                                DetailShowDetailsSection(item = item)
+                                DetailShowDetailsSection(
+                                    item = item,
+                                    englishTitle = uiState.englishTitle,
+                                    romajiTitle = uiState.romajiTitle,
+                                    nativeTitle = item.nativeTitle,
+                                    synonyms = uiState.synonyms,
+                                    tags = uiState.tags,
+                                    popularity = uiState.popularity,
+                                    favourites = uiState.favourites,
+                                    durationMinutes = uiState.durationMinutes,
+                                    onGenreOrTagClick = { name, isTag ->
+                                        selectedCompany = NetworkProductionCompany(
+                                            id = null,
+                                            name = name,
+                                            logoUrl = null,
+                                            kind = if (isTag) "anime_tag" else "anime_genre"
+                                        )
+                                    }
+                                )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
                         }
@@ -770,6 +795,7 @@ fun DetailScreen(
                                     comments = uiState.discussionComments,
                                     seasons = uiState.realSeasons,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
+                                    currentUsername = uiState.currentUsername,
                                     onSeasonSelect = { viewModel.selectSeason(it) },
                                     onPostComment = { content, tag, parentId ->
                                         viewModel.postDiscussionComment(content, tag, parentId)
@@ -1512,41 +1538,6 @@ private fun DetailHeroHeaderSection(
                         fontSize = 12.5.sp
                     )
                 }
-                val altTitle = englishTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-                    ?: romajiTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-                    ?: item.nativeTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-
-                if (!altTitle.isNullOrBlank() && onToggleTitle != null) {
-                    val isEnglishCurrently = englishTitle?.equals(item.title, ignoreCase = true) == true
-                    Box(
-                        modifier = Modifier
-                            .padding(top = 2.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .clickable { onToggleTitle() }
-                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = if (isEnglishCurrently) "EN ⇄ JP" else "JP ⇄ EN",
-                                color = AccentArctic,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = altTitle,
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1695,41 +1686,6 @@ private fun DetailClassicHeaderSection(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    val altTitle = englishTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-                        ?: romajiTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-                        ?: item.nativeTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
-
-                    if (!altTitle.isNullOrBlank() && onToggleTitle != null) {
-                        val isEnglishCurrently = englishTitle?.equals(item.title, ignoreCase = true) == true
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 2.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                            .clickable { onToggleTitle() }
-                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = if (isEnglishCurrently) "EN ⇄ JP" else "JP ⇄ EN",
-                                    color = AccentArctic,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = altTitle,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
                 }
                 IconButton(
                     onClick = onOptionsClick,
@@ -1776,8 +1732,11 @@ private fun DetailSynopsisSection(
     synopsis: String,
     dominantAccent: Color
 ) {
+    val context = LocalContext.current
     var synopsisExpanded by remember { mutableStateOf(false) }
     var canExpandSynopsis by remember { mutableStateOf(false) }
+    var isSpeaking by remember { mutableStateOf(false) }
+    var ttsInstance by remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
 
     val cleanText = remember(synopsis) {
         synopsis
@@ -1788,6 +1747,26 @@ private fun DetailSynopsisSection(
             .trim()
     }
 
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        var localTts: android.speech.tts.TextToSpeech? = null
+        localTts = android.speech.tts.TextToSpeech(context) { status ->
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                localTts?.language = java.util.Locale.ENGLISH
+                localTts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) { isSpeaking = true }
+                    override fun onDone(utteranceId: String?) { isSpeaking = false }
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) { isSpeaking = false }
+                })
+            }
+        }
+        ttsInstance = localTts
+        onDispose {
+            localTts?.stop()
+            localTts?.shutdown()
+        }
+    }
+
     if (cleanText.isBlank()) return
 
     Column(
@@ -1795,33 +1774,92 @@ private fun DetailSynopsisSection(
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .animateContentSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                enabled = canExpandSynopsis,
-                onClick = { synopsisExpanded = !synopsisExpanded }
-            )
     ) {
-        Text(
-            text = cleanText,
-            color = Color.White.copy(alpha = 0.90f),
-            fontSize = 13.5.sp,
-            lineHeight = 20.sp,
-            maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
-            overflow = TextOverflow.Ellipsis,
-            onTextLayout = { textLayoutResult ->
-                if (!synopsisExpanded) {
-                    canExpandSynopsis = textLayoutResult.hasVisualOverflow || textLayoutResult.lineCount > 3
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "Overview",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            // Dartotsu Synopsis SpeakButton
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (isSpeaking) dominantAccent.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
+                    .border(1.dp, if (isSpeaking) dominantAccent else GlassBorder, RoundedCornerShape(999.dp))
+                    .clickable {
+                        if (isSpeaking) {
+                            ttsInstance?.stop()
+                            isSpeaking = false
+                        } else {
+                            ttsInstance?.speak(cleanText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "synopsis_tts")
+                            isSpeaking = true
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSpeaking) Icons.Default.StopCircle else Icons.Default.VolumeUp,
+                        contentDescription = if (isSpeaking) "Stop reading" else "Read synopsis",
+                        tint = if (isSpeaking) dominantAccent else Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (isSpeaking) "Stop" else "Listen",
+                        color = if (isSpeaking) dominantAccent else Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
-        )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = canExpandSynopsis,
+                    onClick = { synopsisExpanded = !synopsisExpanded }
+                )
+        ) {
+            Text(
+                text = cleanText,
+                color = Color.White.copy(alpha = 0.90f),
+                fontSize = 13.5.sp,
+                lineHeight = 20.sp,
+                maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { textLayoutResult ->
+                    if (!synopsisExpanded) {
+                        canExpandSynopsis = textLayoutResult.hasVisualOverflow || textLayoutResult.lineCount > 3
+                    }
+                }
+            )
+        }
         if (canExpandSynopsis) {
             Text(
                 text = if (synopsisExpanded) "Show less" else "Read more",
                 color = dominantAccent,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier
+                    .clickable { synopsisExpanded = !synopsisExpanded }
+                    .padding(top = 4.dp)
             )
         }
     }

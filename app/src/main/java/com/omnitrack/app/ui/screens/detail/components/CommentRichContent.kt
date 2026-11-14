@@ -106,25 +106,17 @@ fun CommentRichContent(
 @Composable
 private fun CommentMediaBlock(url: String) {
     val context = LocalContext.current
-    Box(
+    AsyncImage(
+        model = ImageRequest.Builder(context)
+            .data(url)
+            .crossfade(true)
+            .build(),
+        contentDescription = "Comment attachment",
         modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .clip(RoundedCornerShape(10.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(url)
-                .crossfade(true)
-                .build(),
-            contentDescription = "Comment attachment",
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 100.dp, max = 260.dp),
-            contentScale = ContentScale.Fit
-        )
-    }
+            .clip(RoundedCornerShape(8.dp))
+            .heightIn(max = 240.dp),
+        contentScale = ContentScale.Fit
+    )
 }
 
 @Composable

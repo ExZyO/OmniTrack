@@ -235,6 +235,25 @@ fun VisualPresentationScreen(
                 )
             }
 
+            // Section 4: Preferred Title Localization
+            PresentationSectionTitle("PREFERRED TITLE LOCALIZATION")
+            val titlePref by prefManager.preferredTitleLanguage.collectAsState(initial = com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.omnitrack.app.data.preferences.PreferredTitleLanguage.values().forEach { lang ->
+                    PresentationChoiceCard(
+                        title = lang.displayName,
+                        description = lang.description,
+                        isSelected = titlePref == lang,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch {
+                                prefManager.updatePreferredTitleLanguage(lang)
+                            }
+                        }
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

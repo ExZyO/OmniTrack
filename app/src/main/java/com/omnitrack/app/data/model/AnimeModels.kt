@@ -116,12 +116,21 @@ data class AnimeCharacterDetail(
     val voiceActors: List<AnimeCharacterVoiceActor> = emptyList()
 )
 
+data class AnimeTagItem(
+    val id: Long,
+    val name: String,
+    val rank: Int? = null,
+    val isMediaSpoiler: Boolean = false,
+    val isGeneralSpoiler: Boolean = false
+)
+
 data class AnimeEnrichedDetails(
     val anilistId: Long?,
     val malId: Long?,
     val englishTitle: String? = null,
     val romajiTitle: String? = null,
     val nativeTitle: String? = null,
+    val synonyms: List<String> = emptyList(),
     val characters: List<AnimeCharacterItem> = emptyList(),
     val staff: List<AnimeStaffItem> = emptyList(),
     val relations: List<AnimeRelationItem> = emptyList(),
@@ -131,7 +140,11 @@ data class AnimeEnrichedDetails(
     val bannerUrl: String? = null,
     val coverUrl: String? = null,
     val averageScore: Float? = null,
+    val popularity: Int? = null,
+    val favourites: Int? = null,
+    val durationMinutes: Int? = null,
     val totalEpisodes: Int? = null,
     val totalChapters: Int? = null,
-    val genres: List<String> = emptyList()
+    val genres: List<String> = emptyList(),
+    val tags: List<AnimeTagItem> = emptyList()
 )

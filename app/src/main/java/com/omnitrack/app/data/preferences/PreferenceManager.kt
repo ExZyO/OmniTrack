@@ -81,6 +81,12 @@ enum class EpisodeLayoutMode(val displayName: String, val description: String) {
     }
 }
 
+enum class PreferredTitleLanguage(val displayName: String, val description: String) {
+    ENGLISH("English", "Prefer official English localization (e.g. The Apothecary Diaries)"),
+    ROMAJI("Romaji", "Prefer Japanese romanized titles (e.g. Kusuriya no Hitorigoto)"),
+    NATIVE("Native Japanese", "Prefer original Japanese kanji / kana script")
+}
+
 data class PresentationSettings(
     val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
     val bannerSizing: BannerSizing = BannerSizing.CINEMA_SHOWCASE,
@@ -129,6 +135,7 @@ class PreferenceManager(private val context: Context) {
         val EPISODE_LAYOUT_SCALE = floatPreferencesKey("episode_layout_scale")
         val SEASON_VIEW_MODE = stringPreferencesKey("season_view_mode")
         val CUSTOM_POSTER_URL_PATTERN = stringPreferencesKey("custom_poster_url_pattern")
+        val PREFERRED_TITLE_LANGUAGE = stringPreferencesKey("preferred_title_language")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -229,6 +236,23 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun updateAiSemanticSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] = enabled }
+    }
+
+    val preferredTitleLanguage: Flow<PreferredTitleLanguage> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.PREFERRED_TITLE_LANGUAGE]
+            try {
+                if (raw != null) PreferredTitleLanguage.valueOf(raw) else PreferredTitleLanguage.ROMAJI
+            } catch (_: Exception) {
+                PreferredTitleLanguage.ROMAJI
+            }
+        }
+
+    suspend fun updatePreferredTitleLanguage(language: PreferredTitleLanguage) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.PREFERRED_TITLE_LANGUAGE] = language.name
+        }
     }
 
     val customTraktClientId: Flow<String> = context.dataStore.data
