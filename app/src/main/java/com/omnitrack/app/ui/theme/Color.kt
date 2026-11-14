@@ -6,6 +6,7 @@ val AmoledBlack = Color(0xFF000000)
 val DarkSurface = Color(0xFF0D0D0D)
 val DarkSurfaceElevated = Color(0xFF141414)
 val DarkSurfaceCard = Color(0xFF1A1A1A)
+val SurfaceCard = DarkSurfaceCard
 
 val GlassSurface = Color(0x331E1E1E)
 val GlassSurfaceHighlight = Color(0x1AFFFFFF)
