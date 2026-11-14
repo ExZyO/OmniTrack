@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.ui.graphics.ImageBitmap
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PresentationSettings
@@ -121,7 +123,8 @@ fun AnimeCharacterSheet(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .wrapContentHeight()
+                .heightIn(max = 680.dp)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
         ) {
             // Background presentation matching detail page
@@ -537,7 +540,8 @@ fun AnimeStaffSheet(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.92f)
+                .wrapContentHeight()
+                .heightIn(max = 680.dp)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
         ) {
             // Background presentation matching detail page

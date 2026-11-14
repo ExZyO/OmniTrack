@@ -1403,52 +1403,91 @@ private fun ScoreColumnChart(
     }
     val maxVal = map.values.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(130.dp)
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        for (score in 1..10) {
-            val v = map[score] ?: 0.0
-            val fraction = (v / maxVal).toFloat().coerceIn(0.04f, 1f)
-            val barColor = when {
-                score >= 8 -> AccentJade
-                score >= 6 -> AccentArctic
-                score >= 4 -> AccentGold
-                else -> AccentRose
-            }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            for (score in 1..10) {
+                val v = map[score] ?: 0.0
+                val fraction = (v / maxVal).toFloat().coerceIn(0.04f, 1f)
+                val barColor = when {
+                    score >= 8 -> AccentJade
+                    score >= 6 -> AccentArctic
+                    score >= 4 -> AccentGold
+                    else -> AccentRose
+                }
 
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Bottom
-            ) {
-                if (v > 0) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    if (v > 0) {
+                        Text(
+                            text = if (v >= 1000) "${(v / 1000).toInt()}k" else "${v.toInt()}",
+                            color = Color.White.copy(alpha = 0.70f),
+                            fontSize = 9.sp,
+                            maxLines = 1
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(14.dp)
+                            .fillMaxHeight(fraction * 0.78f)
+                            .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                            .background(barColor)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (v >= 1000) "${(v / 1000).toInt()}k" else "${v.toInt()}",
-                        color = Color.White.copy(alpha = 0.70f),
-                        fontSize = 9.sp,
-                        maxLines = 1
+                        text = "$score",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(modifier = Modifier.height(3.dp))
-                Box(
-                    modifier = Modifier
-                        .width(14.dp)
-                        .fillMaxHeight(fraction * 0.78f)
-                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                        .background(barColor)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "$score",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
+            }
+        }
+
+        // Score Distribution Tier Legend
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(
+                Triple(AccentJade, "8-10", "Masterpiece"),
+                Triple(AccentArctic, "6-7", "Good"),
+                Triple(AccentGold, "4-5", "Average"),
+                Triple(AccentRose, "1-3", "Low")
+            ).forEach { (color, range, label) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                    )
+                    Text(
+                        text = "$range $label",
+                        color = Color.White.copy(alpha = 0.70f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
@@ -1684,55 +1723,93 @@ private fun GenreRadarChart(
 
     val maxV = top.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val r = (size.minDimension / 2f) * 0.85f
-            val n = top.size
-            val angleStep = (2 * Math.PI / n).toFloat()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val r = (size.minDimension / 2f) * 0.85f
+                val n = top.size
+                val angleStep = (2 * Math.PI / n).toFloat()
 
-            // Draw concentric web rings
-            for (level in 1..3) {
-                val ringR = r * (level / 3f)
-                val ringPath = Path()
-                for (i in 0 until n) {
-                    val angle = -Math.PI / 2 + i * angleStep
-                    val x = (cx + ringR * Math.cos(angle)).toFloat()
-                    val y = (cy + ringR * Math.sin(angle)).toFloat()
-                    if (i == 0) ringPath.moveTo(x, y) else ringPath.lineTo(x, y)
+                // Draw concentric web rings
+                for (level in 1..3) {
+                    val ringR = r * (level / 3f)
+                    val ringPath = Path()
+                    for (i in 0 until n) {
+                        val angle = -Math.PI / 2 + i * angleStep
+                        val x = (cx + ringR * Math.cos(angle)).toFloat()
+                        val y = (cy + ringR * Math.sin(angle)).toFloat()
+                        if (i == 0) ringPath.moveTo(x, y) else ringPath.lineTo(x, y)
+                    }
+                    ringPath.close()
+                    drawPath(path = ringPath, color = Color.White.copy(alpha = 0.08f), style = Stroke(width = 1.dp.toPx()))
                 }
-                ringPath.close()
-                drawPath(path = ringPath, color = Color.White.copy(alpha = 0.08f), style = Stroke(width = 1.dp.toPx()))
-            }
 
-            // Draw data polygon
-            val dataPath = Path()
-            top.forEachIndexed { i, item ->
-                val angle = -Math.PI / 2 + i * angleStep
-                val dataR = r * (item.second / maxV).toFloat().coerceIn(0.1f, 1f)
-                val x = (cx + dataR * Math.cos(angle)).toFloat()
-                val y = (cy + dataR * Math.sin(angle)).toFloat()
-                if (i == 0) dataPath.moveTo(x, y) else dataPath.lineTo(x, y)
-                drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
-            }
-            dataPath.close()
+                // Draw data polygon
+                val dataPath = Path()
+                top.forEachIndexed { i, item ->
+                    val angle = -Math.PI / 2 + i * angleStep
+                    val dataR = r * (item.second / maxV).toFloat().coerceIn(0.1f, 1f)
+                    val x = (cx + dataR * Math.cos(angle)).toFloat()
+                    val y = (cy + dataR * Math.sin(angle)).toFloat()
+                    if (i == 0) dataPath.moveTo(x, y) else dataPath.lineTo(x, y)
+                    drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                }
+                dataPath.close()
 
-            drawPath(
-                path = dataPath,
-                color = AccentArctic.copy(alpha = 0.25f),
-                style = Fill
-            )
-            drawPath(
-                path = dataPath,
-                color = AccentArctic,
-                style = Stroke(width = 2.dp.toPx())
-            )
+                drawPath(
+                    path = dataPath,
+                    color = AccentArctic.copy(alpha = 0.25f),
+                    style = Fill
+                )
+                drawPath(
+                    path = dataPath,
+                    color = AccentArctic,
+                    style = Stroke(width = 2.dp.toPx())
+                )
+            }
+        }
+
+        // Explicit Genre Legend Pills
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            top.forEach { (genre, v) ->
+                val displayVal = when (metric) {
+                    1 -> if (isAnime) "${v.toInt()}h" else "${v.toInt()} ch"
+                    2 -> String.format("%.1f", v)
+                    else -> "${v.toInt()}"
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AccentArctic))
+                    Text(
+                        text = "$genre: $displayVal",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
     }
 }

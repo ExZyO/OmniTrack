@@ -120,9 +120,10 @@ private fun CommentMediaBlock(url: String) {
                 .build(),
             contentDescription = "Attachment",
             modifier = Modifier
+                .fillMaxWidth()
                 .padding(vertical = 4.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .heightIn(max = 240.dp),
+                .heightIn(min = 140.dp, max = 340.dp),
             contentScale = ContentScale.Fit,
             onError = { isError = true }
         )
@@ -215,21 +216,46 @@ fun preprocessAniListHtml(raw: String): String {
     // Replace <br>, <br/>, <br /> with newlines
     s = s.replace(Regex("""(?i)<br\s*/?>"""), "\n")
 
+    // Strip <video>, </video>
+    s = s.replace(Regex("""(?i)</?video[^>]*>"""), "")
+
+    // Strip <div>, <center>, <span>, <p> opening and closing tags (including <div align="center">, <center>, etc.)
+    s = s.replace(Regex("""(?i)</?(?:div|center|span|p|font|header|footer|section)[^>]*>"""), "")
+
+    // Clean img###( url ) or img( url ) with optional spaces inside
+    s = s.replace(Regex("""(?i)img\d*(?:\(\d+\))?\s*\(\s*(https?://[^\s\)]+)\s*\)""")) { m ->
+        "img(${m.groupValues[1]})"
+    }
+
+    // Clean webm( url )
+    s = s.replace(Regex("""(?i)webm\s*\(\s*(https?://[^\s\)]+)\s*\)""")) { m ->
+        "img(${m.groupValues[1]})"
+    }
+
+    // Clean youtube( url )
+    s = s.replace(Regex("""(?i)youtube\s*\(\s*(https?://[^\s\)]+)\s*\)""")) { m ->
+        "[Watch on YouTube](${m.groupValues[1]})"
+    }
+
     // Replace <a> tags: <a href="url">text</a> -> [text](url)
     s = s.replace(Regex("""(?is)<a\s+[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""")) { m ->
-        val url = m.groupValues[1]
+        val url = m.groupValues[1].trim()
         val text = m.groupValues[2].replace(Regex("""<[^>]+>"""), "").trim()
         "[${text.ifEmpty { url }}]($url)"
     }
 
     // Replace <img> tags: <img src="url"/> -> img(url)
     s = s.replace(Regex("""(?is)<img\s+[^>]*src=["']([^"']+)["'][^>]*>""")) { m ->
-        val url = m.groupValues[1]
+        val url = m.groupValues[1].trim()
         "img($url)"
     }
 
-    // Strip <div>, <center>, <span>, <p> opening and closing tags (including <div align="center">, <center>, etc.)
-    s = s.replace(Regex("""(?i)</?(?:div|center|span|p|font|header|footer|section)[^>]*>"""), "")
+    // Clean markdown links with spaces: [ text ]( url )
+    s = s.replace(Regex("""\[\s*(.*?)\s*\]\(\s*(https?://[^\s\)]+)\s*\)""")) { m ->
+        val text = m.groupValues[1].trim()
+        val url = m.groupValues[2].trim()
+        "[$text]($url)"
+    }
 
     return s
 }
@@ -285,7 +311,7 @@ private fun parseCommentContent(raw: String): List<CommentBlock> {
 private fun fragmentInlineBlocks(text: String): List<CommentBlock> {
     val result = mutableListOf<CommentBlock>()
     val pattern = Regex(
-        """(?is)(?:img(?:\(\d+\)|\d+)?\((https?://[^\s\)]+)\)|!\[.*?\]\((https?://[^\s\)]+)\)|<img\s+[^>]*src=["'](https?://[^"']+)["'][^>]*>|~!(.*?)!~|\[spoiler\](.*?)\[/spoiler\])"""
+        """(?is)(?:img(?:\(\d+\)|\d+)?\s*\(\s*(https?://[^\s\)]+)\s*\)|webm\s*\(\s*(https?://[^\s\)]+)\s*\)|!\[.*?\]\(\s*(https?://[^\s\)]+)\s*\)|<img\s+[^>]*src=["'](https?://[^"']+)["'][^>]*>|~!(.*?)!~|\[spoiler\](.*?)\[/spoiler\])"""
     )
     var lastIndex = 0
 
@@ -297,8 +323,11 @@ private fun fragmentInlineBlocks(text: String): List<CommentBlock> {
             }
         }
 
-        val mediaUrl = match.groupValues[1].ifEmpty { match.groupValues[2] }.ifEmpty { match.groupValues[3] }
-        val spoilerContent = match.groupValues[4].ifEmpty { match.groupValues[5] }
+        val mediaUrl = match.groupValues[1]
+            .ifEmpty { match.groupValues[2] }
+            .ifEmpty { match.groupValues[3] }
+            .ifEmpty { match.groupValues[4] }
+        val spoilerContent = match.groupValues[5].ifEmpty { match.groupValues[6] }
 
         if (mediaUrl.isNotEmpty()) {
             result.add(CommentBlock.Media(mediaUrl))
@@ -334,7 +363,7 @@ private fun parseMarkdownSpans(raw: String): AnnotatedString {
         // 10 & 11: [link](url)
         // 12: bare url (http:// or https://)
         val tokenRegex = Regex(
-            """(\*\*|__)(.*?)\1|(\*|_)(.*?)\3|(~~)(.*?)\5|(`)(.*?)\7|(@\w+)|\[(.*?)\]\((https?://[^\s\)]+)\)|(https?://[^\s\)]+)"""
+            """(\*\*|__)(.*?)\1|(\*|_)(.*?)\3|(~~)(.*?)\5|(`)(.*?)\7|(@\w+)|\[\s*(.*?)\s*\]\(\s*(https?://[^\s\)]+)\s*\)|(https?://[^\s\)]+)"""
         )
 
         for (match in tokenRegex.findAll(raw)) {

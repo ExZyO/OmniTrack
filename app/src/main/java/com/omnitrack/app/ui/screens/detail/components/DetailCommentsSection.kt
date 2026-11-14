@@ -194,25 +194,37 @@ fun DetailCommentsSection(
 
     // Filter comments by selected tag and sort
     val filteredComments = remember(localCommentsList, selectedTag, sortOrder) {
-        val byTag = if (selectedTag == "All") {
-            localCommentsList
-        } else {
-            val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
-            localCommentsList.filter { comment ->
-                val matchDirect = comment.tag.equals(selectedTag, ignoreCase = true) ||
-                    (tagNumber != null && comment.tag?.endsWith(" $tagNumber") == true) ||
-                    (tagNumber != null && comment.tag == "$tagNumber")
-                val matchReply = comment.replies.any { r ->
-                    r.tag.equals(selectedTag, ignoreCase = true) ||
-                        (tagNumber != null && r.tag?.endsWith(" $tagNumber") == true) ||
-                        (tagNumber != null && r.tag == "$tagNumber")
+        val byTag = when {
+            selectedTag == "All" -> localCommentsList
+            selectedTag.equals("General", ignoreCase = true) -> {
+                localCommentsList.filter { comment ->
+                    comment.tag.isNullOrBlank() ||
+                        comment.tag.equals("General", ignoreCase = true) ||
+                        comment.tag == "0"
                 }
-                val matchContent = if (tagNumber != null) {
-                    val regex = Regex("""(?i)\b(?:ep|episode|ch|chapter)\.?\s*#?$tagNumber\b""")
-                    comment.content.contains(regex) || comment.replies.any { it.content.contains(regex) }
-                } else false
+            }
+            else -> {
+                val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
+                localCommentsList.filter { comment ->
+                    val tagStr = comment.tag?.trim()
+                    val commentTagNum = tagStr?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                    val matchDirect = commentTagNum != null && commentTagNum == tagNumber
+                    val matchString = tagStr != null && (
+                        tagStr.equals(selectedTag, ignoreCase = true) ||
+                        tagStr.endsWith(" $tagNumber") ||
+                        tagStr == "$tagNumber"
+                    )
+                    val matchReply = comment.replies.any { r ->
+                        val rNum = r.tag?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                        rNum == tagNumber || r.tag?.contains("$tagNumber") == true
+                    }
+                    val matchContent = if (tagNumber != null) {
+                        val regex = Regex("""(?i)\b(?:ep|episode|ch|chapter)\.?\s*#?$tagNumber\b""")
+                        comment.content.contains(regex) || comment.replies.any { it.content.contains(regex) }
+                    } else false
 
-                matchDirect || matchReply || matchContent
+                    matchDirect || matchString || matchReply || matchContent
+                }
             }
         }
         when (sortOrder) {

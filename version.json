@@ -1,6 +1,7 @@
 {
-  "version": "1.0.0-b31",
-  "versionCode": 31,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b31/OmniTrack-v1.0.0-b31.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b31: Pure whitespace settings flow, drag reorder lock, hero layout mode, and cinematic artwork preview."
+  "version": "v1.0.0-b162",
+  "versionCode": 162,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b162/OmniTrack-v1.0.0-b162.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b162/OmniTrack-v1.0.0-b162-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b162: fix(syntax): remove extraneous closing brace in AnimeCharacterSheet"
 }

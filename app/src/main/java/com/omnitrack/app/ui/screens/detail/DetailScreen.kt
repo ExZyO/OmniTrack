@@ -206,18 +206,18 @@ fun DetailScreen(
     }
 
     BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
-        if (sheetBackStack.isNotEmpty()) {
+        if (uiState.isPreviewMode) {
+            viewModel.closePreview()
+        } else if (sheetBackStack.isNotEmpty()) {
             sheetBackStack.removeAt(sheetBackStack.lastIndex)
         } else {
-            if (!viewModel.closePreview()) {
-                onBack()
-            }
+            onBack()
         }
     }
 
     val scrollState = rememberScrollState()
 
-    val currentSheet = sheetBackStack.lastOrNull()
+    val currentSheet = if (uiState.isPreviewMode) null else sheetBackStack.lastOrNull()
     when (currentSheet) {
         is DetailSheetTarget.UserProfile -> {
             UserProfileSheet(
@@ -230,7 +230,6 @@ fun DetailScreen(
                 backdropTargetUrl = effectiveBanner,
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
-                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 },
                 onOpenCharacter = { charItem ->
@@ -253,7 +252,6 @@ fun DetailScreen(
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
-                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )
@@ -267,7 +265,6 @@ fun DetailScreen(
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
-                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )
@@ -286,7 +283,6 @@ fun DetailScreen(
                     onBack = { sheetBackStack.removeLastOrNull() },
                     onOpenMediaPreview = { recItem ->
                         viewModel.saveScrollOffset(scrollState.value)
-                        sheetBackStack.clear()
                         viewModel.openPreview(recItem)
                     }
                 )
@@ -306,7 +302,6 @@ fun DetailScreen(
                 onBack = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
-                    sheetBackStack.clear()
                     viewModel.openPreview(recItem)
                 }
             )
