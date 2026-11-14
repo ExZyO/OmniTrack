@@ -45,6 +45,7 @@ import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -902,7 +903,7 @@ class DetailViewModel(
                                     }
                                 }
 
-                                val tmdbOverview = root["overview"]?.jsonPrimitive?.contentOrNull?.trim()
+                                val tmdbOverview = root["overview"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { !it.equals("null", ignoreCase = true) }
                                 if (!tmdbOverview.isNullOrBlank() && item.id <= 0 && _previewItem.value != null) {
                                     val cur = _previewItem.value!!
                                     if (cur.synopsis.isNullOrBlank()) {
