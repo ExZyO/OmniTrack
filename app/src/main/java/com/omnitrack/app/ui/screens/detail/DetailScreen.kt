@@ -130,6 +130,7 @@ import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.UserProfileSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeStaffSection
@@ -174,6 +175,9 @@ fun DetailScreen(
     var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
     var selectedAnimeCharacter by remember { mutableStateOf<AnimeCharacterItem?>(null) }
     var selectedAnimeStaff by remember { mutableStateOf<AnimeStaffItem?>(null) }
+    var showUserProfileSheet by remember { mutableStateOf(false) }
+    var activeProfileUsername by remember { mutableStateOf<String?>(null) }
+    var activeProfileUserId by remember { mutableStateOf<Int?>(null) }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
@@ -189,10 +193,16 @@ fun DetailScreen(
     val isAnySheetOpen = selectedPerson != null ||
         selectedCompany != null ||
         selectedAnimeCharacter != null ||
-        selectedAnimeStaff != null
+        selectedAnimeStaff != null ||
+        showUserProfileSheet
 
     BackHandler(enabled = isAnySheetOpen || uiState.isPreviewMode) {
         when {
+            showUserProfileSheet -> {
+                showUserProfileSheet = false
+                activeProfileUsername = null
+                activeProfileUserId = null
+            }
             selectedPerson != null -> selectedPerson = null
             selectedCompany != null -> selectedCompany = null
             selectedAnimeCharacter != null -> selectedAnimeCharacter = null
@@ -203,6 +213,19 @@ fun DetailScreen(
                 }
             }
         }
+    }
+
+    if (showUserProfileSheet && (activeProfileUsername != null || activeProfileUserId != null)) {
+        UserProfileSheet(
+            username = activeProfileUsername,
+            anilistUserId = activeProfileUserId,
+            userAuthToken = uiState.anilistAuthToken,
+            onDismiss = {
+                showUserProfileSheet = false
+                activeProfileUsername = null
+                activeProfileUserId = null
+            }
+        )
     }
 
     if (selectedAnimeCharacter != null) {
@@ -555,6 +578,9 @@ fun DetailScreen(
                     DetailHeroHeaderSection(
                         item = item,
                         backdropTargetUrl = backdropTargetUrl,
+                        englishTitle = uiState.englishTitle,
+                        romajiTitle = uiState.romajiTitle,
+                        onToggleTitle = { viewModel.togglePreferredTitle() },
                         onOptionsClick = { showOptionsMenu = true },
                         onEditProgress = { showProgressEditSheet = true },
                         onEditStatus = { showStatusPickerSheet = true },
@@ -566,6 +592,9 @@ fun DetailScreen(
                         item = item,
                         coverImageModel = coverImageModel,
                         backdropTargetUrl = backdropTargetUrl,
+                        englishTitle = uiState.englishTitle,
+                        romajiTitle = uiState.romajiTitle,
+                        onToggleTitle = { viewModel.togglePreferredTitle() },
                         onCoverClick = { showArtworkPicker = true },
                         onCoverLoaded = { url ->
                             if (coverCache != null) {
@@ -739,14 +768,25 @@ fun DetailScreen(
                                     reviews = uiState.reviews,
                                     episodeOrChapterCount = item.totalProgress?.toInt() ?: uiState.realEpisodes.size.takeIf { it > 0 },
                                     comments = uiState.discussionComments,
+                                    seasons = uiState.realSeasons,
+                                    selectedSeasonNumber = uiState.selectedSeasonNumber,
+                                    onSeasonSelect = { viewModel.selectSeason(it) },
                                     onPostComment = { content, tag, parentId ->
                                         viewModel.postDiscussionComment(content, tag, parentId)
+                                    },
+                                    onEditComment = { commentId, newContent ->
+                                        viewModel.editDiscussionComment(commentId, newContent)
+                                    },
+                                    onDeleteComment = { commentId ->
+                                        viewModel.deleteDiscussionComment(commentId)
                                     },
                                     onVote = { commentId, voteType ->
                                         viewModel.voteDiscussionComment(commentId, voteType)
                                     },
                                     onUserClick = { username, anilistUserId ->
-                                        // Phase 4 profile sheet
+                                        activeProfileUsername = username
+                                        activeProfileUserId = anilistUserId
+                                        showUserProfileSheet = true
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -1087,6 +1127,9 @@ private fun SiblingDetailPreview(
                 DetailHeroHeaderSection(
                     item = item,
                     backdropTargetUrl = backdropTargetUrl,
+                    englishTitle = uiState.englishTitle,
+                    romajiTitle = uiState.romajiTitle,
+                    onToggleTitle = { viewModel.togglePreferredTitle() },
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -1098,6 +1141,9 @@ private fun SiblingDetailPreview(
                     item = item,
                     coverImageModel = LosslessCoverMapper.toLosslessUrl(effectiveCover),
                     backdropTargetUrl = backdropTargetUrl,
+                    englishTitle = uiState.englishTitle,
+                    romajiTitle = uiState.romajiTitle,
+                    onToggleTitle = { viewModel.togglePreferredTitle() },
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -1399,6 +1445,9 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
 private fun DetailHeroHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     backdropTargetUrl: String?,
+    englishTitle: String? = null,
+    romajiTitle: String? = null,
+    onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
@@ -1469,6 +1518,41 @@ private fun DetailHeroHeaderSection(
                         fontSize = 12.5.sp
                     )
                 }
+                val altTitle = englishTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+                    ?: romajiTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+                    ?: item.nativeTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+
+                if (!altTitle.isNullOrBlank() && onToggleTitle != null) {
+                    val isEnglishCurrently = englishTitle?.equals(item.title, ignoreCase = true) == true
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                            .clickable { onToggleTitle() }
+                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (isEnglishCurrently) "EN ⇄ JP" else "JP ⇄ EN",
+                                color = AccentArctic,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = altTitle,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1520,6 +1604,9 @@ private fun DetailClassicHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     coverImageModel: Any?,
     backdropTargetUrl: String?,
+    englishTitle: String? = null,
+    romajiTitle: String? = null,
+    onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
     onOptionsClick: () -> Unit,
@@ -1613,6 +1700,41 @@ private fun DetailClassicHeaderSection(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                    }
+                    val altTitle = englishTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+                        ?: romajiTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+                        ?: item.nativeTitle?.takeIf { !it.equals(item.title, ignoreCase = true) }
+
+                    if (!altTitle.isNullOrBlank() && onToggleTitle != null) {
+                        val isEnglishCurrently = englishTitle?.equals(item.title, ignoreCase = true) == true
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 2.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                            .clickable { onToggleTitle() }
+                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (isEnglishCurrently) "EN ⇄ JP" else "JP ⇄ EN",
+                                    color = AccentArctic,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = altTitle,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
                 }
                 IconButton(

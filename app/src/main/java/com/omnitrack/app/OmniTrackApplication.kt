@@ -75,6 +75,11 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             .components {
                 add(CoverCacheMapper(coverCache))
                 add(OkHttpNetworkFetcherFactory(callFactory = { sharedClient }))
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil3.gif.AnimatedImageDecoder.Factory())
+                } else {
+                    add(coil3.gif.GifDecoder.Factory())
+                }
             }
             .memoryCache {
                 MemoryCache.Builder()

@@ -86,7 +86,10 @@ data class DetailUiState(
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
     val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections,
-    val discussionComments: List<DiscussionComment> = emptyList()
+    val discussionComments: List<DiscussionComment> = emptyList(),
+    val englishTitle: String? = null,
+    val romajiTitle: String? = null,
+    val anilistAuthToken: String? = null
 )
 
 private data class PreviewAndAux(
@@ -110,7 +113,10 @@ private data class PreviewAndAux(
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
     val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections,
-    val discussionComments: List<DiscussionComment> = emptyList()
+    val discussionComments: List<DiscussionComment> = emptyList(),
+    val englishTitle: String? = null,
+    val romajiTitle: String? = null,
+    val anilistAuthToken: String? = null
 )
 
 class DetailViewModel(
@@ -128,6 +134,9 @@ class DetailViewModel(
     private val _recommendations = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
     private val _discussionComments = MutableStateFlow<List<DiscussionComment>>(emptyList())
+    private val _englishTitle = MutableStateFlow<String?>(null)
+    private val _romajiTitle = MutableStateFlow<String?>(null)
+    private val _anilistAuthToken = MutableStateFlow<String?>(null)
     private val dantotsuCommentsRepository = DantotsuCommentsRepository()
     private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
@@ -272,6 +281,19 @@ class DetailViewModel(
             if (cachedAux.animeRelations.isNotEmpty()) _animeRelations.value = cachedAux.animeRelations
             if (cachedAux.animeAiring != null) _animeAiring.value = cachedAux.animeAiring
             if (cachedAux.nextAiringEpisode != null) _nextAiringEpisode.value = cachedAux.nextAiringEpisode
+            if (cachedAux.englishTitle != null) _englishTitle.value = cachedAux.englishTitle
+            if (cachedAux.romajiTitle != null) _romajiTitle.value = cachedAux.romajiTitle
+        }
+
+        if (trackerTokenManager != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                trackerTokenManager.tokens.collect { tokens ->
+                    _anilistAuthToken.value = tokens.anilistToken
+                    if (!tokens.anilistToken.isNullOrBlank()) {
+                        dantotsuCommentsRepository.authenticate(tokens.anilistToken)
+                    }
+                }
+            }
         }
 
         // 0ms Synchronous Series Seasons & Episodes Cache Hit (Nuvio 0-lag parity):
@@ -427,7 +449,10 @@ class DetailViewModel(
             _animeRelations,
             _animeAiring,
             _sectionOrder,
-            _discussionComments
+            _discussionComments,
+            _englishTitle,
+            _romajiTitle,
+            _anilistAuthToken
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -452,7 +477,10 @@ class DetailViewModel(
             animeRelations = args[17] as List<AnimeRelationItem>,
             animeAiring = args[18] as? AnimeAiringSchedule,
             sectionOrder = args[19] as List<DetailSectionItem>,
-            discussionComments = args[20] as List<DiscussionComment>
+            discussionComments = args[20] as List<DiscussionComment>,
+            englishTitle = args[21] as? String,
+            romajiTitle = args[22] as? String,
+            anilistAuthToken = args[23] as? String
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -484,7 +512,10 @@ class DetailViewModel(
                     animeRelations = aux.animeRelations,
                     animeAiring = aux.animeAiring,
                     sectionOrder = aux.sectionOrder,
-                    discussionComments = aux.discussionComments
+                    discussionComments = aux.discussionComments,
+                    englishTitle = aux.englishTitle,
+                    romajiTitle = aux.romajiTitle,
+                    anilistAuthToken = aux.anilistAuthToken
                 )
             )
         } else {
@@ -534,7 +565,10 @@ class DetailViewModel(
                                 animeRelations = aux.animeRelations,
                                 animeAiring = aux.animeAiring,
                                 sectionOrder = aux.sectionOrder,
-                                discussionComments = aux.discussionComments
+                                discussionComments = aux.discussionComments,
+                                englishTitle = aux.englishTitle,
+                                romajiTitle = aux.romajiTitle,
+                                anilistAuthToken = aux.anilistAuthToken
                             )
                         }
                     } else {
@@ -561,6 +595,8 @@ class DetailViewModel(
         _recommendations.value = emptyList()
         _reviews.value = emptyList()
         _discussionComments.value = emptyList()
+        _englishTitle.value = null
+        _romajiTitle.value = null
         _cast.value = emptyList()
         _trailers.value = emptyList()
         _companies.value = emptyList()
@@ -726,6 +762,8 @@ class DetailViewModel(
                 _collectionName.value = existingCached.collectionName
                 _collectionItems.value = existingCached.collectionItems
             }
+            if (existingCached.englishTitle != null) _englishTitle.value = existingCached.englishTitle
+            if (existingCached.romajiTitle != null) _romajiTitle.value = existingCached.romajiTitle
         }
 
         recommendationFetchJob?.cancel()
@@ -753,6 +791,8 @@ class DetailViewModel(
                 if (it.animeRelations.isNotEmpty()) _animeRelations.value = it.animeRelations
                 if (it.animeAiring != null) _animeAiring.value = it.animeAiring
                 if (it.nextAiringEpisode != null) _nextAiringEpisode.value = it.nextAiringEpisode
+                if (it.englishTitle != null) _englishTitle.value = it.englishTitle
+                if (it.romajiTitle != null) _romajiTitle.value = it.romajiTitle
             }
 
             fun persistAuxCache() {
@@ -768,7 +808,9 @@ class DetailViewModel(
                     animeCharacters = _animeCharacters.value,
                     animeStaff = _animeStaff.value,
                     animeRelations = _animeRelations.value,
-                    animeAiring = _animeAiring.value
+                    animeAiring = _animeAiring.value,
+                    englishTitle = _englishTitle.value,
+                    romajiTitle = _romajiTitle.value
                 )
                 DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
@@ -1107,6 +1149,8 @@ class DetailViewModel(
                         existingSeasonsCount = _realSeasons.value.size.coerceAtLeast(1)
                     )
                     if (animeDetails != null) {
+                        if (!animeDetails.englishTitle.isNullOrBlank()) _englishTitle.value = animeDetails.englishTitle
+                        if (!animeDetails.romajiTitle.isNullOrBlank()) _romajiTitle.value = animeDetails.romajiTitle
                         _animeCharacters.value = animeDetails.characters
                         _animeStaff.value = animeDetails.staff
                         _animeRelations.value = animeDetails.relations
@@ -1778,6 +1822,89 @@ class DetailViewModel(
         }
     }
 
+    fun editDiscussionComment(commentId: String, newContent: String) {
+        val cid = commentId.toLongOrNull()
+        _discussionComments.update { current ->
+            updateCommentContentHelper(current, commentId, newContent)
+        }
+        if (cid != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                dantotsuCommentsRepository.editComment(cid, newContent)
+            }
+        }
+    }
+
+    fun deleteDiscussionComment(commentId: String) {
+        val cid = commentId.toLongOrNull()
+        _discussionComments.update { current ->
+            deleteCommentHelper(current, commentId)
+        }
+        if (cid != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                dantotsuCommentsRepository.deleteComment(cid)
+            }
+        }
+    }
+
+    fun togglePreferredTitle() {
+        val currentItem = _previewItem.value ?: uiState.value.item ?: return
+        val eng = _englishTitle.value
+        val rom = _romajiTitle.value ?: currentItem.nativeTitle
+        if (eng.isNullOrBlank() && rom.isNullOrBlank()) return
+
+        val newTitle = if (!eng.isNullOrBlank() && currentItem.title.equals(eng, ignoreCase = true)) {
+            rom ?: currentItem.title
+        } else {
+            eng ?: currentItem.title
+        }
+
+        if (newTitle == currentItem.title) return
+
+        val newNative = if (newTitle == eng) (rom ?: currentItem.nativeTitle) else (eng ?: currentItem.nativeTitle)
+
+        if (_previewItem.value != null) {
+            val updated = currentItem.copy(title = newTitle, nativeTitle = newNative)
+            _previewItem.value = updated
+            _previewStack.update { stack ->
+                if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+            }
+        } else if (currentItem.id > 0) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val updated = currentItem.copy(title = newTitle, nativeTitle = newNative)
+                repository.updateMedia(updated)
+            }
+        }
+    }
+
+    private fun updateCommentContentHelper(
+        list: List<DiscussionComment>,
+        commentId: String,
+        newContent: String
+    ): List<DiscussionComment> {
+        return list.map { item ->
+            if (item.id == commentId) {
+                item.copy(content = newContent)
+            } else if (item.replies.isNotEmpty()) {
+                item.copy(replies = updateCommentContentHelper(item.replies, commentId, newContent))
+            } else {
+                item
+            }
+        }
+    }
+
+    private fun deleteCommentHelper(
+        list: List<DiscussionComment>,
+        commentId: String
+    ): List<DiscussionComment> {
+        return list.filter { it.id != commentId }.map { item ->
+            if (item.replies.isNotEmpty()) {
+                item.copy(replies = deleteCommentHelper(item.replies, commentId))
+            } else {
+                item
+            }
+        }
+    }
+
     private fun insertNestedReplyHelper(
         list: List<DiscussionComment>,
         parentId: String,
@@ -2141,7 +2268,9 @@ data class CachedDetailAux(
     val animeCharacters: List<AnimeCharacterItem> = emptyList(),
     val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
-    val animeAiring: AnimeAiringSchedule? = null
+    val animeAiring: AnimeAiringSchedule? = null,
+    val englishTitle: String? = null,
+    val romajiTitle: String? = null
 )
 
 internal object DetailAuxMemoryCache {

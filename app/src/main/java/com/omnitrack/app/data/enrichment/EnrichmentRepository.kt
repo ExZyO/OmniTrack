@@ -13,6 +13,10 @@ import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.model.AnimeVoiceActorDetail
 import com.omnitrack.app.data.model.StaffProductionCreditItem
 import com.omnitrack.app.data.model.VoiceActorRoleItem
+import com.omnitrack.app.data.model.UserProfileData
+import com.omnitrack.app.data.model.UserFavoriteMedia
+import com.omnitrack.app.data.model.UserFavoriteCharacter
+import com.omnitrack.app.data.model.UserFavoriteStaff
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
@@ -1417,6 +1421,11 @@ class EnrichmentRepository(
                     val resolvedId = media["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                     val resolvedMalId = media["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
 
+                    val mediaTitleObj = media["title"]?.jsonObject
+                    val mediaEnglishTitle = mediaTitleObj?.get("english").cleanString()
+                    val mediaRomajiTitle = mediaTitleObj?.get("romaji").cleanString()
+                    val mediaNativeTitle = mediaTitleObj?.get("native").cleanString()
+
                     val mediaSynopsis = media["description"].cleanString()
                     val mediaBanner = media["bannerImage"].cleanString()
                     val mediaCover = media["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
@@ -1559,6 +1568,9 @@ class EnrichmentRepository(
                     AnimeEnrichedDetails(
                         anilistId = resolvedId,
                         malId = resolvedMalId,
+                        englishTitle = mediaEnglishTitle,
+                        romajiTitle = mediaRomajiTitle,
+                        nativeTitle = mediaNativeTitle,
                         characters = charList,
                         staff = staffList,
                         relations = relationList,
@@ -2113,6 +2125,278 @@ class EnrichmentRepository(
             } catch (_: Exception) {
                 null
             }
+        }
+    }
+
+    suspend fun fetchAniListUserProfile(
+        username: String? = null,
+        userId: Int? = null,
+        userAuthToken: String? = null
+    ): UserProfileData? = withContext(Dispatchers.IO) {
+        if (username.isNullOrBlank() && (userId == null || userId <= 0)) return@withContext null
+
+        val query = """
+            query (${'$'}name: String, ${'$'}id: Int) {
+              User(name: ${'$'}name, id: ${'$'}id) {
+                id
+                name
+                about(asHtml: false)
+                avatar {
+                  large
+                }
+                bannerImage
+                isFollowing
+                isFollower
+                statistics {
+                  anime {
+                    count
+                    meanScore
+                    minutesWatched
+                    episodesWatched
+                    genres(limit: 5, sort: COUNT_DESC) {
+                      genre
+                      count
+                    }
+                    scores(limit: 10) {
+                      score
+                      count
+                    }
+                  }
+                  manga {
+                    count
+                    meanScore
+                    chaptersRead
+                  }
+                }
+                favourites {
+                  anime {
+                    nodes {
+                      id
+                      title { userPreferred english romaji }
+                      coverImage { large extraLarge }
+                      format
+                    }
+                  }
+                  manga {
+                    nodes {
+                      id
+                      title { userPreferred english romaji }
+                      coverImage { large extraLarge }
+                      format
+                    }
+                  }
+                  characters {
+                    nodes {
+                      id
+                      name { full }
+                      image { large }
+                    }
+                  }
+                  staff {
+                    nodes {
+                      id
+                      name { full }
+                      image { large }
+                    }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val vars = buildJsonObject {
+            if (userId != null && userId > 0) put("id", userId)
+            else if (!username.isNullOrBlank()) put("name", username)
+        }
+
+        try {
+            val jsonPayload = buildJsonObject {
+                put("query", query)
+                put("variables", vars)
+            }.toString()
+
+            val reqBuilder = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "OmniTrack/1.0")
+
+            if (!userAuthToken.isNullOrBlank()) {
+                reqBuilder.header("Authorization", "Bearer $userAuthToken")
+            }
+
+            client.newCall(reqBuilder.build()).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body?.string() ?: return@use null
+                val root = json.parseToJsonElement(body).jsonObject
+                val userObj = root["data"]?.jsonObject?.get("User")?.jsonObject ?: return@use null
+
+                val id = userObj["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@use null
+                val name = userObj["name"].cleanString() ?: "User"
+                val about = userObj["about"].cleanString()
+                val avatar = userObj["avatar"]?.jsonObject?.get("large").cleanString()
+                val banner = userObj["bannerImage"].cleanString()
+                val isFollowing = userObj["isFollowing"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                val isFollower = userObj["isFollower"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+
+                val stats = userObj["statistics"]?.jsonObject
+                val aStats = stats?.get("anime")?.jsonObject
+                val aCount = aStats?.get("count")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val aMean = aStats?.get("meanScore")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                val aMins = aStats?.get("minutesWatched")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                val aDays = aMins / (60.0 * 24.0)
+                val aEps = aStats?.get("episodesWatched")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+
+                val mStats = stats?.get("manga")?.jsonObject
+                val mCount = mStats?.get("count")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val mMean = mStats?.get("meanScore")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                val mChaps = mStats?.get("chaptersRead")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+
+                val genresList = mutableListOf<Pair<String, Int>>()
+                aStats?.get("genres")?.jsonArray.orEmpty().forEach { gElem ->
+                    val gObj = gElem.jsonObject
+                    val gName = gObj["genre"].cleanString()
+                    val gCnt = gObj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    if (gName != null) genresList.add(gName to gCnt)
+                }
+
+                val scoreList = mutableListOf<Pair<Int, Int>>()
+                aStats?.get("scores")?.jsonArray.orEmpty().forEach { sElem ->
+                    val sObj = sElem.jsonObject
+                    val sVal = sObj["score"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    val sCnt = sObj["count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                    if (sVal > 0) scoreList.add(sVal to sCnt)
+                }
+
+                val favs = userObj["favourites"]?.jsonObject
+                val favAnime = mutableListOf<UserFavoriteMedia>()
+                favs?.get("anime")?.jsonObject?.get("nodes")?.jsonArray.orEmpty().forEach { nElem ->
+                    val n = nElem.jsonObject
+                    val mId = n["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@forEach
+                    val tObj = n["title"]?.jsonObject
+                    val t = tObj?.get("userPreferred").cleanString() ?: tObj?.get("english").cleanString() ?: tObj?.get("romaji").cleanString() ?: "Anime"
+                    val c = n["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
+                    val fmt = n["format"].cleanString()
+                    favAnime.add(UserFavoriteMedia(id = mId, title = t, coverUrl = c, format = fmt, mediaType = MediaType.ANIME))
+                }
+
+                val favManga = mutableListOf<UserFavoriteMedia>()
+                favs?.get("manga")?.jsonObject?.get("nodes")?.jsonArray.orEmpty().forEach { nElem ->
+                    val n = nElem.jsonObject
+                    val mId = n["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@forEach
+                    val tObj = n["title"]?.jsonObject
+                    val t = tObj?.get("userPreferred").cleanString() ?: tObj?.get("english").cleanString() ?: tObj?.get("romaji").cleanString() ?: "Manga"
+                    val c = n["coverImage"]?.jsonObject?.get("large").cleanString() ?: ""
+                    val fmt = n["format"].cleanString()
+                    favManga.add(UserFavoriteMedia(id = mId, title = t, coverUrl = c, format = fmt, mediaType = MediaType.MANGA))
+                }
+
+                val favChars = mutableListOf<UserFavoriteCharacter>()
+                favs?.get("characters")?.jsonObject?.get("nodes")?.jsonArray.orEmpty().forEach { nElem ->
+                    val n = nElem.jsonObject
+                    val cId = n["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@forEach
+                    val cName = n["name"]?.jsonObject?.get("full").cleanString() ?: "Character"
+                    val cImg = n["image"]?.jsonObject?.get("large").cleanString()
+                    favChars.add(UserFavoriteCharacter(id = cId, name = cName, imageUrl = cImg))
+                }
+
+                val favStaff = mutableListOf<UserFavoriteStaff>()
+                favs?.get("staff")?.jsonObject?.get("nodes")?.jsonArray.orEmpty().forEach { nElem ->
+                    val n = nElem.jsonObject
+                    val sId = n["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@forEach
+                    val sName = n["name"]?.jsonObject?.get("full").cleanString() ?: "Staff"
+                    val sImg = n["image"]?.jsonObject?.get("large").cleanString()
+                    favStaff.add(UserFavoriteStaff(id = sId, name = sName, imageUrl = sImg))
+                }
+
+                UserProfileData(
+                    userId = id,
+                    username = name,
+                    avatarUrl = avatar,
+                    bannerUrl = banner,
+                    bio = about,
+                    isFollowing = isFollowing,
+                    isFollower = isFollower,
+                    animeCount = aCount,
+                    episodesWatched = aEps,
+                    animeDaysWatched = aDays,
+                    animeMeanScore = aMean,
+                    mangaCount = mCount,
+                    chaptersRead = mChaps,
+                    mangaMeanScore = mMean,
+                    topGenres = genresList,
+                    scoreDistribution = scoreList,
+                    favoriteAnime = favAnime,
+                    favoriteManga = favManga,
+                    favoriteCharacters = favChars,
+                    favoriteStaff = favStaff
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun toggleFollowUser(userId: Int, userAuthToken: String): Boolean = withContext(Dispatchers.IO) {
+        if (userAuthToken.isBlank() || userId <= 0) return@withContext false
+        val mutation = """
+            mutation (${'$'}userId: Int) {
+              ToggleFollow(userId: ${'$'}userId) {
+                id
+                isFollowing
+              }
+            }
+        """.trimIndent()
+        try {
+            val jsonPayload = buildJsonObject {
+                put("query", mutation)
+                put("variables", buildJsonObject { put("userId", userId) })
+            }.toString()
+
+            val req = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .header("Authorization", "Bearer $userAuthToken")
+                .header("User-Agent", "OmniTrack/1.0")
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                resp.isSuccessful
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun sendDirectMessage(recipientId: Int, message: String, userAuthToken: String): Boolean = withContext(Dispatchers.IO) {
+        if (userAuthToken.isBlank() || recipientId <= 0 || message.isBlank()) return@withContext false
+        val mutation = """
+            mutation (${'$'}recipientId: Int, ${'$'}message: String) {
+              SaveMessageActivity(recipientId: ${'$'}recipientId, message: ${'$'}message, private: true) {
+                id
+              }
+            }
+        """.trimIndent()
+        try {
+            val jsonPayload = buildJsonObject {
+                put("query", mutation)
+                put("variables", buildJsonObject {
+                    put("recipientId", recipientId)
+                    put("message", message)
+                })
+            }.toString()
+
+            val req = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .header("Authorization", "Bearer $userAuthToken")
+                .header("User-Agent", "OmniTrack/1.0")
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                resp.isSuccessful
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 }

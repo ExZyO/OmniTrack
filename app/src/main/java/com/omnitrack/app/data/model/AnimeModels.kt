@@ -119,6 +119,9 @@ data class AnimeCharacterDetail(
 data class AnimeEnrichedDetails(
     val anilistId: Long?,
     val malId: Long?,
+    val englishTitle: String? = null,
+    val romajiTitle: String? = null,
+    val nativeTitle: String? = null,
     val characters: List<AnimeCharacterItem> = emptyList(),
     val staff: List<AnimeStaffItem> = emptyList(),
     val relations: List<AnimeRelationItem> = emptyList(),

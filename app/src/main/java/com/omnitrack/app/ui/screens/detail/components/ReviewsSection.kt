@@ -67,6 +67,7 @@ data class CommunityReview(
 @Composable
 fun ReviewsSection(
     reviews: List<CommunityReview>,
+    showHeader: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     if (reviews.isEmpty()) return
@@ -77,18 +78,20 @@ fun ReviewsSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Section Header matching Nuvio 1:1 ("Comments")
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-        ) {
-            Text(
-                text = "Comments",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.SemiBold
-            )
+        // Section Header matching Nuvio 1:1 (optional when embedded in tab switcher)
+        if (showHeader) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+            ) {
+                Text(
+                    text = "Comments",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
 
         LazyRow(
@@ -289,7 +292,12 @@ fun UnifiedDiscussionSection(
     reviews: List<CommunityReview>,
     episodeOrChapterCount: Int? = null,
     comments: List<DiscussionComment>? = null,
+    seasons: List<com.omnitrack.app.data.model.MediaSeason> = emptyList(),
+    selectedSeasonNumber: Int = 1,
+    onSeasonSelect: ((Int) -> Unit)? = null,
     onPostComment: ((content: String, tag: String?, parentId: String?) -> Unit)? = null,
+    onEditComment: ((commentId: String, newContent: String) -> Unit)? = null,
+    onDeleteComment: ((commentId: String) -> Unit)? = null,
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -319,8 +327,10 @@ fun UnifiedDiscussionSection(
             )
 
             if (reviews.isNotEmpty()) {
+                val isTrakt = reviews.any { it.source.contains("Trakt", ignoreCase = true) }
+                val tabLabel = if (isTrakt) "Comments (${reviews.size})" else "Reviews (${reviews.size})"
                 Text(
-                    text = "Reviews (${reviews.size})",
+                    text = tabLabel,
                     color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
                     fontSize = 20.sp,
                     fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
@@ -337,12 +347,17 @@ fun UnifiedDiscussionSection(
                 mediaTitle = mediaTitle,
                 episodeOrChapterCount = episodeOrChapterCount,
                 comments = comments,
+                seasons = seasons,
+                selectedSeasonNumber = selectedSeasonNumber,
+                onSeasonSelect = onSeasonSelect,
                 onPostComment = onPostComment,
+                onEditComment = onEditComment,
+                onDeleteComment = onDeleteComment,
                 onVote = onVote,
                 onUserClick = onUserClick
             )
         } else {
-            ReviewsSection(reviews = reviews)
+            ReviewsSection(reviews = reviews, showHeader = false)
         }
     }
 }

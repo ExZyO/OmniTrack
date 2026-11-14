@@ -37,6 +37,8 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material3.Icon
@@ -119,7 +121,12 @@ fun DetailCommentsSection(
     mediaTitle: String,
     episodeOrChapterCount: Int? = null,
     comments: List<DiscussionComment>? = null,
+    seasons: List<com.omnitrack.app.data.model.MediaSeason> = emptyList(),
+    selectedSeasonNumber: Int = 1,
+    onSeasonSelect: ((Int) -> Unit)? = null,
     onPostComment: ((content: String, tag: String?, parentId: String?) -> Unit)? = null,
+    onEditComment: ((commentId: String, newContent: String) -> Unit)? = null,
+    onDeleteComment: ((commentId: String) -> Unit)? = null,
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -157,6 +164,7 @@ fun DetailCommentsSection(
 
     // Replying target state: if set, compose bar indicates "Replying to @username"
     var replyingToComment by remember { mutableStateOf<DiscussionComment?>(null) }
+    var editingComment by remember { mutableStateOf<DiscussionComment?>(null) }
     var newCommentText by remember { mutableStateOf("") }
 
     // Filter comments by selected tag
@@ -179,6 +187,16 @@ fun DetailCommentsSection(
         val trimmed = newCommentText.trim()
         if (trimmed.isNotBlank()) {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            val editing = editingComment
+            if (editing != null) {
+                localCommentsList = updateCommentContentHelper(localCommentsList, editing.id, trimmed)
+                onEditComment?.invoke(editing.id, trimmed)
+                editingComment = null
+                newCommentText = ""
+                focusManager.clearFocus()
+                return
+            }
+
             val parent = replyingToComment
             val targetTag = parent?.tag ?: if (selectedTag != "All") selectedTag else "General"
 
@@ -217,6 +235,41 @@ fun DetailCommentsSection(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Season Selector Rail (if multi-season data is available)
+        if (seasons.size > 1) {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 2.dp)
+            ) {
+                items(seasons, key = { it.seasonNumber }) { s ->
+                    val isSelected = s.seasonNumber == selectedSeasonNumber
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
+                            .border(
+                                width = 1.dp,
+                                color = if (isSelected) AccentArctic else GlassBorder,
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSeasonSelect?.invoke(s.seasonNumber)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = s.name.ifBlank { "Season ${s.seasonNumber}" },
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+
         // Tag Filter Horizontal Rail (Uncapped)
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
@@ -255,8 +308,54 @@ fun DetailCommentsSection(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            // Edit indicator banner
+            if (editingComment != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = AccentArctic,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "Editing your comment",
+                            color = AccentArctic,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                editingComment = null
+                                newCommentText = ""
+                            }
+                            .padding(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel edit",
+                            tint = TextMuted,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
             // Reply target indicator banner
-            if (replyingToComment != null) {
+            if (replyingToComment != null && editingComment == null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -314,7 +413,7 @@ fun DetailCommentsSection(
                 Box(modifier = Modifier.weight(1f)) {
                     if (newCommentText.isEmpty()) {
                         Text(
-                            text = if (replyingToComment != null) "Write a reply..." else if (selectedTag != "All") "Add a comment for $selectedTag..." else "Join the discussion...",
+                            text = if (editingComment != null) "Edit your comment..." else if (replyingToComment != null) "Write a reply..." else if (selectedTag != "All") "Add a comment for $selectedTag..." else "Join the discussion...",
                             color = Color.White.copy(alpha = 0.55f),
                             fontSize = 13.sp
                         )
@@ -394,6 +493,18 @@ fun DetailCommentsSection(
                         onReplyClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             replyingToComment = node.comment
+                            editingComment = null
+                        },
+                        onEditClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            editingComment = node.comment
+                            newCommentText = node.comment.content
+                            replyingToComment = null
+                        },
+                        onDeleteClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            localCommentsList = deleteCommentHelper(localCommentsList, node.comment.id)
+                            onDeleteComment?.invoke(node.comment.id)
                         },
                         onVote = { voteType ->
                             onVote?.invoke(node.comment.id, voteType)
@@ -416,6 +527,8 @@ private fun CommentNodeRow(
     node: FlattenedCommentNode,
     onToggleCollapse: () -> Unit,
     onReplyClick: () -> Unit,
+    onEditClick: () -> Unit = {},
+    onDeleteClick: () -> Unit = {},
     onVote: (Int) -> Unit,
     onUserClick: () -> Unit
 ) {
@@ -560,24 +673,19 @@ private fun CommentNodeRow(
 
             // Body & Action Bar (Hidden when collapsed)
             if (!node.isCollapsed) {
-                // Comment Body Text: Wrapped in SelectionContainer so holding allows selecting text
-                SelectionContainer {
-                    Text(
-                        text = comment.content,
-                        color = Color.White,
-                        fontSize = 13.5.sp,
-                        lineHeight = 19.sp,
-                        modifier = Modifier.padding(start = 28.dp)
-                    )
-                }
+                // Comment Body: Rich formatting for GIFs, images, spoilers, quotes, markdown & hold-to-select
+                CommentRichContent(
+                    content = comment.content,
+                    modifier = Modifier.padding(start = 28.dp)
+                )
 
-                // Actions: Reddit Voting Capsule + Reply Pill
+                // Actions: Reddit Voting Capsule + Reply Pill + Edit/Delete
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 28.dp, top = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     RedditVoteCapsule(
                         initialScore = comment.upvotes,
@@ -617,6 +725,57 @@ private fun CommentNodeRow(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+
+                    // Edit & Delete Action Pills (for user's own comments)
+                    if (comment.author == "You") {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, GlassBorder, CircleShape)
+                                .clickable(onClick = onEditClick)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit",
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "Edit",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.Red.copy(alpha = 0.08f))
+                                .border(1.dp, Color.Red.copy(alpha = 0.25f), CircleShape)
+                                .clickable(onClick = onDeleteClick)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteOutline,
+                                contentDescription = "Delete",
+                                tint = Color(0xFFFF6B6B),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "Delete",
+                                color = Color(0xFFFF6B6B),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
 
                     if (comment.replies.isNotEmpty()) {
@@ -699,6 +858,35 @@ private fun insertNestedReply(
             item.copy(replies = item.replies + newReply.copy(depth = item.depth + 1))
         } else if (item.replies.isNotEmpty()) {
             item.copy(replies = insertNestedReply(item.replies, parentId, newReply))
+        } else {
+            item
+        }
+    }
+}
+
+private fun updateCommentContentHelper(
+    list: List<DiscussionComment>,
+    targetId: String,
+    newContent: String
+): List<DiscussionComment> {
+    return list.map { item ->
+        if (item.id == targetId) {
+            item.copy(content = newContent)
+        } else if (item.replies.isNotEmpty()) {
+            item.copy(replies = updateCommentContentHelper(item.replies, targetId, newContent))
+        } else {
+            item
+        }
+    }
+}
+
+private fun deleteCommentHelper(
+    list: List<DiscussionComment>,
+    targetId: String
+): List<DiscussionComment> {
+    return list.filter { it.id != targetId }.map { item ->
+        if (item.replies.isNotEmpty()) {
+            item.copy(replies = deleteCommentHelper(item.replies, targetId))
         } else {
             item
         }

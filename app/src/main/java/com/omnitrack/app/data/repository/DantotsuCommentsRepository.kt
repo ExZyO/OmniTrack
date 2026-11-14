@@ -343,6 +343,44 @@ class DantotsuCommentsRepository(
         }
     }
 
+    suspend fun editComment(commentId: Long, newContent: String): Boolean = withContext(Dispatchers.IO) {
+        val token = dantotsuAuthToken ?: return@withContext false
+        try {
+            val body = FormBody.Builder()
+                .add("content", newContent)
+                .build()
+
+            val request = Request.Builder()
+                .url("$BASE_URL/comments/edit/$commentId")
+                .header("appauth", APP_AUTH_KEY)
+                .header("Authorization", token)
+                .post(body)
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun deleteComment(commentId: Long): Boolean = withContext(Dispatchers.IO) {
+        val token = dantotsuAuthToken ?: return@withContext false
+        try {
+            val request = Request.Builder()
+                .url("$BASE_URL/comments/delete/$commentId")
+                .header("appauth", APP_AUTH_KEY)
+                .header("Authorization", token)
+                .post(FormBody.Builder().build())
+                .build()
+
+            val response = client.newCall(request).execute()
+            response.isSuccessful
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun formatRelativeTime(isoString: String): String {
         return try {
             val instant = Instant.parse(isoString)

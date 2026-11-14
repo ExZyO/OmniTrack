@@ -101,9 +101,10 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // Coil 3 for High-Performance Image Loading
+    // Coil 3 for High-Performance Image Loading & Animated GIF Support
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.coil.gif)
     implementation(libs.okhttp)
 
     // Haze for Liquid Glass Backdrop Blur
