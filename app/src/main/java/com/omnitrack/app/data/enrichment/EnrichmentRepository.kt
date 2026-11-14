@@ -834,14 +834,17 @@ class EnrichmentRepository(
             emptyList()
         }
 
-        // Fast path: if TMDb returned seasons with episodes, return immediately (Nuvio 0-lag parity)
-        if (tmdbSeasons.isNotEmpty() && tmdbSeasons.any { it.seasonNumber > 0 && it.episodeCount > 0 }) {
+        // Fast path: if TMDb returned multiple regular seasons with episodes (e.g. standard multi-season TV shows like Breaking Bad), return immediately.
+        // If TMDb only returned <= 1 regular season or Season 1 has > 26 episodes (lumped anime runs like The Apothecary Diaries), consult Cinemeta for split seasons!
+        val hasMultiSeasonTmdb = tmdbSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 } > 1
+        val hasLumpedSeason1 = tmdbSeasons.any { it.seasonNumber == 1 && it.episodeCount > 26 }
+        if (hasMultiSeasonTmdb && !hasLumpedSeason1) {
             return@withTmdbPacing tmdbSeasons
                 .distinctBy { it.seasonNumber }
                 .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
         }
 
-        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2 with 10 announced/ongoing episodes)
+        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         if (!effectiveImdbId.isNullOrBlank()) {
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
@@ -881,6 +884,10 @@ class EnrichmentRepository(
                                 airDate = eps.firstOrNull()?.airDate
                             )
                         )
+                    } else if (sNum == 1 && cinemetaSeasons.keys.any { it > 1 } && existing.episodeCount > eps.size && eps.isNotEmpty()) {
+                        // TMDb lumped Season 1 and Season 2+ together (e.g. Apothecary Diaries 60 eps vs Cinemeta 24 eps)
+                        val idx = mergedList.indexOf(existing)
+                        mergedList[idx] = existing.copy(episodeCount = eps.size)
                     } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
                         val idx = mergedList.indexOf(existing)
                         val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
@@ -950,6 +957,18 @@ class EnrichmentRepository(
         }
 
         if (tmdbEpisodes.isNotEmpty()) {
+            // If Cinemeta splits this show into Season 2+, ensure Season 1 doesn't show episodes belonging to subsequent seasons
+            if (seasonNumber == 1) {
+                val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
+                if (!effectiveImdbId.isNullOrBlank()) {
+                    val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
+                    val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
+                    val hasCinemetaS2 = cinemetaVideos.any { it.seasonNumber == 2 }
+                    if (hasCinemetaS2 && cinemetaS1Count in 1 until tmdbEpisodes.size) {
+                        return@withTmdbPacing tmdbEpisodes.filter { it.episodeNumber <= cinemetaS1Count }
+                    }
+                }
+            }
             return@withTmdbPacing tmdbEpisodes
         }
 
