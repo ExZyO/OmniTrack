@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -137,9 +138,11 @@ class DetailViewModel(
     }
 
     init {
-        val preseededItem = ActiveSiblingHolder.activeItem?.takeIf { it.id == mediaId }
-        if (preseededItem != null) {
-            _previewItem.value = preseededItem
+        if (mediaId == -1L) {
+            val ephemeral = EphemeralPreviewHolder.previewItem
+            if (ephemeral != null) {
+                _previewItem.value = ephemeral
+            }
         }
         val active = ActiveSiblingHolder.activeSiblingIds
         if (active.isNotEmpty()) {
@@ -450,8 +453,7 @@ class DetailViewModel(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = run {
-            val pre = ActiveSiblingHolder.activeItem?.takeIf { it.id == mediaId }
-                ?: if (mediaId == -1L) EphemeralPreviewHolder.previewItem else null
+            val pre = if (mediaId == -1L) EphemeralPreviewHolder.previewItem else null
             if (pre != null) DetailUiState(item = pre, isLoading = false) else DetailUiState()
         }
     )

@@ -454,7 +454,6 @@ fun HomeScreen(
                                                         cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
                                                         onCardClick = {
                                                             AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
-                                                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.activeItem = item
                                                             com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
                                                             onItemClick(item.id)
                                                         },

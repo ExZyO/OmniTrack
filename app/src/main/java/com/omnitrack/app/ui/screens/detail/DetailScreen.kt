@@ -426,9 +426,10 @@ fun DetailScreen(
         ) {
             if (uiState.isLoading && item == null) {
                 Box(Modifier.fillMaxSize().background(AmoledBlack), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                    com.omnitrack.app.ui.components.NuvioLoadingIndicator(size = 44.dp)
                 }
             } else if (item != null) {
+                Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
 
             val customCoverUrl = remember(item, customPosterPattern) {
@@ -784,6 +785,7 @@ fun DetailScreen(
                 } else {
                     Spacer(modifier = Modifier.size(44.dp))
                 }
+            }
             }
 
             // Entry Options Bottom Sheet (Triggered by '...' button beside Title)
