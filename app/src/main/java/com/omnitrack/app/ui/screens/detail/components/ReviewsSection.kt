@@ -276,3 +276,67 @@ fun ReviewsSection(
         )
     }
 }
+
+/**
+ * Unified Discussion & Reviews Section:
+ * Houses both the new Dartotsu-grade Threaded Discussion (Reddit Voting Capsule + Collapsible Comments)
+ * and the Community Reviews Carousel within a clean, unboxed tab switcher.
+ */
+@Composable
+fun UnifiedDiscussionSection(
+    mediaType: com.omnitrack.app.data.model.MediaType,
+    mediaTitle: String,
+    reviews: List<CommunityReview>,
+    episodeOrChapterCount: Int? = null,
+    onUserClick: ((String, Int?) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Discussion, 1: Reviews
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Unboxed Header Tabs
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text(
+                text = "Discussion",
+                color = if (selectedTab == 0) Color.White else TextMuted,
+                fontSize = 20.sp,
+                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { selectedTab = 0 }
+            )
+
+            if (reviews.isNotEmpty()) {
+                Text(
+                    text = "Reviews (${reviews.size})",
+                    color = if (selectedTab == 1) Color.White else TextMuted,
+                    fontSize = 20.sp,
+                    fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { selectedTab = 1 }
+                )
+            }
+        }
+
+        if (selectedTab == 0) {
+            DetailCommentsSection(
+                mediaType = mediaType,
+                mediaTitle = mediaTitle,
+                episodeOrChapterCount = episodeOrChapterCount,
+                onUserClick = onUserClick
+            )
+        } else {
+            ReviewsSection(reviews = reviews)
+        }
+    }
+}

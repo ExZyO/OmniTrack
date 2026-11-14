@@ -121,6 +121,7 @@ import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
+import com.omnitrack.app.ui.screens.detail.components.UnifiedDiscussionSection
 import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
 import com.omnitrack.app.ui.screens.detail.components.statusColor
@@ -731,8 +732,13 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.REVIEWS -> {
-                            if (deferredSectionsAllowed && uiState.reviews.isNotEmpty()) {
-                                ReviewsSection(reviews = uiState.reviews)
+                            if (deferredSectionsAllowed) {
+                                UnifiedDiscussionSection(
+                                    mediaType = item.mediaType,
+                                    mediaTitle = item.title,
+                                    reviews = uiState.reviews,
+                                    episodeOrChapterCount = item.totalProgress?.toInt() ?: item.totalEpisodes ?: item.totalChapters
+                                )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
                         }
