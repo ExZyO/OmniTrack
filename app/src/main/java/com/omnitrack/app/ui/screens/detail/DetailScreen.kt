@@ -737,7 +737,17 @@ fun DetailScreen(
                                     mediaType = item.mediaType,
                                     mediaTitle = item.title,
                                     reviews = uiState.reviews,
-                                    episodeOrChapterCount = item.totalProgress?.toInt()
+                                    episodeOrChapterCount = item.totalProgress?.toInt() ?: uiState.realEpisodes.size.takeIf { it > 0 },
+                                    comments = uiState.discussionComments,
+                                    onPostComment = { content, tag, parentId ->
+                                        viewModel.postDiscussionComment(content, tag, parentId)
+                                    },
+                                    onVote = { commentId, voteType ->
+                                        viewModel.voteDiscussionComment(commentId, voteType)
+                                    },
+                                    onUserClick = { username, anilistUserId ->
+                                        // Phase 4 profile sheet
+                                    }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }

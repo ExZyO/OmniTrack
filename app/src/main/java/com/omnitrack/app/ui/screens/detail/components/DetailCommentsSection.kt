@@ -31,14 +31,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -100,20 +104,23 @@ data class FlattenedCommentNode(
 )
 
 /**
- * Phase 2: Reddit Voting Capsule & Collapsible Thread Engine.
+ * Phase 2 & 3: Reddit Voting Capsule, Interactive Collapsible Comments & Real Comment Engine.
  * - 100% Unboxed AMOLED `#000000` design matching Nuvio-clean aesthetic.
- * - Flattened depth-indented hierarchy (`depth * 14.dp`, max 42.dp) avoiding nested scroll crashes.
- * - Tap-to-collapse thread hierarchy: `[-]` / `[+]` collapses entire subtree.
- * - Interactive vertical thread guide-lines that collapse replies when tapped.
- * - Dynamic `Ep 1, Ep 2...` vs `Ch 1, Ch 2...` tag filter rail based on media type.
- * - Live Reddit voting capsule with separate upvote / downvote counters.
+ * - Clicking ANYWHERE on a comment toggles collapse/expand of its replies.
+ * - Holding (long-press) enables text selection and copying of the comment body.
+ * - Top-anchored Inline Comment Composer directly under the filter chips (no scrolling required).
+ * - Active "Replying to @username" indicator with quick cancel.
+ * - Full dynamic episode/chapter range without the 12-episode limit.
+ * - Live optimistic comment & nested reply addition.
  */
 @Composable
 fun DetailCommentsSection(
     mediaType: MediaType,
     mediaTitle: String,
     episodeOrChapterCount: Int? = null,
-    comments: List<DiscussionComment> = rememberSampleDiscussionComments(mediaType),
+    comments: List<DiscussionComment>? = null,
+    onPostComment: ((content: String, tag: String?, parentId: String?) -> Unit)? = null,
+    onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -122,19 +129,43 @@ fun DetailCommentsSection(
 
     // Dynamic Filter Rail: "Ep" for Anime/Shows, "Ch" for Manga/Novels
     val tagPrefix = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "Ch" else "Ep"
-    val count = (episodeOrChapterCount ?: 24).coerceIn(1, 48)
-    val availableTags = remember(tagPrefix, count) {
-        listOf("All", "General") + (1..count.coerceAtMost(12)).map { "$tagPrefix $it" }
+    // Uncapped episode/chapter count: supports shows with 24, 75, 100+ episodes or chapters
+    val totalCount = (episodeOrChapterCount ?: 24).coerceIn(1, 2000)
+    val availableTags = remember(tagPrefix, totalCount) {
+        listOf("All", "General") + (1..totalCount).map { "$tagPrefix $it" }
     }
     var selectedTag by remember { mutableStateOf("All") }
 
-    // Collapsed Comment State
+    // Seed default comments if external comments not provided
+    val initialSeed = remember(mediaType, totalCount) {
+        rememberSampleDiscussionComments(mediaType, totalCount)
+    }
+
+    // Active working list of comments (optimistic updates on post/reply)
+    var localCommentsList by remember { mutableStateOf(comments?.ifEmpty { initialSeed } ?: initialSeed) }
+
+    LaunchedEffect(comments) {
+        if (!comments.isNullOrEmpty()) {
+            localCommentsList = comments
+        }
+    }
+
+    // Collapsed Comment State: tracks whether a node's replies are collapsed
     val collapsedIds = remember { mutableStateMapOf<String, Boolean>() }
 
+    // Replying target state: if set, compose bar indicates "Replying to @username"
+    var replyingToComment by remember { mutableStateOf<DiscussionComment?>(null) }
+    var newCommentText by remember { mutableStateOf("") }
+
     // Filter comments by selected tag
-    val filteredComments = remember(comments, selectedTag) {
-        if (selectedTag == "All") comments
-        else comments.filter { it.tag == selectedTag || it.replies.any { r -> r.tag == selectedTag } }
+    val filteredComments = remember(localCommentsList, selectedTag) {
+        if (selectedTag == "All") {
+            localCommentsList
+        } else {
+            localCommentsList.filter { comment ->
+                comment.tag == selectedTag || comment.replies.any { it.tag == selectedTag }
+            }
+        }
     }
 
     // Flatten tree respecting collapsed states (Rule 3: Avoid nested scroll crash)
@@ -142,9 +173,41 @@ fun DetailCommentsSection(
         flattenCommentTree(filteredComments, collapsedIds)
     }
 
-    // Local comment input state
-    var newCommentText by remember { mutableStateOf("") }
-    var localCommentsList by remember { mutableStateOf(comments) }
+    fun submitComment() {
+        val trimmed = newCommentText.trim()
+        if (trimmed.isNotBlank()) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            val parent = replyingToComment
+            val targetTag = parent?.tag ?: if (selectedTag != "All") selectedTag else "General"
+
+            val newComment = DiscussionComment(
+                id = "comm_${System.currentTimeMillis()}",
+                author = "You",
+                authorAvatarUrl = null,
+                tag = targetTag,
+                content = trimmed,
+                timeAgo = "Just now",
+                upvotes = 1,
+                downvotes = 0,
+                parentId = parent?.id
+            )
+
+            // Insert into local state (optimistic instant update)
+            localCommentsList = if (parent != null) {
+                insertNestedReply(localCommentsList, parent.id, newComment)
+            } else {
+                listOf(newComment) + localCommentsList
+            }
+
+            // Dispatch to parent / repository
+            onPostComment?.invoke(trimmed, targetTag, parent?.id)
+
+            // Reset compose state
+            newCommentText = ""
+            replyingToComment = null
+            focusManager.clearFocus()
+        }
+    }
 
     Column(
         modifier = modifier
@@ -152,7 +215,7 @@ fun DetailCommentsSection(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Tag Filter Horizontal Rail
+        // Tag Filter Horizontal Rail (Uncapped)
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -185,19 +248,133 @@ fun DetailCommentsSection(
             }
         }
 
+        // Top-Anchored Comment Composer (Right under filter chips for 0-scroll access)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Reply target indicator banner
+            if (replyingToComment != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Reply,
+                            contentDescription = null,
+                            tint = AccentArctic,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "Replying to @${replyingToComment?.author}",
+                            color = AccentArctic,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                replyingToComment = null
+                            }
+                            .padding(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel reply",
+                            tint = TextMuted,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // Message Composer Input Box
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    if (newCommentText.isEmpty()) {
+                        Text(
+                            text = if (replyingToComment != null) "Write a reply..." else if (selectedTag != "All") "Add a comment for $selectedTag..." else "Join the discussion...",
+                            color = TextMuted,
+                            fontSize = 13.sp
+                        )
+                    }
+                    BasicTextField(
+                        value = newCommentText,
+                        onValueChange = { newCommentText = it },
+                        textStyle = TextStyle(
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal
+                        ),
+                        cursorBrush = SolidColor(AccentArctic),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submitComment() }),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (newCommentText.isNotBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { submitComment() }
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "Post comment",
+                            tint = AccentArctic,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // Threaded Comments (Rendered linearly in Column, zero LazyColumn nesting)
         if (flattenedNodes.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
+                    .padding(vertical = 32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "No discussion comments yet for $selectedTag.",
-                    color = TextMuted,
-                    fontSize = 13.sp
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "No discussion comments yet for $selectedTag.",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Be the first to share your thoughts using the box above!",
+                        color = TextMuted,
+                        fontSize = 12.5.sp
+                    )
+                }
             }
         } else {
             Column(
@@ -212,81 +389,16 @@ fun DetailCommentsSection(
                             val current = collapsedIds[node.comment.id] ?: false
                             collapsedIds[node.comment.id] = !current
                         },
+                        onReplyClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            replyingToComment = node.comment
+                        },
+                        onVote = { voteType ->
+                            onVote?.invoke(node.comment.id, voteType)
+                        },
                         onUserClick = { onUserClick?.invoke(node.comment.author, node.comment.anilistUserId) }
                     )
                 }
-            }
-        }
-
-        // Unboxed Inline Comment Composer
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(999.dp))
-                .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                if (newCommentText.isEmpty()) {
-                    Text(
-                        text = "Join the discussion...",
-                        color = TextMuted,
-                        fontSize = 13.sp
-                    )
-                }
-                BasicTextField(
-                    value = newCommentText,
-                    onValueChange = { newCommentText = it },
-                    textStyle = TextStyle(
-                        color = TextPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal
-                    ),
-                    cursorBrush = SolidColor(AccentArctic),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        if (newCommentText.isNotBlank()) {
-                            val newComment = DiscussionComment(
-                                id = "local_${System.currentTimeMillis()}",
-                                author = "You",
-                                tag = if (selectedTag != "All") selectedTag else "General",
-                                content = newCommentText.trim(),
-                                timeAgo = "Just now",
-                                upvotes = 1
-                            )
-                            localCommentsList = listOf(newComment) + localCommentsList
-                            newCommentText = ""
-                            focusManager.clearFocus()
-                        }
-                    }),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            if (newCommentText.isNotBlank()) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Post comment",
-                    tint = AccentArctic,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clickable {
-                            val newComment = DiscussionComment(
-                                id = "local_${System.currentTimeMillis()}",
-                                author = "You",
-                                tag = if (selectedTag != "All") selectedTag else "General",
-                                content = newCommentText.trim(),
-                                timeAgo = "Just now",
-                                upvotes = 1
-                            )
-                            localCommentsList = listOf(newComment) + localCommentsList
-                            newCommentText = ""
-                            focusManager.clearFocus()
-                        }
-                )
             }
         }
     }
@@ -294,11 +406,15 @@ fun DetailCommentsSection(
 
 /**
  * Individual comment node rendered with flattened indentation and vertical thread guide lines.
+ * - Clicking ANYWHERE on the card toggles expand/collapse of its replies.
+ * - Holding (long-pressing) allows selecting and copying the comment text via SelectionContainer.
  */
 @Composable
 private fun CommentNodeRow(
     node: FlattenedCommentNode,
     onToggleCollapse: () -> Unit,
+    onReplyClick: () -> Unit,
+    onVote: (Int) -> Unit,
     onUserClick: () -> Unit
 ) {
     val comment = node.comment
@@ -332,9 +448,16 @@ private fun CommentNodeRow(
             }
         }
 
-        // Comment Content Container
+        // Comment Content Container (Whole container clickable to toggle collapse)
         Column(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleCollapse
+                ),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Header: [-] / [+] Toggle + Avatar + Author + Tag + Time
@@ -435,14 +558,16 @@ private fun CommentNodeRow(
 
             // Body & Action Bar (Hidden when collapsed)
             if (!node.isCollapsed) {
-                // Comment Body Text
-                Text(
-                    text = comment.content,
-                    color = Color(0xFFEDEDED),
-                    fontSize = 13.5.sp,
-                    lineHeight = 19.sp,
-                    modifier = Modifier.padding(start = 28.dp)
-                )
+                // Comment Body Text: Wrapped in SelectionContainer so holding allows selecting text
+                SelectionContainer {
+                    Text(
+                        text = comment.content,
+                        color = Color(0xFFEDEDED),
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp,
+                        modifier = Modifier.padding(start = 28.dp)
+                    )
+                }
 
                 // Actions: Reddit Voting Capsule + Reply Pill
                 Row(
@@ -456,33 +581,64 @@ private fun CommentNodeRow(
                         initialScore = comment.upvotes,
                         initialDownvotes = comment.downvotes,
                         allowDownvote = true,
-                        showDownvoteCount = true
+                        showDownvoteCount = true,
+                        onVoteChanged = { voteType ->
+                            val score = when (voteType) {
+                                VoteType.UPVOTE -> 1
+                                VoteType.DOWNVOTE -> -1
+                                VoteType.NONE -> 0
+                            }
+                            onVote(score)
+                        }
                     )
 
-                    // Reply Counter / Quick Action Pill
-                    val replyCount = comment.replies.size
+                    // Reply Action Pill (Wires directly to top composer)
                     Row(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.05f))
                             .border(1.dp, GlassBorder, CircleShape)
-                            .clickable { onToggleCollapse() }
+                            .clickable(onClick = onReplyClick)
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ChatBubbleOutline,
-                            contentDescription = "Replies",
+                            imageVector = Icons.Default.Reply,
+                            contentDescription = "Reply",
                             tint = TextSecondary,
                             modifier = Modifier.size(11.dp)
                         )
                         Text(
-                            text = if (replyCount > 0) "$replyCount ${if (replyCount == 1) "reply" else "replies"}" else "Reply",
+                            text = "Reply",
                             color = TextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+
+                    if (comment.replies.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.03f))
+                                .clickable(onClick = onToggleCollapse)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = "Replies",
+                                tint = TextMuted,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "${comment.replies.size}",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }
@@ -491,8 +647,7 @@ private fun CommentNodeRow(
 }
 
 /**
- * Recursively flattens a tree of discussion comments into a linear list.
- * Respects collapsed state by omitting child subtrees.
+ * Flattens tree into linear list for safe non-nested vertical rendering.
  */
 private fun flattenCommentTree(
     comments: List<DiscussionComment>,
@@ -530,15 +685,38 @@ private fun countAllDescendants(comment: DiscussionComment): Int {
 }
 
 /**
- * High-quality seed discussion thread tree for live interactive testing in Phase 2.
+ * Recursively inserts a reply under a specified parent comment ID in the comment tree.
+ */
+private fun insertNestedReply(
+    list: List<DiscussionComment>,
+    parentId: String,
+    newReply: DiscussionComment
+): List<DiscussionComment> {
+    return list.map { item ->
+        if (item.id == parentId) {
+            item.copy(replies = item.replies + newReply.copy(depth = item.depth + 1))
+        } else if (item.replies.isNotEmpty()) {
+            item.copy(replies = insertNestedReply(item.replies, parentId, newReply))
+        } else {
+            item
+        }
+    }
+}
+
+/**
+ * High-quality seed discussion thread tree across multiple episodes.
+ * Ensures discussions don't stop after episode 1 or 2.
  */
 @Composable
-private fun rememberSampleDiscussionComments(mediaType: MediaType): List<DiscussionComment> {
+private fun rememberSampleDiscussionComments(mediaType: MediaType, totalEpisodes: Int = 24): List<DiscussionComment> {
     val isReading = mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL
     val prefix = if (isReading) "Ch" else "Ep"
 
-    return remember(mediaType) {
-        listOf(
+    return remember(mediaType, totalEpisodes) {
+        val list = mutableListOf<DiscussionComment>()
+
+        // Episode 1 discussions
+        list.add(
             DiscussionComment(
                 id = "comm_1",
                 author = "KusuriyaFan",
@@ -586,7 +764,11 @@ private fun rememberSampleDiscussionComments(mediaType: MediaType): List<Discuss
                         depth = 1
                     )
                 )
-            ),
+            )
+        )
+
+        // General discussion
+        list.add(
             DiscussionComment(
                 id = "comm_2",
                 author = "ShadowSleuth",
@@ -610,7 +792,11 @@ private fun rememberSampleDiscussionComments(mediaType: MediaType): List<Discuss
                         depth = 1
                     )
                 )
-            ),
+            )
+        )
+
+        // Episode 2 discussion
+        list.add(
             DiscussionComment(
                 id = "comm_3",
                 author = "RetroOtaku",
@@ -623,5 +809,68 @@ private fun rememberSampleDiscussionComments(mediaType: MediaType): List<Discuss
                 downvotes = 4
             )
         )
+
+        // Episode 3 discussion
+        list.add(
+            DiscussionComment(
+                id = "comm_4",
+                author = "JinshiEnjoyer",
+                authorAvatarUrl = null,
+                anilistUserId = 19441,
+                tag = "$prefix 3",
+                content = "The dynamic between Jinshi and Maomao is hilarious. She looks at him like he's an annoying insect while everyone else swoons.",
+                timeAgo = "8h ago",
+                upvotes = 188,
+                downvotes = 2,
+                replies = listOf(
+                    DiscussionComment(
+                        id = "comm_4_1",
+                        author = "PalaceWatcher",
+                        authorAvatarUrl = null,
+                        tag = "$prefix 3",
+                        content = "Her complete immunity to his charm attack broke him emotionally lol.",
+                        timeAgo = "7h ago",
+                        upvotes = 94,
+                        downvotes = 0,
+                        depth = 1
+                    )
+                )
+            )
+        )
+
+        // Episode 4 discussion
+        list.add(
+            DiscussionComment(
+                id = "comm_5",
+                author = "ApothecaryStan",
+                authorAvatarUrl = null,
+                anilistUserId = 22104,
+                tag = "$prefix 4",
+                content = "The visual metaphor of the inner palace as a gilded birdcage was so beautifully executed here.",
+                timeAgo = "12h ago",
+                upvotes = 156,
+                downvotes = 1
+            )
+        )
+
+        // Generate discussions for remaining episodes (up to total episodes or 12)
+        val maxSeed = totalEpisodes.coerceAtMost(12)
+        for (ep in 5..maxSeed) {
+            list.add(
+                DiscussionComment(
+                    id = "comm_seed_$ep",
+                    author = "ArchiveViewer",
+                    authorAvatarUrl = null,
+                    anilistUserId = 30000 + ep,
+                    tag = "$prefix $ep",
+                    content = "Key turning point in the court intrigue storyline. The subtle hints dropped earlier are starting to connect together seamlessly.",
+                    timeAgo = "${ep * 2}h ago",
+                    upvotes = 80 + ep * 7,
+                    downvotes = 1 + (ep % 3)
+                )
+            )
+        }
+
+        list
     }
 }

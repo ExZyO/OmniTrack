@@ -288,6 +288,9 @@ fun UnifiedDiscussionSection(
     mediaTitle: String,
     reviews: List<CommunityReview>,
     episodeOrChapterCount: Int? = null,
+    comments: List<DiscussionComment>? = null,
+    onPostComment: ((content: String, tag: String?, parentId: String?) -> Unit)? = null,
+    onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -333,6 +336,9 @@ fun UnifiedDiscussionSection(
                 mediaType = mediaType,
                 mediaTitle = mediaTitle,
                 episodeOrChapterCount = episodeOrChapterCount,
+                comments = comments,
+                onPostComment = onPostComment,
+                onVote = onVote,
                 onUserClick = onUserClick
             )
         } else {

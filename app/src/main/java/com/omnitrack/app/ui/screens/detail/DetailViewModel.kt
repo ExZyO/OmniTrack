@@ -40,6 +40,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+import com.omnitrack.app.data.repository.DantotsuCommentsRepository
+import com.omnitrack.app.ui.screens.detail.components.DiscussionComment
 import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.CommunityReview
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
@@ -81,7 +83,8 @@ data class DetailUiState(
     val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
-    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
+    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections,
+    val discussionComments: List<DiscussionComment> = emptyList()
 )
 
 private data class PreviewAndAux(
@@ -104,7 +107,8 @@ private data class PreviewAndAux(
     val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
-    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections
+    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections,
+    val discussionComments: List<DiscussionComment> = emptyList()
 )
 
 class DetailViewModel(
@@ -120,6 +124,8 @@ class DetailViewModel(
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _recommendations = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
+    private val _discussionComments = MutableStateFlow<List<DiscussionComment>>(emptyList())
+    private val dantotsuCommentsRepository = DantotsuCommentsRepository()
     private val _cast = MutableStateFlow<List<CastMember>>(emptyList())
     private val _trailers = MutableStateFlow<List<MediaTrailer>>(emptyList())
     private val _companies = MutableStateFlow<List<NetworkProductionCompany>>(emptyList())
@@ -417,7 +423,8 @@ class DetailViewModel(
             _animeStaff,
             _animeRelations,
             _animeAiring,
-            _sectionOrder
+            _sectionOrder,
+            _discussionComments
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -441,7 +448,8 @@ class DetailViewModel(
             animeStaff = args[16] as List<AnimeStaffItem>,
             animeRelations = args[17] as List<AnimeRelationItem>,
             animeAiring = args[18] as? AnimeAiringSchedule,
-            sectionOrder = args[19] as List<DetailSectionItem>
+            sectionOrder = args[19] as List<DetailSectionItem>,
+            discussionComments = args[20] as List<DiscussionComment>
         )
     }.flatMapLatest { aux ->
         if (aux.previewItem != null) {
@@ -472,7 +480,8 @@ class DetailViewModel(
                     animeStaff = aux.animeStaff,
                     animeRelations = aux.animeRelations,
                     animeAiring = aux.animeAiring,
-                    sectionOrder = aux.sectionOrder
+                    sectionOrder = aux.sectionOrder,
+                    discussionComments = aux.discussionComments
                 )
             )
         } else {
@@ -521,7 +530,8 @@ class DetailViewModel(
                                 animeStaff = aux.animeStaff,
                                 animeRelations = aux.animeRelations,
                                 animeAiring = aux.animeAiring,
-                                sectionOrder = aux.sectionOrder
+                                sectionOrder = aux.sectionOrder,
+                                discussionComments = aux.discussionComments
                             )
                         }
                     } else {
@@ -547,6 +557,7 @@ class DetailViewModel(
         _episodesBySeason.value = emptyMap()
         _recommendations.value = emptyList()
         _reviews.value = emptyList()
+        _discussionComments.value = emptyList()
         _cast.value = emptyList()
         _trailers.value = emptyList()
         _companies.value = emptyList()
@@ -1326,6 +1337,19 @@ class DetailViewModel(
             }
             _collectionName.value = fetchedCollName
             _collectionItems.value = fetchedCollParts
+
+            if (resolvedAniListId != null) {
+                try {
+                    val comments = dantotsuCommentsRepository.getComments(
+                        anilistId = resolvedAniListId,
+                        tagPrefix = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) "Ch" else "Ep"
+                    )
+                    if (comments.isNotEmpty()) {
+                        _discussionComments.value = comments
+                    }
+                } catch (_: Exception) {}
+            }
+
             persistAuxCache()
         }
     }
@@ -1684,6 +1708,65 @@ class DetailViewModel(
                 repository.updateMedia(updated)
                 trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
                 trackerSyncEngine?.drainQueue()
+            }
+        }
+    }
+
+    fun postDiscussionComment(content: String, tag: String?, parentId: String?) {
+        val currentItem = _previewItem.value ?: uiState.value.item
+        val targetTag = tag ?: "General"
+        val newComment = DiscussionComment(
+            id = "comm_${System.currentTimeMillis()}",
+            author = "You",
+            tag = targetTag,
+            content = content,
+            timeAgo = "Just now",
+            upvotes = 1,
+            downvotes = 0,
+            parentId = parentId
+        )
+
+        _discussionComments.update { current ->
+            if (parentId != null) {
+                insertNestedReplyHelper(current, parentId, newComment)
+            } else {
+                listOf(newComment) + current
+            }
+        }
+
+        val anilistId = currentItem?.anilistId
+        if (anilistId != null) {
+            val tagNum = targetTag.replace("Ep ", "").replace("Ch ", "").toIntOrNull()
+            viewModelScope.launch(Dispatchers.IO) {
+                dantotsuCommentsRepository.postComment(
+                    anilistId = anilistId,
+                    content = content,
+                    tag = tagNum,
+                    parentCommentId = parentId?.toLongOrNull()
+                )
+            }
+        }
+    }
+
+    fun voteDiscussionComment(commentId: String, voteType: Int) {
+        val cid = commentId.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            dantotsuCommentsRepository.vote(cid, voteType)
+        }
+    }
+
+    private fun insertNestedReplyHelper(
+        list: List<DiscussionComment>,
+        parentId: String,
+        newReply: DiscussionComment
+    ): List<DiscussionComment> {
+        return list.map { item ->
+            if (item.id == parentId) {
+                item.copy(replies = item.replies + newReply.copy(depth = item.depth + 1))
+            } else if (item.replies.isNotEmpty()) {
+                item.copy(replies = insertNestedReplyHelper(item.replies, parentId, newReply))
+            } else {
+                item
             }
         }
     }
