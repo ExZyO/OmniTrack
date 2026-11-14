@@ -163,6 +163,17 @@ fun DetailScreen(
     var selectedPerson by remember { mutableStateOf<CastMember?>(null) }
     var selectedCompany by remember { mutableStateOf<NetworkProductionCompany?>(null) }
 
+    // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
+    // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
+    var deferredSectionsAllowed by remember(item?.id) { mutableStateOf(false) }
+    LaunchedEffect(item?.id) {
+        deferredSectionsAllowed = false
+        if (item != null) {
+            kotlinx.coroutines.delay(250)
+            deferredSectionsAllowed = true
+        }
+    }
+
     BackHandler(enabled = selectedPerson != null) {
         selectedPerson = null
     }
@@ -414,7 +425,7 @@ fun DetailScreen(
                 }
         ) {
             if (uiState.isLoading && item == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().background(AmoledBlack), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
                 }
             } else if (item != null) {
@@ -546,40 +557,42 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
-                // 3. Production / Networks & Companies Section (Clickable)
-                DetailNetworksSection(
-                    item = item,
-                    companies = uiState.companies,
-                    onCompanyClick = { company ->
-                        selectedCompany = company
-                    }
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // 4. Cast Section (Avatars + character names)
-                if (uiState.cast.isNotEmpty()) {
-                    DetailCastSection(
-                        cast = uiState.cast,
-                        onCastMemberClick = { member ->
-                            selectedPerson = member
+                if (deferredSectionsAllowed) {
+                    // 3. Production / Networks & Companies Section (Clickable)
+                    DetailNetworksSection(
+                        item = item,
+                        companies = uiState.companies,
+                        onCompanyClick = { company ->
+                            selectedCompany = company
                         }
                     )
                     Spacer(modifier = Modifier.height(20.dp))
-                }
 
-                // 5. Comments Section (Trakt & Jikan Community Reviews Carousel)
-                if (uiState.reviews.isNotEmpty()) {
-                    ReviewsSection(reviews = uiState.reviews)
-                    Spacer(modifier = Modifier.height(20.dp))
-                }
+                    // 4. Cast Section (Avatars + character names)
+                    if (uiState.cast.isNotEmpty()) {
+                        DetailCastSection(
+                            cast = uiState.cast,
+                            onCastMemberClick = { member ->
+                                selectedPerson = member
+                            }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
 
-                // 6. Trailers Section (Trailer video cards)
-                if (uiState.trailers.isNotEmpty()) {
-                    DetailTrailersSection(
-                        trailers = uiState.trailers,
-                        contentTitle = item.title
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    // 5. Comments Section (Trakt & Jikan Community Reviews Carousel)
+                    if (uiState.reviews.isNotEmpty()) {
+                        ReviewsSection(reviews = uiState.reviews)
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
+
+                    // 6. Trailers Section (Trailer video cards)
+                    if (uiState.trailers.isNotEmpty()) {
+                        DetailTrailersSection(
+                            trailers = uiState.trailers,
+                            contentTitle = item.title
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
                 }
 
                 // 7. Episodes Section (1:1 Nuvio Seasons & Episode Tracking Grid)
@@ -608,27 +621,29 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(20.dp))
                 }
 
-                // 8. Details Section (Show & Production Details)
-                DetailShowDetailsSection(item = item)
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // 8.5. Movie Franchise Collection (1:1 Nuvio Parity: strictly between Details and More Like This)
-                if (item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
-                    DetailCollectionSection(
-                        collectionName = uiState.collectionName ?: "Collection",
-                        items = uiState.collectionItems,
-                        onSelectItem = { viewModel.openPreview(it) }
-                    )
+                if (deferredSectionsAllowed) {
+                    // 8. Details Section (Show & Production Details)
+                    DetailShowDetailsSection(item = item)
                     Spacer(modifier = Modifier.height(20.dp))
-                }
 
-                // 9. More Like This & Recommendations Section
-                if (uiState.recommendations.isNotEmpty()) {
-                    RecommendationsSection(
-                        recommendations = uiState.recommendations,
-                        onSelectRecommendation = { viewModel.openPreview(it) }
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    // 8.5. Movie Franchise Collection (1:1 Nuvio Parity: strictly between Details and More Like This)
+                    if (item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
+                        DetailCollectionSection(
+                            collectionName = uiState.collectionName ?: "Collection",
+                            items = uiState.collectionItems,
+                            onSelectItem = { viewModel.openPreview(it) }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
+
+                    // 9. More Like This & Recommendations Section
+                    if (uiState.recommendations.isNotEmpty()) {
+                        RecommendationsSection(
+                            recommendations = uiState.recommendations,
+                            onSelectRecommendation = { viewModel.openPreview(it) }
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
                 }
 
                 // PREVIEW MODE HERO ACTION: + Add to Library

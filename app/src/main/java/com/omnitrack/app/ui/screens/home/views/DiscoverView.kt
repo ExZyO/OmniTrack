@@ -475,6 +475,7 @@ fun DiscoverView(
                         isLandscape = posterStyle.isLandscape,
                         hideLabels = posterStyle.hideLabels,
                         onCardClick = {
+                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.activeItem = item
                             com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(spotlight.map { it.id })
                             onItemClick(item.id)
                         },

@@ -128,7 +128,10 @@ fun HistoryView(
                 items(historyItems, key = { it.id }) { item ->
                     HistoryItemRow(
                         item = item,
-                        onClick = { onItemClick(item.id) },
+                        onClick = {
+                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.activeItem = item
+                            onItemClick(item.id)
+                        },
                         onQuickProgress = { onQuickProgress(item) }
                     )
                 }

@@ -137,6 +137,10 @@ class DetailViewModel(
     }
 
     init {
+        val preseededItem = ActiveSiblingHolder.activeItem?.takeIf { it.id == mediaId }
+        if (preseededItem != null) {
+            _previewItem.value = preseededItem
+        }
         val active = ActiveSiblingHolder.activeSiblingIds
         if (active.isNotEmpty()) {
             _stableSiblingIds.value = active
@@ -366,7 +370,7 @@ class DetailViewModel(
             nextAiringEpisode = args[14] as? NextAiringEpisode
         )
     }.flatMapLatest { aux ->
-        if (aux.previewItem != null) {
+        if (aux.previewItem != null && _mediaId.value == -1L) {
             flowOf(
                 DetailUiState(
                     item = aux.previewItem,
@@ -394,22 +398,24 @@ class DetailViewModel(
             )
         } else {
             _mediaId.flatMapLatest { currentId ->
+                val preseededItem = aux.previewItem?.takeIf { it.id == currentId }
                 repository.getMediaById(currentId).flatMapLatest { currentItem ->
-                    if (currentItem != null) {
-                        maybeEnrich(currentItem)
+                    val effectiveItem = currentItem ?: preseededItem
+                    if (effectiveItem != null) {
+                        maybeEnrich(effectiveItem)
                         if (_realSeasons.value.isEmpty()) {
-                            loadRecommendationsAndReviews(currentItem)
+                            loadRecommendationsAndReviews(effectiveItem)
                         }
-                        updateSiblings(currentItem.id)
-                        repository.getEpisodeProgress(currentItem.id).map { progressList ->
+                        updateSiblings(effectiveItem.id)
+                        repository.getEpisodeProgress(effectiveItem.id).map { progressList ->
                             val siblings = _stableSiblingIds.value.ifEmpty {
-                                ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(currentItem.id) }
+                                ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
                             }
-                            val currentIndex = siblings.indexOf(currentItem.id)
+                            val currentIndex = siblings.indexOf(effectiveItem.id)
                             val watchedSet = progressList.filter { it.isWatched }
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
                             DetailUiState(
-                                item = currentItem,
+                                item = effectiveItem,
                                 previousItem = aux.previousItem,
                                 nextItem = aux.nextItem,
                                 seasons = emptyList(),
@@ -421,8 +427,8 @@ class DetailViewModel(
                                 recommendations = aux.recommendations,
                                 reviews = aux.reviews,
                                 cast = aux.cast,
-                                trailers = if (aux.trailers.isEmpty() && currentItem.trailerYoutubeKey != null) {
-                                    listOf(MediaTrailer("Official Trailer", currentItem.trailerYoutubeKey))
+                                trailers = if (aux.trailers.isEmpty() && effectiveItem.trailerYoutubeKey != null) {
+                                    listOf(MediaTrailer("Official Trailer", effectiveItem.trailerYoutubeKey))
                                 } else aux.trailers,
                                 companies = aux.companies,
                                 collectionName = aux.collectionName,
@@ -443,7 +449,11 @@ class DetailViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = DetailUiState()
+        initialValue = run {
+            val pre = ActiveSiblingHolder.activeItem?.takeIf { it.id == mediaId }
+                ?: if (mediaId == -1L) EphemeralPreviewHolder.previewItem else null
+            if (pre != null) DetailUiState(item = pre, isLoading = false) else DetailUiState()
+        }
     )
 
     fun openPreview(rec: RecommendationItem) {
@@ -529,6 +539,7 @@ class DetailViewModel(
 
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(250) // Let navigation entrance transition finish smoothly at locked 120 FPS
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()

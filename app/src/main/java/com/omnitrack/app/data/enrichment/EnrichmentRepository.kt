@@ -76,6 +76,7 @@ class EnrichmentRepository(
     private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val aniListSeasonPosterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val kitsuSeasonDataCache = java.util.concurrent.ConcurrentHashMap<String, KitsuSeasonData>()
 
     suspend fun enrich(
         item: MediaItemEntity,
@@ -830,17 +831,25 @@ class EnrichmentRepository(
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
-                        val aniListPoster = if (!showTitle.isNullOrBlank()) {
-                            fetchAniListSeasonPoster(showTitle, sNum)
-                                ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
-                        } else null
+                        val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
+                        val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
+                        val s2Poster = mergedList.find { it.seasonNumber == 2 }?.posterUrl
+
+                        val resolvedPoster = when {
+                            // For Season 3+, prioritize dedicated official key visual (e.g. Kitsu TVアニメ 第3期)
+                            // or prevent AniList from duplicating Season 2's cropped visual
+                            sNum >= 3 && !kitsuData?.posterUrl.isNullOrBlank() -> kitsuData.posterUrl
+                            sNum >= 3 && aniListPoster != null && aniListPoster == s2Poster -> kitsuData?.posterUrl ?: aniListPoster
+                            else -> aniListPoster ?: kitsuData?.posterUrl
+                        }
+
                         val posterUrl = if (sNum <= 0) {
-                            mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: aniListPoster
+                            mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: resolvedPoster
                         } else if (sNum == 1) {
-                            mergedList.find { it.seasonNumber == 1 }?.posterUrl ?: aniListPoster
+                            mergedList.find { it.seasonNumber == 1 }?.posterUrl ?: resolvedPoster
                         } else {
                             // Distinct season poster for Season 2, Season 3, etc. NEVER fall back to Season 1!
-                            aniListPoster
+                            resolvedPoster
                         }
                         mergedList.add(
                             com.omnitrack.app.data.model.MediaSeason(
@@ -853,11 +862,14 @@ class EnrichmentRepository(
                         )
                     } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
                         val idx = mergedList.indexOf(existing)
-                        val enhancedPoster = if (existing.posterUrl.isNullOrBlank() && !showTitle.isNullOrBlank()) {
-                            fetchAniListSeasonPoster(showTitle, sNum)
-                                ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
-                                ?: existing.posterUrl
-                        } else existing.posterUrl
+                        val kitsuData = if (!showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
+                        val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
+                        val resolvedPoster = if (sNum >= 3 && !kitsuData?.posterUrl.isNullOrBlank()) {
+                            kitsuData.posterUrl
+                        } else {
+                            aniListPoster ?: kitsuData?.posterUrl ?: existing.posterUrl
+                        }
+                        val enhancedPoster = if (existing.posterUrl.isNullOrBlank()) resolvedPoster else existing.posterUrl
                         mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = enhancedPoster)
                     }
                 }
@@ -1003,6 +1015,8 @@ class EnrichmentRepository(
     )
 
     suspend fun fetchKitsuSeasonData(title: String, seasonNumber: Int): KitsuSeasonData? = withContext(Dispatchers.IO) {
+        val cacheKey = "$title:$seasonNumber"
+        kitsuSeasonDataCache[cacheKey]?.let { return@withContext it }
         try {
             val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
             val candidateQueries = listOfNotNull(
@@ -1041,6 +1055,9 @@ class EnrichmentRepository(
                         val canonical = attrs?.get("canonicalTitle")?.jsonPrimitive?.content?.lowercase() ?: ""
                         val titlesObj = attrs?.get("titles")?.jsonObject
                         val allTitles = (titlesObj?.values?.mapNotNull { it.jsonPrimitive.content.lowercase() }.orEmpty() + canonical)
+                        val posterObj = attrs?.get("posterImage")?.jsonObject
+                        val hasPoster = posterObj?.get("large")?.jsonPrimitive?.content != null ||
+                            posterObj?.get("original")?.jsonPrimitive?.content != null
                         val isSeasonMatch = allTitles.any { t ->
                             t.contains("${seasonNumber}nd") ||
                             t.contains("${seasonNumber}rd") ||
@@ -1050,9 +1067,11 @@ class EnrichmentRepository(
                             t.contains("第${seasonNumber}期") ||
                             t.contains("s$seasonNumber")
                         }
-                        if (isSeasonMatch) {
+                        if (isSeasonMatch && hasPoster) {
                             matchedAnime = item
                             break
+                        } else if (isSeasonMatch && matchedAnime == null) {
+                            matchedAnime = item
                         }
                     }
                     if (matchedAnime != null) break
@@ -1098,7 +1117,13 @@ class EnrichmentRepository(
                 offset += 20
             }
 
-            KitsuSeasonData(posterUrl = posterUrl, stills = stills)
+            val result = KitsuSeasonData(posterUrl = posterUrl, stills = stills)
+            kitsuSeasonDataCache[cacheKey] = result
+            result
+        } catch (_: Exception) {
+            null
+        }
+    }
         } catch (_: Exception) {
             null
         }
