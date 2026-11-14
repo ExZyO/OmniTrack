@@ -190,6 +190,9 @@ fun DetailScreen(
     BackHandler(enabled = selectedAnimeCharacter != null) {
         selectedAnimeCharacter = null
     }
+    BackHandler(enabled = uiState.isPreviewMode) {
+        viewModel.closePreview()
+    }
 
     if (selectedAnimeCharacter != null) {
         AnimeCharacterSheet(
@@ -761,10 +764,9 @@ fun DetailScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (uiState.isPreviewMode || item?.id == -1L) {
-                            viewModel.closePreview()
+                        if (!viewModel.closePreview()) {
+                            onBack()
                         }
-                        onBack()
                     },
                     modifier = Modifier.size(44.dp)
                 ) {

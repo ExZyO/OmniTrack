@@ -113,26 +113,6 @@ fun DetailAnimeCastSection(
                                     modifier = Modifier.matchParentSize()
                                 )
                             }
-
-                            // Role Badge (MAIN / SUPPORT)
-                            if (item.characterRole.equals("MAIN", ignoreCase = true)) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(6.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color(0xCC000000))
-                                        .border(0.5.dp, AccentArctic.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = "MAIN",
-                                        color = AccentArctic,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 0.4.sp
-                                    )
-                                }
-                            }
                         }
 
                         // Overlapping Seiyuu PiP Avatar Badge

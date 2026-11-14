@@ -110,6 +110,7 @@ class DetailViewModel(
 ) : ViewModel() {
 
     private val _mediaId = MutableStateFlow(mediaId)
+    private val _previewStack = MutableStateFlow<List<MediaItemEntity>>(emptyList())
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
     private val _recommendations = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
@@ -165,6 +166,7 @@ class DetailViewModel(
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
+                _previewStack.value = listOf(ephemeral)
                 _previewItem.value = ephemeral
             }
         }
@@ -259,6 +261,7 @@ class DetailViewModel(
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
+                _previewStack.value = listOf(ephemeral)
                 _previewItem.value = ephemeral
                 loadRecommendationsAndReviews(ephemeral)
                 maybeEnrich(ephemeral)
@@ -347,6 +350,9 @@ class DetailViewModel(
                     totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
                 )
                 _previewItem.value = updated
+                _previewStack.update { stack ->
+                    if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                }
                 loadRecommendationsAndReviews(updated)
             }
             if (enrichment.videos.isNotEmpty()) {
@@ -409,7 +415,7 @@ class DetailViewModel(
             sectionOrder = args[18] as List<DetailSectionItem>
         )
     }.flatMapLatest { aux ->
-        if (aux.previewItem != null && _mediaId.value == -1L) {
+        if (aux.previewItem != null) {
             flowOf(
                 DetailUiState(
                     item = aux.previewItem,
@@ -502,6 +508,23 @@ class DetailViewModel(
         }
     )
 
+    private fun resetAuxFields() {
+        _collectionName.value = null
+        _collectionItems.value = emptyList()
+        _realSeasons.value = emptyList()
+        _realEpisodes.value = emptyList()
+        _episodesBySeason.value = emptyMap()
+        _recommendations.value = emptyList()
+        _reviews.value = emptyList()
+        _cast.value = emptyList()
+        _trailers.value = emptyList()
+        _companies.value = emptyList()
+        _animeCharacters.value = emptyList()
+        _animeRelations.value = emptyList()
+        _animeAiring.value = null
+        _nextAiringEpisode.value = null
+    }
+
     fun openPreview(rec: RecommendationItem) {
         val previewEntity = MediaItemEntity(
             id = -1L,
@@ -516,48 +539,78 @@ class DetailViewModel(
             malId = rec.malId,
             status = TrackingStatus.PLAN_TO_TRACK
         )
-        _collectionName.value = null
-        _collectionItems.value = emptyList()
+        openPreview(previewEntity)
+    }
+
+    fun openPreview(previewEntity: MediaItemEntity) {
+        resetAuxFields()
+        _previewStack.update { it + previewEntity }
         _previewItem.value = previewEntity
         loadRecommendationsAndReviews(previewEntity)
         maybeEnrich(previewEntity)
+        if (previewEntity.mediaType == MediaType.SHOW || previewEntity.mediaType == MediaType.ANIME) {
+            launchSeriesFetch(previewEntity)
+        }
     }
 
     fun openRelationPreview(relation: AnimeRelationItem) {
+        val format = relation.format.uppercase()
+        val targetType = when {
+            format == "MANGA" -> MediaType.MANGA
+            format == "NOVEL" -> MediaType.LIGHT_NOVEL
+            format == "MOVIE" -> MediaType.MOVIE
+            else -> MediaType.ANIME
+        }
         val previewEntity = MediaItemEntity(
             id = -1L,
             title = relation.title,
             coverUrl = relation.coverUrl ?: "",
             bannerUrl = relation.coverUrl,
-            mediaType = relation.mediaType,
+            mediaType = targetType,
             anilistId = relation.id,
             releaseYear = relation.year?.toString(),
             status = TrackingStatus.PLAN_TO_TRACK
         )
-        _collectionName.value = null
-        _collectionItems.value = emptyList()
-        _previewItem.value = previewEntity
-        loadRecommendationsAndReviews(previewEntity)
-        maybeEnrich(previewEntity)
+        openPreview(previewEntity)
     }
 
-    fun closePreview() {
-        EphemeralPreviewHolder.previewItem = null
+    fun closePreview(): Boolean {
+        if (_previewStack.value.isEmpty() && _previewItem.value == null && EphemeralPreviewHolder.previewItem == null) {
+            return false
+        }
+        if (_previewStack.value.size > 1) {
+            _previewStack.update { it.dropLast(1) }
+            val newTop = _previewStack.value.last()
+            _previewItem.value = newTop
+            resetAuxFields()
+            loadRecommendationsAndReviews(newTop)
+            maybeEnrich(newTop)
+            if (newTop.mediaType == MediaType.SHOW || newTop.mediaType == MediaType.ANIME) {
+                launchSeriesFetch(newTop)
+            }
+            return true
+        }
+        _previewStack.value = emptyList()
         _previewItem.value = null
+        EphemeralPreviewHolder.previewItem = null
         val currentId = _mediaId.value
+        resetAuxFields()
         if (currentId > 0L) {
             viewModelScope.launch(Dispatchers.IO) {
                 val item = repository.getMediaById(currentId).firstOrNull()
                 if (item != null) {
                     loadRecommendationsAndReviews(item)
+                    launchSeriesFetch(item)
                 }
             }
         }
+        return true
     }
 
     override fun onCleared() {
         super.onCleared()
         EphemeralPreviewHolder.previewItem = null
+        _previewStack.value = emptyList()
     }
 
     fun addToLibrary(item: MediaItemEntity) {
@@ -565,6 +618,7 @@ class DetailViewModel(
             val toInsert = item.copy(id = 0L)
             val newId = repository.insertMedia(toInsert)
             EphemeralPreviewHolder.previewItem = null
+            _previewStack.value = emptyList()
             _previewItem.value = null
             _mediaId.value = newId
         }
@@ -992,7 +1046,21 @@ class DetailViewModel(
                                         }
                                     }
                                 } else if (_previewItem.value != null) {
-                                    _previewItem.value = _previewItem.value?.copy(anilistId = animeDetails.anilistId)
+                                    val currentTop = _previewItem.value!!
+                                    val enriched = currentTop.copy(
+                                        anilistId = animeDetails.anilistId ?: currentTop.anilistId,
+                                        synopsis = animeDetails.synopsis ?: currentTop.synopsis,
+                                        bannerUrl = animeDetails.bannerUrl ?: currentTop.bannerUrl,
+                                        coverUrl = if (currentTop.coverUrl.isBlank()) animeDetails.coverUrl ?: currentTop.coverUrl else currentTop.coverUrl,
+                                        communityScore = animeDetails.averageScore ?: currentTop.communityScore,
+                                        totalProgress = if (currentTop.totalProgress == null || currentTop.totalProgress == 0.0) {
+                                            animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentTop.totalProgress
+                                        } else currentTop.totalProgress
+                                    )
+                                    _previewItem.value = enriched
+                                    _previewStack.update { stack ->
+                                        if (stack.isNotEmpty()) stack.dropLast(1) + enriched else listOf(enriched)
+                                    }
                                 }
                             }
                         }

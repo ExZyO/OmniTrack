@@ -10,6 +10,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -118,6 +120,12 @@ class OmniSearchRepository(
         }
     }
 
+    private fun JsonElement?.cleanString(): String? {
+        if (this == null || this is JsonNull) return null
+        val str = try { this.jsonPrimitive.contentOrNull?.trim() } catch (_: Exception) { null } ?: return null
+        return if (str.equals("null", ignoreCase = true) || str.isBlank()) null else str
+    }
+
     private suspend fun searchAniList(
         query: String,
         isAnime: Boolean,
@@ -167,23 +175,23 @@ class OmniSearchRepository(
                 mediaList.mapNotNull { node ->
                     val obj = node.jsonObject
                     val titleObj = obj["title"]?.jsonObject
-                    val title = titleObj?.get("romaji")?.jsonPrimitive?.content
-                        ?: titleObj?.get("english")?.jsonPrimitive?.content
-                        ?: titleObj?.get("native")?.jsonPrimitive?.content
+                    val title = titleObj?.get("english").cleanString()
+                        ?: titleObj?.get("romaji").cleanString()
+                        ?: titleObj?.get("native").cleanString()
                         ?: return@mapNotNull null
 
-                    val nativeTitle = titleObj?.get("native")?.jsonPrimitive?.content
-                    val cover = obj["coverImage"]?.jsonObject?.get("extraLarge")?.jsonPrimitive?.content
-                        ?: obj["coverImage"]?.jsonObject?.get("large")?.jsonPrimitive?.content
+                    val nativeTitle = titleObj?.get("native").cleanString()
+                    val cover = obj["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                        ?: obj["coverImage"]?.jsonObject?.get("large").cleanString()
                         ?: return@mapNotNull null
-                    val banner = obj["bannerImage"]?.jsonPrimitive?.content
-                    val synopsis = obj["description"]?.jsonPrimitive?.content
+                    val banner = obj["bannerImage"].cleanString()
+                    val synopsis = obj["description"].cleanString()
                         ?.replace(Regex("<[^>]*>"), "")
                         ?.take(400)
-                    val score = obj["averageScore"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { it / 10f }
-                    val year = obj["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.content
-                    val anilistId = obj["id"]?.jsonPrimitive?.content?.toLongOrNull()
-                    val malId = obj["idMal"]?.jsonPrimitive?.content?.toLongOrNull()
+                    val score = obj["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                    val year = obj["startDate"]?.jsonObject?.get("year").cleanString()
+                    val anilistId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                    val malId = obj["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
 
                     val targetType = when {
                         formatNovel -> MediaType.NOVEL
@@ -192,9 +200,9 @@ class OmniSearchRepository(
                     }
 
                     val totalProgress = if (isAnime) {
-                        obj["episodes"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                        obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                     } else {
-                        obj["chapters"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                        obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                     }
 
                     SearchResultItem(

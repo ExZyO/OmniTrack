@@ -104,34 +104,6 @@ fun DetailFranchiseSection(
                                 modifier = Modifier.matchParentSize()
                             )
                         }
-
-                        // Subtle Relation Badge Top-Left
-                        val badgeText = when (item.relationType.uppercase()) {
-                            "MANGA" -> "MANGA"
-                            "NOVEL" -> "NOVEL"
-                            "SEQUEL" -> "SEQUEL"
-                            "PREQUEL" -> "PREQUEL"
-                            "SIDE_STORY" -> "SIDE STORY"
-                            "SPIN_OFF" -> "SPIN-OFF"
-                            "ALTERNATIVE" -> "ALT"
-                            else -> item.format.uppercase()
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .padding(5.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xCC000000))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = badgeText,
-                                color = Color.White,
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.3.sp
-                            )
-                        }
                     }
 
                     Text(
@@ -143,10 +115,18 @@ fun DetailFranchiseSection(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    val subText = when {
-                        item.year != null -> "${item.format} • ${item.year}"
-                        else -> item.format
+                    val typeLabel = when (item.relationType.uppercase()) {
+                        "MANGA" -> "Manga"
+                        "NOVEL" -> "Light Novel"
+                        "SEQUEL" -> "Sequel"
+                        "PREQUEL" -> "Prequel"
+                        "SIDE_STORY" -> "Side Story"
+                        "SPIN_OFF" -> "Spin-Off"
+                        "ALTERNATIVE" -> "Alt Version"
+                        else -> item.format.lowercase().replaceFirstChar { it.uppercase() }
                     }
+
+                    val subText = if (item.year != null) "$typeLabel • ${item.year}" else typeLabel
 
                     Text(
                         text = subText,
