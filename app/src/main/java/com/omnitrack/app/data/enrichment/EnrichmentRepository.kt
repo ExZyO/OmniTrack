@@ -1189,9 +1189,9 @@ class EnrichmentRepository(
                             val mediaObj = itemElem.jsonObject
                             val nextAiring = mediaObj["nextAiringEpisode"]?.let { if (it is kotlinx.serialization.json.JsonObject) it else null }
                             if (nextAiring != null) {
-                                val ep = nextAiring["episode"]?.jsonPrimitive?.intOrNull ?: continue
-                                val airingAt = nextAiring["airingAt"]?.jsonPrimitive?.longOrNull
-                                val timeUntil = nextAiring["timeUntilAiring"]?.jsonPrimitive?.longOrNull
+                                val ep = nextAiring["episode"]?.jsonPrimitive?.content?.toIntOrNull() ?: continue
+                                val airingAt = nextAiring["airingAt"]?.jsonPrimitive?.content?.toLongOrNull()
+                                val timeUntil = nextAiring["timeUntilAiring"]?.jsonPrimitive?.content?.toLongOrNull()
                                 val mediaTitle = mediaObj["title"]?.jsonObject?.get("english")?.jsonPrimitive?.content
                                     ?: mediaObj["title"]?.jsonObject?.get("romaji")?.jsonPrimitive?.content
 
