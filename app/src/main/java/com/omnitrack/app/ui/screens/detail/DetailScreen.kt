@@ -429,7 +429,6 @@ fun DetailScreen(
                     com.omnitrack.app.ui.components.NuvioLoadingIndicator(size = 44.dp)
                 }
             } else if (item != null) {
-                Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
 
             val customCoverUrl = remember(item, customPosterPattern) {
@@ -480,6 +479,7 @@ fun DetailScreen(
                 enabled = isCinematicBlur
             )
 
+            Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             // Background presentation layer
             when (presentationSettings.fallbackBackgroundStyle) {
                 FallbackBackgroundStyle.CINEMATIC_BLUR -> {
