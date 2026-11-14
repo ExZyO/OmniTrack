@@ -113,7 +113,7 @@ import com.omnitrack.app.data.model.UserStatSet
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
-import com.omnitrack.app.ui.theme.AccentRuby
+import com.omnitrack.app.ui.theme.AccentRose
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -1336,7 +1336,7 @@ private fun AnalyticsCategoryChart(
                                 .background(
                                     when {
                                         metric == 2 && entry.meanScore >= 80 -> AccentJade
-                                        metric == 2 && entry.meanScore < 50 -> AccentRuby
+                                        metric == 2 && entry.meanScore < 50 -> AccentRose
                                         else -> AccentArctic
                                     }
                                 )
@@ -1778,9 +1778,10 @@ private fun FavoriteCharacterRail(
                         .clickable {
                             onOpenCharacter?.invoke(
                                 AnimeCharacterItem(
-                                    id = item.id,
-                                    name = item.name,
-                                    imageUrl = item.imageUrl
+                                    characterId = item.id,
+                                    characterName = item.name,
+                                    characterRole = "FAVOURITE",
+                                    characterImageUrl = item.imageUrl
                                 )
                             )
                         },
@@ -1853,8 +1854,9 @@ private fun FavoriteStaffRail(
                         .clickable {
                             onOpenStaff?.invoke(
                                 AnimeStaffItem(
-                                    id = item.id,
+                                    staffId = item.id,
                                     name = item.name,
+                                    role = "Staff",
                                     imageUrl = item.imageUrl
                                 )
                             )

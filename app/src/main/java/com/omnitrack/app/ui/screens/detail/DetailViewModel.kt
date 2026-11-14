@@ -192,9 +192,11 @@ class DetailViewModel(
     }
 
     fun selectDiscussionTag(tag: Int?) {
-        val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null) ?: return
-        val anilistId = currentItem.anilistId ?: return
-        loadDiscussionComments(anilistId, tag)
+        viewModelScope.launch {
+            val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null) ?: return@launch
+            val anilistId = currentItem.anilistId ?: return@launch
+            loadDiscussionComments(anilistId, tag)
+        }
     }
 
     fun loadDiscussionComments(anilistId: Long, tag: Int? = null) {
