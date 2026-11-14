@@ -29,7 +29,7 @@ class ArtworkWaterfallRepository(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.sharedClient.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
-        .addInterceptor { chain ->
+        .addInterceptor { chain: okhttp3.Interceptor.Chain ->
             val req = chain.request().newBuilder()
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
                 .header("Accept", "application/json")

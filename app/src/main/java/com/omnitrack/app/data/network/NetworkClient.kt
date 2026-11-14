@@ -22,6 +22,9 @@ object NetworkClient {
     @Volatile
     private var instance: OkHttpClient? = null
 
+    val sharedClient: OkHttpClient
+        get() = getClient()
+
     fun getClient(context: Context? = null): OkHttpClient {
         return instance ?: synchronized(this) {
             instance ?: run {
