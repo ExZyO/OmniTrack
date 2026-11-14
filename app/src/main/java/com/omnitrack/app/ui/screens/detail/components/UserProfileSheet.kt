@@ -1217,6 +1217,7 @@ fun UserProfileSheet(
     }
 }
 }
+}
 
 /**
  * 52-Week Activity Heatmap with Month Headers and Levels 0..4
