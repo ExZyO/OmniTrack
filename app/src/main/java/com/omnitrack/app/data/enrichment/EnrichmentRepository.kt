@@ -820,12 +820,16 @@ class EnrichmentRepository(
                 cinemetaSeasons.forEach { (sNum, eps) ->
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
-                        // Season not in TMDb (e.g. Frieren Season 2 in Cinemeta)
+                        // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
                         val aniListPoster = if (!showTitle.isNullOrBlank()) {
                             fetchAniListSeasonPoster(showTitle, sNum)
                                 ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
                         } else null
-                        val posterUrl = aniListPoster ?: mergedList.firstOrNull { it.posterUrl != null }?.posterUrl
+                        val posterUrl = if (sNum <= 0) {
+                            mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: aniListPoster
+                        } else {
+                            aniListPoster ?: mergedList.firstOrNull { it.seasonNumber > 0 && !it.posterUrl.isNullOrBlank() }?.posterUrl
+                        }
                         mergedList.add(
                             com.omnitrack.app.data.model.MediaSeason(
                                 seasonNumber = sNum,
@@ -1093,18 +1097,22 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
-            val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
-            val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
-            val searchQueries = listOf(
+            val strippedTitle = title
+                .replace(Regex("(?i)\\s*(?:season|\\d+(?:st|nd|rd|th)\\s+season|part)\\s*\\d*.*"), "")
+                .split(":", "-", "–").firstOrNull()?.trim()
+                ?.takeIf { it.isNotBlank() } ?: title
+            val baseTitle = strippedTitle
+            val cleanTitle = strippedTitle.replace(Regex("[:\\-_–]"), " ").trim()
+            val searchQueries = listOfNotNull(
                 "$baseTitle Season $seasonNumber",
+                "$cleanTitle Season $seasonNumber",
                 "$baseTitle ${seasonNumber}nd Season",
                 "$baseTitle ${seasonNumber}rd Season",
                 "$baseTitle ${seasonNumber}th Season",
-                "$cleanTitle Season $seasonNumber",
                 "$cleanTitle ${seasonNumber}nd Season",
                 "$cleanTitle ${seasonNumber}rd Season",
                 "$cleanTitle ${seasonNumber}th Season",
-                "$cleanTitle 2nd Season"
+                if (seasonNumber == 1) baseTitle else null
             )
             for (sq in searchQueries) {
                 val jsonPayload = buildJsonObject {

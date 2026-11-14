@@ -560,6 +560,30 @@ private fun EpisodeHorizontalRow(
     }
 }
 
+@Composable
+private fun EpisodeAvailabilityBadge(
+    episode: MediaEpisode,
+    modifier: Modifier = Modifier
+) {
+    val isUnaired = remember(episode.airDate) {
+        val days = AirDateUtils.daysUntilExplicitRelease(AirDateUtils.todayIsoDate(), episode.airDate)
+        days != null && days >= 0
+    }
+    if (!isUnaired) return
+
+    Text(
+        text = "UNAVAILABLE",
+        modifier = modifier
+            .background(Color(0xCC5D4037), RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 3.dp),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = Color.White,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EpisodeHorizontalCard(
@@ -622,6 +646,14 @@ private fun EpisodeHorizontalCard(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
+        // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
+        EpisodeAvailabilityBadge(
+            episode = episode,
+            modifier = Modifier
+                .align(if (isWatched) Alignment.TopStart else Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp, start = 8.dp)
+        )
+
         // In-Image Content Overlay at Bottom Start (1:1 Nuvio Phone Metrics)
         Column(
             modifier = Modifier
@@ -631,7 +663,7 @@ private fun EpisodeHorizontalCard(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
-            val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
+            val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -646,20 +678,15 @@ private fun EpisodeHorizontalCard(
                         backgroundAlpha = 0.45f
                     )
                 }
-                if (airBadgeText != null) {
-                    androidx.compose.material3.Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF00D2FF).copy(alpha = 0.22f),
-                        border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
-                    ) {
-                        Text(
-                            text = airBadgeText,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00D2FF),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                        )
-                    }
+                if (!formattedDate.isNullOrBlank()) {
+                    Text(
+                        text = formattedDate,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.70f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
@@ -840,6 +867,14 @@ private fun EpisodeListCardItem(
                         .align(Alignment.TopEnd)
                         .padding(top = 8.dp, end = 8.dp)
                 )
+
+                // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
+                EpisodeAvailabilityBadge(
+                    episode = episode,
+                    modifier = Modifier
+                        .align(if (isWatched) Alignment.BottomStart else Alignment.TopEnd)
+                        .padding(top = 8.dp, end = 8.dp, start = 8.dp, bottom = 8.dp)
+                )
             }
 
             // Right: Episode Metadata Column (1:1 Nuvio Metrics: 15sp title, 12sp subtitle row, 13sp overview)
@@ -863,27 +898,11 @@ private fun EpisodeListCardItem(
                 )
 
                 val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-                val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
-                if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0) || airBadgeText != null) {
+                if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (airBadgeText != null) {
-                            androidx.compose.material3.Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = Color(0xFF00D2FF).copy(alpha = 0.22f),
-                                border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
-                            ) {
-                                Text(
-                                    text = airBadgeText,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00D2FF),
-                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                                )
-                            }
-                        }
                         if (!formattedDate.isNullOrBlank()) {
                             Text(
                                 text = formattedDate,
@@ -1014,6 +1033,14 @@ private fun EpisodeVerticalCardItem(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
+        // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
+        EpisodeAvailabilityBadge(
+            episode = episode,
+            modifier = Modifier
+                .align(if (isWatched) Alignment.TopStart else Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp, start = 8.dp)
+        )
+
         // In-Image Metadata Overlay at Bottom
         Column(
             modifier = Modifier
@@ -1023,7 +1050,7 @@ private fun EpisodeVerticalCardItem(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
-            val airBadgeText = remember(episode.airDate) { AirDateUtils.computeAirDateBadgeText(episode.airDate) }
+            val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1038,20 +1065,15 @@ private fun EpisodeVerticalCardItem(
                         backgroundAlpha = 0.45f
                     )
                 }
-                if (airBadgeText != null) {
-                    androidx.compose.material3.Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF00D2FF).copy(alpha = 0.22f),
-                        border = BorderStroke(0.8.dp, Color(0xFF00D2FF).copy(alpha = 0.50f))
-                    ) {
-                        Text(
-                            text = airBadgeText,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF00D2FF),
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
-                        )
-                    }
+                if (!formattedDate.isNullOrBlank()) {
+                    Text(
+                        text = formattedDate,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.70f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
