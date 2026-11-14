@@ -618,19 +618,37 @@ private fun StaffDetailContent(
             detail?.age?.let { add("$it yrs") }
             detail?.gender?.takeIf { it.isNotBlank() }?.let { add(it) }
             detail?.dateOfBirth?.takeIf { it.isNotBlank() }?.let { add("Born $it") }
+            detail?.dateOfDeath?.takeIf { it.isNotBlank() }?.let { add("Died $it") }
             detail?.homeTown?.takeIf { it.isNotBlank() }?.let { add(it) }
             detail?.yearsActive?.takeIf { it.isNotBlank() }?.let { add("Active $it") }
             detail?.bloodType?.takeIf { it.isNotBlank() }?.let { add("Blood $it") }
+            detail?.language?.takeIf { it.isNotBlank() }?.let { add(it) }
             formatCompactNumber(detail?.favourites)?.let { add("$it ♥") }
         }
         if (vitalsList.isNotEmpty()) {
-            Text(
-                text = vitalsList.joinToString("  •  "),
-                fontSize = 12.sp,
-                color = TextSecondary,
-                lineHeight = 16.sp,
-                modifier = Modifier.padding(horizontal = 20.dp)
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = vitalsList.joinToString("  •  "),
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                    lineHeight = 16.sp
+                )
+                val altNames = detail?.alternativeNames.orEmpty()
+                if (altNames.isNotEmpty()) {
+                    Text(
+                        text = "AKA: ${altNames.take(4).joinToString(", ")}",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
 
         // Loading spinner while details load

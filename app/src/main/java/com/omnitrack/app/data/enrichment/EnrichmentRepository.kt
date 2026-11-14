@@ -1870,6 +1870,7 @@ class EnrichmentRepository(
                         name {
                           full
                           native
+                          alternative
                         }
                         image {
                           large
@@ -1877,6 +1878,11 @@ class EnrichmentRepository(
                         description
                         age
                         dateOfBirth {
+                          year
+                          month
+                          day
+                        }
+                        dateOfDeath {
                           year
                           month
                           day
@@ -1987,6 +1993,7 @@ class EnrichmentRepository(
                     val sId = staff["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: staffId
                     val name = staff["name"]?.jsonObject?.get("full").cleanString() ?: "Unknown"
                     val nativeName = staff["name"]?.jsonObject?.get("native").cleanString()
+                    val altNames = staff["name"]?.jsonObject?.get("alternative")?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
                     val img = staff["image"]?.jsonObject?.get("large").cleanString()
                     val rawBio = staff["description"].cleanString()
 
@@ -1996,6 +2003,12 @@ class EnrichmentRepository(
                     val m = dobObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val d = dobObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val dobStr = formatAniListDate(y, m, d)
+
+                    val dodObj = staff["dateOfDeath"]?.let { if (it is JsonObject) it else null }
+                    val yD = dodObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mD = dodObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dD = dodObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val dodStr = formatAniListDate(yD, mD, dD)
                     val gender = staff["gender"].cleanString()
                     val home = staff["homeTown"].cleanString()
                     val blood = staff["bloodType"].cleanString()
@@ -2095,10 +2108,12 @@ class EnrichmentRepository(
                         staffId = sId,
                         name = name,
                         nativeName = nativeName,
+                        alternativeNames = altNames,
                         imageUrl = img,
                         biography = rawBio,
                         age = age,
                         dateOfBirth = dobStr,
+                        dateOfDeath = dodStr,
                         homeTown = home,
                         primaryOccupations = occupations,
                         roles = rolesList,
