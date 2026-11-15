@@ -112,7 +112,7 @@ fun NuvioRailPosterCard(
             Text(
                 text = subtitle,
                 fontSize = 11.5.sp,
-                color = TextMuted,
+                color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

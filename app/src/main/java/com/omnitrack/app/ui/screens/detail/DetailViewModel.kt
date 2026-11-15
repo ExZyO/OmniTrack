@@ -204,10 +204,13 @@ class DetailViewModel(
             _discussionComments.value = emptyList()
             return
         }
-        val cacheKey = "${anilistId}_${tag ?: 0}"
+        val cacheKey = "${anilistId}_${tag ?: -1}"
         val cached = discussionCache[cacheKey]
         if (cached != null) {
-            _discussionComments.value = cached
+            if (cached.isNotEmpty()) {
+                val current = _discussionComments.value
+                _discussionComments.value = (cached + current).distinctBy { it.id }
+            }
             return
         }
 
@@ -232,13 +235,12 @@ class DetailViewModel(
 
                 val activeAniListId = _previewItem.value?.anilistId ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
                 if (activeAniListId == anilistId) {
+                    discussionCache[cacheKey] = comments
                     if (comments.isNotEmpty()) {
-                        discussionCache[cacheKey] = comments
                         val current = _discussionComments.value
                         val merged = (comments + current).distinctBy { it.id }
                         _discussionComments.value = merged
                     } else if (tag == null) {
-                        discussionCache[cacheKey] = emptyList()
                         _discussionComments.value = emptyList()
                     }
                 }

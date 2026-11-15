@@ -113,7 +113,7 @@ class DantotsuCommentsRepository(
 
         var url = "$BASE_URL/comments/$anilistId/$page"
         val queryParams = mutableListOf<String>()
-        if (tag != null && tag > 0) queryParams.add("tag=$tag")
+        if (tag != null) queryParams.add("tag=$tag")
         if (sort.isNotBlank()) queryParams.add("sort=$sort")
         if (queryParams.isNotEmpty()) url += "?" + queryParams.joinToString("&")
 
@@ -142,6 +142,9 @@ class DantotsuCommentsRepository(
                 val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                 val content = if (isDeleted) "[deleted]" else rawContent
                 val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
+                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
+                    ?: tag
                 val tagStr = when {
                     tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
                     tagNum == 0 -> "General"
@@ -223,6 +226,7 @@ class DantotsuCommentsRepository(
                 val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                 val content = if (isDeleted) "[deleted]" else rawContent
                 val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
                 val tagStr = when {
                     tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
                     tagNum == 0 -> "General"

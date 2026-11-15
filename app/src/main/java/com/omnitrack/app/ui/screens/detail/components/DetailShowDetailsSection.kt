@@ -282,7 +282,7 @@ fun DetailNamesSynonymsSection(
                         ) {
                             Text(
                                 text = syn,
-                                color = TextSecondary,
+                                color = Color.White,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -333,7 +333,7 @@ fun DetailGenresTagsSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Genres (Bold Arctic accent)
+            // Genres (Pure White)
             effectiveGenres.forEach { genre ->
                 Box(
                     modifier = Modifier
@@ -347,14 +347,14 @@ fun DetailGenresTagsSection(
                 ) {
                     Text(
                         text = genre,
-                        color = AccentArctic,
+                        color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // Tags (Subtle Glass chips with rank %)
+            // Tags (Pure White with rank %)
             visibleTags.forEach { tagItem ->
                 Box(
                     modifier = Modifier
@@ -373,12 +373,12 @@ fun DetailGenresTagsSection(
                         Icon(
                             imageVector = Icons.Default.Label,
                             contentDescription = null,
-                            tint = TextMuted,
+                            tint = Color.White.copy(alpha = 0.85f),
                             modifier = Modifier.size(11.dp)
                         )
                         Text(
                             text = if (tagItem.rank != null) "${tagItem.name} ${tagItem.rank}%" else tagItem.name,
-                            color = TextSecondary,
+                            color = Color.White,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )

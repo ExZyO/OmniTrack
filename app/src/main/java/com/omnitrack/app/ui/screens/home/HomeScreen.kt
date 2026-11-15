@@ -101,6 +101,7 @@ fun HomeScreen(
     onItemClick: (Long) -> Unit,
     onNavigateToArtworkPriority: () -> Unit = {},
     onNavigateToVisualPresentation: () -> Unit = {},
+    onNavigateToDetailsPageLayout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -503,7 +504,8 @@ fun HomeScreen(
                         },
                         onOpenDiagnostics = { showDiagnostics = true },
                         onNavigateToArtworkPriority = onNavigateToArtworkPriority,
-                        onNavigateToVisualPresentation = onNavigateToVisualPresentation
+                        onNavigateToVisualPresentation = onNavigateToVisualPresentation,
+                        onNavigateToDetailsPageLayout = onNavigateToDetailsPageLayout
                     )
                 }
             }

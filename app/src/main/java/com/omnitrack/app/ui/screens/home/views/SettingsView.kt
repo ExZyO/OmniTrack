@@ -89,6 +89,7 @@ fun SettingsView(
     onOpenDiagnostics: () -> Unit,
     onNavigateToArtworkPriority: () -> Unit = {},
     onNavigateToVisualPresentation: () -> Unit = {},
+    onNavigateToDetailsPageLayout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -191,7 +192,7 @@ fun SettingsView(
                 iconTint = AccentArctic,
                 title = "Details Page Sections & Order",
                 subtitle = "Reorder sections and toggle visibility: Airing, Episodes, Cast, Genres & Tags, Details, Synonyms, Reviews",
-                onClick = { showDetailsPageLayoutSheet = true }
+                onClick = onNavigateToDetailsPageLayout
             )
         }
 

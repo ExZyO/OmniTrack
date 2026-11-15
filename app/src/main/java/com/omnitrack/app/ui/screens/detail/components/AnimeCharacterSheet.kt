@@ -132,23 +132,23 @@ fun AnimeCharacterSheet(
                 FallbackBackgroundStyle.CINEMATIC_BLUR -> {
                     ArtworkBackdrop(
                         image = backdropBitmap,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.matchParentSize()
                     )
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.55f)))
                 }
                 FallbackBackgroundStyle.DOMINANT_COLOR -> {
                     CoverGlowBox(
                         imageUrl = backdropTargetUrl,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.matchParentSize()
                     ) {}
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.55f)))
                 }
                 else -> {
-                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                    Box(modifier = Modifier.matchParentSize().background(AmoledBlack))
                 }
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
                 if (showingVoiceActor && (selectedStaffId != null || character.voiceActorId != null)) {
                     StaffDetailContent(
                         staffId = selectedStaffId ?: character.voiceActorId ?: 0L,
@@ -549,23 +549,23 @@ fun AnimeStaffSheet(
                 FallbackBackgroundStyle.CINEMATIC_BLUR -> {
                     ArtworkBackdrop(
                         image = backdropBitmap,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.matchParentSize()
                     )
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.55f)))
                 }
                 FallbackBackgroundStyle.DOMINANT_COLOR -> {
                     CoverGlowBox(
                         imageUrl = backdropTargetUrl,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.matchParentSize()
                     ) {}
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                    Box(modifier = Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.55f)))
                 }
                 else -> {
-                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                    Box(modifier = Modifier.matchParentSize().background(AmoledBlack))
                 }
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
                 StaffDetailContent(
                     staffId = staff.staffId,
                     fallbackName = staff.name,

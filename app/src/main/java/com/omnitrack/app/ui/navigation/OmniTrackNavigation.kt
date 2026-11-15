@@ -21,6 +21,7 @@ import com.omnitrack.app.ui.screens.detail.DetailViewModel
 import com.omnitrack.app.ui.screens.home.HomeScreen
 import com.omnitrack.app.ui.screens.home.HomeViewModel
 import com.omnitrack.app.ui.screens.settings.ArtworkPriorityScreen
+import com.omnitrack.app.ui.screens.settings.DetailsPageLayoutScreen
 import com.omnitrack.app.ui.screens.settings.VisualPresentationScreen
 
 object Routes {
@@ -28,6 +29,7 @@ object Routes {
     const val DETAIL = "detail/{mediaId}"
     const val ARTWORK_PRIORITY = "settings/artwork_priority"
     const val VISUAL_PRESENTATION = "settings/visual_presentation"
+    const val DETAILS_PAGE_LAYOUT = "settings/details_page_layout"
 
     fun detail(mediaId: Long) = "detail/$mediaId"
 }
@@ -76,6 +78,9 @@ fun OmniTrackNavigation(
                 },
                 onNavigateToVisualPresentation = {
                     navController.navigate(Routes.VISUAL_PRESENTATION)
+                },
+                onNavigateToDetailsPageLayout = {
+                    navController.navigate(Routes.DETAILS_PAGE_LAYOUT)
                 }
             )
         }
@@ -161,6 +166,28 @@ fun OmniTrackNavigation(
             }
         ) {
             VisualPresentationScreen(
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.DETAILS_PAGE_LAYOUT,
+            enterTransition = {
+                fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            },
+            popExitTransition = {
+                fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+        ) {
+            DetailsPageLayoutScreen(
                 onBack = { navController.popBackStack() }
             )
         }

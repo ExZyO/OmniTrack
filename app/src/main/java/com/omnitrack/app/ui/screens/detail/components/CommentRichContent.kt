@@ -134,46 +134,43 @@ private fun CommentMediaBlock(url: String) {
 private fun CommentSpoilerBlock(spoilerContent: String) {
     var isRevealed by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isRevealed) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.08f))
-            .border(
-                1.dp,
-                if (isRevealed) GlassBorder else AccentArctic.copy(alpha = 0.35f),
-                RoundedCornerShape(8.dp)
-            )
-            .clickable { isRevealed = !isRevealed }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
+    if (!isRevealed) {
         Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.08f))
+                .clickable { isRevealed = true }
+                .padding(horizontal = 9.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
-                imageVector = if (isRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                imageVector = Icons.Default.Visibility,
                 contentDescription = null,
-                tint = AccentArctic,
-                modifier = Modifier.size(14.dp)
+                tint = Color.White.copy(alpha = 0.70f),
+                modifier = Modifier.size(13.dp)
             )
             Text(
-                text = if (isRevealed) "Spoiler (tap to hide)" else "Spoiler (tap to reveal)",
-                color = AccentArctic,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold
+                text = "Spoiler • Tap to reveal",
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
             )
         }
-
-        AnimatedVisibility(
-            visible = isRevealed,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { isRevealed = false },
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            CommentRichContent(
-                content = spoilerContent,
-                modifier = Modifier.padding(top = 4.dp)
+            CommentRichContent(content = spoilerContent)
+            Text(
+                text = "▲ Tap to hide spoiler",
+                color = Color.White.copy(alpha = 0.40f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Normal,
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
     }

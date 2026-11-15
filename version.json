@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b162",
-  "versionCode": 162,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b162/OmniTrack-v1.0.0-b162.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b162/OmniTrack-v1.0.0-b162-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b162: fix(syntax): remove extraneous closing brace in AnimeCharacterSheet"
+  "version": "v1.0.0-b165",
+  "versionCode": 165,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b165/OmniTrack-v1.0.0-b165.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b165/OmniTrack-v1.0.0-b165-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b165: staff sheet height fix, discussion episode tags, multi-color stats graphs, length units, unboxed spoilers, white text styling, fullscreen reorderable layout settings"
 }

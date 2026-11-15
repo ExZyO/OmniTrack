@@ -1341,6 +1341,45 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
  * 1:1 Dartotsu Parity: ColumnChart for Scores, DonutChart for Formats/Statuses/Countries,
  * LineTrendline for Release/Start Years, RadarChart for Genres, and Ranked Bars for others.
  */
+private val analyticsPalette = listOf(
+    AccentArctic,          // cyan 0xFF38BDF8
+    AccentJade,            // emerald 0xFF10B981
+    AccentGold,            // amber gold 0xFFF59E0B
+    AccentRose,            // soft red 0xFFF43F5E
+    Color(0xFF818CF8),     // indigo
+    Color(0xFFF472B6),     // pink
+    Color(0xFF38BDF8),     // sky blue
+    Color(0xFFFB923C),     // orange
+    Color(0xFFA78BFA),     // violet
+    Color(0xFF34D399),     // mint
+    Color(0xFFFBBF24),     // bright yellow
+    Color(0xFFF87171),     // light coral
+    Color(0xFF2DD4BF),     // teal
+    Color(0xFFE879F9),     // fuchsia
+    Color(0xFF60A5FA),     // light blue
+    Color(0xFFA3E635)      // lime
+)
+
+private fun formatCategoryEntryLabel(categoryKey: String, label: String, isAnime: Boolean): String {
+    if (categoryKey.equals("lengths", ignoreCase = true)) {
+        val unit = if (isAnime) "Episodes" else "Chapters"
+        val singleUnit = if (isAnime) "Episode" else "Chapter"
+        return when {
+            label == "1" -> "1 $singleUnit"
+            label.contains("-") -> {
+                val parts = label.split("-")
+                "${parts[0]}–${parts[1]} $unit"
+            }
+            label.endsWith("+") -> {
+                "${label.removeSuffix("+")}+ $unit"
+            }
+            label.toIntOrNull() != null -> "$label $unit"
+            else -> "$label $unit"
+        }
+    }
+    return label
+}
+
 @Composable
 private fun AnalyticsCategoryChart(
     categoryKey: String,
@@ -1367,15 +1406,15 @@ private fun AnalyticsCategoryChart(
                 if (metric != 2) {
                     DonutRingChart(entries = entries, metric = metric, isAnime = isAnime)
                 } else {
-                    AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+                    AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime, categoryKey = categoryKey)
                 }
             }
             "releaseYears", "startYears" -> YearTrendlineChart(entries = entries, metric = metric, isAnime = isAnime)
             "genres" -> {
                 GenreRadarChart(entries = entries, metric = metric, isAnime = isAnime)
-                AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+                AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime, categoryKey = categoryKey)
             }
-            else -> AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime)
+            else -> AnalyticsCategoryBars(entries = entries, metric = metric, isAnime = isAnime, categoryKey = categoryKey)
         }
     }
 }
@@ -1506,16 +1545,7 @@ private fun DonutRingChart(
         else -> "ENTRIES"
     }
 
-    val palette = listOf(
-        AccentArctic,
-        AccentJade,
-        AccentGold,
-        AccentRose,
-        Color(0xFF818CF8),
-        Color(0xFFF472B6),
-        Color(0xFF38BDF8),
-        Color(0xFFFB923C)
-    )
+    val palette = analyticsPalette
 
     val validEntries = remember(entries, metric) {
         entries.mapNotNull { e ->
@@ -1764,18 +1794,19 @@ private fun GenreRadarChart(
                     val x = (cx + dataR * Math.cos(angle)).toFloat()
                     val y = (cy + dataR * Math.sin(angle)).toFloat()
                     if (i == 0) dataPath.moveTo(x, y) else dataPath.lineTo(x, y)
-                    drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                    val vertexColor = analyticsPalette[i % analyticsPalette.size]
+                    drawCircle(color = vertexColor, radius = 4.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
                 }
                 dataPath.close()
 
                 drawPath(
                     path = dataPath,
-                    color = AccentArctic.copy(alpha = 0.25f),
+                    color = AccentArctic.copy(alpha = 0.20f),
                     style = Fill
                 )
                 drawPath(
                     path = dataPath,
-                    color = AccentArctic,
+                    color = AccentArctic.copy(alpha = 0.80f),
                     style = Stroke(width = 2.dp.toPx())
                 )
             }
@@ -1787,12 +1818,13 @@ private fun GenreRadarChart(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            top.forEach { (genre, v) ->
+            top.forEachIndexed { i, (genre, v) ->
                 val displayVal = when (metric) {
                     1 -> if (isAnime) "${v.toInt()}h" else "${v.toInt()} ch"
                     2 -> String.format("%.1f", v)
                     else -> "${v.toInt()}"
                 }
+                val genreColor = analyticsPalette[i % analyticsPalette.size]
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
@@ -1802,10 +1834,10 @@ private fun GenreRadarChart(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AccentArctic))
+                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(genreColor))
                     Text(
                         text = "$genre: $displayVal",
-                        color = Color.White.copy(alpha = 0.85f),
+                        color = Color.White.copy(alpha = 0.90f),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
@@ -1819,7 +1851,8 @@ private fun GenreRadarChart(
 private fun AnalyticsCategoryBars(
     entries: List<UserStatEntry>,
     metric: Int,
-    isAnime: Boolean
+    isAnime: Boolean,
+    categoryKey: String = ""
 ) {
     val sorted = remember(entries, metric) {
         when (metric) {
@@ -1842,7 +1875,7 @@ private fun AnalyticsCategoryBars(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        sorted.forEach { entry ->
+        sorted.forEachIndexed { index, entry ->
             val metricVal = when (metric) {
                 1 -> if (isAnime) entry.minutesWatched.toDouble() else entry.chaptersRead.toDouble()
                 2 -> entry.meanScore
@@ -1856,6 +1889,8 @@ private fun AnalyticsCategoryBars(
             }
 
             val barFraction = (metricVal / maxMetricValue).toFloat().coerceIn(0.04f, 1f)
+            val barColor = analyticsPalette[index % analyticsPalette.size]
+            val displayLabel = formatCategoryEntryLabel(categoryKey, entry.label, isAnime)
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1866,19 +1901,30 @@ private fun AnalyticsCategoryBars(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = entry.label,
-                        color = Color.White,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+                    Row(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(barColor)
+                        )
+                        Text(
+                            text = displayLabel,
+                            color = Color.White,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = metricStr,
-                        color = Color.White.copy(alpha = 0.80f),
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1896,13 +1942,7 @@ private fun AnalyticsCategoryBars(
                             .fillMaxWidth(barFraction)
                             .height(5.dp)
                             .clip(RoundedCornerShape(3.dp))
-                            .background(
-                                when {
-                                    metric == 2 && entry.meanScore >= 80 -> AccentJade
-                                    metric == 2 && entry.meanScore < 50 -> AccentRose
-                                    else -> AccentArctic
-                                }
-                            )
+                            .background(barColor)
                     )
                 }
             }
