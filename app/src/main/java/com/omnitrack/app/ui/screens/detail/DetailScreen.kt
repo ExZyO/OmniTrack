@@ -208,6 +208,8 @@ fun DetailScreen(
         }
     }
 
+    val scrollState = rememberScrollState()
+
     BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
         if (uiState.isPreviewMode) {
             viewModel.closePreview()
@@ -225,8 +227,6 @@ fun DetailScreen(
             onBack()
         }
     }
-
-    val scrollState = rememberScrollState()
 
     val currentSheet = if (uiState.isPreviewMode) null else sheetBackStack.lastOrNull()
     when (currentSheet) {
