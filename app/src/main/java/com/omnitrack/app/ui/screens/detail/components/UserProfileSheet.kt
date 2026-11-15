@@ -85,7 +85,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -182,7 +184,7 @@ fun UserProfileSheet(
     var showOverflowMenu by remember { mutableStateOf(false) }
 
     // User Media List sheet state (Anime / Manga list browsing)
-    var browsingMediaListType by remember { mutableStateOf<Boolean?>(null) } // true: anime, false: manga, null: closed
+    var browsingMediaListType by rememberSaveable { mutableStateOf<Boolean?>(null) } // true: anime, false: manga, null: closed
 
     // Feed Filter State: "ALL", "ANIME", "MANGA", "TEXT"
     var feedFilter by remember { mutableStateOf("ALL") }
@@ -1965,10 +1967,13 @@ private fun UserMediaListSheetView(
     val context = LocalContext.current
     var mediaList by remember { mutableStateOf<List<UserMediaListItem>?>(null) }
     var isLoading by remember { mutableStateOf(true) }
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedStatusFilter by remember { mutableStateOf("ALL") }
-    var sortOrder by remember { mutableStateOf("SCORE") } // SCORE, TITLE, PROGRESS
-    var isReverseSort by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var selectedStatusFilter by rememberSaveable { mutableStateOf("ALL") }
+    var sortOrder by rememberSaveable { mutableStateOf("SCORE") } // SCORE, TITLE, PROGRESS
+    var isReverseSort by rememberSaveable { mutableStateOf(false) }
+    val listState = rememberSaveable(isAnime, userId, saver = LazyListState.Saver) {
+        LazyListState()
+    }
 
     LaunchedEffect(userId, isAnime) {
         isLoading = true
@@ -2190,6 +2195,7 @@ private fun UserMediaListSheetView(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),

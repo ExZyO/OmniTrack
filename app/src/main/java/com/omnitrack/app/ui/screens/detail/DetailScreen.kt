@@ -85,6 +85,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
@@ -176,11 +178,12 @@ fun DetailScreen(
     val seasonViewMode by prefManager.seasonViewMode.collectAsState(initial = "Posters")
 
     val uiState by viewModel.uiState.collectAsState()
+    val isCommentsLoading by viewModel.isCommentsLoading.collectAsState()
     val item = uiState.item
-    val effectiveBanner = item?.customBannerPath ?: item?.bannerUrl ?: item?.coverUrl
+    val effectiveBanner = item?.customBannerPath ?: item?.bannerUrl
     val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
     val backdropBitmap = rememberArtworkBackdrop(
-        imageUrl = effectiveBanner,
+        imageUrl = effectiveBanner ?: item?.coverUrl,
         enabled = isCinematicBlur
     )
 
@@ -208,8 +211,16 @@ fun DetailScreen(
     BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
         if (uiState.isPreviewMode) {
             viewModel.closePreview()
+            val restoredOffset = viewModel.popScrollOffset()
+            if (restoredOffset != null) {
+                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+            }
         } else if (sheetBackStack.isNotEmpty()) {
             sheetBackStack.removeAt(sheetBackStack.lastIndex)
+            val restoredOffset = viewModel.popScrollOffset()
+            if (restoredOffset != null) {
+                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+            }
         } else {
             onBack()
         }
@@ -231,6 +242,7 @@ fun DetailScreen(
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
                     viewModel.openPreview(recItem)
+                    coroutineScope.launch { scrollState.scrollTo(0) }
                 },
                 onOpenCharacter = { charItem ->
                     sheetBackStack.add(DetailSheetTarget.AnimeCharacter(charItem))
@@ -253,6 +265,7 @@ fun DetailScreen(
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
                     viewModel.openPreview(recItem)
+                    coroutineScope.launch { scrollState.scrollTo(0) }
                 }
             )
         }
@@ -266,6 +279,7 @@ fun DetailScreen(
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
                     viewModel.openPreview(recItem)
+                    coroutineScope.launch { scrollState.scrollTo(0) }
                 }
             )
         }
@@ -303,6 +317,7 @@ fun DetailScreen(
                 onOpenMediaPreview = { recItem ->
                     viewModel.saveScrollOffset(scrollState.value)
                     viewModel.openPreview(recItem)
+                    coroutineScope.launch { scrollState.scrollTo(0) }
                 }
             )
             return
@@ -376,12 +391,6 @@ fun DetailScreen(
     LaunchedEffect(item?.id) {
         animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
-        val restoredOffset = viewModel.popScrollOffset()
-        if (restoredOffset != null) {
-            scrollState.scrollTo(restoredOffset)
-        } else if (!uiState.isPreviewMode) {
-            scrollState.scrollTo(0)
-        }
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
         }
@@ -559,8 +568,8 @@ fun DetailScreen(
                     item.customBannerPath != null -> item.customBannerPath
                     !customBannerFailed && customBannerUrl != null -> customBannerUrl
                     item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-                    item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-                    else -> item.bannerUrl ?: item.coverUrl
+                    item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
+                    else -> item.bannerUrl
                 }
             }
 
@@ -576,7 +585,7 @@ fun DetailScreen(
 
             val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
             val backdropBitmap = rememberArtworkBackdrop(
-                imageUrl = backdropTargetUrl,
+                imageUrl = backdropTargetUrl ?: item.coverUrl,
                 enabled = isCinematicBlur
             )
 
@@ -715,6 +724,7 @@ fun DetailScreen(
                                     onRelationClick = { relation ->
                                         viewModel.saveScrollOffset(scrollState.value)
                                         viewModel.openRelationPreview(relation)
+                                        coroutineScope.launch { scrollState.scrollTo(0) }
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -843,6 +853,7 @@ fun DetailScreen(
                                     reviews = uiState.reviews,
                                     episodeOrChapterCount = item.totalProgress?.toInt() ?: uiState.realEpisodes.size.takeIf { it > 0 },
                                     comments = uiState.discussionComments,
+                                    isLoading = isCommentsLoading,
                                     seasons = uiState.realSeasons,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
                                     currentUsername = uiState.currentUsername,
@@ -876,6 +887,7 @@ fun DetailScreen(
                                     onSelectItem = {
                                         viewModel.saveScrollOffset(scrollState.value)
                                         viewModel.openPreview(it)
+                                        coroutineScope.launch { scrollState.scrollTo(0) }
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -888,6 +900,7 @@ fun DetailScreen(
                                     onSelectRecommendation = {
                                         viewModel.saveScrollOffset(scrollState.value)
                                         viewModel.openPreview(it)
+                                        coroutineScope.launch { scrollState.scrollTo(0) }
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -953,7 +966,19 @@ fun DetailScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (!viewModel.closePreview()) {
+                        if (uiState.isPreviewMode) {
+                            viewModel.closePreview()
+                            val restoredOffset = viewModel.popScrollOffset()
+                            if (restoredOffset != null) {
+                                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                            }
+                        } else if (sheetBackStack.isNotEmpty()) {
+                            sheetBackStack.removeAt(sheetBackStack.lastIndex)
+                            val restoredOffset = viewModel.popScrollOffset()
+                            if (restoredOffset != null) {
+                                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                            }
+                        } else {
                             onBack()
                         }
                     },
@@ -1168,14 +1193,14 @@ private fun SiblingDetailPreview(
         item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
         item.customBannerPath != null -> item.customBannerPath
         item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-        item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-        else -> item.bannerUrl ?: item.coverUrl
+        item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
+        else -> item.bannerUrl
     }
     val backdropTargetUrl = effectiveBanner
 
     val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
     val backdropBitmap = rememberArtworkBackdrop(
-        imageUrl = backdropTargetUrl,
+        imageUrl = backdropTargetUrl ?: item.coverUrl,
         enabled = isCinematicBlur
     )
     val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
@@ -1536,8 +1561,14 @@ private fun DetailHeroHeaderSection(
                 .fillMaxWidth()
                 .height(350.dp)
         ) {
+            val bannerRequest = androidx.compose.ui.platform.LocalContext.current.let { ctx ->
+                ImageRequest.Builder(ctx)
+                    .data(backdropTargetUrl)
+                    .crossfade(true)
+                    .build()
+            }
             AsyncImage(
-                model = backdropTargetUrl,
+                model = bannerRequest,
                 contentDescription = item.title,
                 modifier = Modifier
                     .fillMaxSize()
@@ -1666,8 +1697,14 @@ private fun DetailClassicHeaderSection(
                 .fillMaxWidth()
                 .height(350.dp)
         ) {
+            val bannerRequest = androidx.compose.ui.platform.LocalContext.current.let { ctx ->
+                ImageRequest.Builder(ctx)
+                    .data(backdropTargetUrl)
+                    .crossfade(true)
+                    .build()
+            }
             AsyncImage(
-                model = backdropTargetUrl,
+                model = bannerRequest,
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()

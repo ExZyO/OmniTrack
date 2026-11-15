@@ -73,23 +73,24 @@ class DantotsuCommentsRepository(
                 .post(body)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext false
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext false
 
-            val responseBody = response.body?.string() ?: return@withContext false
-            val parsed = json.parseToJsonElement(responseBody).jsonObject
+                val responseBody = response.body?.string() ?: return@withContext false
+                val parsed = json.parseToJsonElement(responseBody).jsonObject
 
-            val token = parsed["authToken"]?.jsonPrimitive?.contentOrNull
-            val user = parsed["user"]?.jsonObject
+                val token = parsed["authToken"]?.jsonPrimitive?.contentOrNull
+                val user = parsed["user"]?.jsonObject
 
-            if (token != null) {
-                dantotsuAuthToken = token
-                currentUserId = user?.get("user_id")?.jsonPrimitive?.contentOrNull ?: user?.get("id")?.jsonPrimitive?.contentOrNull
-                currentUsername = user?.get("username")?.jsonPrimitive?.contentOrNull
-                currentUserAvatar = user?.get("profile_picture_url")?.jsonPrimitive?.contentOrNull
-                true
-            } else {
-                false
+                if (token != null) {
+                    dantotsuAuthToken = token
+                    currentUserId = user?.get("user_id")?.jsonPrimitive?.contentOrNull ?: user?.get("id")?.jsonPrimitive?.contentOrNull
+                    currentUsername = user?.get("username")?.jsonPrimitive?.contentOrNull
+                    currentUserAvatar = user?.get("profile_picture_url")?.jsonPrimitive?.contentOrNull
+                    true
+                } else {
+                    false
+                }
             }
         } catch (e: Exception) {
             false
@@ -113,7 +114,7 @@ class DantotsuCommentsRepository(
 
         var url = "$BASE_URL/comments/$anilistId/$page"
         val queryParams = mutableListOf<String>()
-        if (tag != null) queryParams.add("tag=$tag")
+        if (tag != null && tag > 0) queryParams.add("tag=$tag")
         if (sort.isNotBlank()) queryParams.add("sort=$sort")
         if (queryParams.isNotEmpty()) url += "?" + queryParams.joinToString("&")
 
@@ -124,63 +125,64 @@ class DantotsuCommentsRepository(
 
             dantotsuAuthToken?.let { reqBuilder.header("Authorization", it) }
 
-            val response = client.newCall(reqBuilder.build()).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
-
-            val body = response.body?.string() ?: return@withContext emptyList()
-            if (!body.startsWith("{")) return@withContext emptyList()
-
-            val root = json.parseToJsonElement(body).jsonObject
-            val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
-
             val commentsList = mutableListOf<DiscussionComment>()
 
-            for (elem in commentsArray) {
-                val c = elem.jsonObject
-                val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
-                val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
-                val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
-                val content = if (isDeleted) "[deleted]" else rawContent
-                val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
-                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
-                    ?: tag
-                val tagStr = when {
-                    tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
-                    tagNum == 0 -> "General"
-                    else -> null
-                }
-                val username = c["username"]?.jsonPrimitive?.contentOrNull ?: "User"
-                val avatar = c["profile_picture_url"]?.jsonPrimitive?.contentOrNull
-                val anilistUserId = c["user_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val timestamp = c["timestamp"]?.jsonPrimitive?.contentOrNull ?: ""
-                val upvotes = c["upvotes"]?.jsonPrimitive?.intOrNull ?: 0
-                val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
-                val replyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
+            client.newCall(reqBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
 
-                // Fetch replies if replies exist
-                val replies = if (replyCount > 0) {
-                    getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = 1)
-                } else {
-                    emptyList()
-                }
+                val body = response.body?.string() ?: return@withContext emptyList()
+                if (!body.startsWith("{")) return@withContext emptyList()
 
-                commentsList.add(
-                    DiscussionComment(
-                        id = commentId.toString(),
-                        author = username,
-                        authorAvatarUrl = avatar,
-                        anilistUserId = anilistUserId,
-                        tag = tagStr,
-                        content = content,
-                        timeAgo = formatRelativeTime(timestamp),
-                        upvotes = upvotes,
-                        downvotes = downvotes,
-                        parentId = null,
-                        replies = replies,
-                        depth = 0
+                val root = json.parseToJsonElement(body).jsonObject
+                val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
+
+                for (elem in commentsArray) {
+                    val c = elem.jsonObject
+                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
+                    val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
+                    val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val content = if (isDeleted) "[deleted]" else rawContent
+                    val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
+                        ?: tag
+                    val tagStr = when {
+                        tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
+                        tagNum == 0 -> "General"
+                        tag != null && tag > 0 -> "$tagPrefix $tag"
+                        else -> "General"
+                    }
+                    val username = c["username"]?.jsonPrimitive?.contentOrNull ?: "User"
+                    val avatar = c["profile_picture_url"]?.jsonPrimitive?.contentOrNull
+                    val anilistUserId = c["user_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val timestamp = c["timestamp"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val upvotes = c["upvotes"]?.jsonPrimitive?.intOrNull ?: 0
+                    val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
+                    val replyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
+
+                    // Fetch replies if replies exist
+                    val replies = if (replyCount > 0) {
+                        getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = 1)
+                    } else {
+                        emptyList()
+                    }
+
+                    commentsList.add(
+                        DiscussionComment(
+                            id = commentId.toString(),
+                            author = username,
+                            authorAvatarUrl = avatar,
+                            anilistUserId = anilistUserId,
+                            tag = tagStr,
+                            content = content,
+                            timeAgo = formatRelativeTime(timestamp),
+                            upvotes = upvotes,
+                            downvotes = downvotes,
+                            parentId = null,
+                            replies = replies,
+                            depth = 0
+                        )
                     )
-                )
+                }
             }
 
             if (page == 1) {
@@ -209,60 +211,61 @@ class DantotsuCommentsRepository(
 
             dantotsuAuthToken?.let { reqBuilder.header("Authorization", it) }
 
-            val response = client.newCall(reqBuilder.build()).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
-
-            val body = response.body?.string() ?: return@withContext emptyList()
-            if (!body.startsWith("{")) return@withContext emptyList()
-
-            val root = json.parseToJsonElement(body).jsonObject
-            val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
-
             val repliesList = mutableListOf<DiscussionComment>()
-            for (elem in commentsArray) {
-                val c = elem.jsonObject
-                val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
-                val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
-                val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
-                val content = if (isDeleted) "[deleted]" else rawContent
-                val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                    ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
-                val tagStr = when {
-                    tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
-                    tagNum == 0 -> "General"
-                    else -> null
-                }
-                val username = c["username"]?.jsonPrimitive?.contentOrNull ?: "User"
-                val avatar = c["profile_picture_url"]?.jsonPrimitive?.contentOrNull
-                val anilistUserId = c["user_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val timestamp = c["timestamp"]?.jsonPrimitive?.contentOrNull ?: ""
-                val upvotes = c["upvotes"]?.jsonPrimitive?.intOrNull ?: 0
-                val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
-                val childReplyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
+            client.newCall(reqBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
 
-                // Recurse for deeper nested replies if available (max depth 3)
-                val nestedReplies = if (childReplyCount > 0 && depth < 3) {
-                    getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = depth + 1)
-                } else {
-                    emptyList()
-                }
+                val body = response.body?.string() ?: return@withContext emptyList()
+                if (!body.startsWith("{")) return@withContext emptyList()
 
-                repliesList.add(
-                    DiscussionComment(
-                        id = commentId.toString(),
-                        author = username,
-                        authorAvatarUrl = avatar,
-                        anilistUserId = anilistUserId,
-                        tag = tagStr,
-                        content = content,
-                        timeAgo = formatRelativeTime(timestamp),
-                        upvotes = upvotes,
-                        downvotes = downvotes,
-                        parentId = parentCommentId.toString(),
-                        replies = nestedReplies,
-                        depth = depth
+                val root = json.parseToJsonElement(body).jsonObject
+                val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
+
+                for (elem in commentsArray) {
+                    val c = elem.jsonObject
+                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
+                    val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
+                    val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val content = if (isDeleted) "[deleted]" else rawContent
+                    val tagNum = c["tag"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        ?: (try { c["tag"]?.jsonPrimitive?.intOrNull } catch (_: Exception) { null })
+                    val tagStr = when {
+                        tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
+                        tagNum == 0 -> "General"
+                        else -> null
+                    }
+                    val username = c["username"]?.jsonPrimitive?.contentOrNull ?: "User"
+                    val avatar = c["profile_picture_url"]?.jsonPrimitive?.contentOrNull
+                    val anilistUserId = c["user_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val timestamp = c["timestamp"]?.jsonPrimitive?.contentOrNull ?: ""
+                    val upvotes = c["upvotes"]?.jsonPrimitive?.intOrNull ?: 0
+                    val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
+                    val childReplyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
+
+                    // Recurse for deeper nested replies if available (max depth 3)
+                    val nestedReplies = if (childReplyCount > 0 && depth < 3) {
+                        getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = depth + 1)
+                    } else {
+                        emptyList()
+                    }
+
+                    repliesList.add(
+                        DiscussionComment(
+                            id = commentId.toString(),
+                            author = username,
+                            authorAvatarUrl = avatar,
+                            anilistUserId = anilistUserId,
+                            tag = tagStr,
+                            content = content,
+                            timeAgo = formatRelativeTime(timestamp),
+                            upvotes = upvotes,
+                            downvotes = downvotes,
+                            parentId = parentCommentId.toString(),
+                            replies = nestedReplies,
+                            depth = depth
+                        )
                     )
-                )
+                }
             }
             repliesList
         } catch (e: Exception) {
@@ -302,11 +305,11 @@ class DantotsuCommentsRepository(
                 .post(formBuilder.build())
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext null
-
-            val body = response.body?.string() ?: return@withContext null
-            val parsed = json.parseToJsonElement(body).jsonObject
+            val parsed = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext null
+                val body = response.body?.string() ?: return@withContext null
+                json.parseToJsonElement(body).jsonObject
+            }
 
             val commentId = parsed["comment_id"]?.jsonPrimitive?.intOrNull ?: parsed["id"]?.jsonPrimitive?.intOrNull ?: System.currentTimeMillis().toInt()
 
@@ -340,8 +343,9 @@ class DantotsuCommentsRepository(
                 .post(FormBody.Builder().build())
                 .build()
 
-            val response = client.newCall(request).execute()
-            response.isSuccessful
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (e: Exception) {
             false
         }
@@ -361,8 +365,9 @@ class DantotsuCommentsRepository(
                 .post(body)
                 .build()
 
-            val response = client.newCall(request).execute()
-            response.isSuccessful
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (e: Exception) {
             false
         }
@@ -378,8 +383,9 @@ class DantotsuCommentsRepository(
                 .delete()
                 .build()
 
-            val response = client.newCall(request).execute()
-            response.isSuccessful
+            client.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (e: Exception) {
             false
         }

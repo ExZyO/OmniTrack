@@ -87,6 +87,7 @@ class EnrichmentRepository(
     private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val aniListSeasonPosterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val kitsuSeasonDataCache = java.util.concurrent.ConcurrentHashMap<String, KitsuSeasonData>()
+    private val userMediaListCache = java.util.concurrent.ConcurrentHashMap<String, List<UserMediaListItem>>()
 
     suspend fun enrich(
         item: MediaItemEntity,
@@ -1378,6 +1379,7 @@ class EnrichmentRepository(
                           startDate {
                             year
                           }
+                          bannerImage
                           coverImage {
                             large
                             extraLarge
@@ -1554,6 +1556,7 @@ class EnrichmentRepository(
                         val english = node["title"]?.jsonObject?.get("english").cleanString()
                         val romaji = node["title"]?.jsonObject?.get("romaji").cleanString()
                         val relTitle = english ?: romaji ?: "Unknown Title"
+                        val relBanner = node["bannerImage"].cleanString()
                         val cover = node["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
                             ?: node["coverImage"]?.jsonObject?.get("large").cleanString()
                         val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
@@ -1586,6 +1589,7 @@ class EnrichmentRepository(
                                 relationType = relType,
                                 format = relFormat,
                                 coverUrl = cover,
+                                bannerUrl = relBanner,
                                 year = year,
                                 mediaType = targetMediaType
                             )
@@ -2693,6 +2697,11 @@ class EnrichmentRepository(
     suspend fun fetchUserMediaList(userId: Int, isAnime: Boolean): List<UserMediaListItem> = withContext(Dispatchers.IO) {
         if (userId <= 0) return@withContext emptyList()
         val mediaTypeStr = if (isAnime) "ANIME" else "MANGA"
+        val cacheKey = "${userId}_$mediaTypeStr"
+        val cached = userMediaListCache[cacheKey]
+        if (cached != null && cached.isNotEmpty()) {
+            return@withContext cached
+        }
         val query = """
             query (${'$'}userId: Int, ${'$'}type: MediaType) {
               MediaListCollection(userId: ${'$'}userId, type: ${'$'}type) {
@@ -2776,7 +2785,11 @@ class EnrichmentRepository(
                         )
                     }
                 }
-                result.distinctBy { it.mediaId }
+                val distinct = result.distinctBy { it.mediaId }
+                if (distinct.isNotEmpty()) {
+                    userMediaListCache[cacheKey] = distinct
+                }
+                distinct
             }
         } catch (_: Exception) {
             emptyList()

@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b165",
-  "versionCode": 165,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b165/OmniTrack-v1.0.0-b165.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b165/OmniTrack-v1.0.0-b165-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b165: staff sheet height fix, discussion episode tags, multi-color stats graphs, length units, unboxed spoilers, white text styling, fullscreen reorderable layout settings"
+  "version": "v1.0.0-b166",
+  "versionCode": 166,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b166/OmniTrack-v1.0.0-b166.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b166/OmniTrack-v1.0.0-b166-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b166: fix(ui): user profile nested backstack, exact scroll restoration, single banner loading without swap flicker, pure Dartotsu discussion episode parity with memory cache & leak fixes"
 }

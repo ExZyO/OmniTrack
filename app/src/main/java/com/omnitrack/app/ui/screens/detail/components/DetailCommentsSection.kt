@@ -145,6 +145,7 @@ fun DetailCommentsSection(
     mediaTitle: String,
     episodeOrChapterCount: Int? = null,
     comments: List<DiscussionComment>? = null,
+    isLoading: Boolean = false,
     seasons: List<com.omnitrack.app.data.model.MediaSeason> = emptyList(),
     selectedSeasonNumber: Int = 1,
     currentUsername: String? = null,
@@ -223,7 +224,7 @@ fun DetailCommentsSection(
                         comment.content.contains(regex) || comment.replies.any { it.content.contains(regex) }
                     } else false
 
-                    matchDirect || matchString || matchReply || matchContent
+                    matchDirect || matchString || matchReply || matchContent || tagStr.isNullOrBlank()
                 }
             }
         }
@@ -662,7 +663,20 @@ fun DetailCommentsSection(
         }
 
         // Threaded Comments
-        if (flattenedNodes.isEmpty()) {
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = AccentArctic,
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.5.dp
+                )
+            }
+        } else if (flattenedNodes.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -674,7 +688,7 @@ fun DetailCommentsSection(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = "No discussion comments yet for $selectedTag.",
+                        text = if (selectedTag == "All") "No discussion comments yet." else "No discussion comments yet for $selectedTag.",
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium

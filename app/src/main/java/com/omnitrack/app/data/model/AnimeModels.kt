@@ -17,6 +17,7 @@ data class AnimeRelationItem(
     val relationType: String, // "SEQUEL", "PREQUEL", "SIDE_STORY", "SPIN_OFF", "MANGA", "NOVEL", "ALTERNATIVE", "OTHER"
     val format: String, // "TV", "MOVIE", "MANGA", "NOVEL", "ONA", "OVA", "SPECIAL"
     val coverUrl: String?,
+    val bannerUrl: String? = null,
     val year: Int? = null,
     val mediaType: MediaType = MediaType.ANIME
 )

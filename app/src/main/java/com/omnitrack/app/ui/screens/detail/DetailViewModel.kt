@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
@@ -149,6 +150,8 @@ class DetailViewModel(
     private val _recommendations = MutableStateFlow<List<RecommendationItem>>(emptyList())
     private val _reviews = MutableStateFlow<List<CommunityReview>>(emptyList())
     private val _discussionComments = MutableStateFlow<List<DiscussionComment>>(emptyList())
+    private val _isCommentsLoading = MutableStateFlow(false)
+    val isCommentsLoading: StateFlow<Boolean> = _isCommentsLoading.asStateFlow()
     private val _englishTitle = MutableStateFlow<String?>(null)
     private val _romajiTitle = MutableStateFlow<String?>(null)
     private val _anilistAuthToken = MutableStateFlow<String?>(null)
@@ -202,18 +205,18 @@ class DetailViewModel(
     fun loadDiscussionComments(anilistId: Long, tag: Int? = null) {
         if (anilistId <= 0L) {
             _discussionComments.value = emptyList()
+            _isCommentsLoading.value = false
             return
         }
         val cacheKey = "${anilistId}_${tag ?: -1}"
         val cached = discussionCache[cacheKey]
         if (cached != null) {
-            if (cached.isNotEmpty()) {
-                val current = _discussionComments.value
-                _discussionComments.value = (cached + current).distinctBy { it.id }
-            }
+            _discussionComments.value = cached
+            _isCommentsLoading.value = false
             return
         }
 
+        _isCommentsLoading.value = true
         discussionFetchJob?.cancel()
         discussionFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -236,18 +239,12 @@ class DetailViewModel(
                 val activeAniListId = _previewItem.value?.anilistId ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
                 if (activeAniListId == anilistId) {
                     discussionCache[cacheKey] = comments
-                    if (comments.isNotEmpty()) {
-                        val current = _discussionComments.value
-                        val merged = (comments + current).distinctBy { it.id }
-                        _discussionComments.value = merged
-                    } else if (tag == null) {
-                        _discussionComments.value = emptyList()
-                    }
+                    _discussionComments.value = comments
                 }
             } catch (_: Exception) {
-                if (tag == null) {
-                    _discussionComments.value = emptyList()
-                }
+                _discussionComments.value = emptyList()
+            } finally {
+                _isCommentsLoading.value = false
             }
         }
     }
@@ -794,7 +791,7 @@ class DetailViewModel(
             id = -1L,
             title = relation.title,
             coverUrl = relation.coverUrl ?: "",
-            bannerUrl = relation.coverUrl,
+            bannerUrl = relation.bannerUrl,
             mediaType = targetType,
             anilistId = relation.id,
             releaseYear = relation.year?.toString(),
