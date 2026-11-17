@@ -598,20 +598,6 @@ fun DetailScreen(
                 }
             }
 
-            LaunchedEffect(uiState.animeRelations, uiState.recommendations) {
-                val candidateItems = (uiState.animeRelations.mapNotNull { it.item } + uiState.recommendations.mapNotNull { it.item })
-                    .filter { it.mediaType in listOf(MediaType.ANIME, MediaType.MOVIE, MediaType.SHOW) }
-                    .take(12)
-                for (cand in candidateItems) {
-                    val logo = cand.clearartUrl?.takeIf { it.isNotBlank() }
-                        ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(cand)
-                    if (!logo.isNullOrBlank()) {
-                        val req = ImageRequest.Builder(context).data(logo).crossfade(false).build()
-                        coil3.SingletonImageLoader.get(context).enqueue(req)
-                    }
-                }
-            }
-
             Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             // Background presentation layer
             when (presentationSettings.fallbackBackgroundStyle) {

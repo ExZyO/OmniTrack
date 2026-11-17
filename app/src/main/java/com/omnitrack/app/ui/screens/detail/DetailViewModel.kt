@@ -1550,26 +1550,6 @@ class DetailViewModel(
             }
 
             persistAuxCache()
-
-            // Proactively warm up clearart memory cache for related and recommended entries
-            val candidateItems = (_animeRelations.value.mapNotNull { it.item } + _recommendations.value.mapNotNull { it.item })
-                .filter { it.mediaType in listOf(MediaType.ANIME, MediaType.MOVIE, MediaType.SHOW) }
-                .take(15)
-            for (cand in candidateItems) {
-                if (!cand.clearartUrl.isNullOrBlank()) {
-                    EnrichmentRepository.putCachedClearart(cand, cand.clearartUrl)
-                } else {
-                    launch {
-                        val logo = enrichmentRepository.resolveClearartFast(cand, null, tmdbKey)
-                        if (!logo.isNullOrBlank() && cand.id > 0) {
-                            val curr = repository.getMediaById(cand.id).firstOrNull()
-                            if (curr != null && curr.clearartUrl.isNullOrBlank()) {
-                                repository.updateMedia(curr.copy(clearartUrl = logo))
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
