@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b171",
-  "versionCode": 171,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b171/OmniTrack-v1.0.0-b171.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b171/OmniTrack-v1.0.0-b171-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b171: fix(discussion): 1:1 Dartotsu episode comment loading, session persistence, auth mutex & on-demand replies"
+  "version": "v1.0.0-b172",
+  "versionCode": 172,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b172/OmniTrack-v1.0.0-b172.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b172/OmniTrack-v1.0.0-b172-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b172: fix(discussion): 1:1 Dartotsu episode comment loading, session persistence, auth mutex & on-demand replies"
 }
