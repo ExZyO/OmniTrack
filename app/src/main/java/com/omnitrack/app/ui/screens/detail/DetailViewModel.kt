@@ -209,11 +209,13 @@ class DetailViewModel(
     }
 
     fun changeDiscussionSort(sort: String) {
-        val anilistId = _activeDiscussionAniListId.value
-            ?: _previewItem.value?.anilistId
-            ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
-            ?: return
-        loadDiscussionComments(anilistId, _activeDiscussionTag.value, sort)
+        viewModelScope.launch {
+            val anilistId = _activeDiscussionAniListId.value
+                ?: _previewItem.value?.anilistId
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+                ?: return@launch
+            loadDiscussionComments(anilistId, _activeDiscussionTag.value, sort)
+        }
     }
 
     fun loadCommentReplies(commentId: String) {
