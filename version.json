@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b175",
-  "versionCode": 175,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b175/OmniTrack-v1.0.0-b175.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b175/OmniTrack-v1.0.0-b175-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b175: fix(discussion): resolve per-season AniList IDs, page 1 query parity, and instantaneous episode tag comment filtering"
+  "version": "v1.0.0-b176",
+  "versionCode": 176,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b176/OmniTrack-v1.0.0-b176.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b176/OmniTrack-v1.0.0-b176-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b176: fix(discussion): resolve per-season AniList IDs, page 1 query parity, and instantaneous episode tag comment filtering"
 }
