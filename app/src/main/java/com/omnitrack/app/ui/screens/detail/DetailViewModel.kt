@@ -271,8 +271,10 @@ class DetailViewModel(
             return
         }
 
-        val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
-        val isManga = currentItem?.mediaType == MediaType.MANGA || currentItem?.mediaType == MediaType.NOVEL
+        val isManga = _previewItem.value?.mediaType == MediaType.MANGA ||
+            _previewItem.value?.mediaType == MediaType.NOVEL ||
+            uiState.value.item?.mediaType == MediaType.MANGA ||
+            uiState.value.item?.mediaType == MediaType.NOVEL
         val tagPrefix = if (isManga) "Ch" else "Ep"
 
         // If filtering by episode/chapter tag, extract already loaded matching comments from the season's "All" comments cache

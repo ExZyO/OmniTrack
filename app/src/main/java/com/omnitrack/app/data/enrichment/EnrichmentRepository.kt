@@ -3061,8 +3061,7 @@ class EnrichmentRepository(
                 }
                 null
             }
-        } catch (e: Exception) {
-            AppLogger.w(TAG, "fetchAniListSeasonId failed for $baseTitle Season $seasonNumber: ${e.message}")
+        } catch (_: Exception) {
             null
         }
     }
