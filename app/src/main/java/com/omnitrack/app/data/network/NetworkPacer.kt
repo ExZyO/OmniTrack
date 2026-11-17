@@ -41,6 +41,14 @@ object NetworkPacer {
     private var lastVndbCallTime = 0L
     private const val VNDB_MIN_INTERVAL_MS = 600L
 
+    private val jikanSemaphore = Semaphore(1)
+    private var lastJikanCallTime = 0L
+    private const val JIKAN_MIN_INTERVAL_MS = 350L
+
+    private val aniZipSemaphore = Semaphore(2)
+    private var lastAniZipCallTime = 0L
+    private const val ANIZIP_MIN_INTERVAL_MS = 100L
+
     private val generalSemaphore = Semaphore(2)
 
     private val coalescingMutex = Mutex()
@@ -128,6 +136,32 @@ object NetworkPacer {
         }
     }
 
+    suspend fun <T> withJikanPacing(block: suspend () -> T): T = jikanSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastJikanCallTime
+        if (elapsed < JIKAN_MIN_INTERVAL_MS) {
+            delay(JIKAN_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastJikanCallTime = System.currentTimeMillis()
+        }
+    }
+
+    suspend fun <T> withAniZipPacing(block: suspend () -> T): T = aniZipSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastAniZipCallTime
+        if (elapsed < ANIZIP_MIN_INTERVAL_MS) {
+            delay(ANIZIP_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastAniZipCallTime = System.currentTimeMillis()
+        }
+    }
+
     suspend fun <T> withGeneralPacing(block: suspend () -> T): T = generalSemaphore.withPermit {
         block()
     }
@@ -141,6 +175,8 @@ object NetworkPacer {
             "steam" in lower -> withSteamPacing(block)
             "bgm.tv" in lower || "bangumi" in lower -> withBangumiPacing(block)
             "vndb" in lower -> withVndbPacing(block)
+            "jikan" in lower -> withJikanPacing(block)
+            "ani.zip" in lower || "anizip" in lower -> withAniZipPacing(block)
             else -> withGeneralPacing(block)
         }
     }

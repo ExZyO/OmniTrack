@@ -18,6 +18,7 @@ import com.omnitrack.app.data.preferences.DetailsPageLayoutDefaults
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
+import com.omnitrack.app.data.network.NetworkClient
 import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.ui.components.Episode
@@ -63,6 +64,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
+import com.omnitrack.app.data.model.ExternalLinkItem
+
 data class DetailUiState(
     val item: MediaItemEntity? = null,
     val previousItem: MediaItemEntity? = null,
@@ -100,7 +103,18 @@ data class DetailUiState(
     val popularity: Int? = null,
     val favourites: Int? = null,
     val durationMinutes: Int? = null,
-    val preferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
+    val preferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI,
+    val format: String? = null,
+    val season: String? = null,
+    val seasonYear: Int? = null,
+    val source: String? = null,
+    val countryOfOrigin: String? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val externalLinks: List<ExternalLinkItem> = emptyList(),
+    val heroClearLogoUrl: String? = null,
+    val isFillerSkipEnabled: Boolean = false,
+    val hasFillers: Boolean = false
 )
 
 private data class PreviewAndAux(
@@ -133,7 +147,17 @@ private data class PreviewAndAux(
     val tags: List<AnimeTagItem> = emptyList(),
     val popularity: Int? = null,
     val favourites: Int? = null,
-    val durationMinutes: Int? = null
+    val durationMinutes: Int? = null,
+    val format: String? = null,
+    val season: String? = null,
+    val seasonYear: Int? = null,
+    val source: String? = null,
+    val countryOfOrigin: String? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val externalLinks: List<ExternalLinkItem> = emptyList(),
+    val heroClearLogoUrl: String? = null,
+    val isFillerSkipEnabled: Boolean = false
 )
 
 class DetailViewModel(
@@ -187,6 +211,18 @@ class DetailViewModel(
     private val _activeDiscussionTag = MutableStateFlow<Int?>(null)
     private val _activeDiscussionSort = MutableStateFlow("newest")
     private val _seasonAniListIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    private val _seasonMalIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    private val _format = MutableStateFlow<String?>(null)
+    private val _season = MutableStateFlow<String?>(null)
+    private val _seasonYear = MutableStateFlow<Int?>(null)
+    private val _source = MutableStateFlow<String?>(null)
+    private val _countryOfOrigin = MutableStateFlow<String?>(null)
+    private val _startDate = MutableStateFlow<String?>(null)
+    private val _endDate = MutableStateFlow<String?>(null)
+    private val _externalLinks = MutableStateFlow<List<ExternalLinkItem>>(emptyList())
+    private val _heroClearLogoUrl = MutableStateFlow<String?>(null)
+    private val _isFillerSkipEnabled = MutableStateFlow(false)
+    private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
     private var discussionFetchJob: kotlinx.coroutines.Job? = null
@@ -693,7 +729,17 @@ class DetailViewModel(
             _popularity,
             _favourites,
             _durationMinutes,
-            _preferredTitleLanguage
+            _preferredTitleLanguage,
+            _format,
+            _season,
+            _seasonYear,
+            _source,
+            _countryOfOrigin,
+            _startDate,
+            _endDate,
+            _externalLinks,
+            _heroClearLogoUrl,
+            _isFillerSkipEnabled
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -727,9 +773,20 @@ class DetailViewModel(
             tags = args[26] as List<AnimeTagItem>,
             popularity = args[27] as? Int,
             favourites = args[28] as? Int,
-            durationMinutes = args[29] as? Int
+            durationMinutes = args[29] as? Int,
+            format = args[31] as? String,
+            season = args[32] as? String,
+            seasonYear = args[33] as? Int,
+            source = args[34] as? String,
+            countryOfOrigin = args[35] as? String,
+            startDate = args[36] as? String,
+            endDate = args[37] as? String,
+            externalLinks = (args[38] as? List<ExternalLinkItem>).orEmpty(),
+            heroClearLogoUrl = args[39] as? String,
+            isFillerSkipEnabled = (args[40] as? Boolean) ?: false
         )
     }.flatMapLatest { aux ->
+        val hasFillers = aux.realEpisodes.any { it.isFiller } || (aux.episodesBySeason[aux.selectedSeasonNumber]?.any { it.isFiller } == true)
         if (aux.previewItem != null) {
             flowOf(
                 DetailUiState(
@@ -769,7 +826,18 @@ class DetailViewModel(
                     popularity = aux.popularity,
                     favourites = aux.favourites,
                     durationMinutes = aux.durationMinutes,
-                    preferredTitleLanguage = _preferredTitleLanguage.value
+                    preferredTitleLanguage = _preferredTitleLanguage.value,
+                    format = aux.format,
+                    season = aux.season,
+                    seasonYear = aux.seasonYear,
+                    source = aux.source,
+                    countryOfOrigin = aux.countryOfOrigin,
+                    startDate = aux.startDate,
+                    endDate = aux.endDate,
+                    externalLinks = aux.externalLinks,
+                    heroClearLogoUrl = aux.heroClearLogoUrl,
+                    isFillerSkipEnabled = aux.isFillerSkipEnabled,
+                    hasFillers = hasFillers
                 )
             )
         } else {
@@ -830,7 +898,18 @@ class DetailViewModel(
                                 popularity = aux.popularity,
                                 favourites = aux.favourites,
                                 durationMinutes = aux.durationMinutes,
-                                preferredTitleLanguage = _preferredTitleLanguage.value
+                                preferredTitleLanguage = _preferredTitleLanguage.value,
+                                format = aux.format,
+                                season = aux.season,
+                                seasonYear = aux.seasonYear,
+                                source = aux.source,
+                                countryOfOrigin = aux.countryOfOrigin,
+                                startDate = aux.startDate,
+                                endDate = aux.endDate,
+                                externalLinks = aux.externalLinks,
+                                heroClearLogoUrl = aux.heroClearLogoUrl,
+                                isFillerSkipEnabled = aux.isFillerSkipEnabled,
+                                hasFillers = hasFillers
                             )
                         }
                     } else {
@@ -1073,6 +1152,16 @@ class DetailViewModel(
                 if (it.englishTitle != null) _englishTitle.value = it.englishTitle
                 if (it.romajiTitle != null) _romajiTitle.value = it.romajiTitle
                 if (it.seasonAniListIds.isNotEmpty()) _seasonAniListIds.value = it.seasonAniListIds
+                if (it.format != null) _format.value = it.format
+                if (it.season != null) _season.value = it.season
+                if (it.seasonYear != null) _seasonYear.value = it.seasonYear
+                if (it.source != null) _source.value = it.source
+                if (it.countryOfOrigin != null) _countryOfOrigin.value = it.countryOfOrigin
+                if (it.startDate != null) _startDate.value = it.startDate
+                if (it.endDate != null) _endDate.value = it.endDate
+                if (it.externalLinks.isNotEmpty()) _externalLinks.value = it.externalLinks
+                if (it.seasonMalIds.isNotEmpty()) _seasonMalIds.value = it.seasonMalIds
+                if (it.heroClearLogoUrl != null) _heroClearLogoUrl.value = it.heroClearLogoUrl
             }
 
             fun persistAuxCache() {
@@ -1091,7 +1180,17 @@ class DetailViewModel(
                     animeAiring = _animeAiring.value,
                     englishTitle = _englishTitle.value,
                     romajiTitle = _romajiTitle.value,
-                    seasonAniListIds = _seasonAniListIds.value
+                    seasonAniListIds = _seasonAniListIds.value,
+                    format = _format.value,
+                    season = _season.value,
+                    seasonYear = _seasonYear.value,
+                    source = _source.value,
+                    countryOfOrigin = _countryOfOrigin.value,
+                    startDate = _startDate.value,
+                    endDate = _endDate.value,
+                    externalLinks = _externalLinks.value,
+                    seasonMalIds = _seasonMalIds.value,
+                    heroClearLogoUrl = _heroClearLogoUrl.value
                 )
                 DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
@@ -1100,7 +1199,7 @@ class DetailViewModel(
 
             if (item.tmdbId != null) {
                 val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
-                val client = OkHttpClient()
+                val client = NetworkClient.sharedClient
 
                 // Consolidated 1-Shot TMDb append_to_response (~100ms total for ALL details)
                 try {
@@ -1439,26 +1538,61 @@ class DetailViewModel(
                         if (animeDetails.seasonAniListIds.isNotEmpty()) {
                             _seasonAniListIds.update { it + animeDetails.seasonAniListIds }
                         }
+                        if (animeDetails.seasonMalIds.isNotEmpty()) {
+                            _seasonMalIds.update { it + animeDetails.seasonMalIds }
+                        }
                         _animeAiring.value = animeDetails.nextAiring
                         _synonyms.value = animeDetails.synonyms
                         _tags.value = animeDetails.tags
                         _popularity.value = animeDetails.popularity
                         _favourites.value = animeDetails.favourites
                         _durationMinutes.value = animeDetails.durationMinutes
+                        if (!animeDetails.format.isNullOrBlank()) _format.value = animeDetails.format
+                        if (!animeDetails.season.isNullOrBlank()) _season.value = animeDetails.season
+                        if (animeDetails.seasonYear != null) _seasonYear.value = animeDetails.seasonYear
+                        if (!animeDetails.source.isNullOrBlank()) _source.value = animeDetails.source
+                        if (!animeDetails.countryOfOrigin.isNullOrBlank()) _countryOfOrigin.value = animeDetails.countryOfOrigin
+                        if (!animeDetails.startDate.isNullOrBlank()) _startDate.value = animeDetails.startDate
+                        if (!animeDetails.endDate.isNullOrBlank()) _endDate.value = animeDetails.endDate
+                        if (animeDetails.externalLinks.isNotEmpty()) _externalLinks.value = animeDetails.externalLinks
+
                         if (animeDetails.animationStudios.isNotEmpty()) {
                             val studioEntries = animeDetails.animationStudios.map { studioName ->
+                                val matchedProd = compList.firstOrNull { it.name.equals(studioName, ignoreCase = true) }
                                 NetworkProductionCompany(
-                                    id = null,
+                                    id = matchedProd?.id,
                                     name = studioName,
-                                    logoUrl = null,
+                                    logoUrl = matchedProd?.logoUrl,
                                     kind = "anime_studio"
                                 )
                             }
-                            compList.addAll(0, studioEntries)
-                            _companies.value = compList.distinctBy { it.name }
+                            val remaining = compList.filter { c ->
+                                studioEntries.none { s -> s.name.equals(c.name, ignoreCase = true) }
+                            }
+                            compList.clear()
+                            compList.addAll(studioEntries)
+                            compList.addAll(remaining)
+                            _companies.value = compList.distinctBy { it.name.lowercase().trim() }
                         }
+
                         if (animeDetails.anilistId != null) {
                             resolvedAniListId = animeDetails.anilistId
+                            if (_heroClearLogoUrl.value.isNullOrBlank()) {
+                                viewModelScope.launch(Dispatchers.IO) {
+                                    val logo = enrichmentRepository.fetchAniZipClearlogo(animeDetails.anilistId)
+                                    if (!logo.isNullOrBlank()) {
+                                        _heroClearLogoUrl.value = logo
+                                        persistAuxCache()
+                                    }
+                                }
+                            }
+                        }
+
+                        val targetMalId = animeDetails.seasonMalIds[_selectedSeasonNumber.value]
+                            ?: item.malId
+                            ?: animeDetails.malId
+                        if (targetMalId != null && targetMalId > 0) {
+                            loadFillersForMalId(targetMalId)
                         }
                         if (item.id <= 0 && _previewItem.value != null) {
                             val currentTop = _previewItem.value!!
@@ -1568,7 +1702,7 @@ class DetailViewModel(
                             .post(bodyJson.toRequestBody("application/json".toMediaType()))
                             .build()
 
-                        val client = OkHttpClient()
+                        val client = NetworkClient.sharedClient
                         client.newCall(req).execute().use { response ->
                             if (response.isSuccessful) {
                                 val body = response.body?.string()
@@ -1878,6 +2012,12 @@ class DetailViewModel(
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
         reloadCommentsForSeason(seasonNumber)
+
+        val malIdForSeason = _seasonMalIds.value[seasonNumber] ?: _seasonMalIds.value[1] ?: _previewItem.value?.malId
+        if (malIdForSeason != null && malIdForSeason > 0 && !_fillerInfoMap.value.containsKey(malIdForSeason)) {
+            loadFillersForMalId(malIdForSeason)
+        }
+
         val inMemory = _episodesBySeason.value[seasonNumber]
         if (!inMemory.isNullOrEmpty()) {
             _realEpisodes.value = inMemory
@@ -1906,9 +2046,67 @@ class DetailViewModel(
                 ?: repository.getMediaById(_mediaId.value).firstOrNull()?.imdbId
             val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, resolvedImdbId, currentTitle)
             if (eps.isNotEmpty()) {
-                SeriesContentMemoryCache.episodesCache["$resolvedTmdbId:$seasonNumber"] = eps
-                _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to eps)
-                _realEpisodes.value = eps
+                val fillerMap = _fillerInfoMap.value[malIdForSeason] ?: emptyMap()
+                val enrichedEps = if (fillerMap.isNotEmpty()) {
+                    eps.map { ep ->
+                        val info = fillerMap[ep.episodeNumber]
+                        if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
+                    }
+                } else eps
+                SeriesContentMemoryCache.episodesCache["$resolvedTmdbId:$seasonNumber"] = enrichedEps
+                _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to enrichedEps)
+                _realEpisodes.value = enrichedEps
+            }
+        }
+    }
+
+    fun toggleSkipFillers() {
+        _isFillerSkipEnabled.update { !it }
+    }
+
+    fun markWatchedUpToWithFillerChoice(episode: MediaEpisode, markFillersWatched: Boolean) {
+        val mediaId = _mediaId.value
+        if (mediaId <= 0) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = !markFillersWatched)
+            repository.setMultipleEpisodesWatched(mediaId, pairs, true)
+            val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
+            val item = repository.getMediaById(mediaId).firstOrNull()
+            if (item != null) {
+                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                    TrackingStatus.COMPLETED
+                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                    TrackingStatus.IN_PROGRESS
+                } else {
+                    item.status
+                }
+                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+                repository.updateMedia(updated)
+                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+                trackerSyncEngine?.drainQueue()
+            }
+        }
+    }
+
+    private fun loadFillersForMalId(malId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val fillers = enrichmentRepository.fetchEpisodeFillers(malId)
+            if (fillers.isNotEmpty()) {
+                _fillerInfoMap.update { it + (malId to fillers) }
+                _realEpisodes.update { list ->
+                    list.map { ep ->
+                        val info = fillers[ep.episodeNumber]
+                        if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
+                    }
+                }
+                _episodesBySeason.update { map ->
+                    map.mapValues { (_, eps) ->
+                        eps.map { ep ->
+                            val info = fillers[ep.episodeNumber]
+                            if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
+                        }
+                    }
+                }
             }
         }
     }
@@ -1928,21 +2126,25 @@ class DetailViewModel(
         return if (cumulative > 0) cumulative.toDouble() else targetEpisode.toDouble()
     }
 
-    private fun getEpisodesToMarkWatchedUpTo(targetSeason: Int, targetEpisode: Int): List<Pair<Int, Int>> {
+    private fun getEpisodesToMarkWatchedUpTo(targetSeason: Int, targetEpisode: Int, skipFillers: Boolean = false): List<Pair<Int, Int>> {
         val pairs = mutableListOf<Pair<Int, Int>>()
         val sortedSeasons = _realSeasons.value.filter { it.seasonNumber > 0 }.sortedBy { it.seasonNumber }
         for (s in sortedSeasons) {
             if (s.seasonNumber < targetSeason) {
                 val eps = _episodesBySeason.value[s.seasonNumber]
                 if (!eps.isNullOrEmpty()) {
-                    pairs.addAll(eps.map { s.seasonNumber to it.episodeNumber })
+                    val toAdd = if (skipFillers) eps.filter { !it.isFiller } else eps
+                    pairs.addAll(toAdd.map { s.seasonNumber to it.episodeNumber })
                 } else {
                     val count = s.episodeCount.coerceAtLeast(1)
                     pairs.addAll((1..count).map { s.seasonNumber to it })
                 }
             } else if (s.seasonNumber == targetSeason) {
                 val eps = _episodesBySeason.value[s.seasonNumber] ?: _realEpisodes.value
-                val filtered = eps.filter { it.seasonNumber == targetSeason && it.episodeNumber <= targetEpisode }
+                var filtered = eps.filter { it.seasonNumber == targetSeason && it.episodeNumber <= targetEpisode }
+                if (skipFillers) {
+                    filtered = filtered.filter { !it.isFiller || it.episodeNumber == targetEpisode }
+                }
                 if (filtered.isNotEmpty()) {
                     pairs.addAll(filtered.map { targetSeason to it.episodeNumber })
                 } else {
@@ -1965,7 +2167,7 @@ class DetailViewModel(
             val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
             if (!isCurrentlyWatched) {
                 // When marking as watched: mark all previous episodes in earlier seasons AND in this season up to episode
-                val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
+                val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = _isFillerSkipEnabled.value)
                 repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             } else {
                 // When unwatching: unmark from this episode upwards in this season
@@ -2665,7 +2867,17 @@ data class CachedDetailAux(
     val animeAiring: AnimeAiringSchedule? = null,
     val englishTitle: String? = null,
     val romajiTitle: String? = null,
-    val seasonAniListIds: Map<Int, Long> = emptyMap()
+    val seasonAniListIds: Map<Int, Long> = emptyMap(),
+    val format: String? = null,
+    val season: String? = null,
+    val seasonYear: Int? = null,
+    val source: String? = null,
+    val countryOfOrigin: String? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val externalLinks: List<ExternalLinkItem> = emptyList(),
+    val seasonMalIds: Map<Int, Long> = emptyMap(),
+    val heroClearLogoUrl: String? = null
 )
 
 internal object DetailAuxMemoryCache {

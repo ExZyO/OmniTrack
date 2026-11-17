@@ -84,6 +84,13 @@ class EnrichmentRepository(
 ) {
     companion object {
         private val clearartMemoryCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+        private val aniZipLogoMemoryCache = java.util.concurrent.ConcurrentHashMap<Long, String>()
+        private val episodeFillerMemoryCache = java.util.concurrent.ConcurrentHashMap<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>()
+        @Volatile private var jikanCircuitBreakerUntil = 0L
+
+        fun getCachedFillerInfo(malId: Long): Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>? {
+            return episodeFillerMemoryCache[malId]
+        }
 
         fun cacheKeyFor(item: MediaItemEntity): String {
             return when {
@@ -143,7 +150,10 @@ class EnrichmentRepository(
         }
 
         var clearart: String? = null
-        if (effectiveTmdbId != null) {
+        if (item.anilistId != null && item.anilistId > 0) {
+            clearart = fetchAniZipClearlogo(item.anilistId)
+        }
+        if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
             if (!fanartApiKey.isNullOrBlank()) {
                 clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
             }
@@ -189,12 +199,17 @@ class EnrichmentRepository(
         }
 
         // 1. Resolve Transparent Clearart Logo
-        if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
-            if (!fanartApiKey.isNullOrBlank()) {
-                clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+        if (clearart.isNullOrBlank()) {
+            if (item.anilistId != null && item.anilistId > 0) {
+                clearart = fetchAniZipClearlogo(item.anilistId)
             }
-            if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
-                clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+            if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
+                if (!fanartApiKey.isNullOrBlank()) {
+                    clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+                }
+                if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
+                    clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+                }
             }
         }
 
@@ -1410,6 +1425,28 @@ class EnrichmentRepository(
                     }
                     format
                     status
+                    season
+                    seasonYear
+                    source
+                    countryOfOrigin
+                    startDate {
+                      year
+                      month
+                      day
+                    }
+                    endDate {
+                      year
+                      month
+                      day
+                    }
+                    externalLinks {
+                      id
+                      url
+                      site
+                      type
+                      icon
+                      color
+                    }
                     synonyms
                     duration
                     popularity
@@ -1525,7 +1562,7 @@ class EnrichmentRepository(
                         }
                       }
                     }
-                    studios(isMain: true) {
+                    studios {
                       edges {
                         isMain
                         node {
@@ -1614,6 +1651,46 @@ class EnrichmentRepository(
                     val mediaPopularity = media["popularity"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaFavourites = media["favourites"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaDuration = media["duration"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaFormat = media["format"].cleanString()
+                    val mediaStatus = media["status"].cleanString()
+                    val mediaSeason = media["season"].cleanString()
+                    val mediaSeasonYear = media["seasonYear"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaSource = media["source"].cleanString()
+                    val mediaCountryOfOrigin = media["countryOfOrigin"].cleanString()
+
+                    val startObj = media["startDate"]?.jsonObject
+                    val sYear = startObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val sMonth = startObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val sDay = startObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaStartDate = formatAniListDate(sYear, sMonth, sDay)
+
+                    val endObj = media["endDate"]?.jsonObject
+                    val eYear = endObj?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val eMonth = endObj?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val eDay = endObj?.get("day")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaEndDate = formatAniListDate(eYear, eMonth, eDay)
+
+                    val externalLinkList = mutableListOf<com.omnitrack.app.data.model.ExternalLinkItem>()
+                    val extEdges = media["externalLinks"]?.jsonArray.orEmpty()
+                    for (elem in extEdges) {
+                        val obj = elem.jsonObject
+                        val eId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val eUrl = obj["url"].cleanString() ?: continue
+                        val eSite = obj["site"].cleanString() ?: continue
+                        val eType = obj["type"].cleanString()
+                        val eIcon = obj["icon"].cleanString()
+                        val eColor = obj["color"].cleanString()
+                        externalLinkList.add(
+                            com.omnitrack.app.data.model.ExternalLinkItem(
+                                id = eId,
+                                url = eUrl,
+                                site = eSite,
+                                type = eType,
+                                icon = eIcon,
+                                color = eColor
+                            )
+                        )
+                    }
 
                     val tagList = mutableListOf<com.omnitrack.app.data.model.AnimeTagItem>()
                     val tagsArray = media["tags"]?.jsonArray.orEmpty()
@@ -1705,6 +1782,7 @@ class EnrichmentRepository(
                     val relEdges = media["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
                     val baseTitleNorm = (title ?: "").lowercase().replace(Regex("[^a-z0-9]"), "")
                     val seasonAniListMap = mutableMapOf<Int, Long>()
+                    val seasonMalMap = mutableMapOf<Int, Long>()
 
                     fun parseSeasonNumber(text: String?): Int? {
                         if (text.isNullOrBlank()) return null
@@ -1720,12 +1798,16 @@ class EnrichmentRepository(
                     if (resolvedId != null && resolvedId > 0) {
                         seasonAniListMap[rootSeason] = resolvedId
                     }
+                    if (resolvedMalId != null && resolvedMalId > 0) {
+                        seasonMalMap[rootSeason] = resolvedMalId
+                    }
 
                     for (edgeElem in relEdges) {
                         val edge = edgeElem.jsonObject
                         val relType = edge["relationType"].cleanString() ?: continue
                         val node = edge["node"]?.jsonObject ?: continue
                         val relId = node["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                        val relIdMal = node["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                         val relFormat = node["format"].cleanString() ?: "TV"
                         val relTypeCategory = node["type"].cleanString() ?: "ANIME"
                         val english = node["title"]?.jsonObject?.get("english").cleanString()
@@ -1742,13 +1824,22 @@ class EnrichmentRepository(
                             if (!seasonAniListMap.containsKey(sNum)) {
                                 seasonAniListMap[sNum] = relId
                             }
+                            if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(sNum)) {
+                                seasonMalMap[sNum] = relIdMal
+                            }
                         } else if (relFormat.equals("TV", ignoreCase = true) && relType == "SEQUEL") {
                             if (!seasonAniListMap.containsKey(2)) {
                                 seasonAniListMap[2] = relId
                             }
+                            if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(2)) {
+                                seasonMalMap[2] = relIdMal
+                            }
                         } else if (relType in listOf("SIDE_STORY", "SPECIAL", "OVA")) {
                             if (!seasonAniListMap.containsKey(0)) {
                                 seasonAniListMap[0] = relId
+                            }
+                            if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(0)) {
+                                seasonMalMap[0] = relIdMal
                             }
                         }
 
@@ -1761,6 +1852,7 @@ class EnrichmentRepository(
                                 val cRelType = cEdge["relationType"].cleanString() ?: continue
                                 val cNode = cEdge["node"]?.jsonObject ?: continue
                                 val cId = cNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                                val cIdMal = cNode["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
                                 val cFormat = cNode["format"].cleanString() ?: "TV"
                                 val cType = cNode["type"].cleanString() ?: "ANIME"
                                 val cEng = cNode["title"]?.jsonObject?.get("english").cleanString()
@@ -1773,10 +1865,16 @@ class EnrichmentRepository(
                                         if (!seasonAniListMap.containsKey(cNum)) {
                                             seasonAniListMap[cNum] = cId
                                         }
+                                        if (cIdMal != null && cIdMal > 0 && !seasonMalMap.containsKey(cNum)) {
+                                            seasonMalMap[cNum] = cIdMal
+                                        }
                                     } else if (cRelType in listOf("ADAPTATION", "PREQUEL") && !seasonAniListMap.containsKey(1)) {
                                         val cYear = cNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                                         if (cYear == null || (year != null && cYear <= year)) {
                                             seasonAniListMap[1] = cId
+                                            if (cIdMal != null && cIdMal > 0 && !seasonMalMap.containsKey(1)) {
+                                                seasonMalMap[1] = cIdMal
+                                            }
                                         }
                                     }
                                 }
@@ -1818,18 +1916,30 @@ class EnrichmentRepository(
                         )
                     }
 
-                    AppLogger.d("EnrichmentRepository", "Discovered seasonAniListIds for '$title': $seasonAniListMap")
+                    AppLogger.d("EnrichmentRepository", "Discovered seasonAniListIds for '$title': $seasonAniListMap, seasonMalIds: $seasonMalMap")
 
-                    // 4. Studios (Filtered by isAnimationStudio == true per Safeguard 6)
+                    // 4. Studios & Networks
                     val studioList = mutableListOf<String>()
+                    val allStudioList = mutableListOf<com.omnitrack.app.data.model.AnimeStudioItem>()
                     val studioEdges = media["studios"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
                     for (edgeElem in studioEdges) {
-                        val node = edgeElem.jsonObject["node"]?.jsonObject ?: continue
+                        val edgeObj = edgeElem.jsonObject
+                        val isMain = edgeObj["isMain"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        val node = edgeObj["node"]?.jsonObject ?: continue
+                        val stId = node["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
                         val isAnim = node["isAnimationStudio"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-                        val studioName = node["name"].cleanString()
-                        if (isAnim && !studioName.isNullOrBlank()) {
+                        val studioName = node["name"].cleanString() ?: continue
+                        if (isAnim && studioName.isNotBlank()) {
                             studioList.add(studioName)
                         }
+                        allStudioList.add(
+                            com.omnitrack.app.data.model.AnimeStudioItem(
+                                id = stId,
+                                name = studioName,
+                                isAnimationStudio = isAnim,
+                                isMain = isMain
+                            )
+                        )
                     }
 
                     AnimeEnrichedDetails(
@@ -1844,6 +1954,7 @@ class EnrichmentRepository(
                         relations = relationList,
                         nextAiring = airingSchedule,
                         animationStudios = studioList,
+                        allStudios = allStudioList,
                         synopsis = mediaSynopsis,
                         bannerUrl = mediaBanner,
                         coverUrl = mediaCover,
@@ -1855,7 +1966,16 @@ class EnrichmentRepository(
                         totalChapters = mediaChapters,
                         genres = mediaGenres,
                         tags = tagList,
-                        seasonAniListIds = seasonAniListMap
+                        seasonAniListIds = seasonAniListMap,
+                        seasonMalIds = seasonMalMap,
+                        format = mediaFormat,
+                        season = mediaSeason,
+                        seasonYear = mediaSeasonYear,
+                        source = mediaSource,
+                        countryOfOrigin = mediaCountryOfOrigin,
+                        startDate = mediaStartDate,
+                        endDate = mediaEndDate,
+                        externalLinks = externalLinkList
                     )
                 }
 
@@ -3159,4 +3279,125 @@ class EnrichmentRepository(
             null
         }
     }
+
+    suspend fun fetchAniZipClearlogo(anilistId: Long): String? = withContext(Dispatchers.IO) {
+        val cached = aniZipLogoMemoryCache[anilistId]
+        if (!cached.isNullOrBlank()) return@withContext cached
+
+        NetworkPacer.withAniZipPacing {
+            try {
+                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniZipPacing null
+                    val body = resp.body?.string() ?: return@withAniZipPacing null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val images = root["images"]?.jsonArray.orEmpty()
+                    val clearlogo = images.firstOrNull { elem ->
+                        val type = elem.jsonObject["coverType"].cleanString() ?: ""
+                        type.equals("Clearlogo", ignoreCase = true)
+                    } ?: images.firstOrNull { elem ->
+                        val type = elem.jsonObject["coverType"].cleanString() ?: ""
+                        type.equals("Clearart", ignoreCase = true)
+                    }
+                    val logoUrl = clearlogo?.jsonObject?.get("url").cleanString()
+                    if (!logoUrl.isNullOrBlank()) {
+                        aniZipLogoMemoryCache[anilistId] = logoUrl
+                        logoUrl
+                    } else null
+                }
+            } catch (e: Exception) {
+                AppLogger.d("EnrichmentRepository", "AniZip clearlogo lookup failed for $anilistId: ${e.message}")
+                null
+            }
+        }
+    }
+
+    suspend fun fetchEpisodeFillers(malId: Long): Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo> = withContext(Dispatchers.IO) {
+        val cached = episodeFillerMemoryCache[malId]
+        if (!cached.isNullOrEmpty()) return@withContext cached
+
+        val fillerMap = mutableMapOf<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>()
+        var page = 1
+        var hasNext = true
+
+        while (hasNext && page <= 5) {
+            val primaryHost = "https://api.jikan.moe/v4"
+            val mirrorHost = "https://jikanfortheweebs.midnightignite.me/v4"
+            val activeHost = if (System.currentTimeMillis() < jikanCircuitBreakerUntil) {
+                mirrorHost
+            } else {
+                primaryHost
+            }
+
+            val pageResult = queryJikanEpisodesPage(activeHost, malId, page)
+            if (pageResult != null) {
+                fillerMap.putAll(pageResult.episodes)
+                hasNext = pageResult.hasNext
+                page++
+            } else {
+                if (activeHost == primaryHost) {
+                    jikanCircuitBreakerUntil = System.currentTimeMillis() + 15 * 60 * 1000L
+                    val mirrorResult = queryJikanEpisodesPage(mirrorHost, malId, page)
+                    if (mirrorResult != null) {
+                        fillerMap.putAll(mirrorResult.episodes)
+                        hasNext = mirrorResult.hasNext
+                        page++
+                    } else {
+                        break
+                    }
+                } else {
+                    break
+                }
+            }
+        }
+
+        if (fillerMap.isNotEmpty()) {
+            episodeFillerMemoryCache[malId] = fillerMap
+        }
+        fillerMap
+    }
+
+    private data class JikanPageResult(
+        val episodes: Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>,
+        val hasNext: Boolean
+    )
+
+    private suspend fun queryJikanEpisodesPage(host: String, malId: Long, page: Int): JikanPageResult? =
+        NetworkPacer.withJikanPacing {
+            try {
+                val url = "$host/anime/$malId/episodes?page=$page"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withJikanPacing null
+                    val body = resp.body?.string() ?: return@withJikanPacing null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val pagination = root["pagination"]?.jsonObject
+                    val hasNext = pagination?.get("has_next_page")?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                    val data = root["data"]?.jsonArray.orEmpty()
+                    val map = mutableMapOf<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>()
+                    for (elem in data) {
+                        val obj = elem.jsonObject
+                        val epNum = obj["mal_id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: continue
+                        val isFiller = obj["filler"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        val isRecap = obj["recap"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        map[epNum] = com.omnitrack.app.data.model.EpisodeFillerInfo(
+                            episodeNumber = epNum,
+                            isFiller = isFiller,
+                            isRecap = isRecap
+                        )
+                    }
+                    JikanPageResult(map, hasNext)
+                }
+            } catch (e: Exception) {
+                AppLogger.d("EnrichmentRepository", "Jikan query failed on $host for malId=$malId page=$page: ${e.message}")
+                null
+            }
+        }
 }

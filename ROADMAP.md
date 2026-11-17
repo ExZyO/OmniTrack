@@ -551,6 +551,155 @@ flowchart LR
 
 ---
 
+## 📌 Phase 5: Core Media Verticals Completion (Universal Parity)
+
+### 5.1 TV Shows & Movies
+- [ ] **1:1 Nuvio Networks & Production Screen**:
+  - Clickable Studio / Network chips with official logos (e.g., HBO, Netflix, Apple TV+, AMC, Tokyo MX, MAPPA).
+  - Tapping opens the dedicated `TmdbEntityBrowseScreen` with all shows/movies released by that network/company.
+- [ ] **Accurate TMDb & MDBList Scores**:
+  - Full Critic ratings row (IMDb, Rotten Tomatoes Critics & Audience, Metacritic, TMDb, Trakt).
+- [ ] **Cinema & Streaming Release Dates**:
+  - Theatrical release vs. Digital / VOD release dates with countdown timers.
+- [ ] **Season & Episode Specials Handling**:
+  - Clean distinction between numbered seasons and Season 0 ("Specials", behind-the-scenes, interviews).
+
+### 5.2 Manga & Light Novels
+- [ ] **Dual Chapter & Volume Tracking**:
+  - Dedicated stepper supporting both Chapters (`Ch. 124`) and Volumes (`Vol. 12`).
+- [ ] **MangaUpdates Integration**:
+  - Detailed scanlation status, latest release date, scanlation group names, and publication status (Licensed / Scanlated / Hiatus).
+- [ ] **MangaDex & Comick Multi-Source Cover Sync**:
+  - High-res volume cover switcher and art gallery.
+
+### 5.3 Video Games
+- [ ] **IGDB & Steam Deep Integration**:
+  - High-res landscape hero capsules (Steam header / library hero) and portrait grid art.
+  - Platforms list with interactive filter (PC, PS5, Xbox Series X/S, Nintendo Switch).
+- [ ] **HowLongToBeat Completion Times**:
+  - Display Main Story, Main + Extra, and 100% Completionist average hours.
+- [ ] **Steam Achievements & DLC Showcase**:
+  - Completed vs total achievements bar and expandable DLC / expansion list.
+
+### 5.4 Books & Literature
+- [ ] **Google Books & Open Library Multi-Source**:
+  - Page count stepper (`Page 180 / 412`) alongside chapter progress.
+  - Edition switcher (Hardcover, Paperback, Audiobook).
+  - Camera-based ISBN-13 barcode scanner to instantly scan physical books into library.
+
+### 5.5 Visual Novels
+- [ ] **VNDB Metadata & Routes**:
+  - Target routes and heroines tracking.
+  - Playtime duration and content warning / tag pills.
+
+---
+
+## 📌 Phase 6: Dartotsu & Dantotsu Cross-Category Power Features
+
+### 6.1 Transparent Clear Logo Engine (`CarouselLogoResolver.kt`)
+- [ ] **AniZip & TMDb Clear Logo Resolver**:
+  - Query `https://api.ani.zip/mappings?anilist_id=...` and TMDB for transparent PNG / WebP logos (`coverType == "Clearlogo"`).
+  - Cache transparent logos locally in Room database / Disk cache.
+  - Display transparent title logo over hero backdrops across Anime, Shows, and Movies instead of plain text titles.
+
+### 6.2 Android Native Home Screen Widgets (`widgets/`)
+- [ ] **Continue Tracking Widget (`ContinueWidget.kt`)**:
+  - 4x2 / 4x1 home screen widget displaying current watching/reading/playing media with cover artwork, episode/chapter progress, and one-tap "+1" progress mark.
+- [ ] **Upcoming Airing Schedule Widget (`UpcomingWidget.kt`)**:
+  - Scrollable list of user's tracked anime episodes and TV show air dates with live countdowns.
+- [ ] **Profile Stats Widget (`ProfileStatsWidget.kt`)**:
+  - Compact profile widget showing days watched, total episodes, manga chapters, and mean score.
+
+### 6.3 Universal ShareCard 3x Graphic Generator (`ShareCard.dart`)
+- [ ] **High-Resolution Visual Share Cards**:
+  - Compose `rememberGraphicsLayer` / bitmap capture engine generating crisp 3x PNG cards:
+    - **Title Card**: Poster, blurred backdrop gradient, title logo, score pills, genre tags, and user tracking status.
+    - **Profile Card**: User avatar, total watch time, completed media count, mean score, and activity heatmap.
+    - **Character & Staff Card**: High-res portrait with Japanese & English voice actor pairing.
+    - **Unit Card**: Single milestone episode or chapter celebration card.
+  - Direct "Share Image" Android intent and "Save to Gallery" with permission handling.
+
+### 6.4 Biometric & PIN App Lock (`Screen/Lock/`)
+- [ ] **Biometric & Passcode Security**:
+  - AndroidX `BiometricPrompt` support (Fingerprint & Face Unlock) with PIN fallback.
+  - Settings toggle: Lock entire app on launch, require biometrics for private watch lists, or lock 18+ content.
+
+### 6.5 Offline Sync Queue Engine (`PendingProgressUpdate.kt`)
+- [ ] **Resilient Offline Progress Queue**:
+  - When marking media offline, enqueue `SyncQueueEntity` mutations locally.
+  - Android `ConnectivityManager` listener automatically batch-syncs queued updates to AniList, MAL, Trakt, SIMKL, and Bangumi upon reconnection.
+
+### 6.6 Discord Rich Presence (RPC) (`DiscordService.kt`)
+- [ ] **Discord Game & Media Activity**:
+  - Native Discord RPC displaying active media tracking on user's Discord profile ("Watching Frieren Ep 14" / "Reading Berserk Ch 87").
+
+---
+
+## 📌 Phase 7: Dartotsu & Dantotsu Anime Ecosystem & Complete Metadata
+
+### 7.1 Anime Detail Page Complete Metadata Fill
+- [ ] **Missing Grid Metadata Fields in `DetailShowDetailsSection`**:
+  - **Broadcast Schedule**: Exact day and time in JST and local timezone (e.g., *"Fridays at 23:00 (JST)"*).
+  - **Season & Year**: Release season and year badge (e.g., *"Fall 2023"*, *"Winter 2024"*).
+  - **Source Material**: Underlying source tag (e.g., *"Manga"*, *"Light Novel"*, *"Original"*, *"Visual Novel"*).
+  - **Format**: Format pill (e.g., *"TV"*, *"TV Short"*, *"Movie"*, *"OVA"*, *"ONA"*, *"Special"*).
+  - **Aired Date Range**: Complete broadcast range (e.g., *"Sep 29, 2023 – Mar 22, 2024"*).
+  - **Origin Country & Language**: Display *"Japan"* and *"Japanese"*.
+  - **Clickable Animation Studio Chips**: Clickable studio chip with studio logo that navigates to studio catalog.
+
+### 7.2 Official External Links & Streaming Chips
+- [ ] **External Links Shelf**:
+  - Horizontal chip row with brand icons linking directly to:
+    - Official Anime Website
+    - Official Twitter / X Account
+    - Legal Streaming Services (Crunchyroll, Netflix, HIDIVE, Bilibili)
+    - Database Links (AniList, MyAnimeList, Bangumi, Kitsu)
+
+### 7.3 Jikan MAL Episode Filler / Canon Badges & Filter
+- [ ] **Episode Filler Detection**:
+  - Query Jikan MAL API (`/v4/anime/{malId}/episodes`) for `filler: Boolean` flags per episode.
+  - Display subtle amber `Filler` or green `Canon` badges in Horizontal, List, and Vertical episode cards.
+  - Add filter chip in episode list: "All Episodes", "Canon Only", "Fillers Only".
+
+### 7.4 AnimeThemes (Openings & Endings Player)
+- [ ] **Themes Section (`ThemesSection.dart`)**:
+  - Query `https://api.animethemes.moe` by AniList ID to fetch creditless Openings (OP) and Endings (ED).
+  - Display track list with song title, artist, and episode range.
+  - In-app playback of theme video or high-quality audio stream.
+
+### 7.5 "Missing Sequels" Home Scanner (`GetMissingSequels.dart`)
+- [ ] **Automatic Sequel Detection**:
+  - Scan user's completed and watching anime on AniList / MAL for `relationType: SEQUEL`.
+  - Filter out sequels already present in the user's library.
+  - Surface an eye-catching "Missing Sequels" shelf on the Discover/Anime tab.
+
+### 7.6 Airing Calendar Tab & Screen
+- [ ] **Weekly Airing Calendar (`CalendarScreen.dart`)**:
+  - Dedicated screen with day selector chips (`Yesterday`, `Today`, `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`).
+  - Episode airing cards with live countdown timers and release times.
+  - Toggle switch: "All Airing Anime" vs. "Only My Tracked Anime".
+
+### 7.7 AniTrendz Weekly Community Charts (`ChartsScreen.dart`)
+- [ ] **Anime Trending Integration**:
+  - Top 10 Anime of the Week.
+  - Top 10 Male & Female Characters of the Week.
+  - Top 10 Couple / Ship Rankings with weekly position delta (`+2`, `-1`, `=`).
+  - Cards link directly to OmniTrack media detail screens.
+
+### 7.8 Reverse Image Search & Sauce Finder
+- [ ] **trace.moe & SauceNAO Integration**:
+  - Image picker button in search bar.
+  - User selects anime screenshot; trace.moe returns exact anime title, episode number, and timestamp preview.
+
+### 7.9 AniList Community Forum Browser (`ForumActivity.kt`)
+- [ ] **In-App Forum Discussions**:
+  - Browse AniList discussion threads, episode discussion threads, and news topics.
+  - View thread comments, replies, and upvote counts with markdown rendering.
+
+---
+
+---
+
 ## 🔍 External Artwork & API Testing Matrix
 
 | API / Provider | Verticals Supported | Endpoints Used | How to Test & Verify |

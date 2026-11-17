@@ -125,6 +125,22 @@ data class AnimeTagItem(
     val isGeneralSpoiler: Boolean = false
 )
 
+data class ExternalLinkItem(
+    val id: Long,
+    val url: String,
+    val site: String,
+    val type: String? = null,
+    val icon: String? = null,
+    val color: String? = null
+)
+
+data class AnimeStudioItem(
+    val id: Long,
+    val name: String,
+    val isAnimationStudio: Boolean,
+    val isMain: Boolean = false
+)
+
 data class AnimeEnrichedDetails(
     val anilistId: Long?,
     val malId: Long?,
@@ -137,6 +153,7 @@ data class AnimeEnrichedDetails(
     val relations: List<AnimeRelationItem> = emptyList(),
     val nextAiring: AnimeAiringSchedule? = null,
     val animationStudios: List<String> = emptyList(),
+    val allStudios: List<AnimeStudioItem> = emptyList(),
     val synopsis: String? = null,
     val bannerUrl: String? = null,
     val coverUrl: String? = null,
@@ -148,5 +165,14 @@ data class AnimeEnrichedDetails(
     val totalChapters: Int? = null,
     val genres: List<String> = emptyList(),
     val tags: List<AnimeTagItem> = emptyList(),
-    val seasonAniListIds: Map<Int, Long> = emptyMap()
+    val seasonAniListIds: Map<Int, Long> = emptyMap(),
+    val seasonMalIds: Map<Int, Long> = emptyMap(),
+    val format: String? = null,
+    val season: String? = null,
+    val seasonYear: Int? = null,
+    val source: String? = null,
+    val countryOfOrigin: String? = null,
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val externalLinks: List<ExternalLinkItem> = emptyList()
 )

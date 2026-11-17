@@ -118,6 +118,7 @@ import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGeneralInfoSection
+import com.omnitrack.app.ui.screens.detail.components.DetailExternalLinksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNamesSynonymsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
@@ -630,6 +631,7 @@ fun DetailScreen(
                         backdropTargetUrl = backdropTargetUrl,
                         englishTitle = uiState.englishTitle,
                         romajiTitle = uiState.romajiTitle,
+                        heroClearLogoUrl = uiState.heroClearLogoUrl,
                         onToggleTitle = { viewModel.togglePreferredTitle() },
                         onOptionsClick = { showOptionsMenu = true },
                         onEditProgress = { showProgressEditSheet = true },
@@ -644,6 +646,7 @@ fun DetailScreen(
                         backdropTargetUrl = backdropTargetUrl,
                         englishTitle = uiState.englishTitle,
                         romajiTitle = uiState.romajiTitle,
+                        heroClearLogoUrl = uiState.heroClearLogoUrl,
                         onToggleTitle = { viewModel.togglePreferredTitle() },
                         onCoverClick = { showArtworkPicker = true },
                         onCoverLoaded = { url ->
@@ -721,7 +724,10 @@ fun DetailScreen(
                                     onSelectSeason = { viewModel.selectSeason(it) },
                                     onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                                     onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
-                                    onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) }
+                                    onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
+                                    isFillerSkipEnabled = uiState.isFillerSkipEnabled,
+                                    onToggleSkipFillers = { viewModel.toggleSkipFillers() },
+                                    onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -840,7 +846,23 @@ fun DetailScreen(
                                     item = item,
                                     popularity = uiState.popularity,
                                     favourites = uiState.favourites,
-                                    durationMinutes = uiState.durationMinutes
+                                    durationMinutes = uiState.durationMinutes,
+                                    format = uiState.format,
+                                    season = uiState.season,
+                                    seasonYear = uiState.seasonYear,
+                                    source = uiState.source,
+                                    countryOfOrigin = uiState.countryOfOrigin,
+                                    startDate = uiState.startDate,
+                                    endDate = uiState.endDate,
+                                    nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                            }
+                        }
+                        DetailSectionKey.EXTERNAL_LINKS -> {
+                            if (deferredSectionsAllowed && uiState.externalLinks.isNotEmpty()) {
+                                DetailExternalLinksSection(
+                                    links = uiState.externalLinks
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -1018,7 +1040,8 @@ fun DetailScreen(
                         .graphicsLayer { alpha = headerAlpha },
                     contentAlignment = Alignment.Center
                 ) {
-                    val effectiveHeaderClearart = item?.clearartUrl?.takeIf { it.isNotBlank() }
+                    val effectiveHeaderClearart = uiState.heroClearLogoUrl?.takeIf { it.isNotBlank() }
+                        ?: item?.clearartUrl?.takeIf { it.isNotBlank() }
                         ?: item?.let { com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(it) }
                     var headerClearartFailed by remember(effectiveHeaderClearart) { mutableStateOf(false) }
                     if (!effectiveHeaderClearart.isNullOrBlank() && !headerClearartFailed) {
@@ -1570,6 +1593,7 @@ private fun DetailHeroHeaderSection(
     backdropTargetUrl: String?,
     englishTitle: String? = null,
     romajiTitle: String? = null,
+    heroClearLogoUrl: String? = null,
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -1618,7 +1642,8 @@ private fun DetailHeroHeaderSection(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                val effectiveClearartUrl = item.clearartUrl?.takeIf { it.isNotBlank() }
+                val effectiveClearartUrl = heroClearLogoUrl?.takeIf { it.isNotBlank() }
+                    ?: item.clearartUrl?.takeIf { it.isNotBlank() }
                     ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
                 var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
                 val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed
@@ -1719,6 +1744,7 @@ private fun DetailClassicHeaderSection(
     backdropTargetUrl: String?,
     englishTitle: String? = null,
     romajiTitle: String? = null,
+    heroClearLogoUrl: String? = null,
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -1805,7 +1831,8 @@ private fun DetailClassicHeaderSection(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val effectiveClearartUrl = item.clearartUrl?.takeIf { it.isNotBlank() }
+                    val effectiveClearartUrl = heroClearLogoUrl?.takeIf { it.isNotBlank() }
+                        ?: item.clearartUrl?.takeIf { it.isNotBlank() }
                         ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
                     var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
                     val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed

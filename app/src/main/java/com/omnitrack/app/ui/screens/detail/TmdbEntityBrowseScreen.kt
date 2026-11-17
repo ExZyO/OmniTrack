@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import com.omnitrack.app.data.network.NetworkClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -108,7 +109,7 @@ fun TmdbEntityBrowseScreen(
         isLoading = true
         entityData = withContext(Dispatchers.IO) {
             try {
-                val client = OkHttpClient()
+                val client = NetworkClient.sharedClient
                 val railsList = mutableListOf<EntityRail>()
                 var resolvedLogo: String? = null
                 var originCountry: String? = null

@@ -20,4 +20,5 @@ release-output/
 temp_release/
 TRACKER.md
 build-artifacts/
+build_artifacts/
 scratch/

@@ -54,7 +54,7 @@ private fun formatCompactNumber(n: Int): String {
 
 /**
  * General Overview & Statistics Section:
- * Status, Total Episodes, Runtime, Popularity, Favorites, Certification, Production.
+ * Format, Status, Season & Year, Source, Aired Range, Broadcast Time, Total Episodes, Runtime, Popularity, Favorites, Certification.
  */
 @Composable
 fun DetailGeneralInfoSection(
@@ -62,6 +62,14 @@ fun DetailGeneralInfoSection(
     popularity: Int? = null,
     favourites: Int? = null,
     durationMinutes: Int? = null,
+    format: String? = null,
+    season: String? = null,
+    seasonYear: Int? = null,
+    source: String? = null,
+    countryOfOrigin: String? = null,
+    startDate: String? = null,
+    endDate: String? = null,
+    nextAiringEpochSeconds: Long? = null,
     modifier: Modifier = Modifier
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
@@ -75,13 +83,110 @@ fun DetailGeneralInfoSection(
         else -> "Details"
     }
 
+    fun formatMediaFormat(raw: String): String = when (raw.uppercase()) {
+        "TV" -> "TV"
+        "TV_SHORT" -> "TV Short"
+        "MOVIE" -> "Movie"
+        "SPECIAL" -> "Special"
+        "OVA" -> "OVA"
+        "ONA" -> "ONA"
+        "MUSIC" -> "Music Video"
+        "MANGA" -> "Manga"
+        "NOVEL" -> "Light Novel"
+        "ONE_SHOT" -> "One Shot"
+        else -> raw.lowercase().replaceFirstChar { it.uppercase() }
+    }
+
+    fun formatStatus(raw: String): String = when (raw.uppercase()) {
+        "FINISHED" -> "Finished"
+        "RELEASING" -> "Releasing"
+        "NOT_YET_RELEASED" -> "Not Yet Released"
+        "CANCELLED" -> "Cancelled"
+        "HIATUS" -> "Hiatus"
+        else -> raw.lowercase().replaceFirstChar { it.uppercase() }
+    }
+
+    fun formatSource(raw: String): String = when (raw.uppercase()) {
+        "ORIGINAL" -> "Original"
+        "MANGA" -> "Manga"
+        "LIGHT_NOVEL" -> "Light Novel"
+        "VISUAL_NOVEL" -> "Visual Novel"
+        "VIDEO_GAME", "GAME" -> "Video Game"
+        "WEB_NOVEL" -> "Web Novel"
+        "LIVE_ACTION" -> "Live Action"
+        "COMIC" -> "Comic"
+        "MULTIMEDIA_PROJECT" -> "Multimedia Project"
+        "PICTURE_BOOK" -> "Picture Book"
+        "DOUJINSHI" -> "Doujinshi"
+        "NOVEL" -> "Novel"
+        else -> raw.lowercase().replaceFirstChar { it.uppercase() }
+    }
+
     val rows = buildList {
-        if (!item.airStatus.isNullOrBlank()) {
-            add("Status" to item.airStatus)
+        // 1. Format
+        if (!format.isNullOrBlank()) {
+            add("Format" to formatMediaFormat(format))
         }
+
+        // 2. Status
+        val effStatus = item.airStatus?.takeIf { it.isNotBlank() }
+        if (!effStatus.isNullOrBlank()) {
+            add("Status" to formatStatus(effStatus))
+        }
+
+        // 3. Season & Year
+        if (!season.isNullOrBlank()) {
+            val formattedSeason = when (season.uppercase()) {
+                "WINTER" -> "Winter"
+                "SPRING" -> "Spring"
+                "SUMMER" -> "Summer"
+                "FALL" -> "Fall"
+                else -> season.lowercase().replaceFirstChar { it.uppercase() }
+            }
+            val seasonDisplay = if (seasonYear != null && seasonYear > 0) "$formattedSeason $seasonYear" else formattedSeason
+            add("Season" to seasonDisplay)
+        }
+
+        // 4. Source Material
+        if (!source.isNullOrBlank()) {
+            add("Source Material" to formatSource(source))
+        }
+
+        // 5. Aired Range
+        val airedStr = when {
+            !startDate.isNullOrBlank() && !endDate.isNullOrBlank() -> "$startDate to $endDate"
+            !startDate.isNullOrBlank() && (effStatus?.equals("RELEASING", ignoreCase = true) == true) -> "$startDate to Present"
+            !startDate.isNullOrBlank() -> startDate
+            item.releaseYear != null -> "${item.releaseYear}"
+            else -> null
+        }
+        if (!airedStr.isNullOrBlank()) {
+            add("Aired" to airedStr)
+        }
+
+        // 6. Dual Broadcast Time (JST + User Local Time)
+        if (nextAiringEpochSeconds != null && nextAiringEpochSeconds > 0) {
+            try {
+                val instant = java.time.Instant.ofEpochSecond(nextAiringEpochSeconds)
+                val jstZone = java.time.ZoneId.of("Asia/Tokyo")
+                val jstZoned = instant.atZone(jstZone)
+                val jstDay = jstZoned.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)
+                val jstTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm").format(jstZoned)
+
+                val localZone = java.time.ZoneId.systemDefault()
+                val localZoned = instant.atZone(localZone)
+                val localTime = java.time.format.DateTimeFormatter.ofPattern("h:mm a").format(localZoned)
+
+                add("Broadcast" to "${jstDay}s at $jstTime JST ($localTime local)")
+            } catch (_: Exception) {}
+        }
+
+        // 7. Total Episodes
         if (item.totalProgress != null && item.totalProgress > 0 && isSeries) {
             add("Total Episodes" to "${item.totalProgress.toInt()} Episodes")
         }
+
+        // 8. Runtime
         val effRuntime = durationMinutes ?: item.runtimeMinutes
         if (effRuntime != null && effRuntime > 0) {
             val hrs = effRuntime / 60
@@ -89,19 +194,37 @@ fun DetailGeneralInfoSection(
             val formatted = if (hrs > 0 && mins > 0) "${hrs}h ${mins}m" else if (hrs > 0) "${hrs}h" else "${mins}m"
             add("Runtime" to formatted)
         }
+
+        // 9. Origin Country
+        val countryDisplay = when (countryOfOrigin?.uppercase()) {
+            "JP" -> "Japan (JP)"
+            "CN" -> "China (CN)"
+            "KR" -> "South Korea (KR)"
+            "US" -> "United States (US)"
+            "GB", "UK" -> "United Kingdom (UK)"
+            null -> null
+            else -> countryOfOrigin
+        }
+        if (!countryDisplay.isNullOrBlank()) {
+            add("Origin Country" to countryDisplay)
+        }
+
+        // 10. Popularity & Favorites
         if (popularity != null && popularity > 0) {
             add("Popularity" to formatCompactNumber(popularity))
         }
         if (favourites != null && favourites > 0) {
             add("Favorites" to formatCompactNumber(favourites))
         }
+
+        // 11. Certification & Platform & Production (for non-anime or fallback)
         if (!item.contentRating.isNullOrBlank()) {
             add("Certification" to item.contentRating)
         }
         if (!item.platforms.isNullOrBlank()) {
             add("Platform" to item.platforms)
         }
-        if (!item.studioOrNetwork.isNullOrBlank()) {
+        if (!item.studioOrNetwork.isNullOrBlank() && !isSeries) {
             add("Production" to item.studioOrNetwork)
         }
     }

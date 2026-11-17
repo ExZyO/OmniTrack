@@ -18,7 +18,9 @@ data class MediaEpisode(
     val airDate: String? = null,
     val runtimeMinutes: Int? = null,
     val voteAverage: Float? = null,
-    val isWatched: Boolean = false
+    val isWatched: Boolean = false,
+    val isFiller: Boolean = false,
+    val isRecap: Boolean = false
 )
 
 data class NextAiringEpisode(
@@ -28,4 +30,10 @@ data class NextAiringEpisode(
     val airDate: String? = null,
     val airingAtEpochSec: Long? = null,
     val timeUntilAiringSec: Long? = null
+)
+
+data class EpisodeFillerInfo(
+    val episodeNumber: Int,
+    val isFiller: Boolean,
+    val isRecap: Boolean
 )

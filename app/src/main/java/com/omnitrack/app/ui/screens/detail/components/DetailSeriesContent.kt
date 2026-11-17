@@ -114,7 +114,10 @@ fun DetailSeriesContent(
     layoutScale: Float = 1.0f,
     initialSeasonViewMode: String = "Posters",
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
-    onLayoutModeChanged: ((EpisodeLayoutMode) -> Unit)? = null
+    onLayoutModeChanged: ((EpisodeLayoutMode) -> Unit)? = null,
+    isFillerSkipEnabled: Boolean = false,
+    onToggleSkipFillers: (() -> Unit)? = null,
+    onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null
 ) {
     if (seasons.isEmpty() && episodes.isEmpty() && episodesBySeason.isEmpty()) {
         Column(
@@ -156,9 +159,29 @@ fun DetailSeriesContent(
     }
 
     var activeActionSheetEpisode by remember { mutableStateOf<MediaEpisode?>(null) }
+    var fillerPromptEpisode by remember { mutableStateOf<MediaEpisode?>(null) }
     var currentSeasonViewMode by remember(initialSeasonViewMode) { mutableStateOf(initialSeasonViewMode) }
     var currentLayoutMode by remember(layoutMode) { mutableStateOf(layoutMode) }
     val hasSeasonPosters = remember(seasons) { seasons.any { !it.posterUrl.isNullOrBlank() } }
+
+    val handleEpisodeClick: (MediaEpisode) -> Unit = { ep ->
+        val isWatched = (ep.seasonNumber to ep.episodeNumber) in watchedEpisodes
+        if (!isWatched && isFillerSkipEnabled) {
+            val sEps = episodesBySeason[selectedSeasonNumber] ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
+            val precedingFillers = sEps.filter {
+                it.episodeNumber < ep.episodeNumber &&
+                it.isFiller &&
+                (it.seasonNumber to it.episodeNumber) !in watchedEpisodes
+            }
+            if (precedingFillers.isNotEmpty()) {
+                fillerPromptEpisode = ep
+            } else {
+                onToggleEpisodeWatched(ep)
+            }
+        } else {
+            onToggleEpisodeWatched(ep)
+        }
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -270,11 +293,49 @@ fun DetailSeriesContent(
                 )
             }
 
-            // Layout Mode Switcher Icon Button
+            // Layout Mode Switcher Icon Button & Skip Fillers Chip
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                val hasFillersInSeason = seasonEpisodes.any { it.isFiller }
+                if (hasFillersInSeason) {
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+                            .border(
+                                1.dp,
+                                if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.50f) else Color.White.copy(alpha = 0.14f),
+                                RoundedCornerShape(14.dp)
+                            )
+                            .clickable { onToggleSkipFillers?.invoke() }
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (isFillerSkipEnabled) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = AccentJade,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                            Text(
+                                text = "Skip fillers",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isFillerSkipEnabled) AccentJade else Color.White.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+
                 IconButton(
                     onClick = {
                         val nextMode = when (currentLayoutMode) {
@@ -346,7 +407,7 @@ fun DetailSeriesContent(
                                 watchedEpisodes = watchedEpisodes,
                                 fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
-                                onToggleWatched = onToggleEpisodeWatched,
+                                onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
                             )
                         }
@@ -357,7 +418,7 @@ fun DetailSeriesContent(
                                 watchedEpisodes = watchedEpisodes,
                                 fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
-                                onToggleWatched = onToggleEpisodeWatched,
+                                onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
                             )
                         }
@@ -368,7 +429,7 @@ fun DetailSeriesContent(
                                 watchedEpisodes = watchedEpisodes,
                                 fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
-                                onToggleWatched = onToggleEpisodeWatched,
+                                onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
                             )
                         }
@@ -393,9 +454,71 @@ fun DetailSeriesContent(
             canMarkPreviousEpisodes = ep.episodeNumber > 1 || ep.seasonNumber > 1,
             isSeasonWatched = isSeasonWatched,
             onDismiss = { activeActionSheetEpisode = null },
-            onToggleWatched = { onToggleEpisodeWatched(ep) },
+            onToggleWatched = { handleEpisodeClick(ep) },
             onMarkPreviousWatched = { onMarkPreviousWatched(ep) },
             onToggleSeasonWatched = { onToggleSeasonWatched(ep.seasonNumber) }
+        )
+    }
+
+    // Skip Fillers Confirmation Dialog
+    if (fillerPromptEpisode != null) {
+        val targetEp = fillerPromptEpisode!!
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { fillerPromptEpisode = null },
+            containerColor = Color(0xFF141416),
+            titleContentColor = Color.White,
+            textContentColor = Color.White.copy(alpha = 0.85f),
+            title = {
+                Text(
+                    text = "Skipping Filler Episodes",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "You have skipped filler episodes before Episode ${targetEp.episodeNumber}. Would you like to mark those filler episodes as watched on your trackers, or keep them skipped?",
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val ep = targetEp
+                        fillerPromptEpisode = null
+                        if (onMarkWatchedChoice != null) {
+                            onMarkWatchedChoice(ep, true)
+                        } else {
+                            onToggleEpisodeWatched(ep)
+                        }
+                    }
+                ) {
+                    Text(
+                        text = "Mark All Watched",
+                        color = AccentJade,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        val ep = targetEp
+                        fillerPromptEpisode = null
+                        if (onMarkWatchedChoice != null) {
+                            onMarkWatchedChoice(ep, false)
+                        } else {
+                            onToggleEpisodeWatched(ep)
+                        }
+                    }
+                ) {
+                    Text(
+                        text = "Keep Fillers Skipped",
+                        color = Color.White.copy(alpha = 0.70f)
+                    )
+                }
+            }
         )
     }
 }
@@ -651,12 +774,32 @@ private fun EpisodeHorizontalCard(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
+        // Solid White FILLER / RECAP Badge at Top Start
+        if (episode.isFiller || episode.isRecap) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (episode.isRecap) "RECAP" else "FILLER",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
         // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
         EpisodeAvailabilityBadge(
             episode = episode,
             modifier = Modifier
-                .align(if (isWatched) Alignment.TopStart else Alignment.TopEnd)
-                .padding(top = 8.dp, end = 8.dp, start = 8.dp)
+                .align(if (isWatched || episode.isFiller || episode.isRecap) Alignment.BottomEnd else Alignment.TopEnd)
+                .padding(8.dp)
         )
 
         // In-Image Content Overlay at Bottom Start (1:1 Nuvio Phone Metrics)
@@ -841,11 +984,31 @@ private fun EpisodeListCardItem(
                         .padding(top = 8.dp, end = 8.dp)
                 )
 
+                // Solid White FILLER / RECAP Badge at Top Start
+                if (episode.isFiller || episode.isRecap) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(top = 8.dp, start = 8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White)
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (episode.isRecap) "RECAP" else "FILLER",
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+
                 // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
                 EpisodeAvailabilityBadge(
                     episode = episode,
                     modifier = Modifier
-                        .align(if (isWatched) Alignment.BottomStart else Alignment.TopEnd)
+                        .align(if (isWatched || episode.isFiller || episode.isRecap) Alignment.BottomStart else Alignment.TopEnd)
                         .padding(top = 8.dp, end = 8.dp, start = 8.dp, bottom = 8.dp)
                 )
             }
@@ -1006,12 +1169,32 @@ private fun EpisodeVerticalCardItem(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
+        // Solid White FILLER / RECAP Badge at Top Start
+        if (episode.isFiller || episode.isRecap) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.White)
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (episode.isRecap) "RECAP" else "FILLER",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
         // 1:1 Nuvio Availability Badge ("UNAVAILABLE" for unaired episodes)
         EpisodeAvailabilityBadge(
             episode = episode,
             modifier = Modifier
-                .align(if (isWatched) Alignment.TopStart else Alignment.TopEnd)
-                .padding(top = 8.dp, end = 8.dp, start = 8.dp)
+                .align(if (isWatched || episode.isFiller || episode.isRecap) Alignment.BottomEnd else Alignment.TopEnd)
+                .padding(8.dp)
         )
 
         // In-Image Metadata Overlay at Bottom

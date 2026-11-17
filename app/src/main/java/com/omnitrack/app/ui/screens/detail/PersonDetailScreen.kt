@@ -30,6 +30,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import com.omnitrack.app.data.network.NetworkClient
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -115,7 +116,7 @@ fun PersonDetailScreen(
         isLoading = true
         personData = withContext(Dispatchers.IO) {
             try {
-                val client = OkHttpClient()
+                val client = NetworkClient.sharedClient
                 val url = "https://api.themoviedb.org/3/person/$personId?api_key=$apiKey&append_to_response=combined_credits"
                 val req = Request.Builder().url(url).get().build()
                 client.newCall(req).execute().use { resp ->

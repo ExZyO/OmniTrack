@@ -47,7 +47,7 @@ fun DetailNetworksSection(
     onCompanyClick: ((NetworkProductionCompany) -> Unit)? = null
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
-    val sectionTitle = if (isSeries) "Networks" else "Production"
+    val sectionTitle = if (item.mediaType == MediaType.ANIME) "Studios & Networks" else if (isSeries) "Networks" else "Production"
 
     val displayItems = rememberDisplayCompanies(item, companies)
     if (displayItems.isEmpty()) return
@@ -122,8 +122,17 @@ private fun rememberDisplayCompanies(
     item: MediaItemEntity,
     passedCompanies: List<NetworkProductionCompany>
 ): List<NetworkProductionCompany> {
-    val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
+    val isAnime = item.mediaType == MediaType.ANIME
+    val isSeries = item.mediaType == MediaType.SHOW || isAnime
+
     if (passedCompanies.isNotEmpty()) {
+        if (isAnime) {
+            val studios = passedCompanies.filter { it.kind == "anime_studio" }
+            val others = passedCompanies.filter { it.kind != "anime_studio" }
+            val sorted = (studios + others).distinctBy { it.name.lowercase().trim() }
+            return sorted.take(8)
+        }
+
         val studiosOrNetworks = passedCompanies.filter { it.kind == "network" || it.kind == "anime_studio" }
         return if (isSeries) {
             if (studiosOrNetworks.isNotEmpty()) {
@@ -143,7 +152,7 @@ private fun rememberDisplayCompanies(
         listOf(
             NetworkProductionCompany(
                 name = studio.split(",").first().trim(),
-                kind = "network"
+                kind = if (isAnime) "anime_studio" else "network"
             )
         )
     } else {
