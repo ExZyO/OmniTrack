@@ -883,6 +883,12 @@ fun DetailScreen(
                                     },
                                     onUserClick = { username, anilistUserId ->
                                         sheetBackStack.add(DetailSheetTarget.UserProfile(username, anilistUserId))
+                                    },
+                                    onSortChange = { sort ->
+                                        viewModel.changeDiscussionSort(sort)
+                                    },
+                                    onLoadReplies = { commentId ->
+                                        viewModel.loadCommentReplies(commentId)
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))

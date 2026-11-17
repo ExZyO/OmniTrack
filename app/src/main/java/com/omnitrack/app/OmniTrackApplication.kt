@@ -33,6 +33,11 @@ import java.util.concurrent.TimeUnit
 
 class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
 
+    companion object {
+        lateinit var instance: OmniTrackApplication
+            private set
+    }
+
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
     val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao()) }
     val coverCache by lazy { CoverCache(this) }
@@ -45,6 +50,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         AppLogger.init(this)
 
         // Chimanew / Tachiyomi Startup Preloading: Warm up Dispatchers.Main service loader ahead of time

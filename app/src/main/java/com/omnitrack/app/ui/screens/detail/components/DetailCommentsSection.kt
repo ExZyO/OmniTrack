@@ -94,11 +94,11 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
-enum class CommentSortOrder(val displayName: String) {
-    NEWEST("Newest"),
-    OLDEST("Oldest"),
-    HIGHEST_RATED("Highest Rated"),
-    LOWEST_RATED("Lowest Rated")
+enum class CommentSortOrder(val displayName: String, val apiValue: String) {
+    NEWEST("Newest", "newest"),
+    OLDEST("Oldest", "oldest"),
+    HIGHEST_RATED("Highest Rated", "top"),
+    LOWEST_RATED("Lowest Rated", "bottom")
 }
 
 /**
@@ -116,6 +116,7 @@ data class DiscussionComment(
     val downvotes: Int = 0,
     val parentId: String? = null,
     val replies: List<DiscussionComment> = emptyList(),
+    val replyCount: Int = 0,
     val depth: Int = 0
 )
 
@@ -157,19 +158,21 @@ fun DetailCommentsSection(
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     onTagSelect: ((Int?) -> Unit)? = null,
+    onSortChange: ((String) -> Unit)? = null,
+    onLoadReplies: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
 
-    // Dynamic Filter Rail: "Ep" for Anime/Shows, "Ch" for Manga/Novels
+    // Dynamic Filter Rail: "Ep" for Anime/Shows, "Ch" for Manga/Novels (1:1 Dartotsu parity: tag 1..N, null for All)
     val tagPrefix = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "Ch" else "Ep"
     val totalCount = (episodeOrChapterCount ?: 24).coerceIn(1, 2000)
     val availableTags = remember(tagPrefix, totalCount) {
-        listOf("All", "General") + (1..totalCount).map { "$tagPrefix $it" }
+        listOf("All") + (1..totalCount).map { "$tagPrefix $it" }
     }
-    var selectedTag by remember { mutableStateOf("All") }
+    var selectedTag by remember(mediaTitle, selectedSeasonNumber) { mutableStateOf("All") }
     var sortOrder by remember { mutableStateOf(CommentSortOrder.NEWEST) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
 
@@ -195,17 +198,16 @@ fun DetailCommentsSection(
     var tagPickerExpanded by remember { mutableStateOf(false) }
 
     // Filter comments by selected tag and sort
-    val filteredComments = remember(localCommentsList, selectedTag, sortOrder) {
-        val byTag = when {
-            selectedTag == "All" -> localCommentsList
-            selectedTag.equals("General", ignoreCase = true) -> {
-                localCommentsList.filter { comment ->
-                    comment.tag.isNullOrBlank() ||
-                        comment.tag.equals("General", ignoreCase = true) ||
-                        comment.tag == "0"
-                }
-            }
-            else -> {
+    val filteredComments = remember(localCommentsList, selectedTag, sortOrder, onTagSelect) {
+        val byTag = if (onTagSelect != null) {
+            // Server-side filtering already executed via onTagSelect!
+            // Do not discard server results with redundant client-side regex.
+            localCommentsList
+        } else {
+            // Client-side fallback for offline/sample preview
+            if (selectedTag == "All") {
+                localCommentsList
+            } else {
                 val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
                 localCommentsList.filter { comment ->
                     val tagStr = comment.tag?.trim()
@@ -220,20 +222,19 @@ fun DetailCommentsSection(
                         val rNum = r.tag?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
                         rNum == tagNumber || r.tag?.contains("$tagNumber") == true
                     }
-                    val matchContent = if (tagNumber != null) {
-                        val regex = Regex("""(?i)\b(?:ep|episode|ch|chapter)\.?\s*#?$tagNumber\b""")
-                        comment.content.contains(regex) || comment.replies.any { it.content.contains(regex) }
-                    } else false
-
-                    matchDirect || matchString || matchReply || matchContent || tagStr.isNullOrBlank()
+                    matchDirect || matchString || matchReply
                 }
             }
         }
-        when (sortOrder) {
-            CommentSortOrder.NEWEST -> byTag // API arrives with newest first
-            CommentSortOrder.OLDEST -> byTag.reversed() // Invert to show oldest first
-            CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
-            CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
+        if (onSortChange != null) {
+            byTag
+        } else {
+            when (sortOrder) {
+                CommentSortOrder.NEWEST -> byTag // API arrives with newest first
+                CommentSortOrder.OLDEST -> byTag.reversed() // Invert to show oldest first
+                CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
+                CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
+            }
         }
     }
 
@@ -402,6 +403,7 @@ fun DetailCommentsSection(
                             onClick = {
                                 sortOrder = order
                                 sortMenuExpanded = false
+                                onSortChange?.invoke(order.apiValue)
                             }
                         )
                     }
@@ -428,11 +430,7 @@ fun DetailCommentsSection(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = tag
-                                val tagNum = when {
-                                    tag == "All" -> null
-                                    tag == "General" -> 0
-                                    else -> tag.replace(Regex("[^0-9]"), "").toIntOrNull()
-                                }
+                                val tagNum = if (tag == "All") null else tag.replace(Regex("[^0-9]"), "").toIntOrNull()
                                 onTagSelect?.invoke(tagNum)
                             }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -737,7 +735,8 @@ fun DetailCommentsSection(
                             voteStates[node.comment.id] = voteType
                             onVote?.invoke(node.comment.id, voteType)
                         },
-                        onUserClick = { onUserClick?.invoke(node.comment.author, node.comment.anilistUserId) }
+                        onUserClick = { onUserClick?.invoke(node.comment.author, node.comment.anilistUserId) },
+                        onLoadReplies = { onLoadReplies?.invoke(node.comment.id) }
                     )
                 }
             }
@@ -759,7 +758,8 @@ private fun CommentNodeRow(
     onEditClick: () -> Unit = {},
     onDeleteClick: () -> Unit = {},
     onVote: (Int) -> Unit,
-    onUserClick: () -> Unit
+    onUserClick: () -> Unit,
+    onLoadReplies: (() -> Unit)? = null
 ) {
     val comment = node.comment
     val indentPadding = (node.depth.coerceAtMost(3) * 14).dp
@@ -1056,6 +1056,29 @@ private fun CommentNodeRow(
                                 fontSize = 11.sp
                             )
                         }
+                    } else if (comment.replyCount > 0) {
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(AccentArctic.copy(alpha = 0.12f))
+                                .clickable { onLoadReplies?.invoke() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = "View replies",
+                                tint = AccentArctic,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Text(
+                                text = "${comment.replyCount} ${if (comment.replyCount == 1) "reply" else "replies"}",
+                                color = AccentArctic,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
@@ -1163,6 +1186,7 @@ private fun flattenCommentTree(
  * Counts total nested replies under a given comment node.
  */
 private fun countAllDescendants(comment: DiscussionComment): Int {
+    if (comment.replies.isEmpty()) return comment.replyCount
     var count = comment.replies.size
     for (reply in comment.replies) {
         count += countAllDescendants(reply)

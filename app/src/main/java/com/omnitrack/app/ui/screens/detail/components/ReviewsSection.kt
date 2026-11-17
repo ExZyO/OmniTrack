@@ -305,6 +305,8 @@ fun UnifiedDiscussionSection(
     onVote: ((commentId: String, voteType: Int) -> Unit)? = null,
     onUserClick: ((String, Int?) -> Unit)? = null,
     onTagSelect: ((Int?) -> Unit)? = null,
+    onSortChange: ((String) -> Unit)? = null,
+    onLoadReplies: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Comments/Reviews (Default), 1: Discussion
@@ -369,7 +371,9 @@ fun UnifiedDiscussionSection(
                 onDeleteComment = onDeleteComment,
                 onVote = onVote,
                 onUserClick = onUserClick,
-                onTagSelect = onTagSelect
+                onTagSelect = onTagSelect,
+                onSortChange = onSortChange,
+                onLoadReplies = onLoadReplies
             )
         }
     }

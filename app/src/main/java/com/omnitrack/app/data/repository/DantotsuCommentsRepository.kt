@@ -1,8 +1,13 @@
 package com.omnitrack.app.data.repository
 
+import android.content.Context
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.network.NetworkClient
 import com.omnitrack.app.ui.screens.detail.components.DiscussionComment
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -11,6 +16,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -18,98 +24,187 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Phase 3: Dantotsu Comment DB Integration.
  * Endpoints: https://api.dantotsu.app
- * Auth handshake key: 6*45Qp%W2RS@t38jkXoSKY588Ynj%n
+ * Handshake key: 6*45Qp%W2RS@t38jkXoSKY588Ynj%n
  *
- * Rules:
- * - Strictly requires AniList ID (never pass TMDb or Room IDs).
- * - Threaded comments via /comments/:media_id/:page and /comments/parent/:parent_id/:page.
- * - Dynamic tag support ("Ep 1, Ep 2..." for Anime, "Ch 1, Ch 2..." for Manga/Novels).
+ * 1:1 Dartotsu parity:
+ * - 6-day session persistence in SharedPreferences.
+ * - Single-flight Mutex lock on /authenticate prevents 429 concurrent storms.
+ * - 1 single HTTP request for comments page (no recursive N+1 replies loop).
+ * - Automatic 401 re-authentication and retry.
+ * - On-demand reply loading.
  */
 class DantotsuCommentsRepository(
-    private val client: okhttp3.OkHttpClient = NetworkClient.sharedClient
+    private val client: OkHttpClient = NetworkClient.sharedClient
 ) {
     companion object {
+        private const val TAG = "DantotsuComments"
         private const val BASE_URL = "https://api.dantotsu.app"
         private const val APP_AUTH_KEY = "6*45Qp%W2RS@t38jkXoSKY588Ynj%n"
+        private const val PREFS_NAME = "dantotsu_comments_session"
+        private const val SESSION_LIFETIME_MS = 6L * 24 * 60 * 60 * 1000L // 6 days
+
+        private val authMutex = Mutex()
+
+        @Volatile
+        private var cachedAuthToken: String? = null
+
+        @Volatile
+        private var cachedUserId: String? = null
+
+        @Volatile
+        private var cachedUsername: String? = null
+
+        @Volatile
+        private var cachedUserAvatar: String? = null
+
+        @Volatile
+        private var cachedForToken: String? = null
+
+        @Volatile
+        private var cachedIssuedAt: Long = 0L
+
+        private val commentCache = ConcurrentHashMap<String, List<DiscussionComment>>()
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    // Cached session token issued by Dantotsu /authenticate
-    @Volatile
-    private var dantotsuAuthToken: String? = null
+    fun getCurrentUsername(): String? = cachedUsername
+    fun getCurrentUserAvatar(): String? = cachedUserAvatar
+    fun getCurrentUserId(): String? = cachedUserId
 
-    @Volatile
-    private var currentUserId: String? = null
+    fun clearCache() {
+        commentCache.clear()
+    }
 
-    @Volatile
-    private var currentUsername: String? = null
-
-    @Volatile
-    private var currentUserAvatar: String? = null
-
-    fun getCurrentUsername(): String? = currentUsername
-    fun getCurrentUserAvatar(): String? = currentUserAvatar
-    fun getCurrentUserId(): String? = currentUserId
-
-    // In-memory cache for fast tab switches
-    private val commentCache = ConcurrentHashMap<String, List<DiscussionComment>>()
+    fun signOut() {
+        cachedAuthToken = null
+        cachedUserId = null
+        cachedUsername = null
+        cachedUserAvatar = null
+        cachedForToken = null
+        cachedIssuedAt = 0L
+        commentCache.clear()
+        try {
+            val prefs = OmniTrackApplication.instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().clear().apply()
+        } catch (_: Exception) {}
+    }
 
     /**
      * Authenticates with Dantotsu API using an AniList OAuth access token.
+     * Uses SharedPreferences cache (6 days TTL) and a Mutex lock to prevent duplicate /authenticate calls.
      */
-    suspend fun authenticate(anilistToken: String?): Boolean = withContext(Dispatchers.IO) {
+    suspend fun authenticate(anilistToken: String?, force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (anilistToken.isNullOrBlank()) return@withContext false
-        if (dantotsuAuthToken != null) return@withContext true
 
-        try {
-            val body = FormBody.Builder()
-                .add("token", anilistToken)
-                .build()
+        val now = System.currentTimeMillis()
+        if (!force && cachedAuthToken != null && cachedForToken == anilistToken && (now - cachedIssuedAt) < SESSION_LIFETIME_MS) {
+            return@withContext true
+        }
 
-            val request = Request.Builder()
-                .url("$BASE_URL/authenticate")
-                .header("appauth", APP_AUTH_KEY)
-                .post(body)
-                .build()
+        authMutex.withLock {
+            val lockedNow = System.currentTimeMillis()
+            if (!force && cachedAuthToken != null && cachedForToken == anilistToken && (lockedNow - cachedIssuedAt) < SESSION_LIFETIME_MS) {
+                return@withLock true
+            }
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext false
+            val prefs = try {
+                OmniTrackApplication.instance.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            } catch (_: Exception) {
+                null
+            }
 
-                val responseBody = response.body?.string() ?: return@withContext false
-                val parsed = json.parseToJsonElement(responseBody).jsonObject
-
-                val token = parsed["authToken"]?.jsonPrimitive?.contentOrNull
-                val user = parsed["user"]?.jsonObject
-
-                if (token != null) {
-                    dantotsuAuthToken = token
-                    currentUserId = user?.get("user_id")?.jsonPrimitive?.contentOrNull ?: user?.get("id")?.jsonPrimitive?.contentOrNull
-                    currentUsername = user?.get("username")?.jsonPrimitive?.contentOrNull
-                    currentUserAvatar = user?.get("profile_picture_url")?.jsonPrimitive?.contentOrNull
-                    true
-                } else {
-                    false
+            if (!force && prefs != null) {
+                val savedToken = prefs.getString("auth_token", null)
+                val savedForToken = prefs.getString("for_token", null)
+                val savedIssuedAt = prefs.getLong("issued_at", 0L)
+                if (!savedToken.isNullOrBlank() && savedForToken == anilistToken && (lockedNow - savedIssuedAt) < SESSION_LIFETIME_MS) {
+                    cachedAuthToken = savedToken
+                    cachedForToken = savedForToken
+                    cachedIssuedAt = savedIssuedAt
+                    cachedUserId = prefs.getString("user_id", null)
+                    cachedUsername = prefs.getString("username", null)
+                    cachedUserAvatar = prefs.getString("avatar", null)
+                    AppLogger.d(TAG, "Restored active Dantotsu session from persistent storage for user $cachedUsername")
+                    return@withLock true
                 }
             }
-        } catch (e: Exception) {
-            false
+
+            try {
+                val body = FormBody.Builder()
+                    .add("token", anilistToken)
+                    .build()
+
+                val request = Request.Builder()
+                    .url("$BASE_URL/authenticate")
+                    .header("appauth", APP_AUTH_KEY)
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        AppLogger.w(TAG, "Dantotsu authenticate HTTP ${response.code}")
+                        return@withLock false
+                    }
+
+                    val responseBody = response.body?.string() ?: return@withLock false
+                    val parsed = json.parseToJsonElement(responseBody).jsonObject
+
+                    val token = parsed["authToken"]?.jsonPrimitive?.contentOrNull
+                    val user = parsed["user"]?.jsonObject
+
+                    if (token != null) {
+                        val issuedTime = System.currentTimeMillis()
+                        cachedAuthToken = token
+                        cachedForToken = anilistToken
+                        cachedIssuedAt = issuedTime
+                        cachedUserId = user?.get("user_id")?.jsonPrimitive?.contentOrNull ?: user?.get("id")?.jsonPrimitive?.contentOrNull
+                        cachedUsername = user?.get("username")?.jsonPrimitive?.contentOrNull
+                        cachedUserAvatar = user?.get("profile_picture_url")?.jsonPrimitive?.contentOrNull
+
+                        prefs?.edit()
+                            ?.putString("auth_token", token)
+                            ?.putString("for_token", anilistToken)
+                            ?.putLong("issued_at", issuedTime)
+                            ?.putString("user_id", cachedUserId)
+                            ?.putString("username", cachedUsername)
+                            ?.putString("avatar", cachedUserAvatar)
+                            ?.apply()
+
+                        AppLogger.i(TAG, "Dantotsu authenticated successfully for $cachedUsername")
+                        true
+                    } else {
+                        false
+                    }
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error during Dantotsu authenticate", e)
+                false
+            }
         }
     }
 
     /**
-     * Fetches paginated top-level comments and nested replies for an AniList media item.
+     * Fetches top-level comments for an AniList media item (1 single HTTP request).
      */
     suspend fun getComments(
         anilistId: Long,
         page: Int = 1,
         tag: Int? = null,
         tagPrefix: String = "Ep",
-        sort: String = "newest"
+        sort: String = "newest",
+        anilistToken: String? = null,
+        retried: Boolean = false
     ): List<DiscussionComment> = withContext(Dispatchers.IO) {
+        if (anilistId <= 0L) return@withContext emptyList()
+
         val cacheKey = "${anilistId}_${page}_${tag ?: -1}_$sort"
         if (page == 1 && commentCache.containsKey(cacheKey)) {
             return@withContext commentCache[cacheKey] ?: emptyList()
+        }
+
+        if (cachedAuthToken == null && !anilistToken.isNullOrBlank()) {
+            authenticate(anilistToken)
         }
 
         var url = "$BASE_URL/comments/$anilistId/$page"
@@ -123,12 +218,30 @@ class DantotsuCommentsRepository(
                 .url(url)
                 .header("appauth", APP_AUTH_KEY)
 
-            dantotsuAuthToken?.let { reqBuilder.header("Authorization", it) }
-
-            val commentsList = mutableListOf<DiscussionComment>()
+            cachedAuthToken?.let { reqBuilder.header("Authorization", it) }
 
             client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
+                if (response.code == 401 && !retried && !anilistToken.isNullOrBlank()) {
+                    AppLogger.w(TAG, "Dantotsu 401 Unauthorized - re-authenticating with force=true")
+                    cachedAuthToken = null
+                    val authSuccess = authenticate(anilistToken, force = true)
+                    if (authSuccess) {
+                        return@withContext getComments(
+                            anilistId = anilistId,
+                            page = page,
+                            tag = tag,
+                            tagPrefix = tagPrefix,
+                            sort = sort,
+                            anilistToken = anilistToken,
+                            retried = true
+                        )
+                    }
+                }
+
+                if (!response.isSuccessful) {
+                    AppLogger.w(TAG, "getComments failed with HTTP ${response.code} for anilistId=$anilistId, tag=$tag")
+                    return@withContext emptyList()
+                }
 
                 val body = response.body?.string() ?: return@withContext emptyList()
                 if (!body.startsWith("{")) return@withContext emptyList()
@@ -136,9 +249,12 @@ class DantotsuCommentsRepository(
                 val root = json.parseToJsonElement(body).jsonObject
                 val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
 
+                val commentsList = ArrayList<DiscussionComment>(commentsArray.size)
                 for (elem in commentsArray) {
                     val c = elem.jsonObject
-                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
+                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull
+                        ?: c["id"]?.jsonPrimitive?.intOrNull
+                        ?: continue
                     val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
                     val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                     val content = if (isDeleted) "[deleted]" else rawContent
@@ -149,7 +265,7 @@ class DantotsuCommentsRepository(
                         tagNum != null && tagNum > 0 -> "$tagPrefix $tagNum"
                         tagNum == 0 -> "General"
                         tag != null && tag > 0 -> "$tagPrefix $tag"
-                        else -> "General"
+                        else -> null
                     }
                     val username = c["username"]?.jsonPrimitive?.contentOrNull ?: "User"
                     val avatar = c["profile_picture_url"]?.jsonPrimitive?.contentOrNull
@@ -158,13 +274,6 @@ class DantotsuCommentsRepository(
                     val upvotes = c["upvotes"]?.jsonPrimitive?.intOrNull ?: 0
                     val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
                     val replyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
-
-                    // Fetch replies if replies exist
-                    val replies = if (replyCount > 0) {
-                        getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = 1)
-                    } else {
-                        emptyList()
-                    }
 
                     commentsList.add(
                         DiscussionComment(
@@ -178,30 +287,34 @@ class DantotsuCommentsRepository(
                             upvotes = upvotes,
                             downvotes = downvotes,
                             parentId = null,
-                            replies = replies,
+                            replies = emptyList(),
+                            replyCount = replyCount,
                             depth = 0
                         )
                     )
                 }
-            }
 
-            if (page == 1) {
-                commentCache[cacheKey] = commentsList
+                if (page == 1 && commentsList.isNotEmpty()) {
+                    commentCache[cacheKey] = commentsList
+                }
+                commentsList
             }
-            commentsList
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Exception during getComments for anilistId=$anilistId, tag=$tag", e)
             emptyList()
         }
     }
 
     /**
-     * Fetches threaded replies for a specific parent comment.
+     * Fetches replies for a specific parent comment on demand.
      */
     suspend fun getReplies(
         parentCommentId: Long,
         page: Int = 1,
         tagPrefix: String = "Ep",
-        depth: Int = 1
+        depth: Int = 1,
+        anilistToken: String? = null,
+        retried: Boolean = false
     ): List<DiscussionComment> = withContext(Dispatchers.IO) {
         val url = "$BASE_URL/comments/parent/$parentCommentId/$page"
         try {
@@ -209,10 +322,24 @@ class DantotsuCommentsRepository(
                 .url(url)
                 .header("appauth", APP_AUTH_KEY)
 
-            dantotsuAuthToken?.let { reqBuilder.header("Authorization", it) }
+            cachedAuthToken?.let { reqBuilder.header("Authorization", it) }
 
-            val repliesList = mutableListOf<DiscussionComment>()
             client.newCall(reqBuilder.build()).execute().use { response ->
+                if (response.code == 401 && !retried && !anilistToken.isNullOrBlank()) {
+                    cachedAuthToken = null
+                    val authSuccess = authenticate(anilistToken, force = true)
+                    if (authSuccess) {
+                        return@withContext getReplies(
+                            parentCommentId = parentCommentId,
+                            page = page,
+                            tagPrefix = tagPrefix,
+                            depth = depth,
+                            anilistToken = anilistToken,
+                            retried = true
+                        )
+                    }
+                }
+
                 if (!response.isSuccessful) return@withContext emptyList()
 
                 val body = response.body?.string() ?: return@withContext emptyList()
@@ -221,9 +348,12 @@ class DantotsuCommentsRepository(
                 val root = json.parseToJsonElement(body).jsonObject
                 val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
 
+                val repliesList = ArrayList<DiscussionComment>(commentsArray.size)
                 for (elem in commentsArray) {
                     val c = elem.jsonObject
-                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull ?: continue
+                    val commentId = c["comment_id"]?.jsonPrimitive?.intOrNull
+                        ?: c["id"]?.jsonPrimitive?.intOrNull
+                        ?: continue
                     val isDeleted = (c["deleted"]?.jsonPrimitive?.intOrNull ?: 0) == 1
                     val rawContent = c["content"]?.jsonPrimitive?.contentOrNull ?: ""
                     val content = if (isDeleted) "[deleted]" else rawContent
@@ -242,13 +372,6 @@ class DantotsuCommentsRepository(
                     val downvotes = c["downvotes"]?.jsonPrimitive?.intOrNull ?: 0
                     val childReplyCount = c["reply_count"]?.jsonPrimitive?.intOrNull ?: 0
 
-                    // Recurse for deeper nested replies if available (max depth 3)
-                    val nestedReplies = if (childReplyCount > 0 && depth < 3) {
-                        getReplies(commentId.toLong(), tagPrefix = tagPrefix, depth = depth + 1)
-                    } else {
-                        emptyList()
-                    }
-
                     repliesList.add(
                         DiscussionComment(
                             id = commentId.toString(),
@@ -261,14 +384,16 @@ class DantotsuCommentsRepository(
                             upvotes = upvotes,
                             downvotes = downvotes,
                             parentId = parentCommentId.toString(),
-                            replies = nestedReplies,
+                            replies = emptyList(),
+                            replyCount = childReplyCount,
                             depth = depth
                         )
                     )
                 }
+                repliesList
             }
-            repliesList
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Error fetching replies for parentCommentId=$parentCommentId", e)
             emptyList()
         }
     }
@@ -282,8 +407,8 @@ class DantotsuCommentsRepository(
         tag: Int? = null,
         parentCommentId: Long? = null
     ): DiscussionComment? = withContext(Dispatchers.IO) {
-        val token = dantotsuAuthToken ?: return@withContext null
-        val uid = currentUserId ?: return@withContext null
+        val token = cachedAuthToken ?: return@withContext null
+        val uid = cachedUserId ?: return@withContext null
 
         try {
             val formBuilder = FormBody.Builder()
@@ -311,21 +436,29 @@ class DantotsuCommentsRepository(
                 json.parseToJsonElement(body).jsonObject
             }
 
-            val commentId = parsed["comment_id"]?.jsonPrimitive?.intOrNull ?: parsed["id"]?.jsonPrimitive?.intOrNull ?: System.currentTimeMillis().toInt()
+            val commentId = parsed["comment_id"]?.jsonPrimitive?.intOrNull
+                ?: parsed["id"]?.jsonPrimitive?.intOrNull
+                ?: System.currentTimeMillis().toInt()
+
+            commentCache.clear()
 
             DiscussionComment(
                 id = commentId.toString(),
-                author = currentUsername ?: "You",
-                authorAvatarUrl = currentUserAvatar,
+                author = cachedUsername ?: "You",
+                authorAvatarUrl = cachedUserAvatar,
                 anilistUserId = uid.toIntOrNull(),
-                tag = if (tag != null && tag > 0) "Ep $tag" else "General",
+                tag = if (tag != null && tag > 0) "Ep $tag" else null,
                 content = content,
                 timeAgo = "Just now",
                 upvotes = 1,
                 downvotes = 0,
-                parentId = parentCommentId?.toString()
+                parentId = parentCommentId?.toString(),
+                replies = emptyList(),
+                replyCount = 0,
+                depth = if (parentCommentId != null) 1 else 0
             )
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Error posting comment", e)
             null
         }
     }
@@ -334,7 +467,7 @@ class DantotsuCommentsRepository(
      * Votes on a comment: 1 = upvote, -1 = downvote, 0 = neutral.
      */
     suspend fun vote(commentId: Long, voteType: Int): Boolean = withContext(Dispatchers.IO) {
-        val token = dantotsuAuthToken ?: return@withContext false
+        val token = cachedAuthToken ?: return@withContext false
         try {
             val request = Request.Builder()
                 .url("$BASE_URL/comments/vote/$commentId/$voteType")
@@ -347,12 +480,13 @@ class DantotsuCommentsRepository(
                 response.isSuccessful
             }
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Error voting on comment $commentId", e)
             false
         }
     }
 
     suspend fun editComment(commentId: Long, newContent: String): Boolean = withContext(Dispatchers.IO) {
-        val token = dantotsuAuthToken ?: return@withContext false
+        val token = cachedAuthToken ?: return@withContext false
         try {
             val body = FormBody.Builder()
                 .add("content", newContent)
@@ -369,12 +503,13 @@ class DantotsuCommentsRepository(
                 response.isSuccessful
             }
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Error editing comment $commentId", e)
             false
         }
     }
 
     suspend fun deleteComment(commentId: Long): Boolean = withContext(Dispatchers.IO) {
-        val token = dantotsuAuthToken ?: return@withContext false
+        val token = cachedAuthToken ?: return@withContext false
         try {
             val request = Request.Builder()
                 .url("$BASE_URL/comments/$commentId")
@@ -387,6 +522,7 @@ class DantotsuCommentsRepository(
                 response.isSuccessful
             }
         } catch (e: Exception) {
+            AppLogger.e(TAG, "Error deleting comment $commentId", e)
             false
         }
     }

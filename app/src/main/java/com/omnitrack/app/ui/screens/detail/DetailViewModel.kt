@@ -182,6 +182,9 @@ class DetailViewModel(
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedKeys = mutableSetOf<String>()
+    private val _activeDiscussionAniListId = MutableStateFlow<Long?>(null)
+    private val _activeDiscussionTag = MutableStateFlow<Int?>(null)
+    private val _activeDiscussionSort = MutableStateFlow("newest")
     private var discussionFetchJob: kotlinx.coroutines.Job? = null
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
     private val scrollOffsetStack = mutableListOf<Int>()
@@ -196,21 +199,65 @@ class DetailViewModel(
 
     fun selectDiscussionTag(tag: Int?) {
         viewModelScope.launch {
-            val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null) ?: return@launch
-            val anilistId = currentItem.anilistId ?: return@launch
-            loadDiscussionComments(anilistId, tag)
+            val targetAniListId = _activeDiscussionAniListId.value
+                ?: _previewItem.value?.anilistId
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+                ?: return@launch
+            _activeDiscussionTag.value = tag
+            loadDiscussionComments(targetAniListId, tag, _activeDiscussionSort.value)
         }
     }
 
-    fun loadDiscussionComments(anilistId: Long, tag: Int? = null) {
+    fun changeDiscussionSort(sort: String) {
+        val anilistId = _activeDiscussionAniListId.value
+            ?: _previewItem.value?.anilistId
+            ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+            ?: return
+        loadDiscussionComments(anilistId, _activeDiscussionTag.value, sort)
+    }
+
+    fun loadCommentReplies(commentId: String) {
+        val cid = commentId.toLongOrNull() ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+                val isManga = currentItem?.mediaType == MediaType.MANGA || currentItem?.mediaType == MediaType.NOVEL
+                val tagPrefix = if (isManga) "Ch" else "Ep"
+                val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
+                val replies = dantotsuCommentsRepository.getReplies(
+                    parentCommentId = cid,
+                    page = 1,
+                    tagPrefix = tagPrefix,
+                    anilistToken = anilistToken
+                )
+                if (replies.isNotEmpty()) {
+                    _discussionComments.update { current ->
+                        current.map { topComment ->
+                            if (topComment.id == commentId) {
+                                topComment.copy(replies = replies)
+                            } else {
+                                topComment
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun loadDiscussionComments(anilistId: Long, tag: Int? = null, sort: String = "newest") {
         if (anilistId <= 0L) {
             _discussionComments.value = emptyList()
             _isCommentsLoading.value = false
             return
         }
-        val cacheKey = "${anilistId}_${tag ?: -1}"
+        _activeDiscussionAniListId.value = anilistId
+        _activeDiscussionTag.value = tag
+        _activeDiscussionSort.value = sort
+
+        val cacheKey = "${anilistId}_${tag ?: -1}_$sort"
         val cached = discussionCache[cacheKey]
-        if (cached != null) {
+        if (cached != null && cached.isNotEmpty()) {
             _discussionComments.value = cached
             _isCommentsLoading.value = false
             return
@@ -233,16 +280,20 @@ class DetailViewModel(
                     anilistId = anilistId,
                     tag = tag,
                     tagPrefix = tagPrefix,
-                    sort = "newest"
+                    sort = sort,
+                    anilistToken = anilistToken
                 )
 
-                val activeAniListId = _previewItem.value?.anilistId ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
-                if (activeAniListId == anilistId) {
-                    discussionCache[cacheKey] = comments
+                if (_activeDiscussionAniListId.value == anilistId && _activeDiscussionTag.value == tag && _activeDiscussionSort.value == sort) {
+                    if (comments.isNotEmpty()) {
+                        discussionCache[cacheKey] = comments
+                    }
                     _discussionComments.value = comments
                 }
             } catch (_: Exception) {
-                _discussionComments.value = emptyList()
+                if (_activeDiscussionAniListId.value == anilistId && _activeDiscussionTag.value == tag) {
+                    _discussionComments.value = emptyList()
+                }
             } finally {
                 _isCommentsLoading.value = false
             }
@@ -739,6 +790,9 @@ class DetailViewModel(
 
     private fun resetAuxFields() {
         discussionFetchJob?.cancel()
+        _activeDiscussionAniListId.value = null
+        _activeDiscussionTag.value = null
+        _activeDiscussionSort.value = "newest"
         _collectionName.value = null
         _collectionItems.value = emptyList()
         _realSeasons.value = emptyList()
