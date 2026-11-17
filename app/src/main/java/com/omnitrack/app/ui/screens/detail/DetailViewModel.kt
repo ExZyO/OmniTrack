@@ -441,9 +441,14 @@ class DetailViewModel(
         if (!force && enrichedKeys.contains(cacheKey)) return
         enrichedKeys.add(cacheKey)
 
+        if (!item.clearartUrl.isNullOrBlank()) {
+            EnrichmentRepository.putCachedClearart(item, item.clearartUrl)
+        }
+
         val isVideoMedia = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.ANIME
         val hasStaleRatings = isVideoMedia && (item.imdbScore == 6.7f || (item.imdbScore != null && item.traktScore == null))
         val needsEnrichment = force || (
+            (isVideoMedia && item.clearartUrl.isNullOrBlank()) ||
             item.releaseYear == null ||
             item.contentRating == null ||
             (isVideoMedia && item.runtimeMinutes == null) ||
@@ -461,7 +466,23 @@ class DetailViewModel(
                 item = item,
                 fanartApiKey = fanartKey,
                 tmdbApiKey = tmdbKey,
-                mdblistApiKey = mdbKey
+                mdblistApiKey = mdbKey,
+                onClearartResolved = { earlyLogo, _ ->
+                    EnrichmentRepository.putCachedClearart(item, earlyLogo)
+                    if (item.id > 0) {
+                        val curr = repository.getMediaById(item.id).firstOrNull() ?: item
+                        if (curr.clearartUrl != earlyLogo) {
+                            repository.updateMedia(curr.copy(clearartUrl = earlyLogo))
+                        }
+                    } else if (_previewItem.value != null) {
+                        val currentPreview = _previewItem.value ?: item
+                        val updated = currentPreview.copy(clearartUrl = earlyLogo)
+                        _previewItem.value = updated
+                        _previewStack.update { stack ->
+                            if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                        }
+                    }
+                }
             )
 
             if (item.id > 0) {
@@ -1529,6 +1550,26 @@ class DetailViewModel(
             }
 
             persistAuxCache()
+
+            // Proactively warm up clearart memory cache for related and recommended entries
+            val candidateItems = (_animeRelations.value.mapNotNull { it.item } + _recommendations.value.mapNotNull { it.item })
+                .filter { it.mediaType in listOf(MediaType.ANIME, MediaType.MOVIE, MediaType.SHOW) }
+                .take(15)
+            for (cand in candidateItems) {
+                if (!cand.clearartUrl.isNullOrBlank()) {
+                    EnrichmentRepository.putCachedClearart(cand, cand.clearartUrl)
+                } else {
+                    launch {
+                        val logo = enrichmentRepository.resolveClearartFast(cand, null, tmdbKey)
+                        if (!logo.isNullOrBlank() && cand.id > 0) {
+                            val curr = repository.getMediaById(cand.id).firstOrNull()
+                            if (curr != null && curr.clearartUrl.isNullOrBlank()) {
+                                repository.updateMedia(curr.copy(clearartUrl = logo))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

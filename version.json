@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b168",
-  "versionCode": 168,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b168/OmniTrack-v1.0.0-b168.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b168/OmniTrack-v1.0.0-b168-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b168: feat(ui): display hero, cover, and clearart logo as title in details page with zero layout shift & TMDB clearart fallback"
+  "version": "v1.0.0-b169",
+  "versionCode": 169,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b169/OmniTrack-v1.0.0-b169.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b169/OmniTrack-v1.0.0-b169-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b169: perf(ui): instant zero-swap clearart logo rendering with memory cache prefetching"
 }

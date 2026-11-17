@@ -589,6 +589,29 @@ fun DetailScreen(
                 enabled = isCinematicBlur
             )
 
+            val currentClearart = item.clearartUrl?.takeIf { it.isNotBlank() }
+                ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
+            LaunchedEffect(currentClearart) {
+                if (!currentClearart.isNullOrBlank()) {
+                    val req = ImageRequest.Builder(context).data(currentClearart).crossfade(false).build()
+                    coil3.SingletonImageLoader.get(context).enqueue(req)
+                }
+            }
+
+            LaunchedEffect(uiState.animeRelations, uiState.recommendations) {
+                val candidateItems = (uiState.animeRelations.mapNotNull { it.item } + uiState.recommendations.mapNotNull { it.item })
+                    .filter { it.mediaType in listOf(MediaType.ANIME, MediaType.MOVIE, MediaType.SHOW) }
+                    .take(12)
+                for (cand in candidateItems) {
+                    val logo = cand.clearartUrl?.takeIf { it.isNotBlank() }
+                        ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(cand)
+                    if (!logo.isNullOrBlank()) {
+                        val req = ImageRequest.Builder(context).data(logo).crossfade(false).build()
+                        coil3.SingletonImageLoader.get(context).enqueue(req)
+                    }
+                }
+            }
+
             Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             // Background presentation layer
             when (presentationSettings.fallbackBackgroundStyle) {
@@ -1003,11 +1026,18 @@ fun DetailScreen(
                         .graphicsLayer { alpha = headerAlpha },
                     contentAlignment = Alignment.Center
                 ) {
-                    var headerClearartFailed by remember(item?.clearartUrl) { mutableStateOf(false) }
-                    val clearartUrl = item?.clearartUrl
-                    if (!clearartUrl.isNullOrBlank() && !headerClearartFailed) {
+                    val effectiveHeaderClearart = item?.clearartUrl?.takeIf { it.isNotBlank() }
+                        ?: item?.let { com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(it) }
+                    var headerClearartFailed by remember(effectiveHeaderClearart) { mutableStateOf(false) }
+                    if (!effectiveHeaderClearart.isNullOrBlank() && !headerClearartFailed) {
+                        val headerLogoRequest = remember(effectiveHeaderClearart) {
+                            ImageRequest.Builder(context)
+                                .data(effectiveHeaderClearart)
+                                .crossfade(false)
+                                .build()
+                        }
                         AsyncImage(
-                            model = clearartUrl,
+                            model = headerLogoRequest,
                             contentDescription = item?.title.orEmpty(),
                             modifier = Modifier
                                 .height(32.dp)
@@ -1596,9 +1626,10 @@ private fun DetailHeroHeaderSection(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
-                var clearartLoaded by remember(item.clearartUrl) { mutableStateOf(false) }
-                val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+                val effectiveClearartUrl = item.clearartUrl?.takeIf { it.isNotBlank() }
+                    ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
+                var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
+                val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed
                 val context = LocalContext.current
 
                 Box(
@@ -1608,10 +1639,10 @@ private fun DetailHeroHeaderSection(
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (hasClearart) {
-                        val logoRequest = remember(item.clearartUrl) {
+                        val logoRequest = remember(effectiveClearartUrl) {
                             ImageRequest.Builder(context)
-                                .data(item.clearartUrl)
-                                .crossfade(true)
+                                .data(effectiveClearartUrl)
+                                .crossfade(false)
                                 .build()
                         }
                         AsyncImage(
@@ -1620,16 +1651,12 @@ private fun DetailHeroHeaderSection(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp)
-                                .padding(bottom = 4.dp)
-                                .graphicsLayer { alpha = if (clearartLoaded) 1f else 0f },
+                                .padding(bottom = 4.dp),
                             contentScale = ContentScale.Fit,
                             alignment = Alignment.CenterStart,
-                            onSuccess = { clearartLoaded = true },
                             onError = { clearartFailed = true }
                         )
-                    }
-
-                    if (!hasClearart || !clearartLoaded) {
+                    } else {
                         Text(
                             text = item.title,
                             color = TextPrimary,
@@ -1786,9 +1813,10 @@ private fun DetailClassicHeaderSection(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
-                    var clearartLoaded by remember(item.clearartUrl) { mutableStateOf(false) }
-                    val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+                    val effectiveClearartUrl = item.clearartUrl?.takeIf { it.isNotBlank() }
+                        ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
+                    var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
+                    val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed
                     val context = LocalContext.current
 
                     Box(
@@ -1798,10 +1826,10 @@ private fun DetailClassicHeaderSection(
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (hasClearart) {
-                            val logoRequest = remember(item.clearartUrl) {
+                            val logoRequest = remember(effectiveClearartUrl) {
                                 ImageRequest.Builder(context)
-                                    .data(item.clearartUrl)
-                                    .crossfade(true)
+                                    .data(effectiveClearartUrl)
+                                    .crossfade(false)
                                     .build()
                             }
                             AsyncImage(
@@ -1810,16 +1838,12 @@ private fun DetailClassicHeaderSection(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(54.dp)
-                                    .padding(bottom = 2.dp)
-                                    .graphicsLayer { alpha = if (clearartLoaded) 1f else 0f },
+                                    .padding(bottom = 2.dp),
                                 contentScale = ContentScale.Fit,
                                 alignment = Alignment.CenterStart,
-                                onSuccess = { clearartLoaded = true },
                                 onError = { clearartFailed = true }
                             )
-                        }
-
-                        if (!hasClearart || !clearartLoaded) {
+                        } else {
                             Text(
                                 text = item.title,
                                 color = TextPrimary,

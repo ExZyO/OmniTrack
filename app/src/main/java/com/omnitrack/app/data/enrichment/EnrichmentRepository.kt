@@ -81,6 +81,32 @@ data class EnrichmentData(
 class EnrichmentRepository(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.getClient()
 ) {
+    companion object {
+        private val clearartMemoryCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun cacheKeyFor(item: MediaItemEntity): String {
+            return when {
+                item.tmdbId != null -> "tmdb_${item.mediaType}_${item.tmdbId}"
+                item.anilistId != null -> "anilist_${item.mediaType}_${item.anilistId}"
+                item.malId != null -> "mal_${item.mediaType}_${item.malId}"
+                item.id > 0 -> "id_${item.id}"
+                else -> "title_${item.mediaType}_${item.title.lowercase().trim()}"
+            }
+        }
+
+        fun getCachedClearart(item: MediaItemEntity): String? {
+            val key = cacheKeyFor(item)
+            return clearartMemoryCache[key]
+        }
+
+        fun putCachedClearart(item: MediaItemEntity, url: String) {
+            if (url.isNotBlank()) {
+                val key = cacheKeyFor(item)
+                clearartMemoryCache[key] = url
+            }
+        }
+    }
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
@@ -89,11 +115,54 @@ class EnrichmentRepository(
     private val kitsuSeasonDataCache = java.util.concurrent.ConcurrentHashMap<String, KitsuSeasonData>()
     private val userMediaListCache = java.util.concurrent.ConcurrentHashMap<String, List<UserMediaListItem>>()
 
+    suspend fun resolveClearartFast(
+        item: MediaItemEntity,
+        fanartApiKey: String? = null,
+        tmdbApiKey: String? = null
+    ): String? = withContext(Dispatchers.IO) {
+        if (!item.clearartUrl.isNullOrBlank()) {
+            putCachedClearart(item, item.clearartUrl)
+            return@withContext item.clearartUrl
+        }
+        val cached = getCachedClearart(item)
+        if (!cached.isNullOrBlank()) {
+            return@withContext cached
+        }
+
+        val effectiveTmdbKey = tmdbApiKey?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+        var effectiveTmdbId = item.tmdbId
+        var isMovie = item.mediaType == MediaType.MOVIE
+
+        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
+            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
+            if (animeTmdb != null) {
+                effectiveTmdbId = animeTmdb.first
+                isMovie = animeTmdb.second
+            }
+        }
+
+        var clearart: String? = null
+        if (effectiveTmdbId != null) {
+            if (!fanartApiKey.isNullOrBlank()) {
+                clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+            }
+            if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
+                clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+            }
+        }
+
+        if (!clearart.isNullOrBlank()) {
+            putCachedClearart(item, clearart)
+        }
+        clearart
+    }
+
     suspend fun enrich(
         item: MediaItemEntity,
         fanartApiKey: String? = null,
         tmdbApiKey: String? = null,
-        mdblistApiKey: String? = null
+        mdblistApiKey: String? = null,
+        onClearartResolved: (suspend (String, Long?) -> Unit)? = null
     ): EnrichmentData = withContext(Dispatchers.IO) {
         var clearart: String? = item.clearartUrl
         var communityScore: Float? = item.communityScore
@@ -125,6 +194,13 @@ class EnrichmentRepository(
             }
             if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
                 clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+            }
+        }
+
+        if (!clearart.isNullOrBlank()) {
+            putCachedClearart(item, clearart)
+            if (clearart != item.clearartUrl) {
+                onClearartResolved?.invoke(clearart, effectiveTmdbId)
             }
         }
 
