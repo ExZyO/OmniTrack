@@ -596,11 +596,11 @@ flowchart LR
 
 ## 📌 Phase 6: Dartotsu & Dantotsu Cross-Category Power Features
 
-### 6.1 Transparent Clear Logo Engine (`CarouselLogoResolver.kt`)
-- [ ] **AniZip & TMDb Clear Logo Resolver**:
-  - Query `https://api.ani.zip/mappings?anilist_id=...` and TMDB for transparent PNG / WebP logos (`coverType == "Clearlogo"`).
-  - Cache transparent logos locally in Room database / Disk cache.
-  - Display transparent title logo over hero backdrops across Anime, Shows, and Movies instead of plain text titles.
+### 6.1 Transparent Clear Logo Engine (`AniZipSource` & TMDb Clearart)
+- [x] **AniZip & TMDb Clear Logo Resolver**:
+  - Query `https://api.ani.zip/mappings?anilist_id=...` and TMDB for transparent PNG / WebP logos (`image_type == "clearlogo"`).
+  - Memory cache & disk cache with graceful fallback to TMDb clearart and clean title text with zero layout shift (fixed 54dp box).
+  - Display transparent title logo over hero backdrops across Anime and sticky top bar.
 
 ### 6.2 Android Native Home Screen Widgets (`widgets/`)
 - [ ] **Continue Tracking Widget (`ContinueWidget.kt`)**:
@@ -638,28 +638,29 @@ flowchart LR
 ## 📌 Phase 7: Dartotsu & Dantotsu Anime Ecosystem & Complete Metadata
 
 ### 7.1 Anime Detail Page Complete Metadata Fill
-- [ ] **Missing Grid Metadata Fields in `DetailShowDetailsSection`**:
-  - **Broadcast Schedule**: Exact day and time in JST and local timezone (e.g., *"Fridays at 23:00 (JST)"*).
+- [x] **Missing Grid Metadata Fields in `DetailShowDetailsSection`**:
+  - **Broadcast Schedule**: Exact day and time in JST and calculated local timezone (e.g., *"Fridays at 23:00 JST (10:00 AM your time)"*).
   - **Season & Year**: Release season and year badge (e.g., *"Fall 2023"*, *"Winter 2024"*).
   - **Source Material**: Underlying source tag (e.g., *"Manga"*, *"Light Novel"*, *"Original"*, *"Visual Novel"*).
   - **Format**: Format pill (e.g., *"TV"*, *"TV Short"*, *"Movie"*, *"OVA"*, *"ONA"*, *"Special"*).
   - **Aired Date Range**: Complete broadcast range (e.g., *"Sep 29, 2023 – Mar 22, 2024"*).
   - **Origin Country & Language**: Display *"Japan"* and *"Japanese"*.
-  - **Clickable Animation Studio Chips**: Clickable studio chip with studio logo that navigates to studio catalog.
+  - **Clickable Animation Studio Chips**: Clickable studio chip with studio logo that navigates to studio catalog (primary animation studios prioritized, matched with TMDb production logos).
 
 ### 7.2 Official External Links & Streaming Chips
-- [ ] **External Links Shelf**:
-  - Horizontal chip row with brand icons linking directly to:
+- [x] **External Links Shelf**:
+  - Horizontal chip row with brand vectors linking directly to:
     - Official Anime Website
     - Official Twitter / X Account
     - Legal Streaming Services (Crunchyroll, Netflix, HIDIVE, Bilibili)
     - Database Links (AniList, MyAnimeList, Bangumi, Kitsu)
+  - Rendered with Option L1 Dark Glass pills (`Color.White.copy(alpha = 0.08f)`).
 
 ### 7.3 Jikan MAL Episode Filler / Canon Badges & Filter
-- [ ] **Episode Filler Detection**:
-  - Query Jikan MAL API (`/v4/anime/{malId}/episodes`) for `filler: Boolean` flags per episode.
-  - Display subtle amber `Filler` or green `Canon` badges in Horizontal, List, and Vertical episode cards.
-  - Add filter chip in episode list: "All Episodes", "Canon Only", "Fillers Only".
+- [x] **Episode Filler Detection & Smart Skip**:
+  - Query Jikan MAL API (`/v4/anime/{malId}/episodes`) for `filler: Boolean` and `recap: Boolean` flags per episode with circuit breaker failover.
+  - Display solid white `FILLER` and `RECAP` badges across Horizontal, List, and Vertical episode cards.
+  - "Skip fillers" toggle chip in episodes header; smart prompt when tapping an episode: *"Also mark skipped fillers as watched?"* or *"Keep fillers unwatched"*.
 
 ### 7.4 AnimeThemes (Openings & Endings Player)
 - [ ] **Themes Section (`ThemesSection.dart`)**:
