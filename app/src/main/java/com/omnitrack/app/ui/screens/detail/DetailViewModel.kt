@@ -185,6 +185,7 @@ class DetailViewModel(
     private val _activeDiscussionAniListId = MutableStateFlow<Long?>(null)
     private val _activeDiscussionTag = MutableStateFlow<Int?>(null)
     private val _activeDiscussionSort = MutableStateFlow("newest")
+    private var rootAniListId: Long? = null
     private var discussionFetchJob: kotlinx.coroutines.Job? = null
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
     private val scrollOffsetStack = mutableListOf<Int>()
@@ -252,6 +253,9 @@ class DetailViewModel(
             _discussionComments.value = emptyList()
             _isCommentsLoading.value = false
             return
+        }
+        if (rootAniListId == null) {
+            rootAniListId = anilistId
         }
         _activeDiscussionAniListId.value = anilistId
         _activeDiscussionTag.value = tag
@@ -792,6 +796,7 @@ class DetailViewModel(
 
     private fun resetAuxFields() {
         discussionFetchJob?.cancel()
+        rootAniListId = null
         _activeDiscussionAniListId.value = null
         _activeDiscussionTag.value = null
         _activeDiscussionSort.value = "newest"
@@ -2044,11 +2049,21 @@ class DetailViewModel(
     }
 
     fun reloadCommentsForSeason(seasonNumber: Int) {
-        val currentItem = _previewItem.value ?: uiState.value.item ?: return
-        val currentAniListId = currentItem.anilistId ?: return
         viewModelScope.launch(Dispatchers.IO) {
+            val baseAniListId = rootAniListId
+                ?: _activeDiscussionAniListId.value
+                ?: _previewItem.value?.anilistId
+                ?: uiState.value.item?.anilistId
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+                ?: return@launch
+
+            _activeDiscussionTag.value = null
+
             val targetAniListId = if (seasonNumber == 1) {
-                currentAniListId
+                baseAniListId
+            } else if (seasonNumber <= 0) {
+                val match = _animeRelations.value.firstOrNull { it.relationType == "SIDE_STORY" || it.relationType == "SPECIAL" }
+                match?.id ?: baseAniListId
             } else {
                 val relations = _animeRelations.value
                 val match = relations.firstOrNull { rel ->
@@ -2058,10 +2073,15 @@ class DetailViewModel(
                     rel.title.contains("${seasonNumber}th Season", ignoreCase = true) ||
                     (seasonNumber == 2 && rel.relationType == "SEQUEL")
                 }
-                match?.id ?: currentAniListId
+                match?.id
             }
 
-            loadDiscussionComments(targetAniListId)
+            if (targetAniListId != null) {
+                loadDiscussionComments(targetAniListId, tag = null)
+            } else {
+                _discussionComments.value = emptyList()
+                _isCommentsLoading.value = false
+            }
         }
     }
 

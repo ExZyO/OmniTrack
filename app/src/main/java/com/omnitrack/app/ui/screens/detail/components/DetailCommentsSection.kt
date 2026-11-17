@@ -168,8 +168,11 @@ fun DetailCommentsSection(
 
     // Dynamic Filter Rail: "Ep" for Anime/Shows, "Ch" for Manga/Novels (1:1 Dartotsu parity: tag 1..N, null for All)
     val tagPrefix = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "Ch" else "Ep"
-    val totalCount = (episodeOrChapterCount ?: 24).coerceIn(1, 2000)
-    val availableTags = remember(tagPrefix, totalCount) {
+    val seasonEpCount = seasons.firstOrNull { it.seasonNumber == selectedSeasonNumber }?.episodeCount?.takeIf { it > 0 }
+        ?: episodeOrChapterCount
+        ?: 24
+    val totalCount = seasonEpCount.coerceIn(1, 2000)
+    val availableTags = remember(tagPrefix, totalCount, selectedSeasonNumber) {
         listOf("All") + (1..totalCount).map { "$tagPrefix $it" }
     }
     var selectedTag by remember(mediaTitle, selectedSeasonNumber) { mutableStateOf("All") }
@@ -333,6 +336,7 @@ fun DetailCommentsSection(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = "All"
+                                onTagSelect?.invoke(null)
                                 onSeasonSelect?.invoke(s.seasonNumber)
                             }
                             .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -686,8 +690,13 @@ fun DetailCommentsSection(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    val emptyNotice = when {
+                        selectedTag != "All" -> "No discussion comments yet for $selectedTag."
+                        selectedSeasonNumber > 1 -> "No discussion comments yet for Season $selectedSeasonNumber."
+                        else -> "No discussion comments yet."
+                    }
                     Text(
-                        text = if (selectedTag == "All") "No discussion comments yet." else "No discussion comments yet for $selectedTag.",
+                        text = emptyNotice,
                         color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium

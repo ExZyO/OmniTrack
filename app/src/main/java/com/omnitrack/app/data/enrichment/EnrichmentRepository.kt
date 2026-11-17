@@ -936,6 +936,26 @@ class EnrichmentRepository(
                 } else emptyMap()
 
                 cinemetaSeasons.forEach { (sNum, eps) ->
+                    // 1. Sanity check: Discard empty or unreleased dummy phantom seasons (e.g. Cinemeta "Season 3" with 1 dummy unreleased placeholder)
+                    val isPhantom = eps.isEmpty() || (
+                        eps.size <= 1 &&
+                        eps.all { it.airDate.isNullOrBlank() } &&
+                        (eps.firstOrNull()?.title.isNullOrBlank() || eps.firstOrNull()?.title.equals("Episode 1", ignoreCase = true))
+                    )
+                    if (isPhantom) return@forEach
+
+                    // 2. Specials (sNum <= 0) Sanity Check:
+                    // Only include Season 0 if TMDb explicitly listed Specials, OR if the episodes have legitimate release dates
+                    // and are not promotional interview clips, scene breakdowns, or screening talks.
+                    if (sNum <= 0) {
+                        val tmdbHasSpecials = tmdbSeasons.any { it.seasonNumber == 0 && it.episodeCount > 0 }
+                        val isPromoOnly = eps.all { ep ->
+                            val lower = ep.title.lowercase()
+                            lower.contains("interview") || lower.contains("breakdown") || lower.contains("screening") || lower.contains("commemorative")
+                        }
+                        if (!tmdbHasSpecials && (isPromoOnly || eps.all { it.airDate.isNullOrBlank() })) return@forEach
+                    }
+
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
@@ -1212,6 +1232,7 @@ class EnrichmentRepository(
             val query = """
                 query (${'$'}search: String) {
                   Media(search: ${'$'}search, type: ANIME) {
+                    title { romaji english }
                     coverImage { extraLarge large }
                   }
                 }
@@ -1250,6 +1271,19 @@ class EnrichmentRepository(
                         val body = resp.body?.string() ?: return@use
                         val root = json.parseToJsonElement(body).jsonObject
                         val media = root["data"]?.jsonObject?.get("Media")?.jsonObject
+                        if (seasonNumber >= 2) {
+                            val titleObj = media?.get("title")?.jsonObject
+                            val rTitle = titleObj?.get("romaji")?.jsonPrimitive?.contentOrNull.orEmpty()
+                            val eTitle = titleObj?.get("english")?.jsonPrimitive?.contentOrNull.orEmpty()
+                            val combined = "$rTitle $eTitle".lowercase()
+                            val hasSeason = combined.contains("season $seasonNumber") ||
+                                combined.contains("${seasonNumber}nd") ||
+                                combined.contains("${seasonNumber}rd") ||
+                                combined.contains("${seasonNumber}th") ||
+                                combined.contains("part $seasonNumber") ||
+                                combined.contains(" $seasonNumber")
+                            if (!hasSeason) return@use
+                        }
                         val cover = media?.get("coverImage")?.jsonObject
                         val img = cover?.get("extraLarge")?.jsonPrimitive?.content
                             ?: cover?.get("large")?.jsonPrimitive?.content
