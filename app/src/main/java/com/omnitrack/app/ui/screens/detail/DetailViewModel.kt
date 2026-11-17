@@ -272,11 +272,7 @@ class DetailViewModel(
             return
         }
 
-        val isManga = _previewItem.value?.mediaType == MediaType.MANGA ||
-            _previewItem.value?.mediaType == MediaType.NOVEL ||
-            uiState.value.item?.mediaType == MediaType.MANGA ||
-            uiState.value.item?.mediaType == MediaType.NOVEL
-        val tagPrefix = if (isManga) "Ch" else "Ep"
+        val isMangaPreview = _previewItem.value?.let { it.mediaType == MediaType.MANGA || it.mediaType == MediaType.NOVEL } ?: false
 
         // If filtering by episode/chapter tag, extract already loaded matching comments from the season's "All" comments cache
         val localTagged = if (tag != null && tag > 0) {
@@ -286,7 +282,8 @@ class DetailViewModel(
                 val commentTagNum = tagStr?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
                 val matchDirect = commentTagNum != null && commentTagNum == tag
                 val matchString = tagStr != null && (
-                    tagStr.equals("$tagPrefix $tag", ignoreCase = true) ||
+                    tagStr.equals("Ep $tag", ignoreCase = true) ||
+                    tagStr.equals("Ch $tag", ignoreCase = true) ||
                     tagStr.endsWith(" $tag") ||
                     tagStr == "$tag"
                 )
@@ -308,6 +305,11 @@ class DetailViewModel(
         discussionFetchJob?.cancel()
         discussionFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                val currentItem = _previewItem.value
+                    ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+                val isManga = currentItem?.let { it.mediaType == MediaType.MANGA || it.mediaType == MediaType.NOVEL } ?: isMangaPreview
+                val tagPrefix = if (isManga) "Ch" else "Ep"
+
                 val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
                 if (!anilistToken.isNullOrBlank()) {
                     dantotsuCommentsRepository.authenticate(anilistToken)
@@ -2132,18 +2134,16 @@ class DetailViewModel(
 
     fun reloadCommentsForSeason(seasonNumber: Int) {
         viewModelScope.launch(Dispatchers.IO) {
+            val currentItem = _previewItem.value
+                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
             val baseAniListId = rootAniListId
                 ?: _activeDiscussionAniListId.value
-                ?: _previewItem.value?.anilistId
-                ?: uiState.value.item?.anilistId
-                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull()?.anilistId else null)
+                ?: currentItem?.anilistId
                 ?: return@launch
 
             _activeDiscussionTag.value = null
 
-            val currentTitle = _previewItem.value?.title
-                ?: uiState.value.item?.title
-                ?: ""
+            val currentTitle = currentItem?.title ?: ""
 
             // 1. Check pre-extracted per-season map (from raw relations before Safeguard 3 filtering)
             var targetAniListId = _seasonAniListIds.value[seasonNumber]
