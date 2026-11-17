@@ -1655,6 +1655,10 @@ class EnrichmentRepository(
                     val relationList = mutableListOf<AnimeRelationItem>()
                     val relEdges = media["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
                     val baseTitleNorm = (title ?: "").lowercase().replace(Regex("[^a-z0-9]"), "")
+                    val seasonAniListMap = mutableMapOf<Int, Long>()
+                    if (resolvedId != null && resolvedId > 0) {
+                        seasonAniListMap[1] = resolvedId
+                    }
 
                     for (edgeElem in relEdges) {
                         val edge = edgeElem.jsonObject
@@ -1670,6 +1674,22 @@ class EnrichmentRepository(
                         val cover = node["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
                             ?: node["coverImage"]?.jsonObject?.get("large").cleanString()
                         val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+                        // Extract per-season AniList ID from raw relations BEFORE Safeguard 3 strips them for the Franchise rail
+                        val sMatch = Regex("""(?i)(?:season\s*|s)(\d+)""").find(relTitle)
+                            ?: Regex("""(?i)(\d+)(?:st|nd|rd|th)\s*season""").find(relTitle)
+                        val sNum = sMatch?.groupValues?.get(1)?.toIntOrNull()
+                        if (sNum != null && sNum > 0) {
+                            seasonAniListMap[sNum] = relId
+                        } else if (relFormat.equals("TV", ignoreCase = true) && relType == "SEQUEL") {
+                            if (!seasonAniListMap.containsKey(2)) {
+                                seasonAniListMap[2] = relId
+                            }
+                        } else if (relType in listOf("SIDE_STORY", "SPECIAL", "OVA")) {
+                            if (!seasonAniListMap.containsKey(0)) {
+                                seasonAniListMap[0] = relId
+                            }
+                        }
 
                         // Determine Target MediaType
                         val targetMediaType = when (relTypeCategory.uppercase()) {
@@ -1740,7 +1760,8 @@ class EnrichmentRepository(
                         totalEpisodes = mediaEpisodes,
                         totalChapters = mediaChapters,
                         genres = mediaGenres,
-                        tags = tagList
+                        tags = tagList,
+                        seasonAniListIds = seasonAniListMap
                     )
                 }
 
@@ -2967,6 +2988,82 @@ class EnrichmentRepository(
             }
         } catch (_: Exception) {
             false
+        }
+    }
+
+    suspend fun fetchAniListSeasonId(
+        baseTitle: String,
+        seasonNumber: Int,
+        rootAniListId: Long? = null
+    ): Long? = withContext(Dispatchers.IO) {
+        if (seasonNumber == 1 && rootAniListId != null && rootAniListId > 0) {
+            return@withContext rootAniListId
+        }
+        if (baseTitle.isBlank()) return@withContext null
+
+        try {
+            val searchQuery = "$baseTitle Season $seasonNumber"
+            val query = """
+                query (${'$'}search: String) {
+                  Page(page: 1, perPage: 6) {
+                    media(search: ${'$'}search, type: ANIME) {
+                      id
+                      format
+                      title {
+                        romaji
+                        english
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val jsonPayload = buildJsonObject {
+                put("query", query)
+                put("variables", buildJsonObject {
+                    put("search", searchQuery)
+                })
+            }.toString()
+
+            val req = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "OmniTrack/1.0")
+                .build()
+
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body?.string() ?: return@use null
+                val root = json.parseToJsonElement(body).jsonObject
+                val mediaArray = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray.orEmpty()
+                for (elem in mediaArray) {
+                    val obj = elem.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                    val eng = obj["title"]?.jsonObject?.get("english").cleanString() ?: ""
+                    val rom = obj["title"]?.jsonObject?.get("romaji").cleanString() ?: ""
+                    val combined = "$eng $rom"
+                    val hasSeasonNum = combined.contains("Season $seasonNumber", ignoreCase = true) ||
+                        combined.contains("${seasonNumber}nd Season", ignoreCase = true) ||
+                        combined.contains("${seasonNumber}rd Season", ignoreCase = true) ||
+                        combined.contains("${seasonNumber}th Season", ignoreCase = true) ||
+                        combined.contains("${seasonNumber}st Season", ignoreCase = true)
+                    if (hasSeasonNum) {
+                        return@use id
+                    }
+                }
+                // Fallback: first TV result that isn't rootAniListId
+                val firstTv = mediaArray.firstOrNull {
+                    val f = it.jsonObject["format"].cleanString() ?: ""
+                    f.equals("TV", ignoreCase = true)
+                }
+                val firstId = firstTv?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                if (firstId != null && firstId != rootAniListId) {
+                    return@use firstId
+                }
+                null
+            }
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "fetchAniListSeasonId failed for $baseTitle Season $seasonNumber: ${e.message}")
+            null
         }
     }
 }

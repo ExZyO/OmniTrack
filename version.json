@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b174",
-  "versionCode": 174,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b174/OmniTrack-v1.0.0-b174.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b174/OmniTrack-v1.0.0-b174-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b174: fix(seasons): eliminate Cinemeta phantom seasons & restore discussion season comment loading"
+  "version": "v1.0.0-b175",
+  "versionCode": 175,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b175/OmniTrack-v1.0.0-b175.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b175/OmniTrack-v1.0.0-b175-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b175: fix(discussion): resolve per-season AniList IDs, page 1 query parity, and instantaneous episode tag comment filtering"
 }

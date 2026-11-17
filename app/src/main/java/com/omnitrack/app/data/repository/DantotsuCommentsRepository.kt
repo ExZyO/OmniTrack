@@ -210,7 +210,17 @@ class DantotsuCommentsRepository(
         var url = "$BASE_URL/comments/$anilistId/$page"
         val queryParams = mutableListOf<String>()
         if (tag != null && tag > 0) queryParams.add("tag=$tag")
-        if (sort.isNotBlank()) queryParams.add("sort=$sort")
+        val apiSort = when (sort.lowercase()) {
+            "top", "highest_rated" -> "highest_rated"
+            "bottom", "lowest_rated" -> "lowest_rated"
+            "oldest" -> "oldest"
+            else -> null // On page 1, omit sort for "newest" matching Dantotsu CommentsFragment.kt:789
+        }
+        if (page > 1 && sort.isNotBlank()) {
+            queryParams.add("sort=$sort")
+        } else if (apiSort != null) {
+            queryParams.add("sort=$apiSort")
+        }
         if (queryParams.isNotEmpty()) url += "?" + queryParams.joinToString("&")
 
         try {
@@ -294,10 +304,17 @@ class DantotsuCommentsRepository(
                     )
                 }
 
-                if (page == 1 && commentsList.isNotEmpty()) {
-                    commentCache[cacheKey] = commentsList
+                val sortedList = when (sort.lowercase()) {
+                    "oldest" -> commentsList.reversed()
+                    "top", "highest_rated" -> commentsList.sortedByDescending { it.upvotes - it.downvotes }
+                    "bottom", "lowest_rated" -> commentsList.sortedBy { it.upvotes - it.downvotes }
+                    else -> commentsList
                 }
-                commentsList
+
+                if (page == 1 && sortedList.isNotEmpty()) {
+                    commentCache[cacheKey] = sortedList
+                }
+                sortedList
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "Exception during getComments for anilistId=$anilistId, tag=$tag", e)

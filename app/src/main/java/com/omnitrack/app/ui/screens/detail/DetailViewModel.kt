@@ -185,6 +185,8 @@ class DetailViewModel(
     private val _activeDiscussionAniListId = MutableStateFlow<Long?>(null)
     private val _activeDiscussionTag = MutableStateFlow<Int?>(null)
     private val _activeDiscussionSort = MutableStateFlow("newest")
+    private val _seasonAniListIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
     private var discussionFetchJob: kotlinx.coroutines.Job? = null
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
@@ -269,14 +271,40 @@ class DetailViewModel(
             return
         }
 
+        val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
+        val isManga = currentItem?.mediaType == MediaType.MANGA || currentItem?.mediaType == MediaType.NOVEL
+        val tagPrefix = if (isManga) "Ch" else "Ep"
+
+        // If filtering by episode/chapter tag, extract already loaded matching comments from the season's "All" comments cache
+        val localTagged = if (tag != null && tag > 0) {
+            val allForSeason = allSeasonCommentsCache[anilistId].orEmpty()
+            allForSeason.filter { comment ->
+                val tagStr = comment.tag?.trim()
+                val commentTagNum = tagStr?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                val matchDirect = commentTagNum != null && commentTagNum == tag
+                val matchString = tagStr != null && (
+                    tagStr.equals("$tagPrefix $tag", ignoreCase = true) ||
+                    tagStr.endsWith(" $tag") ||
+                    tagStr == "$tag"
+                )
+                val matchReply = comment.replies.any { r ->
+                    val rNum = r.tag?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                    rNum == tag || r.tag?.contains("$tag") == true
+                }
+                matchDirect || matchString || matchReply
+            }
+        } else {
+            emptyList()
+        }
+
+        if (localTagged.isNotEmpty()) {
+            _discussionComments.value = localTagged
+        }
+
         _isCommentsLoading.value = true
         discussionFetchJob?.cancel()
         discussionFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val currentItem = _previewItem.value ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
-                val isManga = currentItem?.mediaType == MediaType.MANGA || currentItem?.mediaType == MediaType.NOVEL
-                val tagPrefix = if (isManga) "Ch" else "Ep"
-
                 val anilistToken = trackerTokenManager?.tokens?.firstOrNull()?.anilistToken
                 if (!anilistToken.isNullOrBlank()) {
                     dantotsuCommentsRepository.authenticate(anilistToken)
@@ -290,15 +318,35 @@ class DetailViewModel(
                     anilistToken = anilistToken
                 )
 
-                if (_activeDiscussionAniListId.value == anilistId && _activeDiscussionTag.value == tag && _activeDiscussionSort.value == sort) {
-                    if (comments.isNotEmpty()) {
-                        discussionCache[cacheKey] = comments
+                if (tag == null && comments.isNotEmpty()) {
+                    allSeasonCommentsCache[anilistId] = comments
+                }
+
+                val finalComments = if (comments.isNotEmpty()) {
+                    if (localTagged.isNotEmpty()) {
+                        (comments + localTagged).distinctBy { it.id }
+                    } else {
+                        comments
                     }
-                    _discussionComments.value = comments
+                } else if (localTagged.isNotEmpty()) {
+                    localTagged
+                } else {
+                    emptyList()
+                }
+
+                if (_activeDiscussionAniListId.value == anilistId && _activeDiscussionTag.value == tag && _activeDiscussionSort.value == sort) {
+                    if (finalComments.isNotEmpty()) {
+                        discussionCache[cacheKey] = finalComments
+                    }
+                    _discussionComments.value = finalComments
                 }
             } catch (_: Exception) {
                 if (_activeDiscussionAniListId.value == anilistId && _activeDiscussionTag.value == tag) {
-                    _discussionComments.value = emptyList()
+                    if (localTagged.isNotEmpty()) {
+                        _discussionComments.value = localTagged
+                    } else {
+                        _discussionComments.value = emptyList()
+                    }
                 }
             } finally {
                 _isCommentsLoading.value = false
@@ -800,6 +848,8 @@ class DetailViewModel(
         _activeDiscussionAniListId.value = null
         _activeDiscussionTag.value = null
         _activeDiscussionSort.value = "newest"
+        _seasonAniListIds.value = emptyMap()
+        allSeasonCommentsCache.clear()
         _collectionName.value = null
         _collectionItems.value = emptyList()
         _realSeasons.value = emptyList()
@@ -978,6 +1028,7 @@ class DetailViewModel(
             }
             if (existingCached.englishTitle != null) _englishTitle.value = existingCached.englishTitle
             if (existingCached.romajiTitle != null) _romajiTitle.value = existingCached.romajiTitle
+            if (existingCached.seasonAniListIds.isNotEmpty()) _seasonAniListIds.value = existingCached.seasonAniListIds
         }
 
         recommendationFetchJob?.cancel()
@@ -1007,6 +1058,7 @@ class DetailViewModel(
                 if (it.nextAiringEpisode != null) _nextAiringEpisode.value = it.nextAiringEpisode
                 if (it.englishTitle != null) _englishTitle.value = it.englishTitle
                 if (it.romajiTitle != null) _romajiTitle.value = it.romajiTitle
+                if (it.seasonAniListIds.isNotEmpty()) _seasonAniListIds.value = it.seasonAniListIds
             }
 
             fun persistAuxCache() {
@@ -1024,7 +1076,8 @@ class DetailViewModel(
                     animeRelations = _animeRelations.value,
                     animeAiring = _animeAiring.value,
                     englishTitle = _englishTitle.value,
-                    romajiTitle = _romajiTitle.value
+                    romajiTitle = _romajiTitle.value,
+                    seasonAniListIds = _seasonAniListIds.value
                 )
                 DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
@@ -1368,6 +1421,9 @@ class DetailViewModel(
                         _animeCharacters.value = animeDetails.characters
                         _animeStaff.value = animeDetails.staff
                         _animeRelations.value = animeDetails.relations
+                        if (animeDetails.seasonAniListIds.isNotEmpty()) {
+                            _seasonAniListIds.update { it + animeDetails.seasonAniListIds }
+                        }
                         _animeAiring.value = animeDetails.nextAiring
                         _synonyms.value = animeDetails.synonyms
                         _tags.value = animeDetails.tags
@@ -2003,7 +2059,7 @@ class DetailViewModel(
             }
         }
 
-        val anilistId = currentItem?.anilistId
+        val anilistId = _activeDiscussionAniListId.value ?: currentItem?.anilistId
         if (anilistId != null) {
             val tagNum = targetTag.replace("Ep ", "").replace("Ch ", "").toIntOrNull()
             viewModelScope.launch(Dispatchers.IO) {
@@ -2059,29 +2115,51 @@ class DetailViewModel(
 
             _activeDiscussionTag.value = null
 
-            val targetAniListId = if (seasonNumber == 1) {
-                baseAniListId
-            } else if (seasonNumber <= 0) {
-                val match = _animeRelations.value.firstOrNull { it.relationType == "SIDE_STORY" || it.relationType == "SPECIAL" }
-                match?.id ?: baseAniListId
-            } else {
-                val relations = _animeRelations.value
-                val match = relations.firstOrNull { rel ->
-                    rel.title.contains("Season $seasonNumber", ignoreCase = true) ||
-                    rel.title.contains("${seasonNumber}nd Season", ignoreCase = true) ||
-                    rel.title.contains("${seasonNumber}rd Season", ignoreCase = true) ||
-                    rel.title.contains("${seasonNumber}th Season", ignoreCase = true) ||
-                    (seasonNumber == 2 && rel.relationType == "SEQUEL")
-                }
-                match?.id
+            val currentTitle = _previewItem.value?.title
+                ?: uiState.value.item?.title
+                ?: ""
+
+            // 1. Check pre-extracted per-season map (from raw relations before Safeguard 3 filtering)
+            var targetAniListId = _seasonAniListIds.value[seasonNumber]
+
+            // 2. If season 1, use baseAniListId
+            if (targetAniListId == null && seasonNumber == 1) {
+                targetAniListId = baseAniListId
             }
 
-            if (targetAniListId != null) {
-                loadDiscussionComments(targetAniListId, tag = null)
-            } else {
-                _discussionComments.value = emptyList()
-                _isCommentsLoading.value = false
+            // 3. Check relations in _animeRelations
+            if (targetAniListId == null) {
+                if (seasonNumber <= 0) {
+                    val match = _animeRelations.value.firstOrNull { it.relationType == "SIDE_STORY" || it.relationType == "SPECIAL" }
+                    targetAniListId = match?.id
+                } else {
+                    val relations = _animeRelations.value
+                    val match = relations.firstOrNull { rel ->
+                        rel.title.contains("Season $seasonNumber", ignoreCase = true) ||
+                        rel.title.contains("${seasonNumber}nd Season", ignoreCase = true) ||
+                        rel.title.contains("${seasonNumber}rd Season", ignoreCase = true) ||
+                        rel.title.contains("${seasonNumber}th Season", ignoreCase = true) ||
+                        (seasonNumber == 2 && rel.relationType == "SEQUEL")
+                    }
+                    targetAniListId = match?.id
+                }
             }
+
+            // 4. If still null and seasonNumber > 1, resolve via AniList GraphQL
+            if (targetAniListId == null && seasonNumber > 1 && currentTitle.isNotBlank()) {
+                val resolvedId = enrichmentRepository.fetchAniListSeasonId(currentTitle, seasonNumber, baseAniListId)
+                if (resolvedId != null) {
+                    targetAniListId = resolvedId
+                    _seasonAniListIds.update { it + (seasonNumber to resolvedId) }
+                }
+            }
+
+            // 5. Final fallback if anime has no separate sequel ID: use baseAniListId
+            if (targetAniListId == null) {
+                targetAniListId = baseAniListId
+            }
+
+            loadDiscussionComments(targetAniListId, tag = null)
         }
     }
 
@@ -2560,7 +2638,8 @@ data class CachedDetailAux(
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
     val englishTitle: String? = null,
-    val romajiTitle: String? = null
+    val romajiTitle: String? = null,
+    val seasonAniListIds: Map<Int, Long> = emptyMap()
 )
 
 internal object DetailAuxMemoryCache {

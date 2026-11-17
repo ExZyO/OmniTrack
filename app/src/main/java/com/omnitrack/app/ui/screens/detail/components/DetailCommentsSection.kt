@@ -97,8 +97,8 @@ import com.omnitrack.app.ui.theme.TextSecondary
 enum class CommentSortOrder(val displayName: String, val apiValue: String) {
     NEWEST("Newest", "newest"),
     OLDEST("Oldest", "oldest"),
-    HIGHEST_RATED("Highest Rated", "top"),
-    LOWEST_RATED("Lowest Rated", "bottom")
+    HIGHEST_RATED("Highest Rated", "highest_rated"),
+    LOWEST_RATED("Lowest Rated", "lowest_rated")
 }
 
 /**
@@ -201,43 +201,37 @@ fun DetailCommentsSection(
     var tagPickerExpanded by remember { mutableStateOf(false) }
 
     // Filter comments by selected tag and sort
-    val filteredComments = remember(localCommentsList, selectedTag, sortOrder, onTagSelect) {
-        val byTag = if (onTagSelect != null) {
-            // Server-side filtering already executed via onTagSelect!
-            // Do not discard server results with redundant client-side regex.
+    val filteredComments = remember(localCommentsList, selectedTag, sortOrder) {
+        val byTag = if (selectedTag == "All") {
             localCommentsList
         } else {
-            // Client-side fallback for offline/sample preview
-            if (selectedTag == "All") {
-                localCommentsList
-            } else {
-                val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
-                localCommentsList.filter { comment ->
-                    val tagStr = comment.tag?.trim()
-                    val commentTagNum = tagStr?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
-                    val matchDirect = commentTagNum != null && commentTagNum == tagNumber
-                    val matchString = tagStr != null && (
-                        tagStr.equals(selectedTag, ignoreCase = true) ||
-                        tagStr.endsWith(" $tagNumber") ||
-                        tagStr == "$tagNumber"
-                    )
-                    val matchReply = comment.replies.any { r ->
-                        val rNum = r.tag?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
-                        rNum == tagNumber || r.tag?.contains("$tagNumber") == true
-                    }
-                    matchDirect || matchString || matchReply
+            val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()
+            val filtered = localCommentsList.filter { comment ->
+                val tagStr = comment.tag?.trim()
+                val commentTagNum = tagStr?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                val matchDirect = commentTagNum != null && commentTagNum == tagNumber
+                val matchString = tagStr != null && (
+                    tagStr.equals(selectedTag, ignoreCase = true) ||
+                    tagStr.endsWith(" $tagNumber") ||
+                    tagStr == "$tagNumber"
+                )
+                val matchReply = comment.replies.any { r ->
+                    val rNum = r.tag?.replace(Regex("[^0-9]"), "")?.toIntOrNull()
+                    rNum == tagNumber || r.tag?.contains("$tagNumber") == true
                 }
+                matchDirect || matchString || matchReply
+            }
+            if (filtered.isNotEmpty()) {
+                filtered
+            } else {
+                localCommentsList
             }
         }
-        if (onSortChange != null) {
-            byTag
-        } else {
-            when (sortOrder) {
-                CommentSortOrder.NEWEST -> byTag // API arrives with newest first
-                CommentSortOrder.OLDEST -> byTag.reversed() // Invert to show oldest first
-                CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
-                CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
-            }
+        when (sortOrder) {
+            CommentSortOrder.NEWEST -> byTag
+            CommentSortOrder.OLDEST -> byTag.reversed()
+            CommentSortOrder.HIGHEST_RATED -> byTag.sortedByDescending { it.upvotes - it.downvotes }
+            CommentSortOrder.LOWEST_RATED -> byTag.sortedBy { it.upvotes - it.downvotes }
         }
     }
 
@@ -336,7 +330,6 @@ fun DetailCommentsSection(
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = "All"
-                                onTagSelect?.invoke(null)
                                 onSeasonSelect?.invoke(s.seasonNumber)
                             }
                             .padding(horizontal = 14.dp, vertical = 6.dp)

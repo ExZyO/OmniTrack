@@ -147,5 +147,6 @@ data class AnimeEnrichedDetails(
     val totalEpisodes: Int? = null,
     val totalChapters: Int? = null,
     val genres: List<String> = emptyList(),
-    val tags: List<AnimeTagItem> = emptyList()
+    val tags: List<AnimeTagItem> = emptyList(),
+    val seasonAniListIds: Map<Int, Long> = emptyMap()
 )
