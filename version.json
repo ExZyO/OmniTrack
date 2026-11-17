@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b181",
-  "versionCode": 181,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b181/OmniTrack-v1.0.0-b181.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b181/OmniTrack-v1.0.0-b181-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b181: fix(crash): avoid premature uiState access during early discussion comment loading"
+  "version": "v1.0.0-b182",
+  "versionCode": 182,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b182/OmniTrack-v1.0.0-b182.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b182/OmniTrack-v1.0.0-b182-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b182: 1:1 Nuvio episode checkmark stroked ring, remove redundant in-image episode badges, surface episode layout & scaling in Visual Presentation settings, and fix trailer embed third-party cookies"
 }
