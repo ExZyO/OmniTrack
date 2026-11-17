@@ -248,6 +248,11 @@ class DantotsuCommentsRepository(
                     }
                 }
 
+                if (response.code == 404) {
+                    AppLogger.d(TAG, "getComments HTTP 404 (no comments yet) for anilistId=$anilistId, tag=$tag")
+                    return@withContext emptyList()
+                }
+
                 if (!response.isSuccessful) {
                     AppLogger.w(TAG, "getComments failed with HTTP ${response.code} for anilistId=$anilistId, tag=$tag")
                     return@withContext emptyList()
@@ -258,6 +263,7 @@ class DantotsuCommentsRepository(
 
                 val root = json.parseToJsonElement(body).jsonObject
                 val commentsArray = root["comments"]?.jsonArray ?: return@withContext emptyList()
+                AppLogger.d(TAG, "getComments HTTP 200: ${commentsArray.size} comments for anilistId=$anilistId, tag=$tag")
 
                 val commentsList = ArrayList<DiscussionComment>(commentsArray.size)
                 for (elem in commentsArray) {

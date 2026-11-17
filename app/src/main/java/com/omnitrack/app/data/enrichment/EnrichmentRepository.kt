@@ -1,5 +1,6 @@
 package com.omnitrack.app.data.enrichment
 
+import com.omnitrack.app.util.AppLogger
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.AnimeAiringSchedule
@@ -1393,12 +1394,13 @@ class EnrichmentRepository(
         anilistId: Long? = null,
         malId: Long? = null,
         title: String? = null,
-        existingSeasonsCount: Int = 1
+        existingSeasonsCount: Int = 1,
+        mediaType: MediaType = MediaType.ANIME
     ): AnimeEnrichedDetails? = withContext(Dispatchers.IO) {
         try {
             val query = """
-                query (${'$'}id: Int, ${'$'}idMal: Int, ${'$'}search: String) {
-                  Media(id: ${'$'}id, idMal: ${'$'}idMal, search: ${'$'}search) {
+                query (${'$'}id: Int, ${'$'}idMal: Int, ${'$'}search: String, ${'$'}type: MediaType) {
+                  Media(id: ${'$'}id, idMal: ${'$'}idMal, search: ${'$'}search, type: ${'$'}type) {
                     id
                     idMal
                     title {
@@ -1488,11 +1490,37 @@ class EnrichmentRepository(
                           status
                           startDate {
                             year
+                            month
                           }
                           bannerImage
                           coverImage {
                             large
                             extraLarge
+                          }
+                          relations {
+                            edges {
+                              relationType
+                              node {
+                                id
+                                idMal
+                                title {
+                                  romaji
+                                  english
+                                }
+                                format
+                                type
+                                status
+                                startDate {
+                                  year
+                                  month
+                                }
+                                bannerImage
+                                coverImage {
+                                  large
+                                  extraLarge
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -1511,20 +1539,41 @@ class EnrichmentRepository(
                 }
             """.trimIndent()
 
+            val anilistMediaType = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "MANGA" else "ANIME"
+
             // Safe lookup: Only send ONE mutually exclusive variable to avoid AND-filtering in AniList
             val candidateVars = mutableListOf<JsonObject>()
             if (anilistId != null && anilistId > 0) {
-                candidateVars.add(buildJsonObject { put("id", anilistId) })
+                candidateVars.add(buildJsonObject {
+                    put("id", anilistId)
+                    put("type", anilistMediaType)
+                })
             }
             if (malId != null && malId > 0) {
-                candidateVars.add(buildJsonObject { put("idMal", malId) })
+                candidateVars.add(buildJsonObject {
+                    put("idMal", malId)
+                    put("type", anilistMediaType)
+                })
             }
             if (!title.isNullOrBlank()) {
                 val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
                 val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
-                candidateVars.add(buildJsonObject { put("search", title.trim()) })
-                if (cleanTitle != title.trim()) candidateVars.add(buildJsonObject { put("search", cleanTitle) })
-                if (baseTitle != title.trim() && baseTitle.length >= 3) candidateVars.add(buildJsonObject { put("search", baseTitle) })
+                candidateVars.add(buildJsonObject {
+                    put("search", title.trim())
+                    put("type", anilistMediaType)
+                })
+                if (cleanTitle != title.trim()) {
+                    candidateVars.add(buildJsonObject {
+                        put("search", cleanTitle)
+                        put("type", anilistMediaType)
+                    })
+                }
+                if (baseTitle != title.trim() && baseTitle.length >= 3) {
+                    candidateVars.add(buildJsonObject {
+                        put("search", baseTitle)
+                        put("type", anilistMediaType)
+                    })
+                }
             }
 
             for (vars in candidateVars) {
@@ -1651,13 +1700,25 @@ class EnrichmentRepository(
                         )
                     }
 
-                    // 3. Franchise & Relations with smart season deduplication
+                    // 3. Franchise & Relations with smart season deduplication and multi-season mapping
                     val relationList = mutableListOf<AnimeRelationItem>()
                     val relEdges = media["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
                     val baseTitleNorm = (title ?: "").lowercase().replace(Regex("[^a-z0-9]"), "")
                     val seasonAniListMap = mutableMapOf<Int, Long>()
+
+                    fun parseSeasonNumber(text: String?): Int? {
+                        if (text.isNullOrBlank()) return null
+                        val m1 = Regex("""(?i)\bseason\s*(\d+)\b""").find(text)
+                        if (m1 != null) return m1.groupValues[1].toIntOrNull()
+                        val m2 = Regex("""(?i)\b(\d+)(?:st|nd|rd|th)\s*season\b""").find(text)
+                        if (m2 != null) return m2.groupValues[1].toIntOrNull()
+                        return null
+                    }
+
+                    val rootTitle = mediaEnglishTitle ?: mediaRomajiTitle ?: title ?: ""
+                    val rootSeason = parseSeasonNumber(rootTitle) ?: 1
                     if (resolvedId != null && resolvedId > 0) {
-                        seasonAniListMap[1] = resolvedId
+                        seasonAniListMap[rootSeason] = resolvedId
                     }
 
                     for (edgeElem in relEdges) {
@@ -1675,12 +1736,12 @@ class EnrichmentRepository(
                             ?: node["coverImage"]?.jsonObject?.get("large").cleanString()
                         val year = node["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
 
-                        // Extract per-season AniList ID from raw relations BEFORE Safeguard 3 strips them for the Franchise rail
-                        val sMatch = Regex("""(?i)(?:season\s*|s)(\d+)""").find(relTitle)
-                            ?: Regex("""(?i)(\d+)(?:st|nd|rd|th)\s*season""").find(relTitle)
-                        val sNum = sMatch?.groupValues?.get(1)?.toIntOrNull()
+                        // Extract per-season AniList ID from Level 1 relation
+                        val sNum = parseSeasonNumber(relTitle)
                         if (sNum != null && sNum > 0) {
-                            seasonAniListMap[sNum] = relId
+                            if (!seasonAniListMap.containsKey(sNum)) {
+                                seasonAniListMap[sNum] = relId
+                            }
                         } else if (relFormat.equals("TV", ignoreCase = true) && relType == "SEQUEL") {
                             if (!seasonAniListMap.containsKey(2)) {
                                 seasonAniListMap[2] = relId
@@ -1688,6 +1749,37 @@ class EnrichmentRepository(
                         } else if (relType in listOf("SIDE_STORY", "SPECIAL", "OVA")) {
                             if (!seasonAniListMap.containsKey(0)) {
                                 seasonAniListMap[0] = relId
+                            }
+                        }
+
+                        // Inspect Level 2 nested relations for multi-season TV anime:
+                        // Traversed on ADAPTATION (e.g. Manga/Novel linking all seasons) or SEQUEL/PREQUEL/PARENT
+                        if (relType in listOf("ADAPTATION", "SEQUEL", "PREQUEL", "PARENT")) {
+                            val childEdges = node["relations"]?.jsonObject?.get("edges")?.jsonArray.orEmpty()
+                            for (childElem in childEdges) {
+                                val cEdge = childElem.jsonObject
+                                val cRelType = cEdge["relationType"].cleanString() ?: continue
+                                val cNode = cEdge["node"]?.jsonObject ?: continue
+                                val cId = cNode["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: continue
+                                val cFormat = cNode["format"].cleanString() ?: "TV"
+                                val cType = cNode["type"].cleanString() ?: "ANIME"
+                                val cEng = cNode["title"]?.jsonObject?.get("english").cleanString()
+                                val cRom = cNode["title"]?.jsonObject?.get("romaji").cleanString()
+                                val cTitle = cEng ?: cRom ?: ""
+
+                                if (cType.equals("ANIME", ignoreCase = true) && cFormat in listOf("TV", "TV_SHORT", "ONA")) {
+                                    val cNum = parseSeasonNumber(cTitle)
+                                    if (cNum != null && cNum > 0) {
+                                        if (!seasonAniListMap.containsKey(cNum)) {
+                                            seasonAniListMap[cNum] = cId
+                                        }
+                                    } else if (cRelType in listOf("ADAPTATION", "PREQUEL") && !seasonAniListMap.containsKey(1)) {
+                                        val cYear = cNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                        if (cYear == null || (year != null && cYear <= year)) {
+                                            seasonAniListMap[1] = cId
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -1725,6 +1817,8 @@ class EnrichmentRepository(
                             )
                         )
                     }
+
+                    AppLogger.d("EnrichmentRepository", "Discovered seasonAniListIds for '$title': $seasonAniListMap")
 
                     // 4. Studios (Filtered by isAnimationStudio == true per Safeguard 6)
                     val studioList = mutableListOf<String>()

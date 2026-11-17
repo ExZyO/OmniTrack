@@ -202,7 +202,7 @@ fun DetailCommentsSection(
 
     // Filter comments by selected tag and sort
     val filteredComments = remember(localCommentsList, selectedTag, sortOrder) {
-        val byTag = if (selectedTag == "All") {
+        val byTag = if (selectedTag == "All" || onTagSelect != null) {
             localCommentsList
         } else {
             val tagNumber = selectedTag.replace(Regex("[^0-9]"), "").toIntOrNull()

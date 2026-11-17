@@ -1,7 +1,7 @@
 {
-  "version": "v1.0.0-b178",
-  "versionCode": 178,
-  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b178/OmniTrack-v1.0.0-b178.apk",
-  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b178/OmniTrack-v1.0.0-b178-debug.apk",
-  "releaseNotes": "OmniTrack v1.0.0-b178: fix(discussion): resolve per-season AniList IDs, page 1 query parity, and instantaneous episode tag comment filtering"
+  "version": "v1.0.0-b180",
+  "versionCode": 180,
+  "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b180/OmniTrack-v1.0.0-b180.apk",
+  "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/v1.0.0-b180/OmniTrack-v1.0.0-b180-debug.apk",
+  "releaseNotes": "OmniTrack v1.0.0-b180: fix(discussion): 2-level AniList relation mapping for all seasons, resolve self-wipe loop, season persistence, and Dantotsu episode tag filtering"
 }

@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Collections
 
 import com.omnitrack.app.data.model.AnimeTagItem
 import com.omnitrack.app.data.preferences.PreferredTitleLanguage
@@ -776,7 +777,8 @@ class DetailViewModel(
                     val effectiveItem = currentItem ?: preseededItem
                     if (effectiveItem != null) {
                         maybeEnrich(effectiveItem)
-                        if (_realSeasons.value.isEmpty()) {
+                        val auxKey = "${effectiveItem.id}_${effectiveItem.anilistId}_${effectiveItem.tmdbId}_${effectiveItem.title}"
+                        if (loadedAuxKeys.add(auxKey)) {
                             loadRecommendationsAndReviews(effectiveItem)
                         }
                         updateSiblings(effectiveItem.id)
@@ -844,7 +846,10 @@ class DetailViewModel(
         }
     )
 
+    private val loadedAuxKeys = Collections.synchronizedSet(mutableSetOf<String>())
+
     private fun resetAuxFields() {
+        loadedAuxKeys.clear()
         discussionFetchJob?.cancel()
         rootAniListId = null
         _activeDiscussionAniListId.value = null
@@ -1002,7 +1007,12 @@ class DetailViewModel(
     private var seriesFetchJob: kotlinx.coroutines.Job? = null
 
     private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
-        _discussionComments.value = emptyList()
+        if (_activeDiscussionAniListId.value == null) {
+            _discussionComments.value = emptyList()
+        }
+        if (item.anilistId != null && item.anilistId > 0 && _activeDiscussionAniListId.value == null) {
+            loadDiscussionComments(item.anilistId)
+        }
         val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
 
         if (isShowOrAnime) {
@@ -1415,7 +1425,8 @@ class DetailViewModel(
                         anilistId = item.anilistId,
                         malId = item.malId,
                         title = item.title,
-                        existingSeasonsCount = _realSeasons.value.size.coerceAtLeast(1)
+                        existingSeasonsCount = _realSeasons.value.size.coerceAtLeast(1),
+                        mediaType = item.mediaType
                     )
                     if (animeDetails != null) {
                         if (!animeDetails.englishTitle.isNullOrBlank()) _englishTitle.value = animeDetails.englishTitle
@@ -1663,9 +1674,18 @@ class DetailViewModel(
             _collectionItems.value = fetchedCollParts
 
             if (resolvedAniListId != null) {
-                loadDiscussionComments(resolvedAniListId)
+                val currentSeason = _selectedSeasonNumber.value
+                if (currentSeason > 1) {
+                    reloadCommentsForSeason(currentSeason)
+                } else {
+                    if (_activeDiscussionAniListId.value != resolvedAniListId || _discussionComments.value.isEmpty()) {
+                        loadDiscussionComments(resolvedAniListId)
+                    }
+                }
             } else {
-                _discussionComments.value = emptyList()
+                if (_activeDiscussionAniListId.value == null) {
+                    _discussionComments.value = emptyList()
+                }
             }
 
             persistAuxCache()
@@ -1751,7 +1771,9 @@ class DetailViewModel(
                         val validSeasons = seasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         val sortedSeasons = validSeasons.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
                         SeriesContentMemoryCache.seasonsCache[tmdbId] = sortedSeasons
-                        SeriesContentMemoryCache.seasonsCache[item.id] = sortedSeasons
+                        if (item.id > 0L) {
+                            SeriesContentMemoryCache.seasonsCache[item.id] = sortedSeasons
+                        }
                         _realSeasons.value = sortedSeasons
 
                         val currentSelected = _selectedSeasonNumber.value
@@ -1796,7 +1818,9 @@ class DetailViewModel(
                                 }
                             }
                             SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] = _episodesBySeason.value
-                            SeriesContentMemoryCache.episodesBySeasonCache[item.id] = _episodesBySeason.value
+                            if (item.id > 0L) {
+                                SeriesContentMemoryCache.episodesBySeasonCache[item.id] = _episodesBySeason.value
+                            }
                             refreshNextAiringEpisode(item)
                         }
                     }
