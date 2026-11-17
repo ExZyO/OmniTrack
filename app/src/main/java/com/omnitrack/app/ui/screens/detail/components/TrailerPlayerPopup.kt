@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -148,7 +149,7 @@ fun TrailerPlayerPopup(
             <div class="iframe-container">
                 <iframe
                     id="ytplayer"
-                    src="https://www.youtube-nocookie.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1&controls=1"
+                    src="https://www.youtube.com/embed/$youtubeKey?autoplay=1&playsinline=1&enablejsapi=1&rel=0&modestbranding=1&controls=1&origin=https://www.youtube.com"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                     allowfullscreen>
                 </iframe>
@@ -166,9 +167,12 @@ fun TrailerPlayerPopup(
             )
             setBackgroundColor(android.graphics.Color.BLACK)
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
+                databaseEnabled = true
                 mediaPlaybackRequiresUserGesture = false
                 cacheMode = WebSettings.LOAD_DEFAULT
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -196,7 +200,7 @@ fun TrailerPlayerPopup(
             }
             webViewClient = WebViewClient()
             loadDataWithBaseURL(
-                "https://omnitrack.app",
+                "https://www.youtube.com",
                 htmlContent,
                 "text/html",
                 "UTF-8",

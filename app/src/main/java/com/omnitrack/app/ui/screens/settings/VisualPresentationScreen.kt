@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -56,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.BannerSizing
 import com.omnitrack.app.data.preferences.DetailsBackdropStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
+import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
@@ -63,10 +66,13 @@ import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurfaceElevated
+import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun VisualPresentationScreen(
@@ -77,6 +83,8 @@ fun VisualPresentationScreen(
     val prefManager = remember { PreferenceManager(context) }
     val scope = rememberCoroutineScope()
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = EpisodeLayoutMode.HORIZONTAL)
+    val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
 
     Column(
         modifier = modifier
@@ -251,6 +259,93 @@ fun VisualPresentationScreen(
                             }
                         }
                     )
+                }
+            }
+
+            // Section 5: Episode Layout & Sizing
+            PresentationSectionTitle("EPISODE LAYOUT & SIZING")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                PresentationChoiceCard(
+                    title = "Horizontal Carousel",
+                    description = "16:9 widescreen thumbnails you can swipe sideways like a filmstrip.",
+                    isSelected = episodeLayoutMode == EpisodeLayoutMode.HORIZONTAL,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.HORIZONTAL) }
+                    }
+                )
+
+                PresentationChoiceCard(
+                    title = "Compact List",
+                    description = "Clean vertical list with thumbnails on the left and titles/synopses on the right.",
+                    isSelected = episodeLayoutMode == EpisodeLayoutMode.LIST,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.LIST) }
+                    }
+                )
+            }
+
+            PresentationChoiceCard(
+                title = "Vertical Hero Cards",
+                description = "Bigger vertical cards where episode title, description, and scores sit directly inside the card image.",
+                isSelected = episodeLayoutMode == EpisodeLayoutMode.VERTICAL_CARD,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.VERTICAL_CARD) }
+                }
+            )
+
+            // Episode Resizing Slider (80% - 135%)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Episode Card Scale",
+                        color = TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${(episodeLayoutScale * 100).roundToInt()}%",
+                        color = AccentJade,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Slider(
+                    value = episodeLayoutScale,
+                    onValueChange = { newScale ->
+                        scope.launch { prefManager.updateEpisodeLayoutScale(newScale) }
+                    },
+                    valueRange = 0.80f..1.35f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = AccentJade,
+                        activeTrackColor = AccentJade,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.15f)
+                    )
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("80% Compact", color = TextMuted, fontSize = 11.sp)
+                    Text("100% Default", color = TextMuted, fontSize = 11.sp)
+                    Text("135% Large", color = TextMuted, fontSize = 11.sp)
                 }
             }
 

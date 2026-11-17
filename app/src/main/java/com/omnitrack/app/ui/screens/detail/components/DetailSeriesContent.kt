@@ -402,8 +402,8 @@ fun DetailSeriesContent(
 
 /**
  * 1:1 Nuvio Animated Watched Badge:
- * Solid 24dp circular badge filled with vibrant emerald accent (0xFF22D37C) and crisp white checkmark icon (14dp).
- * Fades and scales smoothly on toggle.
+ * Delicate stroked ring circle (hollow center letting underlying thumbnail artwork shine through)
+ * with a crisp centered white checkmark icon. Fades and scales smoothly on toggle.
  */
 @Composable
 fun NuvioAnimatedWatchedBadge(
@@ -418,15 +418,20 @@ fun NuvioAnimatedWatchedBadge(
     ) {
         Box(
             modifier = Modifier
-                .size(20.dp)
+                .size(22.dp)
                 .clip(CircleShape)
-                .background(Brush.linearGradient(listOf(Color(0xFFE52E5E), Color(0xFFC2185B)))),
+                .background(Color.Black.copy(alpha = 0.20f))
+                .border(
+                    width = 1.2.dp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    shape = CircleShape
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Watched",
-                tint = Color.White,
+                tint = Color.White.copy(alpha = 0.95f),
                 modifier = Modifier.size(12.dp)
             )
         }
@@ -662,32 +667,16 @@ private fun EpisodeHorizontalCard(
                 .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
             val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (badgeText.isNotBlank()) {
-                    EpisodeCodeBadge(
-                        text = badgeText,
-                        textSize = 10.sp,
-                        radius = 4.dp,
-                        horizontalPadding = 6.dp,
-                        verticalPadding = 2.dp,
-                        backgroundAlpha = 0.45f
-                    )
-                }
-                if (!formattedDate.isNullOrBlank()) {
-                    Text(
-                        text = formattedDate,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.70f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            if (!formattedDate.isNullOrBlank()) {
+                Text(
+                    text = formattedDate,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.70f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
@@ -844,23 +833,7 @@ private fun EpisodeListCardItem(
                     }
                 }
 
-                // 1:1 Nuvio Top-Left Episode Code Badge
-                val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
-                if (badgeText.isNotBlank()) {
-                    EpisodeCodeBadge(
-                        text = badgeText,
-                        textSize = 10.sp,
-                        radius = 4.dp,
-                        horizontalPadding = 6.dp,
-                        verticalPadding = 2.dp,
-                        backgroundAlpha = 0.45f,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(start = 8.dp, top = 8.dp)
-                    )
-                }
-
-                // 1:1 Nuvio Top-Right Watched Circle (solid crimson/magenta with white checkmark)
+                // 1:1 Nuvio Top-Right Watched Circle (delicate stroked ring with white checkmark)
                 NuvioAnimatedWatchedBadge(
                     isWatched = isWatched,
                     modifier = Modifier
@@ -1049,32 +1022,16 @@ private fun EpisodeVerticalCardItem(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val badgeText = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
             val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (badgeText.isNotBlank()) {
-                    EpisodeCodeBadge(
-                        text = badgeText,
-                        textSize = 10.sp,
-                        radius = 4.dp,
-                        horizontalPadding = 6.dp,
-                        verticalPadding = 2.dp,
-                        backgroundAlpha = 0.45f
-                    )
-                }
-                if (!formattedDate.isNullOrBlank()) {
-                    Text(
-                        text = formattedDate,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.70f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+            if (!formattedDate.isNullOrBlank()) {
+                Text(
+                    text = formattedDate,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.70f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
@@ -1233,7 +1190,7 @@ private fun SeasonTextChipScrollRow(
         state = listState,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(seasons, key = { it.seasonNumber }) { season ->
             val isSelected = season.seasonNumber == selectedSeasonNumber
@@ -1244,12 +1201,12 @@ private fun SeasonTextChipScrollRow(
 
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent
                     )
                     .clickable { onSelectSeason(season.seasonNumber) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1264,7 +1221,7 @@ private fun SeasonTextChipScrollRow(
                 Text(
                     text = label,
                     color = if (isSelected) Color.White else Color.White.copy(alpha = 0.65f),
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
                 )
             }
