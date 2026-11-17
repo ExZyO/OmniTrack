@@ -123,7 +123,7 @@ class EnrichmentRepository(
             if (!fanartApiKey.isNullOrBlank()) {
                 clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
             }
-            if (clearart.isNullOrBlank() && !tmdbApiKey.isNullOrBlank()) {
+            if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
                 clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
             }
         }

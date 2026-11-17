@@ -1597,27 +1597,49 @@ private fun DetailHeroHeaderSection(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
+                var clearartLoaded by remember(item.clearartUrl) { mutableStateOf(false) }
                 val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+                val context = LocalContext.current
 
-                if (hasClearart) {
-                    AsyncImage(
-                        model = item.clearartUrl,
-                        contentDescription = item.title,
-                        modifier = Modifier
-                            .height(52.dp)
-                            .padding(bottom = 6.dp),
-                        contentScale = ContentScale.Fit,
-                        alignment = Alignment.CenterStart,
-                        onError = { clearartFailed = true }
-                    )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = onToggleTitle != null) { onToggleTitle?.invoke() },
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (hasClearart) {
+                        val logoRequest = remember(item.clearartUrl) {
+                            ImageRequest.Builder(context)
+                                .data(item.clearartUrl)
+                                .crossfade(true)
+                                .build()
+                        }
+                        AsyncImage(
+                            model = logoRequest,
+                            contentDescription = item.title,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .padding(bottom = 4.dp)
+                                .graphicsLayer { alpha = if (clearartLoaded) 1f else 0f },
+                            contentScale = ContentScale.Fit,
+                            alignment = Alignment.CenterStart,
+                            onSuccess = { clearartLoaded = true },
+                            onError = { clearartFailed = true }
+                        )
+                    }
+
+                    if (!hasClearart || !clearartLoaded) {
+                        Text(
+                            text = item.title,
+                            color = TextPrimary,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Black,
+                            lineHeight = 29.sp
+                        )
+                    }
                 }
-                Text(
-                    text = item.title,
-                    color = TextPrimary,
-                    fontSize = if (hasClearart) 20.sp else 24.sp,
-                    fontWeight = FontWeight.Black,
-                    lineHeight = if (hasClearart) 25.sp else 29.sp
-                )
+
                 if (item.nativeTitle != null) {
                     Text(
                         text = item.nativeTitle,
@@ -1760,16 +1782,56 @@ private fun DetailClassicHeaderSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.title,
-                        color = TextPrimary,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = 27.sp
-                    )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    var clearartFailed by remember(item.clearartUrl) { mutableStateOf(false) }
+                    var clearartLoaded by remember(item.clearartUrl) { mutableStateOf(false) }
+                    val hasClearart = !item.clearartUrl.isNullOrBlank() && !clearartFailed
+                    val context = LocalContext.current
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = onToggleTitle != null) { onToggleTitle?.invoke() },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (hasClearart) {
+                            val logoRequest = remember(item.clearartUrl) {
+                                ImageRequest.Builder(context)
+                                    .data(item.clearartUrl)
+                                    .crossfade(true)
+                                    .build()
+                            }
+                            AsyncImage(
+                                model = logoRequest,
+                                contentDescription = item.title,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp)
+                                    .padding(bottom = 2.dp)
+                                    .graphicsLayer { alpha = if (clearartLoaded) 1f else 0f },
+                                contentScale = ContentScale.Fit,
+                                alignment = Alignment.CenterStart,
+                                onSuccess = { clearartLoaded = true },
+                                onError = { clearartFailed = true }
+                            )
+                        }
+
+                        if (!hasClearart || !clearartLoaded) {
+                            Text(
+                                text = item.title,
+                                color = TextPrimary,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                lineHeight = 27.sp
+                            )
+                        }
+                    }
+
                     if (item.nativeTitle != null) {
                         Text(
                             text = item.nativeTitle,
@@ -1792,12 +1854,22 @@ private fun DetailClassicHeaderSection(
                     )
                 }
             }
-            Text(
-                text = item.mediaType.displayName.uppercase(),
-                color = AccentArctic,
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Black
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = item.mediaType.displayName.uppercase(),
+                    color = AccentArctic,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+                if (item.platform != null) {
+                    Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 10.5.sp)
+                    Text(text = item.platform, color = Color.White, fontSize = 11.sp)
+                }
+            }
         }
     }
 

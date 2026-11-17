@@ -158,7 +158,7 @@ fun VisualPresentationScreen(
                 val isClassic = presentationSettings.detailsPagePresentation == DetailsPagePresentation.CLASSIC
                 PresentationChoiceCard(
                     title = "Classic Poster",
-                    description = "Overlaid portrait card with ambient glow, adjacent title and floating stats.",
+                    description = "Overlaid portrait cover with ambient glow, studio logo art as title, and floating stats.",
                     isSelected = isClassic,
                     modifier = Modifier.weight(1f),
                     onClick = {
