@@ -491,33 +491,32 @@ fun DetailSeriesContent(
 @Composable
 fun NuvioAnimatedWatchedBadge(
     isWatched: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
-    AnimatedVisibility(
-        visible = isWatched,
-        enter = fadeIn(tween(150)) + scaleIn(spring(dampingRatio = 0.8f, stiffness = 400f)),
-        exit = fadeOut(tween(150)) + scaleOut(tween(150)),
+    val bgColor = if (isWatched) Color(0xFF00E054) else Color.Black.copy(alpha = 0.42f)
+    val borderColor = if (isWatched) Color(0xFF00E054) else Color.White.copy(alpha = 0.55f)
+    val iconColor = if (isWatched) Color.Black else Color.White.copy(alpha = 0.38f)
+
+    Box(
         modifier = modifier
-    ) {
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.20f))
-                .border(
-                    width = 1.2.dp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Watched",
-                tint = Color.White.copy(alpha = 0.95f),
-                modifier = Modifier.size(12.dp)
+            .size(24.dp)
+            .clip(CircleShape)
+            .background(bgColor)
+            .border(
+                width = if (isWatched) 1.4.dp else 1.3.dp,
+                color = borderColor,
+                shape = CircleShape
             )
-        }
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Check,
+            contentDescription = if (isWatched) "Watched" else "Mark Watched",
+            tint = iconColor,
+            modifier = Modifier.size(13.dp)
+        )
     }
 }
 
@@ -746,9 +745,10 @@ private fun EpisodeHorizontalCard(
                 )
         )
 
-        // 1:1 Nuvio Watched Badge Circle on Top Right (hidden when unwatched)
+        // Always-Visible Watched Badge Circle on Top Right
         NuvioAnimatedWatchedBadge(
             isWatched = isWatched,
+            onClick = onToggleWatched,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 8.dp, end = 8.dp)
@@ -778,7 +778,7 @@ private fun EpisodeHorizontalCard(
         EpisodeAvailabilityBadge(
             episode = episode,
             modifier = Modifier
-                .align(if (isWatched || episode.isFiller || episode.isRecap) Alignment.BottomEnd else Alignment.TopEnd)
+                .align(if (episode.isFiller || episode.isRecap) Alignment.BottomEnd else Alignment.TopStart)
                 .padding(8.dp)
         )
 
@@ -930,9 +930,10 @@ private fun EpisodeListCardItem(
             ) {
                 EpisodeThumbnailLayer(episode = episode)
 
-                // 1:1 Nuvio Top-Right Watched Circle (delicate stroked ring with white checkmark)
+                // Always-Visible Top-Right Watched Circle
                 NuvioAnimatedWatchedBadge(
                     isWatched = isWatched,
+                    onClick = onToggleWatched,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 8.dp, end = 8.dp)
@@ -1103,9 +1104,10 @@ private fun EpisodeVerticalCardItem(
                 )
         )
 
-        // Top-Right Watched Circle (hidden when unwatched)
+        // Always-Visible Top-Right Watched Circle
         NuvioAnimatedWatchedBadge(
             isWatched = isWatched,
+            onClick = onToggleWatched,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 8.dp, end = 8.dp)

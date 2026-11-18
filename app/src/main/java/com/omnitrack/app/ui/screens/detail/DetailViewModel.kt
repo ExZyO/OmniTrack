@@ -442,6 +442,23 @@ class DetailViewModel(
             if (ephemeral != null) {
                 _previewStack.value = listOf(ephemeral)
                 _previewItem.value = ephemeral
+                viewModelScope.launch(Dispatchers.IO) {
+                    val existing = repository.findExistingMedia(
+                        anilistId = ephemeral.anilistId,
+                        malId = ephemeral.malId,
+                        tmdbId = ephemeral.tmdbId,
+                        title = ephemeral.title,
+                        mediaType = ephemeral.mediaType
+                    )
+                    if (existing != null && existing.id > 0L) {
+                        withContext(Dispatchers.Main) {
+                            EphemeralPreviewHolder.previewItem = null
+                            _previewStack.value = emptyList()
+                            _previewItem.value = null
+                            _mediaId.value = existing.id
+                        }
+                    }
+                }
             }
         }
         val active = ActiveSiblingHolder.activeSiblingIds
@@ -798,7 +815,16 @@ class DetailViewModel(
                 aux.previewItem.nativeTitle
             }
             val displayPreviewItem = aux.previewItem.copy(title = resolvedPreviewTitle, nativeTitle = resolvedPreviewNative)
-            flowOf(
+            val progressFlow = if (aux.previewItem.id > 0L) {
+                repository.getEpisodeProgress(aux.previewItem.id)
+                    .onStart { emit(latestEpisodeProgressCache[aux.previewItem.id] ?: emptyList()) }
+                    .distinctUntilChanged()
+            } else {
+                flowOf(emptyList())
+            }
+            progressFlow.map { progressList ->
+                val watchedSet = progressList.filter { it.isWatched }
+                    .map { it.seasonNumber to it.episodeNumber }.toSet()
                 DetailUiState(
                     item = displayPreviewItem,
                     previousItem = null,
@@ -808,7 +834,7 @@ class DetailViewModel(
                     realEpisodes = aux.realEpisodes,
                     selectedSeasonNumber = aux.selectedSeasonNumber,
                     episodesBySeason = aux.episodesBySeason,
-                    watchedEpisodes = emptySet(),
+                    watchedEpisodes = watchedSet,
                     recommendations = aux.recommendations,
                     reviews = aux.reviews,
                     cast = aux.cast,
@@ -849,7 +875,7 @@ class DetailViewModel(
                     isFillerSkipEnabled = aux.isFillerSkipEnabled,
                     hasFillers = hasFillers
                 )
-            )
+            }
         } else {
             _mediaId.flatMapLatest { currentId ->
                 repository.getMediaById(currentId)
@@ -1677,11 +1703,13 @@ class DetailViewModel(
                             }
                         }
 
-                        val targetMalId = animeDetails.seasonMalIds[_selectedSeasonNumber.value]
-                            ?: item.malId
-                            ?: animeDetails.malId
-                        if (targetMalId != null && targetMalId > 0) {
-                            loadFillersForMalId(targetMalId)
+                        val rootMalId = animeDetails.malId ?: item.malId ?: animeDetails.seasonMalIds[1]
+                        val targetMalId = animeDetails.seasonMalIds[_selectedSeasonNumber.value] ?: rootMalId
+                        if (rootMalId != null && rootMalId > 0) {
+                            loadFillersForMalId(rootMalId, item.title)
+                        }
+                        if (targetMalId != null && targetMalId > 0 && targetMalId != rootMalId) {
+                            loadFillersForMalId(targetMalId, item.title)
                         }
                         if (item.id <= 0 && _previewItem.value != null) {
                             val currentTop = _previewItem.value!!
@@ -2206,27 +2234,56 @@ class DetailViewModel(
 
     private var seasonEpisodesJob: kotlinx.coroutines.Job? = null
 
+    private fun decorateEpisodesWithFillers(
+        seasonNumber: Int,
+        episodes: List<MediaEpisode>,
+        malIdForSeason: Long?
+    ): List<MediaEpisode> {
+        val rootMalId = _seasonMalIds.value[1] ?: _previewItem.value?.malId ?: latestRoomItemCache[_mediaId.value]?.malId
+        val rootFillers = rootMalId?.let { _fillerInfoMap.value[it] }.orEmpty()
+        val seasonFillers = malIdForSeason?.let { _fillerInfoMap.value[it] }.orEmpty()
+        if (rootFillers.isEmpty() && seasonFillers.isEmpty()) return episodes
+        val offset = getCumulativeOffsetForSeason(seasonNumber)
+        return episodes.map { ep ->
+            val absoluteNum = offset + ep.episodeNumber
+            val info = (if (seasonNumber > 1 && rootFillers.containsKey(absoluteNum)) rootFillers[absoluteNum] else null)
+                ?: seasonFillers[ep.episodeNumber]
+                ?: rootFillers[absoluteNum]
+                ?: seasonFillers[absoluteNum]
+            if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
+        }
+    }
+
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
         reloadCommentsForSeason(seasonNumber)
 
-        val malIdForSeason = _seasonMalIds.value[seasonNumber] ?: _seasonMalIds.value[1] ?: _previewItem.value?.malId
-        if (malIdForSeason != null && malIdForSeason > 0 && !_fillerInfoMap.value.containsKey(malIdForSeason)) {
-            loadFillersForMalId(malIdForSeason)
+        val previewItem = _previewItem.value
+        val activeItem = previewItem ?: latestRoomItemCache[_mediaId.value]
+        val rootMalId = _seasonMalIds.value[1] ?: activeItem?.malId
+        val malIdForSeason = _seasonMalIds.value[seasonNumber] ?: rootMalId
+        if (rootMalId != null && rootMalId > 0 && !_fillerInfoMap.value.containsKey(rootMalId)) {
+            loadFillersForMalId(rootMalId, activeItem?.title)
+        }
+        if (malIdForSeason != null && malIdForSeason > 0 && malIdForSeason != rootMalId && !_fillerInfoMap.value.containsKey(malIdForSeason)) {
+            loadFillersForMalId(malIdForSeason, activeItem?.title)
         }
 
         val inMemory = _episodesBySeason.value[seasonNumber]
         if (!inMemory.isNullOrEmpty()) {
-            _realEpisodes.value = inMemory
+            val decorated = decorateEpisodesWithFillers(seasonNumber, inMemory, malIdForSeason)
+            _realEpisodes.value = decorated
+            if (decorated != inMemory) {
+                _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to decorated)
+            }
             return
         }
 
-        val previewItem = _previewItem.value
-        val activeItem = previewItem ?: latestRoomItemCache[_mediaId.value]
         val tmdbId = activeItem?.tmdbId ?: SeriesContentMemoryCache.resolvedTmdbIdCache[_mediaId.value]
         SeriesContentMemoryCache.findSeasonEpisodes(activeItem, tmdbId, seasonNumber, _mediaId.value)?.let { cached ->
-            _realEpisodes.value = cached
-            _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to cached)
+            val decorated = decorateEpisodesWithFillers(seasonNumber, cached, malIdForSeason)
+            _realEpisodes.value = decorated
+            _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to decorated)
             return
         }
         seasonEpisodesJob?.cancel()
@@ -2240,15 +2297,7 @@ class DetailViewModel(
             val resolvedImdbId = dbItem?.imdbId
             val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, resolvedImdbId, currentTitle)
             if (eps.isNotEmpty()) {
-                val fillerMap = _fillerInfoMap.value[malIdForSeason] ?: emptyMap()
-                val enrichedEps = if (fillerMap.isNotEmpty()) {
-                    val offset = getCumulativeOffsetForSeason(seasonNumber)
-                    eps.map { ep ->
-                        val absoluteNum = offset + ep.episodeNumber
-                        val info = fillerMap[absoluteNum] ?: fillerMap[ep.episodeNumber]
-                        if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
-                    }
-                } else eps
+                val enrichedEps = decorateEpisodesWithFillers(seasonNumber, eps, malIdForSeason)
                 SeriesContentMemoryCache.putSeasonEpisodes(dbItem, resolvedTmdbId, seasonNumber, enrichedEps)
                 _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to enrichedEps)
                 _realEpisodes.value = enrichedEps
@@ -2260,10 +2309,38 @@ class DetailViewModel(
         _isFillerSkipEnabled.update { !it }
     }
 
+    private suspend fun ensureLibraryMediaId(): Long {
+        val existingId = _mediaId.value
+        if (existingId > 0L) return existingId
+        val preview = _previewItem.value ?: return -1L
+        val found = repository.findExistingMedia(
+            anilistId = preview.anilistId,
+            malId = preview.malId,
+            tmdbId = preview.tmdbId,
+            title = preview.title,
+            mediaType = preview.mediaType
+        )
+        val resolvedId = found?.id?.takeIf { it > 0L } ?: repository.insertMedia(
+            preview.copy(
+                id = 0L,
+                status = if (preview.status == TrackingStatus.PLAN_TO_TRACK) TrackingStatus.IN_PROGRESS else preview.status
+            )
+        )
+        if (resolvedId > 0L) {
+            withContext(Dispatchers.Main) {
+                EphemeralPreviewHolder.previewItem = null
+                _previewStack.value = emptyList()
+                _previewItem.value = null
+                _mediaId.value = resolvedId
+            }
+        }
+        return resolvedId
+    }
+
     fun markWatchedUpToWithFillerChoice(episode: MediaEpisode, markFillersWatched: Boolean) {
-        val mediaId = _mediaId.value
-        if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
             val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = !markFillersWatched)
             repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
@@ -2292,27 +2369,25 @@ class DetailViewModel(
             .sumOf { it.episodeCount }
     }
 
-    private fun loadFillersForMalId(malId: Long) {
+    private fun loadFillersForMalId(malId: Long, showTitle: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
-            val fillers = enrichmentRepository.fetchEpisodeFillers(malId)
+            val titleForLookup = showTitle ?: _previewItem.value?.title ?: latestRoomItemCache[_mediaId.value]?.title
+            val fillers = enrichmentRepository.fetchEpisodeFillers(malId, titleForLookup)
             if (fillers.isNotEmpty()) {
                 _fillerInfoMap.update { it + (malId to fillers) }
+                val activeItem = _previewItem.value ?: latestRoomItemCache[_mediaId.value]
+                val tmdbId = activeItem?.tmdbId ?: SeriesContentMemoryCache.resolvedTmdbIdCache[_mediaId.value]
+                val currentSeason = _selectedSeasonNumber.value
+                val seasonMalId = _seasonMalIds.value[currentSeason] ?: malId
                 _realEpisodes.update { list ->
-                    list.map { ep ->
-                        val offset = getCumulativeOffsetForSeason(ep.seasonNumber)
-                        val absoluteNum = offset + ep.episodeNumber
-                        val info = fillers[absoluteNum] ?: fillers[ep.episodeNumber]
-                        if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
-                    }
+                    decorateEpisodesWithFillers(currentSeason, list, seasonMalId)
                 }
                 _episodesBySeason.update { map ->
                     map.mapValues { (sNum, eps) ->
-                        val offset = getCumulativeOffsetForSeason(sNum)
-                        eps.map { ep ->
-                            val absoluteNum = offset + ep.episodeNumber
-                            val info = fillers[absoluteNum] ?: fillers[ep.episodeNumber]
-                            if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
-                        }
+                        val sMal = _seasonMalIds.value[sNum] ?: malId
+                        val decorated = decorateEpisodesWithFillers(sNum, eps, sMal)
+                        SeriesContentMemoryCache.putSeasonEpisodes(activeItem, tmdbId, sNum, decorated)
+                        decorated
                     }
                 }
             }
@@ -2368,9 +2443,9 @@ class DetailViewModel(
     }
 
     fun toggleEpisodeWatched(episode: MediaEpisode) {
-        val mediaId = _mediaId.value
-        if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
             if (!isCurrentlyWatched) {
@@ -2413,9 +2488,9 @@ class DetailViewModel(
     }
 
     fun markPreviousEpisodesWatched(episode: MediaEpisode) {
-        val mediaId = _mediaId.value
-        if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
             val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
             repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
@@ -2437,9 +2512,9 @@ class DetailViewModel(
     }
 
     fun toggleSeasonWatched(seasonNumber: Int) {
-        val mediaId = _mediaId.value
-        if (mediaId <= 0) return
         viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val seasonEps = _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
             val allWatched = seasonEps.isNotEmpty() && seasonEps.all { ep ->

@@ -21,6 +21,25 @@ import java.io.IOException
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
 
+data class GeminiModelOption(
+    val id: String,
+    val name: String,
+    val description: String
+)
+
+val DEFAULT_GEMINI_MODELS = listOf(
+    GeminiModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "Official Flagship · Fast & High Quota"),
+    GeminiModelOption("gemini-3.7-flash", "Gemini 3.7 Flash", "Flagship Hybrid & Fast"),
+    GeminiModelOption("gemini-3.5-flash", "Gemini 3.5 Flash", "Ultra Fast"),
+    GeminiModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Highest Free Quota"),
+    GeminiModelOption("gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "High Quota & Fast"),
+    GeminiModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Deep Reasoning"),
+    GeminiModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Recommended · Fast & Intelligent"),
+    GeminiModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Deep Reasoning & Analysis"),
+    GeminiModelOption("gemini-2.0-flash", "Gemini 2.0 Flash", "Fast Hybrid"),
+    GeminiModelOption("gemini-2.0-flash-lite", "Gemini 2.0 Flash-Lite", "High Quota")
+)
+
 data class PosterCardStyle(
     val widthDp: Int = 126,
     val cornerRadiusDp: Int = 12,
@@ -104,6 +123,9 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_MODEL = stringPreferencesKey("gemini_model")
+        val CUSTOM_GEMINI_MODEL = stringPreferencesKey("custom_gemini_model")
+        val USE_CUSTOM_GEMINI_MODEL = booleanPreferencesKey("use_custom_gemini_model")
         val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
         val TMDB_API_KEY = stringPreferencesKey("tmdb_api_key")
         val FANART_API_KEY = stringPreferencesKey("fanart_api_key")
@@ -197,6 +219,39 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateGeminiApiKey(key: String) {
         context.dataStore.edit { it[PreferencesKeys.GEMINI_API_KEY] = key }
     }
+
+    val geminiModel: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.GEMINI_MODEL] ?: "gemini-2.5-flash" }
+
+    suspend fun updateGeminiModel(model: String) {
+        context.dataStore.edit { it[PreferencesKeys.GEMINI_MODEL] = model }
+    }
+
+    val customGeminiModel: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.CUSTOM_GEMINI_MODEL] ?: "" }
+
+    suspend fun updateCustomGeminiModel(customModel: String) {
+        context.dataStore.edit { it[PreferencesKeys.CUSTOM_GEMINI_MODEL] = customModel }
+    }
+
+    val useCustomGeminiModel: Flow<Boolean> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.USE_CUSTOM_GEMINI_MODEL] ?: false }
+
+    suspend fun updateUseCustomGeminiModel(useCustom: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.USE_CUSTOM_GEMINI_MODEL] = useCustom }
+    }
+
+    val activeGeminiModel: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val useCustom = prefs[PreferencesKeys.USE_CUSTOM_GEMINI_MODEL] ?: false
+            val custom = prefs[PreferencesKeys.CUSTOM_GEMINI_MODEL] ?: ""
+            val preset = prefs[PreferencesKeys.GEMINI_MODEL] ?: "gemini-2.5-flash"
+            if (useCustom && custom.isNotBlank()) custom.trim() else preset
+        }
 
     val openRouterApiKey: Flow<String> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }

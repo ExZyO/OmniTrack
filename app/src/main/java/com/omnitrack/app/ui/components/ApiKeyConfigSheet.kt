@@ -1,7 +1,11 @@
 package com.omnitrack.app.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,15 +19,21 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -41,9 +51,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.preferences.DEFAULT_GEMINI_MODELS
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.ui.theme.AccentArctic
@@ -66,6 +79,9 @@ fun ApiKeyConfigSheet(
     val scope = rememberCoroutineScope()
 
     val currentGemini by preferenceManager.geminiApiKey.collectAsState(initial = "")
+    val currentGeminiModel by preferenceManager.geminiModel.collectAsState(initial = "gemini-2.5-flash")
+    val currentCustomGeminiModel by preferenceManager.customGeminiModel.collectAsState(initial = "")
+    val currentUseCustomGeminiModel by preferenceManager.useCustomGeminiModel.collectAsState(initial = false)
     val currentOpenRouter by preferenceManager.openRouterApiKey.collectAsState(initial = "")
     val currentTmdb by preferenceManager.tmdbApiKey.collectAsState(initial = "")
     val currentFanart by preferenceManager.fanartApiKey.collectAsState(initial = "")
@@ -182,6 +198,29 @@ fun ApiKeyConfigSheet(
                 value = geminiKey,
                 onValueChange = { geminiKey = it },
                 accentColor = AccentArctic
+            )
+
+            // Gemini AI Model Selector (Dual-Mode Preset + Custom Model ID)
+            GeminiModelSelectorSection(
+                geminiModel = currentGeminiModel,
+                customGeminiModel = currentCustomGeminiModel,
+                useCustomGeminiModel = currentUseCustomGeminiModel,
+                onSelectPreset = { modelId ->
+                    scope.launch {
+                        preferenceManager.updateUseCustomGeminiModel(false)
+                        preferenceManager.updateGeminiModel(modelId)
+                    }
+                },
+                onSelectCustomMode = {
+                    scope.launch {
+                        preferenceManager.updateUseCustomGeminiModel(true)
+                    }
+                },
+                onCustomModelChange = { valTrim ->
+                    scope.launch {
+                        preferenceManager.updateCustomGeminiModel(valTrim)
+                    }
+                }
             )
 
             // OpenRouter API Key
@@ -380,6 +419,199 @@ private fun ApiKeyField(
                     innerTextField()
                 }
             )
+        }
+    }
+}
+
+@Composable
+fun GeminiModelSelectorSection(
+    geminiModel: String,
+    customGeminiModel: String,
+    useCustomGeminiModel: Boolean,
+    onSelectPreset: (String) -> Unit,
+    onSelectCustomMode: () -> Unit,
+    onCustomModelChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedOption = remember(geminiModel) {
+        DEFAULT_GEMINI_MODELS.firstOrNull { it.id == geminiModel }
+    }
+    val displayLabel = if (useCustomGeminiModel) {
+        "Custom Model (Enter Manually…)"
+    } else {
+        selectedOption?.let { "${it.name} (${it.description})" } ?: geminiModel
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Gemini AI Model",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextSecondary
+        )
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(
+                        width = 1.dp,
+                        color = if (expanded) AccentArctic.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable { expanded = true }
+                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = AccentArctic,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = displayLabel,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = "Select Model",
+                    tint = TextMuted,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .background(Color(0xFF121216))
+                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+            ) {
+                DEFAULT_GEMINI_MODELS.forEach { option ->
+                    val isSelected = !useCustomGeminiModel && geminiModel == option.id
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = option.name,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) AccentArctic else TextPrimary
+                                )
+                                Text(
+                                    text = option.description,
+                                    fontSize = 11.sp,
+                                    color = TextMuted
+                                )
+                            }
+                        },
+                        trailingIcon = if (isSelected) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = AccentArctic,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else null,
+                        onClick = {
+                            onSelectPreset(option.id)
+                            expanded = false
+                        }
+                    )
+                }
+
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                text = "Custom Model (Enter Manually…)",
+                                fontSize = 13.sp,
+                                fontWeight = if (useCustomGeminiModel) FontWeight.Bold else FontWeight.Medium,
+                                color = if (useCustomGeminiModel) AccentArctic else TextPrimary
+                            )
+                            Text(
+                                text = "Enter any custom or preview Gemini model ID",
+                                fontSize = 11.sp,
+                                color = TextMuted
+                            )
+                        }
+                    },
+                    trailingIcon = if (useCustomGeminiModel) {
+                        {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = AccentArctic,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else null,
+                    onClick = {
+                        onSelectCustomMode()
+                        expanded = false
+                    }
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = useCustomGeminiModel) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Custom Model ID",
+                    fontSize = 11.sp,
+                    color = TextMuted
+                )
+                OutlinedTextField(
+                    value = customGeminiModel,
+                    onValueChange = { onCustomModelChange(it.trim()) },
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            text = "e.g. gemini-3.8-flash",
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = TextMuted.copy(alpha = 0.55f)
+                        )
+                    },
+                    textStyle = TextStyle(
+                        color = TextPrimary,
+                        fontSize = 12.5.sp,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentArctic,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                        focusedContainerColor = Color(0xFF0A0A0E),
+                        unfocusedContainerColor = Color(0xFF0A0A0E),
+                        cursorColor = AccentArctic
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

@@ -1,8 +1,10 @@
 package com.omnitrack.app.ui.screens.home.views
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -31,11 +33,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -63,10 +69,12 @@ import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.DEFAULT_GEMINI_MODELS
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.ui.components.GeminiModelSelectorSection
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.home.HomeViewModel
@@ -84,6 +92,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverView(
     allMedia: List<MediaCardSummary>,
@@ -99,6 +108,11 @@ fun DiscoverView(
     val scope = rememberCoroutineScope()
 
     val geminiKey by prefManager.geminiApiKey.collectAsState(initial = "")
+    val geminiModel by prefManager.geminiModel.collectAsState(initial = "gemini-2.5-flash")
+    val customGeminiModel by prefManager.customGeminiModel.collectAsState(initial = "")
+    val useCustomGeminiModel by prefManager.useCustomGeminiModel.collectAsState(initial = false)
+    val activeGeminiModel by prefManager.activeGeminiModel.collectAsState(initial = "gemini-2.5-flash")
+    var showModelPickerSheet by remember { mutableStateOf(false) }
     val openRouterKey by prefManager.openRouterApiKey.collectAsState(initial = "")
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
     val aiSearchSetting by prefManager.aiSemanticSearchEnabled.collectAsState(initial = false)
@@ -129,6 +143,7 @@ fun DiscoverView(
     var localLastExecutedQuery by remember { mutableStateOf(homeViewModel?.discoverLastExecutedQuery) }
     var localLastExecutedFilter by remember { mutableStateOf(homeViewModel?.discoverLastExecutedFilter) }
     var localLastExecutedAi by remember { mutableStateOf(homeViewModel?.discoverLastExecutedAi) }
+    var localLastExecutedModel by remember { mutableStateOf<String?>(null) }
     var localLastEffectiveQuery by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveQuery) }
     var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
     var searchGen by remember { mutableStateOf(0L) }
@@ -146,7 +161,7 @@ fun DiscoverView(
     }
 
     // Multi-Vertical OmniSearch Trigger
-    LaunchedEffect(searchQuery, selectedFilter, useAiSearch) {
+    LaunchedEffect(searchQuery, selectedFilter, useAiSearch, activeGeminiModel) {
         val myGen = ++searchGen
         val trimmed = searchQuery.trim()
         val prevQuery = homeViewModel?.discoverLastExecutedQuery ?: localLastExecutedQuery
@@ -155,12 +170,14 @@ fun DiscoverView(
         val prevDebounceQuery = homeViewModel?.discoverLastDebounceQuery ?: localLastDebounceQuery
 
         if (trimmed.length >= 2) {
-            if (resultsFlow.value.isNotEmpty() && trimmed == prevQuery && selectedFilter == prevFilter && useAiSearch == prevAi) {
+            val modelChanged = useAiSearch && localLastExecutedModel != null && localLastExecutedModel != activeGeminiModel
+            if (!modelChanged && resultsFlow.value.isNotEmpty() && trimmed == prevQuery && selectedFilter == prevFilter && useAiSearch == prevAi) {
                 // Preserved search results restored from previous navigation! Don't re-trigger.
                 return@LaunchedEffect
             }
+            localLastExecutedModel = activeGeminiModel
             val filterChanged = prevFilter != null && selectedFilter != prevFilter
-            if (!filterChanged && trimmed != prevDebounceQuery) {
+            if (!filterChanged && !modelChanged && trimmed != prevDebounceQuery) {
                 delay(400)
                 localLastDebounceQuery = trimmed
                 homeViewModel?.discoverLastDebounceQuery = trimmed
@@ -177,11 +194,12 @@ fun DiscoverView(
                 val aiResult = aiEngine.resolveQuery(
                     rawQuery = trimmed,
                     geminiApiKey = geminiKey.ifBlank { null },
-                    openRouterApiKey = openRouterKey.ifBlank { null }
+                    openRouterApiKey = openRouterKey.ifBlank { null },
+                    geminiModel = activeGeminiModel
                 )
                 if (aiResult.isAiResolved) {
                     queryToRun = aiResult.resolvedTitle
-                    resolvedBanner = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
+                    resolvedBanner = "AI [$activeGeminiModel]: \"${aiResult.resolvedTitle}\"" +
                         (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
                         (aiResult.explanation?.let { " • $it" } ?: "")
                     if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
@@ -203,7 +221,7 @@ fun DiscoverView(
                             "AI Smart Mode (No API key in Settings) — Try natural phrases like 'anime about alchemy', or add a Gemini key."
                         }
                     } else {
-                        resolvedBanner = "AI Mode: searching exact title \"$queryToRun\""
+                        resolvedBanner = "AI Mode [$activeGeminiModel]: searching exact title \"$queryToRun\""
                     }
                 }
             }
@@ -341,23 +359,36 @@ fun DiscoverView(
                 }
             )
 
-            // Inline AI Toggle Pill
+            // Inline AI Toggle & Quick Model Picker Pill
+            val shortModelLabel = remember(activeGeminiModel) {
+                activeGeminiModel
+                    .removePrefix("gemini-")
+                    .replace("-preview", "")
+                    .replace("flash-lite", "FL")
+                    .replace("flash", "F")
+                    .take(12)
+            }
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (useAiSearch) AccentArctic.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
-                    .clickable {
-                        val nextAi = !useAiSearch
-                        useAiFlow.value = nextAi
-                        scope.launch { prefManager.updateAiSemanticSearchEnabled(nextAi) }
-                        if (nextAi) {
-                            if (geminiKey.isBlank() && openRouterKey.isBlank()) {
-                                bannerFlow.value = "AI Smart Mode enabled (Local heuristics) — Describe what you're looking for, or add a Gemini / OpenRouter key in Settings for full AI search."
+                    .combinedClickable(
+                        onClick = {
+                            val nextAi = !useAiSearch
+                            useAiFlow.value = nextAi
+                            scope.launch { prefManager.updateAiSemanticSearchEnabled(nextAi) }
+                            if (nextAi) {
+                                if (geminiKey.isBlank() && openRouterKey.isBlank()) {
+                                    bannerFlow.value = "AI Smart Mode enabled (Local heuristics) — Describe what you're looking for, or add a Gemini / OpenRouter key in Settings for full AI search."
+                                }
+                            } else {
+                                bannerFlow.value = null
                             }
-                        } else {
-                            bannerFlow.value = null
+                        },
+                        onLongClick = {
+                            showModelPickerSheet = true
                         }
-                    }
+                    )
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -369,10 +400,19 @@ fun DiscoverView(
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "AI",
+                    text = if (useAiSearch) "AI · $shortModelLabel" else "AI",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (useAiSearch) AccentArctic else TextMuted
+                )
+                Icon(
+                    imageVector = Icons.Default.ExpandMore,
+                    contentDescription = "Select AI Model",
+                    tint = if (useAiSearch) AccentArctic else TextMuted,
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(CircleShape)
+                        .clickable { showModelPickerSheet = true }
                 )
             }
 
@@ -600,6 +640,61 @@ fun DiscoverView(
                     )
                 }
             }
+            }
+        }
+
+        if (showModelPickerSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showModelPickerSheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = AmoledBlack
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = AccentArctic,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Search AI Model",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    }
+                    GeminiModelSelectorSection(
+                        geminiModel = geminiModel,
+                        customGeminiModel = customGeminiModel,
+                        useCustomGeminiModel = useCustomGeminiModel,
+                        onSelectPreset = { modelId ->
+                            scope.launch {
+                                prefManager.updateUseCustomGeminiModel(false)
+                                prefManager.updateGeminiModel(modelId)
+                            }
+                        },
+                        onSelectCustomMode = {
+                            scope.launch {
+                                prefManager.updateUseCustomGeminiModel(true)
+                            }
+                        },
+                        onCustomModelChange = { valTrim ->
+                            scope.launch {
+                                prefManager.updateCustomGeminiModel(valTrim)
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
         }
     }

@@ -48,13 +48,14 @@ class OmniSearchRepository(
 
     private val providerPriority = mapOf(
         "AniList" to 1,
-        "TMDb" to 2,
-        "MangaDex" to 3,
-        "RanobeDB" to 4,
-        "Steam" to 5,
-        "VNDB" to 6,
-        "OpenLibrary" to 7,
-        "WLNUpdates" to 8,
+        "TVDB" to 2,
+        "TMDb" to 3,
+        "MangaDex" to 4,
+        "RanobeDB" to 5,
+        "Steam" to 6,
+        "VNDB" to 7,
+        "OpenLibrary" to 8,
+        "WLNUpdates" to 9,
         "Bangumi" to 10
     )
 
@@ -81,12 +82,27 @@ class OmniSearchRepository(
             },
             { (index, _) -> index }
         )).map { it.value }
-        val seen = mutableSetOf<String>()
+        val indexByKey = mutableMapOf<String, Int>()
         val deduped = mutableListOf<SearchResultItem>()
         for (item in prioritized) {
             val key = "${item.mediaType.name}:${item.title.trim().lowercase()}"
-            if (seen.add(key)) {
+            val existingIdx = indexByKey[key]
+            if (existingIdx == null) {
+                indexByKey[key] = deduped.size
                 deduped.add(item)
+            } else {
+                val existing = deduped[existingIdx]
+                deduped[existingIdx] = existing.copy(
+                    tmdbId = existing.tmdbId ?: item.tmdbId,
+                    anilistId = existing.anilistId ?: item.anilistId,
+                    malId = existing.malId ?: item.malId,
+                    bannerUrl = existing.bannerUrl ?: item.bannerUrl,
+                    coverUrl = existing.coverUrl.ifBlank { item.coverUrl },
+                    synopsis = existing.synopsis ?: item.synopsis,
+                    totalProgress = existing.totalProgress ?: item.totalProgress,
+                    releaseYear = existing.releaseYear ?: item.releaseYear,
+                    communityScore = existing.communityScore ?: item.communityScore
+                )
             }
         }
         return deduped
@@ -141,6 +157,8 @@ class OmniSearchRepository(
                 }
                 MediaType.ANIME -> {
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = true) })
+                    deferreds.add(launchProvider { searchTvdbSkyHookAnime(trimmed) })
+                    deferreds.add(launchProvider { searchTmdbAnime(trimmed, tmdbApiKey) })
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 2, defaultType = MediaType.ANIME) })
                 }
                 MediaType.MANGA -> {
@@ -583,6 +601,160 @@ class OmniSearchRepository(
             if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
+        }
+    }
+
+    private suspend fun searchTvdbSkyHookAnime(query: String): List<SearchResultItem> {
+        val cacheKey = "tvdb_anime:${query.lowercase().trim()}"
+        providerSearchCache[cacheKey]?.let { return it }
+        return NetworkPacer.coalesce(cacheKey) {
+            providerSearchCache[cacheKey]?.let { return@coalesce it }
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val encoded = URLEncoder.encode(query, "UTF-8")
+                    val url = "https://skyhook.sonarr.tv/v1/tvdb/search/en/?term=$encoded"
+                    val request = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                        val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                        val items = json.parseToJsonElement(body).jsonArray
+                        val parsed = items.mapNotNull { node ->
+                            val obj = node.jsonObject
+                            val title = obj["title"].cleanString() ?: return@mapNotNull null
+                            val aniListIds = obj["aniListIds"]?.jsonArray?.mapNotNull {
+                                it.jsonPrimitive.contentOrNull?.toLongOrNull()
+                            }.orEmpty()
+                            val malIds = obj["malIds"]?.jsonArray?.mapNotNull {
+                                it.jsonPrimitive.contentOrNull?.toLongOrNull()
+                            }.orEmpty()
+                            val genres = obj["genres"]?.jsonArray?.mapNotNull {
+                                it.jsonPrimitive.contentOrNull
+                            }.orEmpty()
+                            val country = obj["originalCountry"].cleanString().orEmpty()
+                            val isAnime = aniListIds.isNotEmpty() ||
+                                malIds.isNotEmpty() ||
+                                genres.any { it.equals("Anime", ignoreCase = true) } ||
+                                (country.equals("jpn", ignoreCase = true) && genres.any { it.equals("Animation", ignoreCase = true) })
+                            if (!isAnime) return@mapNotNull null
+
+                            val images = obj["images"]?.jsonArray.orEmpty()
+                            var posterUrl: String? = null
+                            var bannerUrl: String? = null
+                            for (imgNode in images) {
+                                val imgObj = imgNode.jsonObject
+                                val cType = imgObj["coverType"].cleanString()
+                                val u = imgObj["url"].cleanString() ?: continue
+                                if (cType.equals("Poster", ignoreCase = true) && posterUrl == null) {
+                                    posterUrl = u
+                                } else if (cType.equals("Fanart", ignoreCase = true) && bannerUrl == null) {
+                                    bannerUrl = u
+                                } else if (cType.equals("Banner", ignoreCase = true) && bannerUrl == null) {
+                                    bannerUrl = u
+                                }
+                            }
+                            if (posterUrl.isNullOrBlank()) return@mapNotNull null
+
+                            val tmdbId = obj["tmdbId"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                            val synopsis = cleanSynopsis(obj["overview"].cleanString())
+                            val releaseYear = obj["firstAired"].cleanString()?.take(4)
+                            val score = obj["rating"]?.jsonObject?.get("value")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+
+                            SearchResultItem(
+                                title = title,
+                                synopsis = synopsis,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl(posterUrl),
+                                bannerUrl = bannerUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                                mediaType = MediaType.ANIME,
+                                releaseYear = releaseYear,
+                                communityScore = score,
+                                sourceProvider = "TVDB",
+                                anilistId = aniListIds.firstOrNull(),
+                                malId = malIds.firstOrNull(),
+                                tmdbId = tmdbId
+                            )
+                        }
+                        if (parsed.isNotEmpty()) {
+                            providerSearchCache[cacheKey] = parsed
+                        }
+                        parsed
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    AppLogger.w("OmniSearchRepository", "TVDB SkyHook anime search failed for $query: ${e.message}")
+                    emptyList()
+                }
+            }
+        }
+    }
+
+    private suspend fun searchTmdbAnime(
+        query: String,
+        customTmdbKey: String? = null
+    ): List<SearchResultItem> {
+        val cacheKey = "tmdb_anime:${query.lowercase().trim()}"
+        providerSearchCache[cacheKey]?.let { return it }
+        val apiKey = customTmdbKey?.takeIf { it.isNotBlank() } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+        return NetworkPacer.coalesce(cacheKey) {
+            providerSearchCache[cacheKey]?.let { return@coalesce it }
+            coroutineScope {
+                val encoded = URLEncoder.encode(query, "UTF-8")
+                suspend fun queryEndpoint(endpoint: String): List<SearchResultItem> = NetworkPacer.withTmdbPacing {
+                    try {
+                        val url = "https://api.themoviedb.org/3/search/$endpoint?api_key=$apiKey&query=$encoded"
+                        val request = Request.Builder().url(url).get().build()
+                        client.newCall(request).execute().use { response ->
+                            if (!response.isSuccessful) return@withTmdbPacing emptyList()
+                            val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                            val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray
+                                ?: return@withTmdbPacing emptyList()
+                            results.mapNotNull { node ->
+                                val obj = node.jsonObject
+                                val genres = obj["genre_ids"]?.jsonArray?.mapNotNull {
+                                    it.jsonPrimitive.contentOrNull?.toIntOrNull()
+                                }.orEmpty()
+                                val origLang = obj["original_language"].cleanString()
+                                val origCountries = obj["origin_country"]?.jsonArray?.mapNotNull {
+                                    it.jsonPrimitive.contentOrNull
+                                }.orEmpty()
+                                val isAnime = 16 in genres && (origLang == "ja" || origCountries.any { it.equals("JP", ignoreCase = true) })
+                                if (!isAnime) return@mapNotNull null
+
+                                val title = obj["name"].cleanString() ?: obj["title"].cleanString() ?: return@mapNotNull null
+                                val nativeTitle = obj["original_name"].cleanString() ?: obj["original_title"].cleanString()
+                                val posterPath = obj["poster_path"].cleanString() ?: return@mapNotNull null
+                                val backdropPath = obj["backdrop_path"].cleanString()
+                                val date = obj["first_air_date"].cleanString() ?: obj["release_date"].cleanString()
+                                val tmdbId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+
+                                SearchResultItem(
+                                    title = title,
+                                    nativeTitle = nativeTitle,
+                                    synopsis = cleanSynopsis(obj["overview"].cleanString()),
+                                    coverUrl = LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$posterPath"),
+                                    bannerUrl = backdropPath?.let { LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$it") },
+                                    mediaType = MediaType.ANIME,
+                                    releaseYear = date?.split("-")?.firstOrNull()?.cleanString(),
+                                    communityScore = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull(),
+                                    sourceProvider = "TMDb",
+                                    tmdbId = tmdbId
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        emptyList()
+                    }
+                }
+                val combined = listOf(async { queryEndpoint("tv") }, async { queryEndpoint("movie") }).awaitAll().flatten()
+                if (combined.isNotEmpty()) {
+                    providerSearchCache[cacheKey] = combined
+                }
+                combined
+            }
         }
     }
 

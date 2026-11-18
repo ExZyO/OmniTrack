@@ -118,6 +118,14 @@ class EnrichmentRepository(
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    private val jikanClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(4000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
     private data class TmdbRawSeasonMeta(
         val seasonNumber: Int,
         val rawName: String,
@@ -126,7 +134,16 @@ class EnrichmentRepository(
         val airDate: String?
     )
 
+    private data class SkyHookShowData(
+        val tvdbId: Long,
+        val seasonPosters: Map<Int, String>,
+        val episodesBySeason: Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>
+    )
+
     private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
+    private val cinemetaTvdbIdCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val tmdbTvdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+    private val skyHookShowCache = java.util.concurrent.ConcurrentHashMap<Long, SkyHookShowData>()
     private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val tmdbSeasonMetaCache = java.util.concurrent.ConcurrentHashMap<Long, List<TmdbRawSeasonMeta>>()
     private val tmdbSeasonRawEpisodesCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
@@ -468,6 +485,9 @@ class EnrichmentRepository(
                     if (!response.isSuccessful) return@withTmdbPacing null
                     val body = response.body?.string() ?: return@withTmdbPacing null
                     val root = json.parseToJsonElement(body).jsonObject
+                    root["tvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.takeIf { it > 0L }?.let {
+                        tmdbTvdbIdCache[tmdbId] = it
+                    }
                     root["imdb_id"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
                 }
             } catch (_: Exception) {
@@ -696,9 +716,14 @@ class EnrichmentRepository(
 
     private suspend fun fetchJikanScore(malId: Long): Float? {
         return try {
-            val url = "https://api.jikan.moe/v4/anime/$malId"
+            val host = if (System.currentTimeMillis() < jikanCircuitBreakerUntil) {
+                "https://jikanfortheweebs.midnightignite.me/v4"
+            } else {
+                "https://jikanfortheweebs.midnightignite.me/v4"
+            }
+            val url = "$host/anime/$malId"
             val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { response ->
+            jikanClient.newCall(req).execute().use { response ->
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
                 val root = json.parseToJsonElement(body).jsonObject
@@ -908,6 +933,9 @@ class EnrichmentRepository(
                     val body = response.body?.string() ?: return@coalesce emptyList()
                     val root = json.parseToJsonElement(body).jsonObject
                     val meta = root["meta"]?.jsonObject ?: return@coalesce emptyList()
+                    meta["tvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.takeIf { it > 0L }?.let {
+                        cinemetaTvdbIdCache[imdbId] = it
+                    }
                     val videos = meta["videos"]?.jsonArray ?: return@coalesce emptyList()
                     val result = videos.mapNotNull { node ->
                         val obj = node.jsonObject
@@ -947,6 +975,86 @@ class EnrichmentRepository(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 emptyList()
+            }
+        }
+    }
+
+    private suspend fun fetchSkyHookShow(tvdbId: Long): SkyHookShowData? = withContext(Dispatchers.IO) {
+        if (tvdbId <= 0L) return@withContext null
+        skyHookShowCache[tvdbId]?.let { return@withContext it }
+        NetworkPacer.coalesce("skyhook_show_$tvdbId") {
+            skyHookShowCache[tvdbId]?.let { return@coalesce it }
+            try {
+                val url = "https://skyhook.sonarr.tv/v1/tvdb/shows/en/$tvdbId"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@coalesce null
+                    val body = resp.body?.string() ?: return@coalesce null
+                    val root = json.parseToJsonElement(body).jsonObject
+
+                    val seasonPosters = mutableMapOf<Int, String>()
+                    root["seasons"]?.jsonArray?.forEach { node ->
+                        val obj = node.jsonObject
+                        val sNum = obj["seasonNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                            ?: return@forEach
+                        val posterUrl = obj["images"]?.jsonArray?.firstNotNullOfOrNull { imgNode ->
+                            val imgObj = imgNode.jsonObject
+                            val coverType = imgObj["coverType"].cleanString()
+                            if (coverType.equals("Poster", ignoreCase = true)) {
+                                imgObj["url"].cleanString()
+                            } else null
+                        }
+                        if (!posterUrl.isNullOrBlank()) {
+                            seasonPosters[sNum] = posterUrl
+                        }
+                    }
+
+                    val episodesBySeason = mutableMapOf<Int, MutableList<com.omnitrack.app.data.model.MediaEpisode>>()
+                    root["episodes"]?.jsonArray?.forEach { node ->
+                        val obj = node.jsonObject
+                        val sNum = obj["seasonNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                            ?: return@forEach
+                        val epNum = obj["episodeNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                            ?: return@forEach
+                        val title = obj["title"].cleanString() ?: "Episode $epNum"
+                        val overview = obj["overview"].cleanString()
+                        val stillUrl = obj["image"].cleanString()
+                        val airDate = obj["airDate"].cleanString()?.take(10)
+                        val runtime = obj["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        val list = episodesBySeason.getOrPut(sNum) { mutableListOf() }
+                        list.add(
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = sNum * 1000L + epNum,
+                                episodeNumber = epNum,
+                                seasonNumber = sNum,
+                                title = title,
+                                overview = overview,
+                                stillUrl = stillUrl,
+                                airDate = airDate,
+                                runtimeMinutes = runtime
+                            )
+                        )
+                    }
+                    val sortedEpisodes = episodesBySeason.mapValues { (_, list) ->
+                        list.sortedBy { it.episodeNumber }
+                    }
+                    val data = SkyHookShowData(
+                        tvdbId = tvdbId,
+                        seasonPosters = seasonPosters,
+                        episodesBySeason = sortedEpisodes
+                    )
+                    if (seasonPosters.isNotEmpty() || sortedEpisodes.isNotEmpty()) {
+                        skyHookShowCache[tvdbId] = data
+                    }
+                    data
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                null
             }
         }
     }
@@ -1205,18 +1313,23 @@ class EnrichmentRepository(
                 .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
         }
 
-        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2, Bleach S1-16, or Apothecary Diaries S2/3)
+        // Cinemeta + TVDB (SkyHook) merge for multi-season anime (e.g. Frieren S2, Bleach S1-16, Apothecary Diaries S2/3)
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         if (!effectiveImdbId.isNullOrBlank()) {
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
+            val tvdbId = cinemetaTvdbIdCache[effectiveImdbId] ?: tmdbTvdbIdCache[tmdbId]
+            val skyHook = if (tvdbId != null && tvdbId > 0L) fetchSkyHookShow(tvdbId) else null
+
             if (cinemetaVideos.isNotEmpty()) {
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
                 val tmdbSeason1Poster = tmdbSeasons.find { it.seasonNumber == 1 }?.posterUrl
 
-                // Parallel season poster discovery capped at <= 5 seasons to prevent request storms on long-running anime (e.g. Bleach 16 seasons)
+                // Parallel AniList/Kitsu poster discovery ONLY for seasons still missing a SkyHook TVDB poster (and <= 5)
                 val seasonsNeedingPosters = cinemetaSeasons.keys.filter { sNum ->
-                    sNum > 0 && mergedList.find { it.seasonNumber == sNum }?.posterUrl.isNullOrBlank()
+                    sNum > 0 &&
+                        mergedList.find { it.seasonNumber == sNum }?.posterUrl.isNullOrBlank() &&
+                        skyHook?.seasonPosters?.get(sNum).isNullOrBlank()
                 }
                 val seasonPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && seasonsNeedingPosters.isNotEmpty() && seasonsNeedingPosters.size <= 5) {
                     coroutineScope {
@@ -1254,15 +1367,16 @@ class EnrichmentRepository(
                     val cmYear = eps.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
                     val isYearMismatch = existing != null && sNum >= 2 && existingYear != null && cmYear != null &&
                         kotlin.math.abs(existingYear - cmYear) > 1
+                    val skyHookPoster = skyHook?.seasonPosters?.get(sNum)
 
                     if (existing == null) {
-                        val resolvedPoster = seasonPosters[sNum]
+                        val resolvedPoster = skyHookPoster ?: seasonPosters[sNum]
                         val posterUrl = if (sNum <= 0) {
                             mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: resolvedPoster
                         } else if (sNum == 1) {
                             mergedList.find { it.seasonNumber == 1 }?.posterUrl ?: resolvedPoster
                         } else {
-                            // Use distinct season poster if found; for lumped multi-arc shows (e.g. Bleach S1-16), fall back to official 2:3 Season 1 poster
+                            // Prefer distinct TVDB/AniList season poster; only fall back to Season 1 poster if none exists
                             resolvedPoster ?: if (hasLumpedSeason1) tmdbSeason1Poster else null
                         }
                         mergedList.add(
@@ -1277,7 +1391,7 @@ class EnrichmentRepository(
                     } else if (isYearMismatch) {
                         // Replace colliding TMDb sequel sub-season (e.g. 2022 TYBW stored as Season 2 on 2004 Bleach) with Cinemeta Season 2 (2005)
                         val idx = mergedList.indexOf(existing)
-                        val resolvedPoster = seasonPosters[sNum] ?: if (hasLumpedSeason1) tmdbSeason1Poster else existing.posterUrl
+                        val resolvedPoster = skyHookPoster ?: seasonPosters[sNum] ?: if (hasLumpedSeason1) tmdbSeason1Poster else existing.posterUrl
                         mergedList[idx] = existing.copy(
                             name = "Season $sNum",
                             episodeCount = eps.size,
@@ -1287,11 +1401,15 @@ class EnrichmentRepository(
                     } else if (sNum == 1 && cinemetaSeasons.keys.any { it > 1 } && existing.episodeCount > eps.size && eps.isNotEmpty()) {
                         // TMDb lumped Season 1 and Season 2+ together (e.g. Apothecary Diaries 60 eps vs Cinemeta 24 eps)
                         val idx = mergedList.indexOf(existing)
-                        mergedList[idx] = existing.copy(episodeCount = eps.size)
-                    } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
-                        val idx = mergedList.indexOf(existing)
-                        val resolvedPoster = existing.posterUrl?.takeIf { it.isNotBlank() } ?: seasonPosters[sNum]
+                        val resolvedPoster = skyHookPoster ?: existing.posterUrl
                         mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = resolvedPoster)
+                    } else {
+                        val idx = mergedList.indexOf(existing)
+                        val nextCount = if (existing.episodeCount <= 0 && eps.isNotEmpty()) eps.size else existing.episodeCount
+                        val nextPoster = skyHookPoster ?: existing.posterUrl?.takeIf { it.isNotBlank() } ?: seasonPosters[sNum]
+                        if (nextCount != existing.episodeCount || nextPoster != existing.posterUrl) {
+                            mergedList[idx] = existing.copy(episodeCount = nextCount, posterUrl = nextPoster)
+                        }
                     }
                 }
                 return mergedList
@@ -1330,6 +1448,10 @@ class EnrichmentRepository(
 
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         val cinemetaVideos = if (!effectiveImdbId.isNullOrBlank()) fetchCinemetaVideos(effectiveImdbId) else emptyList()
+        val tvdbId = (effectiveImdbId?.let { cinemetaTvdbIdCache[it] }) ?: tmdbTvdbIdCache[tmdbId]
+        val skyHookEps = if (tvdbId != null && tvdbId > 0L) {
+            (skyHookShowCache[tvdbId] ?: fetchSkyHookShow(tvdbId))?.episodesBySeason?.get(seasonNumber).orEmpty()
+        } else emptyList()
         val cmSeasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
         val hasCinemetaS2 = cinemetaVideos.any { it.seasonNumber == 2 }
 
@@ -1343,23 +1465,31 @@ class EnrichmentRepository(
         if (hasTmdbSeasonInMeta) {
             val tmdbEpisodes = fetchTmdbRawSeasonEpisodes(tmdbId, seasonNumber, apiKey)
             if (tmdbEpisodes.isNotEmpty()) {
-                if (seasonNumber == 1 && cinemetaVideos.isNotEmpty()) {
+                val sliced = if (seasonNumber == 1 && cinemetaVideos.isNotEmpty()) {
                     val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
                     if (hasCinemetaS2 && cinemetaS1Count in 1 until tmdbEpisodes.size) {
-                        return tmdbEpisodes.filter { it.episodeNumber <= cinemetaS1Count }
-                    }
-                    return tmdbEpisodes
+                        tmdbEpisodes.filter { it.episodeNumber <= cinemetaS1Count }
+                    } else tmdbEpisodes
+                } else {
+                    val epYear = tmdbEpisodes.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
+                    val isEpYearMismatch = seasonNumber >= 2 && hasCinemetaS2 && cmSeasonEps.isNotEmpty() &&
+                        epYear != null && cmSeasonYear != null && kotlin.math.abs(epYear - cmSeasonYear) > 1
+                    if (!isEpYearMismatch) tmdbEpisodes else null
                 }
-                val epYear = tmdbEpisodes.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
-                val isEpYearMismatch = seasonNumber >= 2 && hasCinemetaS2 && cmSeasonEps.isNotEmpty() &&
-                    epYear != null && cmSeasonYear != null && kotlin.math.abs(epYear - cmSeasonYear) > 1
-                if (!isEpYearMismatch) {
-                    return tmdbEpisodes
+                if (sliced != null) {
+                    return sliced.map { ep ->
+                        val shMatch = skyHookEps.firstOrNull { it.episodeNumber == ep.episodeNumber }
+                        ep.copy(
+                            stillUrl = ep.stillUrl ?: shMatch?.stillUrl,
+                            overview = ep.overview?.takeIf { it.isNotBlank() } ?: shMatch?.overview,
+                            runtimeMinutes = ep.runtimeMinutes ?: shMatch?.runtimeMinutes
+                        )
+                    }
                 }
             }
         }
 
-        // Cinemeta fallback + TMDb Season 1 cumulative & title/date enrichment (e.g. Bleach S2-16, Apothecary Diaries S2/3)
+        // Cinemeta + TMDb Season 1 + TVDB (SkyHook) cumulative & title/date enrichment (e.g. Bleach S2-16, Apothecary Diaries S2/3)
         if (cmSeasonEps.isNotEmpty()) {
             val tmdbSeason1Eps = tmdbSeason1StillsCache[tmdbId] ?: fetchTmdbRawSeasonEpisodes(tmdbId, 1, apiKey)
             val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
@@ -1383,16 +1513,23 @@ class EnrichmentRepository(
                 } else null
 
                 val tmdbMatch = byCumulative ?: byTitle ?: byDate
-                val resolvedStill = tmdbMatch?.stillUrl ?: ep.stillUrl
-                val resolvedOverview = if (ep.overview.isNullOrBlank()) tmdbMatch?.overview else ep.overview
+                val shMatch = skyHookEps.firstOrNull { it.episodeNumber == ep.episodeNumber }
+                val resolvedStill = tmdbMatch?.stillUrl ?: shMatch?.stillUrl ?: ep.stillUrl
+                val resolvedOverview = if (ep.overview.isNullOrBlank()) (tmdbMatch?.overview ?: shMatch?.overview) else ep.overview
                 val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
+                val resolvedRuntime = ep.runtimeMinutes ?: tmdbMatch?.runtimeMinutes ?: shMatch?.runtimeMinutes
 
                 ep.copy(
                     stillUrl = resolvedStill,
                     overview = resolvedOverview,
+                    runtimeMinutes = resolvedRuntime,
                     voteAverage = resolvedVote
                 )
             }
+        }
+
+        if (skyHookEps.isNotEmpty()) {
+            return skyHookEps
         }
 
         return emptyList()
@@ -3740,50 +3877,127 @@ class EnrichmentRepository(
         }
     }
 
-    suspend fun fetchEpisodeFillers(malId: Long): Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo> = withContext(Dispatchers.IO) {
+    suspend fun fetchEpisodeFillers(
+        malId: Long,
+        showTitle: String? = null
+    ): Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo> = withContext(Dispatchers.IO) {
         val cached = episodeFillerMemoryCache[malId]
         if (!cached.isNullOrEmpty()) return@withContext cached
 
-        val fillerMap = mutableMapOf<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>()
-        var page = 1
-        var hasNext = true
+        NetworkPacer.coalesce("fillers_$malId") {
+            episodeFillerMemoryCache[malId]?.takeIf { it.isNotEmpty() }?.let { return@coalesce it }
 
-        while (hasNext && page <= 5) {
-            val primaryHost = "https://api.jikan.moe/v4"
+            val fillerMap = mutableMapOf<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>()
             val mirrorHost = "https://jikanfortheweebs.midnightignite.me/v4"
-            val activeHost = if (System.currentTimeMillis() < jikanCircuitBreakerUntil) {
-                mirrorHost
-            } else {
-                primaryHost
+            val officialHost = "https://api.jikan.moe/v4"
+            var activeHost = mirrorHost
+
+            var page1 = queryJikanEpisodesPage(activeHost, malId, 1)
+            if (page1 == null && System.currentTimeMillis() >= jikanCircuitBreakerUntil) {
+                activeHost = officialHost
+                page1 = queryJikanEpisodesPage(activeHost, malId, 1)
             }
 
-            val pageResult = queryJikanEpisodesPage(activeHost, malId, page)
-            if (pageResult != null) {
-                fillerMap.putAll(pageResult.episodes)
-                hasNext = pageResult.hasNext
-                page++
-            } else {
-                if (activeHost == primaryHost) {
-                    jikanCircuitBreakerUntil = System.currentTimeMillis() + 15 * 60 * 1000L
-                    val mirrorResult = queryJikanEpisodesPage(mirrorHost, malId, page)
-                    if (mirrorResult != null) {
-                        fillerMap.putAll(mirrorResult.episodes)
-                        hasNext = mirrorResult.hasNext
-                        page++
-                    } else {
-                        break
+            if (page1 != null) {
+                fillerMap.putAll(page1.episodes)
+                if (page1.hasNext) {
+                    val remainingPages = coroutineScope {
+                        (2..6).map { p ->
+                            async { queryJikanEpisodesPage(activeHost, malId, p) }
+                        }.awaitAll()
                     }
-                } else {
-                    break
+                    for (res in remainingPages) {
+                        if (res != null) {
+                            fillerMap.putAll(res.episodes)
+                        }
+                    }
                 }
             }
-        }
 
-        if (fillerMap.isNotEmpty()) {
-            episodeFillerMemoryCache[malId] = fillerMap
+            if (fillerMap.isEmpty() && !showTitle.isNullOrBlank()) {
+                val aflMap = fetchAnimeFillerListFillers(showTitle)
+                if (aflMap.isNotEmpty()) {
+                    fillerMap.putAll(aflMap)
+                }
+            }
+
+            if (fillerMap.isNotEmpty()) {
+                episodeFillerMemoryCache[malId] = fillerMap
+            }
+            fillerMap
         }
-        fillerMap
     }
+
+    private suspend fun fetchAnimeFillerListFillers(showTitle: String): Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo> =
+        withContext(Dispatchers.IO) {
+            try {
+                val baseTitle = showTitle
+                    .replace(Regex("(?i)\\s*[:\\-]\\s*(season|part|cour).*"), "")
+                    .trim()
+                val rawSlug = baseTitle.lowercase()
+                    .replace(Regex("[^a-z0-9]+"), "-")
+                    .trim('-')
+                if (rawSlug.isBlank()) return@withContext emptyMap()
+
+                val candidates = listOfNotNull(
+                    rawSlug,
+                    rawSlug.removePrefix("the-").takeIf { it != rawSlug }
+                ).distinct()
+
+                for (slug in candidates) {
+                    val url = "https://www.animefillerlist.com/shows/$slug"
+                    val req = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "Mozilla/5.0 (Linux; Android 14)")
+                        .build()
+                    val html = jikanClient.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) null else resp.body?.string()
+                    } ?: continue
+
+                    val fillerSectionMatch = Regex(
+                        """class="filler"[^>]*>.*?<span class="Episodes">(.*?)</span>""",
+                        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
+                    ).find(html) ?: continue
+
+                    val episodesText = fillerSectionMatch.groupValues[1]
+                        .replace(Regex("<[^>]+>"), "")
+                        .trim()
+                    if (episodesText.isBlank()) continue
+
+                    val map = mutableMapOf<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>()
+                    episodesText.split(",").forEach { token ->
+                        val cleaned = token.trim()
+                        if (cleaned.contains("-")) {
+                            val bounds = cleaned.split("-")
+                            val start = bounds.getOrNull(0)?.trim()?.toIntOrNull()
+                            val end = bounds.getOrNull(1)?.trim()?.toIntOrNull()
+                            if (start != null && end != null && start <= end && end - start <= 500) {
+                                for (ep in start..end) {
+                                    map[ep] = com.omnitrack.app.data.model.EpisodeFillerInfo(
+                                        episodeNumber = ep,
+                                        isFiller = true,
+                                        isRecap = false
+                                    )
+                                }
+                            }
+                        } else {
+                            cleaned.toIntOrNull()?.let { ep ->
+                                map[ep] = com.omnitrack.app.data.model.EpisodeFillerInfo(
+                                    episodeNumber = ep,
+                                    isFiller = true,
+                                    isRecap = false
+                                )
+                            }
+                        }
+                    }
+                    if (map.isNotEmpty()) return@withContext map
+                }
+                emptyMap()
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                emptyMap()
+            }
+        }
 
     private data class JikanPageResult(
         val episodes: Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>,
@@ -3798,8 +4012,13 @@ class EnrichmentRepository(
                     .url(url)
                     .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
                     .build()
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withJikanPacing null
+                jikanClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        if (host.contains("api.jikan.moe")) {
+                            jikanCircuitBreakerUntil = System.currentTimeMillis() + 30 * 60 * 1000L
+                        }
+                        return@withJikanPacing null
+                    }
                     val body = resp.body?.string() ?: return@withJikanPacing null
                     val root = json.parseToJsonElement(body).jsonObject
                     val pagination = root["pagination"]?.jsonObject
@@ -3820,6 +4039,10 @@ class EnrichmentRepository(
                     JikanPageResult(map, hasNext)
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (host.contains("api.jikan.moe")) {
+                    jikanCircuitBreakerUntil = System.currentTimeMillis() + 30 * 60 * 1000L
+                }
                 AppLogger.d("EnrichmentRepository", "Jikan query failed on $host for malId=$malId page=$page: ${e.message}")
                 null
             }

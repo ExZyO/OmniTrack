@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -41,14 +42,15 @@ class AiQueryEngine(
     suspend fun resolveQuery(
         rawQuery: String,
         geminiApiKey: String? = null,
-        openRouterApiKey: String? = null
+        openRouterApiKey: String? = null,
+        geminiModel: String? = null
     ): AiQueryResult = withContext(Dispatchers.IO) {
         val trimmed = rawQuery.trim()
         if (trimmed.length < 3) return@withContext AiQueryResult(resolvedTitle = trimmed)
 
         // 1. Try Gemini API first if configured
         if (!geminiApiKey.isNullOrBlank()) {
-            val geminiResult = resolveWithGemini(trimmed, geminiApiKey)
+            val geminiResult = resolveWithGemini(trimmed, geminiApiKey, geminiModel)
             if (geminiResult != null) return@withContext geminiResult
         }
 
@@ -62,7 +64,11 @@ class AiQueryEngine(
         resolveWithLocalHeuristics(trimmed)
     }
 
-    private suspend fun resolveWithGemini(query: String, apiKey: String): AiQueryResult? =
+    private suspend fun resolveWithGemini(
+        query: String,
+        apiKey: String,
+        preferredModel: String? = null
+    ): AiQueryResult? =
         NetworkPacer.withGeneralPacing {
             try {
                 val prompt = """
@@ -87,7 +93,11 @@ class AiQueryEngine(
                     })
                 }
 
-                val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash")
+                val modelsToTry = listOfNotNull(
+                    preferredModel?.trim()?.takeIf { it.isNotBlank() },
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash"
+                ).distinct()
                 for (modelName in modelsToTry) {
                     val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
                     val request = Request.Builder()
@@ -101,8 +111,11 @@ class AiQueryEngine(
                         val root = json.parseToJsonElement(body).jsonObject
                         val candidates = root["candidates"]?.jsonArray ?: return@use
                         val candidate = candidates.firstOrNull()?.jsonObject ?: return@use
-                        val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()
-                            ?.jsonObject?.get("text")?.jsonPrimitive?.content ?: return@use
+                        val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray ?: return@use
+                        val answerPart = parts.firstOrNull {
+                            it.jsonObject["thought"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() != true
+                        } ?: parts.firstOrNull()
+                        val text = answerPart?.jsonObject?.get("text")?.jsonPrimitive?.contentOrNull ?: return@use
 
                         val parsed = parseAiResponseJson(text)
                         if (parsed != null) return@withGeneralPacing parsed
