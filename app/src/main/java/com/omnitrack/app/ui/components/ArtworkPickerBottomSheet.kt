@@ -118,6 +118,13 @@ fun ArtworkPickerBottomSheet(
     currentCustomBannerPath: String? = null,
     mediaId: Long = 0,
     currentRole: String = "DEFAULT",
+    anilistId: Long? = null,
+    malId: Long? = null,
+    mangadexId: String? = null,
+    nativeTitle: String? = null,
+    romajiTitle: String? = null,
+    originCountry: String? = null,
+    defaultCoverUrl: String? = null,
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
     onBannerSelected: (String) -> Unit = {},
@@ -174,25 +181,44 @@ fun ArtworkPickerBottomSheet(
         }
     }
 
-    val fetchCandidates = {
+    val fetchCandidates: (Boolean) -> Unit = { forceRefresh ->
         scope.launch {
             isLoading = true
-            allCandidates = effectiveRepository.searchArtworkCandidates(title, mediaType)
+            allCandidates = effectiveRepository.searchArtworkCandidates(
+                title = title,
+                mediaType = mediaType,
+                anilistId = anilistId,
+                malId = malId,
+                mangadexId = mangadexId,
+                nativeTitle = nativeTitle,
+                romajiTitle = romajiTitle,
+                originCountry = originCountry,
+                defaultCoverUrl = defaultCoverUrl,
+                forceRefresh = forceRefresh
+            )
             isLoading = false
         }
     }
 
-    LaunchedEffect(title, mediaType) {
-        fetchCandidates()
+    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId) {
+        fetchCandidates(false)
     }
 
     // Filter covers and banners according to exclusions
     val displayedCovers = remember(allCandidates, excludedSources) {
-        allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources }
+        if ("ALL" in excludedSources) {
+            allCandidates.filter { !it.isBanner && it.sourceName.equals("Default", ignoreCase = true) }
+        } else {
+            allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources }
+        }
     }
 
     val displayedBanners = remember(allCandidates, excludedSources) {
-        allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources }
+        if ("ALL" in excludedSources) {
+            emptyList()
+        } else {
+            allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources }
+        }
     }
 
     val isBannerDisabled = currentCustomBannerPath == "NONE"
@@ -244,7 +270,7 @@ fun ArtworkPickerBottomSheet(
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(
-                        onClick = { fetchCandidates() },
+                        onClick = { fetchCandidates(true) },
                         enabled = !isLoading
                     ) {
                         Icon(
@@ -340,10 +366,20 @@ fun ArtworkPickerBottomSheet(
                             strokeWidth = 2.5.dp,
                             modifier = Modifier.size(32.dp)
                         )
+                        val loadingText = when (mediaType) {
+                            MediaType.MANGA, MediaType.NOVEL -> "Querying AniList, MangaDex, BookWalker, Naver, Kuaikan, Bangumi & Kitsu..."
+                            MediaType.ANIME -> "Querying AniList, TMDb, Bangumi, Kitsu & MangaDex..."
+                            MediaType.SHOW, MediaType.MOVIE -> "Querying TMDb, TVMaze & Bangumi..."
+                            MediaType.GAME -> "Querying Steam Artwork..."
+                            MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam & Bangumi..."
+                            else -> "Querying artwork providers..."
+                        }
                         Text(
-                            text = "Querying AniList, MangaDex, Bangumi & Steam...",
+                            text = loadingText,
                             color = TextMuted,
-                            fontSize = 12.5.sp
+                            fontSize = 12.5.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp)
                         )
                     }
                 }
@@ -351,6 +387,17 @@ fun ArtworkPickerBottomSheet(
                 when (selectedTab) {
                     // TAB 0: COVERS
                     0 -> {
+                        val latestMdCover = remember(displayedCovers) {
+                            displayedCovers.filter { it.sourceName.equals("MangaDex", ignoreCase = true) }
+                                .mapNotNull { option ->
+                                    val volStr = option.description?.substringAfter("Vol. ", "")?.substringBefore(" ")?.trim()
+                                    val volNum = volStr?.toDoubleOrNull()
+                                    if (volNum != null) volNum to option else null
+                                }
+                                .maxByOrNull { it.first }?.second
+                                ?: displayedCovers.firstOrNull { it.sourceName.equals("MangaDex", ignoreCase = true) }
+                        }
+
                         Column(modifier = Modifier.weight(1f)) {
                             // Quick Action Chips
                             Row(
@@ -359,6 +406,33 @@ fun ArtworkPickerBottomSheet(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                if (latestMdCover != null) {
+                                    Button(
+                                        onClick = {
+                                            onCoverSelected(latestMdCover.url)
+                                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = AccentArctic,
+                                            contentColor = AmoledBlack
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = latestMdCover.description
+                                                ?.takeIf { it.isNotBlank() && it != "Official Cover" }
+                                                ?.let { "Latest MD ($it)" }
+                                                ?: "Latest MD Vol",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+
                                 FilledTonalButton(
                                     onClick = {
                                         coverPickerLauncher.launch(
@@ -507,6 +581,29 @@ fun ArtworkPickerBottomSheet(
                                                     fontWeight = FontWeight.Bold,
                                                     color = TextPrimary
                                                 )
+                                            }
+
+                                            if (!candidate.description.isNullOrBlank()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomCenter)
+                                                        .fillMaxWidth()
+                                                        .background(
+                                                            Brush.verticalGradient(
+                                                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.88f))
+                                                            )
+                                                        )
+                                                        .padding(horizontal = 6.dp, vertical = 5.dp)
+                                                ) {
+                                                    Text(
+                                                        text = candidate.description,
+                                                        fontSize = 9.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = TextPrimary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
                                             }
 
                                             if (isCurrent) {
@@ -741,6 +838,29 @@ fun ArtworkPickerBottomSheet(
                                                 )
                                             }
 
+                                            if (!candidate.description.isNullOrBlank()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomCenter)
+                                                        .fillMaxWidth()
+                                                        .background(
+                                                            Brush.verticalGradient(
+                                                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.86f))
+                                                            )
+                                                        )
+                                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = candidate.description,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = TextPrimary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+
                                             if (isCurrent) {
                                                 Box(
                                                     modifier = Modifier
@@ -768,7 +888,21 @@ fun ArtworkPickerBottomSheet(
 
                     // TAB 2: EXCLUSIONS
                     2 -> {
-                        val availableSources = listOf("AniList", "MangaDex", "Bangumi", "Kitsu", "Steam", "TVMaze", "VNDB")
+                        val availableSources = remember(allCandidates) {
+                            val standard = listOf(
+                                "AniList", "MangaDex", "BookWalker", "Naver", "Kuaikan",
+                                "Bangumi", "Kitsu", "MyAnimeList", "Comick", "TMDb",
+                                "Steam", "TVMaze", "VNDB"
+                            )
+                            val discovered = allCandidates
+                                .map { it.sourceName }
+                                .filter { it.isNotBlank() && !it.equals("Default", ignoreCase = true) }
+                            val merged = (standard + discovered)
+                                .distinctBy { it.uppercase() }
+                            listOf("ALL" to "All Remote Sources (Keep Default only)") +
+                                merged.map { it.uppercase() to it }
+                        }
+                        val allExcluded = "ALL" in excludedSources
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -794,8 +928,13 @@ fun ArtworkPickerBottomSheet(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                items(availableSources) { source ->
-                                    val isExcluded = source.uppercase() in excludedSources
+                                items(availableSources, key = { it.first }) { (sourceKey, displayLabel) ->
+                                    val isMasterAll = sourceKey == "ALL"
+                                    val isExcluded = if (isMasterAll) {
+                                        allExcluded
+                                    } else {
+                                        allExcluded || sourceKey in excludedSources
+                                    }
 
                                     Row(
                                         modifier = Modifier
@@ -808,20 +947,22 @@ fun ArtworkPickerBottomSheet(
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Text(
-                                            text = source,
+                                            text = displayLabel,
                                             color = if (isExcluded) TextMuted else TextPrimary,
                                             fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium
+                                            fontWeight = if (isMasterAll) FontWeight.SemiBold else FontWeight.Medium,
+                                            modifier = Modifier.weight(1f)
                                         )
 
                                         Switch(
-                                            checked = !isExcluded,
-                                            onCheckedChange = { isEnabled ->
+                                            checked = if (isMasterAll) allExcluded else !isExcluded,
+                                            enabled = isMasterAll || !allExcluded,
+                                            onCheckedChange = { checked ->
                                                 val next = excludedSources.toMutableSet()
-                                                if (isEnabled) {
-                                                    next.remove(source.uppercase())
+                                                if (isMasterAll) {
+                                                    if (checked) next.add("ALL") else next.remove("ALL")
                                                 } else {
-                                                    next.add(source.uppercase())
+                                                    if (checked) next.remove(sourceKey) else next.add(sourceKey)
                                                 }
                                                 excludedSources = next
                                             },

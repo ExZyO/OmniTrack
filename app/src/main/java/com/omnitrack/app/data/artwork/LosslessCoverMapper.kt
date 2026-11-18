@@ -40,6 +40,23 @@ object LosslessCoverMapper {
                 .replace("/pic/cover/s/", "/pic/cover/l/")
         }
 
+        // Kitsu: upgrade small/medium/large to original
+        if (clean.contains("kitsu.io")) {
+            clean = clean.replace("/large/", "/original/")
+                .replace("/medium/", "/original/")
+                .replace("/small/", "/original/")
+        }
+
+        // Kuaikan Manhua: strip trailing width/format compression suffix
+        if (clean.contains("kkmh.com") || clean.contains("kuaikanmanhua.com")) {
+            clean = clean.replace(Regex("-w\\d+(\\.w)?$"), "")
+        }
+
+        // Webtoons Global: upgrade cropped thumbnails to q90
+        if (clean.contains("webtoons") || clean.contains("pstatic.net")) {
+            clean = clean.replace(Regex("\\?type=crop\\d+_\\d+"), "?type=q90")
+        }
+
         return clean
     }
 }

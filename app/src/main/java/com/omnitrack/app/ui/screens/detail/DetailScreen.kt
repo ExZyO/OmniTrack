@@ -1230,6 +1230,13 @@ fun DetailScreen(
                     currentCustomBannerPath = item.customBannerPath,
                     mediaId = item.id,
                     currentRole = item.artworkRole,
+                    anilistId = item.anilistId,
+                    malId = item.malId,
+                    mangadexId = item.mangadexId,
+                    nativeTitle = item.nativeTitle,
+                    romajiTitle = uiState.romajiTitle,
+                    originCountry = item.originCountry ?: uiState.countryOfOrigin,
+                    defaultCoverUrl = item.coverUrl,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
                         if (newUrl.startsWith("/") || newUrl.startsWith("file:") || newUrl.startsWith("content:")) {
