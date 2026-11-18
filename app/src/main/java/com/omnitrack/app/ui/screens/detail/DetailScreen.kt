@@ -199,14 +199,11 @@ fun DetailScreen(
     val sheetBackStack = remember { mutableStateListOf<DetailSheetTarget>() }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
-    // by 250ms until navigation entrance transition finishes, eliminating frame drops & stutter.
-    var deferredSectionsAllowed by remember(item?.id) { mutableStateOf(false) }
-    LaunchedEffect(item?.id) {
-        deferredSectionsAllowed = false
-        if (item != null) {
-            kotlinx.coroutines.delay(250)
-            deferredSectionsAllowed = true
-        }
+    // by 200ms until navigation entrance transition finishes, eliminating frame drops & stutter.
+    var deferredSectionsAllowed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(200)
+        deferredSectionsAllowed = true
     }
 
     val scrollState = rememberScrollState()
@@ -219,10 +216,14 @@ fun DetailScreen(
                 coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
             }
         } else if (uiState.isPreviewMode) {
-            viewModel.closePreview()
-            val restoredOffset = viewModel.popScrollOffset()
-            if (restoredOffset != null) {
-                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+            val handled = viewModel.closePreview()
+            if (!handled) {
+                onBack()
+            } else {
+                val restoredOffset = viewModel.popScrollOffset()
+                if (restoredOffset != null) {
+                    coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                }
             }
         } else {
             onBack()
@@ -667,8 +668,9 @@ fun DetailScreen(
 
                 // 1. Actions / Progress Section (Only rendered for media types with action cards)
                 val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                val hasBackdrop = backdropTargetUrl != null
                 if (hasProgressControls) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
                     DetailProgressSection(
                         item = item,
                         onUpdateProgress = { viewModel.updateProgress(it) },
@@ -676,10 +678,9 @@ fun DetailScreen(
                         onTogglePlatform = { viewModel.togglePlatform(it) },
                         onUpdateStatus = { viewModel.updateStatus(it) }
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                 } else {
-                    val hasBackdrop = backdropTargetUrl != null
-                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-26).dp else (-2).dp))
+                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
                 }
 
                 // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)

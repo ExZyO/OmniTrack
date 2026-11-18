@@ -121,41 +121,6 @@ fun DetailSeriesContent(
     onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null
 ) {
     if (seasons.isEmpty() && episodes.isEmpty() && episodesBySeason.isEmpty()) {
-        Column(
-            modifier = modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .width(80.dp)
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                )
-            }
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(3) {
-                    Box(
-                        modifier = Modifier
-                            .width(280.dp)
-                            .height(168.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                    )
-                }
-            }
-        }
         return
     }
 
@@ -400,7 +365,7 @@ fun DetailSeriesContent(
                             EpisodeHorizontalRow(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -411,7 +376,7 @@ fun DetailSeriesContent(
                             EpisodeListColumn(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -422,7 +387,7 @@ fun DetailSeriesContent(
                             EpisodeVerticalCardColumn(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -719,7 +684,7 @@ private fun EpisodeHorizontalCard(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(12.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -733,7 +698,7 @@ private fun EpisodeHorizontalCard(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed) null else imgModel
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -921,7 +886,7 @@ private fun EpisodeListCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(8.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -944,7 +909,7 @@ private fun EpisodeListCardItem(
                     .background(Color(0xFF0D0D0D))
             ) {
                 var loadFailed by remember(imgModel) { mutableStateOf(false) }
-                val effectiveUrl = if (loadFailed) null else imgModel
+                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
                 if (!effectiveUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = effectiveUrl,
@@ -1112,7 +1077,7 @@ private fun EpisodeVerticalCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
-    val imgModel = episode.stillUrl
+    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -1126,7 +1091,7 @@ private fun EpisodeVerticalCardItem(
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed) null else imgModel
+        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -1301,9 +1266,10 @@ private fun SeasonPosterScrollRow(
                             else Modifier
                         )
                 ) {
-                    val posterModel = season.posterUrl ?: fallbackImageUrl
+                    val episodeStillFallback = seasonEps.firstOrNull { !it.stillUrl.isNullOrBlank() }?.stillUrl
+                    val posterModel = season.posterUrl ?: episodeStillFallback
                     var loadFailed by remember(posterModel) { mutableStateOf(false) }
-                    val effectivePoster = if (loadFailed) null else posterModel
+                    val effectivePoster = if (loadFailed) episodeStillFallback else posterModel
                     if (!effectivePoster.isNullOrBlank()) {
                         AsyncImage(
                             model = effectivePoster,

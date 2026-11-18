@@ -1134,6 +1134,9 @@ class DetailViewModel(
             ?: (itemTmdbKey?.let { DetailAuxMemoryCache.cache[it] })
             ?: (idKey?.let { DetailAuxMemoryCache.cache[it] })
 
+        // Reset or populate hero clear logo immediately so previous entry logo never sticks
+        _heroClearLogoUrl.value = existingCached?.heroClearLogoUrl ?: item.clearartUrl
+
         if (existingCached != null) {
             if (existingCached.recommendations.isNotEmpty()) _recommendations.value = existingCached.recommendations
             if (existingCached.reviews.isNotEmpty()) _reviews.value = existingCached.reviews
@@ -1604,7 +1607,7 @@ class DetailViewModel(
                             resolvedAniListId = animeDetails.anilistId
                             if (_heroClearLogoUrl.value.isNullOrBlank()) {
                                 viewModelScope.launch(Dispatchers.IO) {
-                                    val logo = enrichmentRepository.fetchAniZipClearlogo(animeDetails.anilistId)
+                                    val logo = enrichmentRepository.fetchAniZipClearlogo(animeDetails.anilistId, tmdbKey)
                                     if (!logo.isNullOrBlank()) {
                                         _heroClearLogoUrl.value = logo
                                         persistAuxCache()
@@ -1862,6 +1865,12 @@ class DetailViewModel(
             val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
             if (resolvedTmdbId == null && isShowOrAnime) {
                 resolvedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[item.id]
+                if (resolvedTmdbId == null && item.anilistId != null && item.anilistId > 0) {
+                    resolvedTmdbId = enrichmentRepository.fetchAniZipTmdbId(item.anilistId)
+                    if (resolvedTmdbId != null) {
+                        SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId
+                    }
+                }
                 if (resolvedTmdbId == null && item.title.isNotBlank()) {
                     val found = enrichmentRepository.searchTmdbForAnime(item.title, tmdbKey, item.nativeTitle)
                     if (found != null) {
@@ -1986,6 +1995,39 @@ class DetailViewModel(
                         }
                     }
                 } catch (_: Exception) {}
+            }
+
+            // 3. AniZip Anime Fallback (for Anime Specials, OVAs, and Side-Stories missing TMDb TV mappings)
+            if (_realSeasons.value.isEmpty() && item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0) {
+                try {
+                    val aniZipEps = enrichmentRepository.fetchAniZipEpisodes(item.anilistId)
+                    if (aniZipEps.isNotEmpty()) {
+                        val grouped = aniZipEps.groupBy { it.seasonNumber }
+                        val constructedSeasons = grouped.map { (sNum, eps) ->
+                            com.omnitrack.app.data.model.MediaSeason(
+                                id = sNum.toLong(),
+                                seasonNumber = sNum,
+                                name = if (sNum == 0) "Specials" else "Season $sNum",
+                                overview = null,
+                                posterUrl = null,
+                                episodeCount = eps.size,
+                                airDate = eps.firstOrNull()?.airDate
+                            )
+                        }.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
+
+                        _realSeasons.value = constructedSeasons
+                        _episodesBySeason.value = grouped
+                        val defaultSeason = constructedSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber
+                            ?: constructedSeasons.first().seasonNumber
+                        _selectedSeasonNumber.value = defaultSeason
+                        _realEpisodes.value = grouped[defaultSeason].orEmpty()
+                        SeriesContentMemoryCache.seasonsCache[item.id] = constructedSeasons
+                        SeriesContentMemoryCache.episodesBySeasonCache[item.id] = grouped
+                        refreshNextAiringEpisode(item)
+                    }
+                } catch (e: Exception) {
+                    AppLogger.d("DetailViewModel", "AniZip fallback episodes error: ${e.message}")
+                }
             }
         }
     }
@@ -2516,6 +2558,7 @@ class DetailViewModel(
         if (immediate != null) {
             _mediaId.value = immediate.id
             _previewItem.value = null
+            _heroClearLogoUrl.value = immediate.clearartUrl
         }
         viewModelScope.launch {
             val currentId = _mediaId.value
@@ -2529,6 +2572,7 @@ class DetailViewModel(
             val prevItem = immediate?.takeIf { it.id == prevId } ?: repository.getMediaById(prevId).firstOrNull() ?: return@launch
             _mediaId.value = prevId
             _previewItem.value = null
+            _heroClearLogoUrl.value = prevItem.clearartUrl
             updateSiblings(prevId)
             val cachedSeasons = SeriesContentMemoryCache.seasonsCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.seasonsCache[prevId]
             val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.episodesBySeasonCache[prevId]
@@ -2559,6 +2603,9 @@ class DetailViewModel(
                 _animeRelations.value = cachedAux.animeRelations
                 _animeAiring.value = cachedAux.animeAiring
                 _nextAiringEpisode.value = cachedAux.nextAiringEpisode
+                _heroClearLogoUrl.value = cachedAux.heroClearLogoUrl ?: prevItem.clearartUrl
+            } else {
+                _heroClearLogoUrl.value = prevItem.clearartUrl
             }
             loadRecommendationsAndReviews(prevItem)
         }
@@ -2570,6 +2617,7 @@ class DetailViewModel(
         if (immediate != null) {
             _mediaId.value = immediate.id
             _previewItem.value = null
+            _heroClearLogoUrl.value = immediate.clearartUrl
         }
         viewModelScope.launch {
             val currentId = _mediaId.value
@@ -2583,6 +2631,7 @@ class DetailViewModel(
             val nextItem = immediate?.takeIf { it.id == nextId } ?: repository.getMediaById(nextId).firstOrNull() ?: return@launch
             _mediaId.value = nextId
             _previewItem.value = null
+            _heroClearLogoUrl.value = nextItem.clearartUrl
             updateSiblings(nextId)
             val nextCachedSeasons = SeriesContentMemoryCache.seasonsCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.seasonsCache[nextId]
             val nextCachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.episodesBySeasonCache[nextId]
@@ -2613,6 +2662,9 @@ class DetailViewModel(
                 _animeRelations.value = nextCachedAux.animeRelations
                 _animeAiring.value = nextCachedAux.animeAiring
                 _nextAiringEpisode.value = nextCachedAux.nextAiringEpisode
+                _heroClearLogoUrl.value = nextCachedAux.heroClearLogoUrl ?: nextItem.clearartUrl
+            } else {
+                _heroClearLogoUrl.value = nextItem.clearartUrl
             }
             loadRecommendationsAndReviews(nextItem)
         }

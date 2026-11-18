@@ -24,6 +24,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -47,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -124,28 +127,34 @@ fun DetailTrailersSection(
                 letterSpacing = (-0.3).sp
             )
 
-            // Category Selector Dropdown Pill (Clean category text, number count in submenu only)
+            // Category Selector Dropdown Button (1:1 Discussion Page Filter Menu Design)
             Box {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(Color.White.copy(alpha = 0.08f))
                         .clickable { menuExpanded = true }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = "Select Category",
+                        tint = AccentArctic,
+                        modifier = Modifier.size(14.dp)
+                    )
                     Text(
                         text = selectedCategory,
-                        color = TextPrimary,
+                        color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Icon(
-                        imageVector = Icons.Default.ExpandMore,
-                        contentDescription = "Select Category",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(14.dp)
                     )
                 }
 
@@ -154,7 +163,7 @@ fun DetailTrailersSection(
                     onDismissRequest = { menuExpanded = false },
                     modifier = Modifier
                         .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
                 ) {
                     grouped.keys.forEach { cat ->
                         val count = grouped[cat]?.size ?: 0
@@ -164,7 +173,7 @@ fun DetailTrailersSection(
                                     text = "$cat ($count)",
                                     fontSize = 13.sp,
                                     fontWeight = if (cat == selectedCategory) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (cat == selectedCategory) com.omnitrack.app.ui.theme.AccentArctic else TextPrimary
+                                    color = if (cat == selectedCategory) AccentArctic else Color.White
                                 )
                             },
                             onClick = {

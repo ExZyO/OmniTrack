@@ -150,16 +150,16 @@ class EnrichmentRepository(
         }
 
         var clearart: String? = null
-        if (item.anilistId != null && item.anilistId > 0) {
-            clearart = fetchAniZipClearlogo(item.anilistId)
-        }
-        if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
-            if (!fanartApiKey.isNullOrBlank()) {
-                clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
-            }
-            if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
+        if (effectiveTmdbId != null) {
+            if (!effectiveTmdbKey.isNullOrBlank()) {
                 clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
             }
+            if (clearart.isNullOrBlank() && !fanartApiKey.isNullOrBlank()) {
+                clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+            }
+        }
+        if (clearart.isNullOrBlank() && item.anilistId != null && item.anilistId > 0) {
+            clearart = fetchAniZipClearlogo(item.anilistId)
         }
 
         if (!clearart.isNullOrBlank()) {
@@ -188,28 +188,38 @@ class EnrichmentRepository(
         var isMovie = item.mediaType == MediaType.MOVIE
         var isShow = item.mediaType == MediaType.SHOW
 
-        // Auto-resolve TMDb ID for Anime if missing so Anime receives Clearart, Trailers, and MDBList scores
-        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
-            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
-            if (animeTmdb != null) {
-                effectiveTmdbId = animeTmdb.first
-                isMovie = animeTmdb.second
-                isShow = !animeTmdb.second
+        // Auto-resolve TMDb ID for Anime if missing via AniZip or TMDb search
+        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME) {
+            if (item.anilistId != null && item.anilistId > 0) {
+                effectiveTmdbId = fetchAniZipTmdbId(item.anilistId)
+            }
+            if (effectiveTmdbId == null && item.title.isNotBlank()) {
+                val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
+                if (animeTmdb != null) {
+                    effectiveTmdbId = animeTmdb.first
+                    isMovie = animeTmdb.second
+                    isShow = !animeTmdb.second
+                }
             }
         }
 
-        // 1. Resolve Transparent Clearart Logo
-        if (clearart.isNullOrBlank()) {
-            if (item.anilistId != null && item.anilistId > 0) {
-                clearart = fetchAniZipClearlogo(item.anilistId)
+        // 1. Resolve Transparent Clearart Logo (TMDb / Fanart first with language matching; replace stale TVDB logos)
+        val isStaleTvdbLogo = clearart?.contains("thetvdb.com") == true && !clearart.contains("tmdb.org")
+        if (clearart.isNullOrBlank() || isStaleTvdbLogo) {
+            var newClearart: String? = null
+            if (effectiveTmdbId != null) {
+                if (!effectiveTmdbKey.isNullOrBlank()) {
+                    newClearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+                }
+                if (newClearart.isNullOrBlank() && !fanartApiKey.isNullOrBlank()) {
+                    newClearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
+                }
             }
-            if (clearart.isNullOrBlank() && effectiveTmdbId != null) {
-                if (!fanartApiKey.isNullOrBlank()) {
-                    clearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
-                }
-                if (clearart.isNullOrBlank() && !effectiveTmdbKey.isNullOrBlank()) {
-                    clearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
-                }
+            if (newClearart.isNullOrBlank() && item.anilistId != null && item.anilistId > 0) {
+                newClearart = fetchAniZipClearlogo(item.anilistId)
+            }
+            if (!newClearart.isNullOrBlank()) {
+                clearart = newClearart
             }
         }
 
@@ -361,9 +371,19 @@ class EnrichmentRepository(
                         root["hdtvlogo"]?.jsonArray ?: root["clearlogo"]?.jsonArray
                     } ?: return@withGeneralPacing null
 
-                    val best = logos.firstOrNull {
-                        it.jsonObject["lang"]?.jsonPrimitive?.content == "en"
-                    } ?: logos.firstOrNull()
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val best = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> {
+                            logos.firstOrNull { it.jsonObject["lang"]?.jsonPrimitive?.content == "ja" }
+                                ?: logos.firstOrNull { it.jsonObject["lang"]?.jsonPrimitive?.content == "en" }
+                                ?: logos.firstOrNull()
+                        }
+                        else -> {
+                            logos.firstOrNull { it.jsonObject["lang"]?.jsonPrimitive?.content == "en" }
+                                ?: logos.firstOrNull { it.jsonObject["lang"]?.jsonPrimitive?.content == "ja" }
+                                ?: logos.firstOrNull()
+                        }
+                    }
 
                     best?.jsonObject?.get("url")?.jsonPrimitive?.content
                 }
@@ -376,16 +396,29 @@ class EnrichmentRepository(
         NetworkPacer.withTmdbPacing {
             try {
                 val typeStr = if (isMovie) "movie" else "tv"
-                val url = "https://api.themoviedb.org/3/$typeStr/$tmdbId/images?api_key=$apiKey"
+                val url = "https://api.themoviedb.org/3/$typeStr/$tmdbId/images?api_key=$apiKey&include_image_language=en,null,ja"
                 val request = Request.Builder().url(url).get().build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) return@withTmdbPacing null
                     val body = response.body?.string() ?: return@withTmdbPacing null
                     val root = json.parseToJsonElement(body).jsonObject
                     val logos = root["logos"]?.jsonArray ?: return@withTmdbPacing null
-                    val best = logos.firstOrNull {
-                        it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "en"
-                    } ?: logos.firstOrNull()
+
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val best = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> {
+                            logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "ja" }
+                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "en" }
+                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == null }
+                                ?: logos.firstOrNull()
+                        }
+                        else -> {
+                            logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "en" }
+                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == null }
+                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "ja" }
+                                ?: logos.firstOrNull()
+                        }
+                    }
 
                     val filePath = best?.jsonObject?.get("file_path")?.jsonPrimitive?.content ?: return@withTmdbPacing null
                     "https://image.tmdb.org/t/p/w500$filePath"
@@ -3280,7 +3313,7 @@ class EnrichmentRepository(
         }
     }
 
-    suspend fun fetchAniZipClearlogo(anilistId: Long): String? = withContext(Dispatchers.IO) {
+    suspend fun fetchAniZipClearlogo(anilistId: Long, tmdbKey: String? = null): String? = withContext(Dispatchers.IO) {
         val cached = aniZipLogoMemoryCache[anilistId]
         if (!cached.isNullOrBlank()) return@withContext cached
 
@@ -3295,6 +3328,18 @@ class EnrichmentRepository(
                     if (!resp.isSuccessful) return@withAniZipPacing null
                     val body = resp.body?.string() ?: return@withAniZipPacing null
                     val root = json.parseToJsonElement(body).jsonObject
+
+                    // 1. Language-matched TMDb clearart check first (prevents Chinese TVDB logos)
+                    val effectiveKey = tmdbKey ?: tmdbApiKey ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+                    val tmdbId = root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.content?.toLongOrNull()
+                    if (tmdbId != null && tmdbId > 0) {
+                        val tmdbLogo = fetchTmdbClearart(tmdbId, isMovie = false, apiKey = effectiveKey)
+                        if (!tmdbLogo.isNullOrBlank()) {
+                            aniZipLogoMemoryCache[anilistId] = tmdbLogo
+                            return@withAniZipPacing tmdbLogo
+                        }
+                    }
+
                     val images = root["images"]?.jsonArray.orEmpty()
                     val clearlogo = images.firstOrNull { elem ->
                         val type = elem.jsonObject["coverType"].cleanString() ?: ""
@@ -3312,6 +3357,99 @@ class EnrichmentRepository(
             } catch (e: Exception) {
                 AppLogger.d("EnrichmentRepository", "AniZip clearlogo lookup failed for $anilistId: ${e.message}")
                 null
+            }
+        }
+    }
+
+    suspend fun fetchAniZipTmdbId(anilistId: Long): Long? = withContext(Dispatchers.IO) {
+        NetworkPacer.withAniZipPacing {
+            try {
+                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniZipPacing null
+                    val body = resp.body?.string() ?: return@withAniZipPacing null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.content?.toLongOrNull()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    private val aniZipEpisodesMemoryCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
+
+    suspend fun fetchAniZipEpisodes(anilistId: Long): List<com.omnitrack.app.data.model.MediaEpisode> = withContext(Dispatchers.IO) {
+        val cached = aniZipEpisodesMemoryCache[anilistId]
+        if (!cached.isNullOrEmpty()) return@withContext cached
+
+        NetworkPacer.withAniZipPacing {
+            try {
+                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                val req = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniZipPacing emptyList()
+                    val body = resp.body?.string() ?: return@withAniZipPacing emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val episodesObj = root["episodes"]?.jsonObject ?: return@withAniZipPacing emptyList()
+
+                    val epsList = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+
+                    episodesObj.entries.forEach { (key, elem) ->
+                        val o = elem.jsonObject
+                        val epNum = o["episodeNumber"]?.jsonPrimitive?.content?.toIntOrNull()
+                            ?: key.replace(Regex("[^0-9]"), "").toIntOrNull()
+                            ?: return@forEach
+                        val sNum = o["seasonNumber"]?.jsonPrimitive?.content?.toIntOrNull()
+                            ?: if (key.startsWith("S", ignoreCase = true)) 0 else 1
+                        val titlesObj = o["title"]?.jsonObject
+                        val titleEn = titlesObj?.get("en")?.jsonPrimitive?.content
+                        val titleJa = titlesObj?.get("ja")?.jsonPrimitive?.content
+                        val titleRom = titlesObj?.get("x-jat")?.jsonPrimitive?.content
+                        val resolvedTitle = when (pref) {
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> titleJa ?: titleRom ?: titleEn
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> titleRom ?: titleEn ?: titleJa
+                            else -> titleEn ?: titleRom ?: titleJa
+                        } ?: "Episode $epNum"
+
+                        val overview = o["overview"]?.jsonPrimitive?.content ?: o["summary"]?.jsonPrimitive?.content
+                        val image = o["image"]?.jsonPrimitive?.content
+                        val airDate = o["airDate"]?.jsonPrimitive?.content ?: o["airdate"]?.jsonPrimitive?.content
+                        val runtime = o["runtime"]?.jsonPrimitive?.content?.toIntOrNull() ?: o["length"]?.jsonPrimitive?.content?.toIntOrNull()
+                        val rating = o["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+
+                        epsList.add(
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = sNum * 1000L + epNum,
+                                episodeNumber = epNum,
+                                seasonNumber = sNum,
+                                title = resolvedTitle,
+                                overview = overview,
+                                stillUrl = image,
+                                airDate = airDate?.take(10),
+                                runtimeMinutes = runtime,
+                                voteAverage = rating
+                            )
+                        )
+                    }
+
+                    val sorted = epsList.sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
+                    if (sorted.isNotEmpty()) {
+                        aniZipEpisodesMemoryCache[anilistId] = sorted
+                    }
+                    sorted
+                }
+            } catch (e: Exception) {
+                AppLogger.d("EnrichmentRepository", "AniZip episodes lookup failed for $anilistId: ${e.message}")
+                emptyList()
             }
         }
     }

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -384,7 +385,12 @@ fun UnifiedDiscussionSection(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        isDiscussionExpanded = !isDiscussionExpanded
+                    },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -395,29 +401,18 @@ fun UnifiedDiscussionSection(
                     fontWeight = FontWeight.Bold
                 )
 
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .clickable {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            isDiscussionExpanded = !isDiscussionExpanded
-                        }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                IconButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        isDiscussionExpanded = !isDiscussionExpanded
+                    },
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    Text(
-                        text = if (isDiscussionExpanded) "Collapse" else "Expand",
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
                     Icon(
                         imageVector = if (isDiscussionExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (isDiscussionExpanded) "Collapse" else "Expand",
+                        contentDescription = if (isDiscussionExpanded) "Collapse Discussion" else "Expand Discussion",
                         tint = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
