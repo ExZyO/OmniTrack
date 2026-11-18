@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.DropdownMenu
@@ -138,12 +137,6 @@ fun DetailTrailersSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.FilterList,
-                        contentDescription = "Select Category",
-                        tint = AccentArctic,
-                        modifier = Modifier.size(14.dp)
-                    )
                     Text(
                         text = selectedCategory,
                         color = Color.White,

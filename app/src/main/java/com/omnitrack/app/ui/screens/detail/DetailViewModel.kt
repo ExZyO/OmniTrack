@@ -229,6 +229,7 @@ class DetailViewModel(
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
     private var discussionFetchJob: kotlinx.coroutines.Job? = null
+    private var enrichmentFetchJob: kotlinx.coroutines.Job? = null
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
     private val scrollOffsetStack = mutableListOf<Int>()
 
@@ -550,11 +551,11 @@ class DetailViewModel(
 
         // 0ms Synchronous Series Seasons & Episodes Cache Hit (Nuvio 0-lag parity):
         val initCachedSeasons = (if (mediaId > 0L) SeriesContentMemoryCache.seasonsCache[mediaId] else null)
-            ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.seasonsCache[it] }
-            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { SeriesContentMemoryCache.seasonsCache[it.id] ?: it.tmdbId?.let { tid -> SeriesContentMemoryCache.seasonsCache[tid] } } else null)
+            ?: (if (mediaId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.seasonsCache[it] } else null)
+            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { it.tmdbId?.let { tid -> SeriesContentMemoryCache.seasonsCache[tid] } } else null)
         val initCachedGrouped = (if (mediaId > 0L) SeriesContentMemoryCache.episodesBySeasonCache[mediaId] else null)
-            ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] }
-            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { SeriesContentMemoryCache.episodesBySeasonCache[it.id] ?: it.tmdbId?.let { tid -> SeriesContentMemoryCache.episodesBySeasonCache[tid] } } else null)
+            ?: (if (mediaId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] } else null)
+            ?: (if (mediaId == -1L) EphemeralPreviewHolder.previewItem?.let { it.tmdbId?.let { tid -> SeriesContentMemoryCache.episodesBySeasonCache[tid] } } else null)
 
         if (!initCachedSeasons.isNullOrEmpty()) {
             val valid = initCachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
@@ -606,7 +607,8 @@ class DetailViewModel(
         )
         if (!needsEnrichment) return
 
-        viewModelScope.launch(Dispatchers.IO) {
+        enrichmentFetchJob?.cancel()
+        enrichmentFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val mdbKey = preferenceManager?.mdblistApiKey?.firstOrNull()?.ifBlank { null }
@@ -618,23 +620,35 @@ class DetailViewModel(
                 mdblistApiKey = mdbKey,
                 onClearartResolved = { earlyLogo, _ ->
                     EnrichmentRepository.putCachedClearart(item, earlyLogo)
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val isAllowedLogo = !earlyLogo.isNullOrBlank() && (!earlyLogo.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)
                     if (item.id > 0) {
+                        if (_mediaId.value == item.id && isAllowedLogo) {
+                            _heroClearLogoUrl.value = earlyLogo
+                        }
                         val curr = repository.getMediaById(item.id).firstOrNull() ?: item
                         if (curr.clearartUrl != earlyLogo) {
                             repository.updateMedia(curr.copy(clearartUrl = earlyLogo))
                         }
-                    } else if (_previewItem.value != null) {
-                        val currentPreview = _previewItem.value ?: item
-                        val updated = currentPreview.copy(clearartUrl = earlyLogo)
-                        _previewItem.value = updated
-                        _previewStack.update { stack ->
-                            if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                    } else {
+                        val currentPreview = _previewItem.value
+                        val matchesPreview = currentPreview != null && (currentPreview.id == item.id || currentPreview.title == item.title || (currentPreview.anilistId != null && currentPreview.anilistId == item.anilistId))
+                        if (matchesPreview && currentPreview != null) {
+                            val updated = currentPreview.copy(clearartUrl = earlyLogo)
+                            _previewItem.value = updated
+                            if (isAllowedLogo) {
+                                _heroClearLogoUrl.value = earlyLogo
+                            }
+                            _previewStack.update { stack ->
+                                if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+                            }
                         }
                     }
                 }
             )
 
             if (item.id > 0) {
+                if (_mediaId.value != item.id) return@launch
                 // Fetch the latest state from repository so we never overwrite user-changed cover or banner
                 val latest = repository.getMediaById(item.id).firstOrNull() ?: item
                 val updated = latest.copy(
@@ -662,6 +676,10 @@ class DetailViewModel(
                     loadRecommendationsAndReviews(updated)
                 }
             } else {
+                val currentPreview = _previewItem.value
+                val matchesPreview = currentPreview != null && (currentPreview.id == item.id || currentPreview.title == item.title || (currentPreview.anilistId != null && currentPreview.anilistId == item.anilistId))
+                if (!matchesPreview) return@launch
+
                 val updated = item.copy(
                     tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
                     imdbId = enrichment.resolvedImdbId ?: item.imdbId,
@@ -687,11 +705,15 @@ class DetailViewModel(
                 loadRecommendationsAndReviews(updated)
             }
             if (enrichment.videos.isNotEmpty()) {
-                _trailers.value = enrichment.videos
+                val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
+                if (isStillCurrent) {
+                    _trailers.value = enrichment.videos
+                }
             }
             if (enrichment.belongsToCollectionId != null && _collectionItems.value.isEmpty()) {
                 val collData = enrichmentRepository.fetchTmdbCollection(enrichment.belongsToCollectionId, tmdbKey)
-                if (collData != null) {
+                val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
+                if (collData != null && isStillCurrent) {
                     _collectionName.value = collData.name
                     _collectionItems.value = collData.parts
                 }
@@ -1004,8 +1026,8 @@ class DetailViewModel(
     fun openPreview(previewEntity: MediaItemEntity) {
         resetAuxFields()
         val pTmdb = previewEntity.tmdbId
-        val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: SeriesContentMemoryCache.seasonsCache[previewEntity.id]
-        val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: SeriesContentMemoryCache.episodesBySeasonCache[previewEntity.id]
+        val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: (if (previewEntity.id > 0L) SeriesContentMemoryCache.seasonsCache[previewEntity.id] else null)
+        val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: (if (previewEntity.id > 0L) SeriesContentMemoryCache.episodesBySeasonCache[previewEntity.id] else null)
         if (!pSeasons.isNullOrEmpty()) {
             val valid = pSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
             _realSeasons.value = valid
@@ -1056,8 +1078,8 @@ class DetailViewModel(
             _previewItem.value = newTop
             resetAuxFields()
             val pTmdb = newTop.tmdbId
-            val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: SeriesContentMemoryCache.seasonsCache[newTop.id]
-            val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: SeriesContentMemoryCache.episodesBySeasonCache[newTop.id]
+            val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: (if (newTop.id > 0L) SeriesContentMemoryCache.seasonsCache[newTop.id] else null)
+            val pGrouped = (if (pTmdb != null) SeriesContentMemoryCache.episodesBySeasonCache[pTmdb] else null) ?: (if (newTop.id > 0L) SeriesContentMemoryCache.episodesBySeasonCache[newTop.id] else null)
             if (!pSeasons.isNullOrEmpty()) {
                 val valid = pSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                 _realSeasons.value = valid
@@ -1136,7 +1158,11 @@ class DetailViewModel(
             ?: (idKey?.let { DetailAuxMemoryCache.cache[it] })
 
         // Reset or populate hero clear logo immediately so previous entry logo never sticks
-        _heroClearLogoUrl.value = existingCached?.heroClearLogoUrl ?: item.clearartUrl
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val isAllowedLogo = existingCached?.heroClearLogoUrl ?: item.clearartUrl?.takeIf {
+            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+        }
+        _heroClearLogoUrl.value = isAllowedLogo
 
         if (existingCached != null) {
             if (existingCached.recommendations.isNotEmpty()) _recommendations.value = existingCached.recommendations
@@ -1609,7 +1635,8 @@ class DetailViewModel(
                             if (_heroClearLogoUrl.value.isNullOrBlank()) {
                                 viewModelScope.launch(Dispatchers.IO) {
                                     val logo = enrichmentRepository.fetchAniZipClearlogo(animeDetails.anilistId, tmdbKey)
-                                    if (!logo.isNullOrBlank()) {
+                                    val isCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
+                                    if (!logo.isNullOrBlank() && isCurrent) {
                                         _heroClearLogoUrl.value = logo
                                         persistAuxCache()
                                     }
@@ -1862,13 +1889,21 @@ class DetailViewModel(
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             var resolvedTmdbId = item.tmdbId
-            var resolvedImdbId = item.imdbId ?: SeriesContentMemoryCache.resolvedImdbIdCache[item.id]
+            var resolvedImdbId = item.imdbId ?: (if (item.id > 0L) SeriesContentMemoryCache.resolvedImdbIdCache[item.id] else null)
             val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
+
+            var effectiveAnilistId = item.anilistId
+            if (effectiveAnilistId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
+                effectiveAnilistId = enrichmentRepository.searchAniListForAnime(item.title, item.nativeTitle)
+            }
+
             if (resolvedTmdbId == null && isShowOrAnime) {
-                resolvedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[item.id]
-                if (resolvedTmdbId == null && item.anilistId != null && item.anilistId > 0) {
-                    resolvedTmdbId = enrichmentRepository.fetchAniZipTmdbId(item.anilistId)
-                    if (resolvedTmdbId != null) {
+                if (item.id > 0L) {
+                    resolvedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[item.id]
+                }
+                if (resolvedTmdbId == null && effectiveAnilistId != null && effectiveAnilistId > 0) {
+                    resolvedTmdbId = enrichmentRepository.fetchAniZipTmdbId(effectiveAnilistId)
+                    if (resolvedTmdbId != null && item.id > 0L) {
                         SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId
                     }
                 }
@@ -1876,8 +1911,8 @@ class DetailViewModel(
                     val found = enrichmentRepository.searchTmdbForAnime(item.title, tmdbKey, item.nativeTitle)
                     if (found != null) {
                         resolvedTmdbId = found.first
-                        SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId
-                        if (item.id > 0) {
+                        if (item.id > 0L) {
+                            SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId
                             val cur = repository.getMediaById(item.id).firstOrNull()
                             if (cur != null && cur.tmdbId == null) {
                                 repository.updateMedia(cur.copy(tmdbId = resolvedTmdbId))
@@ -1900,14 +1935,16 @@ class DetailViewModel(
                     if (resolvedImdbId == null) {
                         resolvedImdbId = enrichmentRepository.fetchTmdbImdbId(tmdbId, false, tmdbKey)
                         if (resolvedImdbId != null) {
-                            SeriesContentMemoryCache.resolvedImdbIdCache[item.id] = resolvedImdbId
+                            if (item.id > 0L) {
+                                SeriesContentMemoryCache.resolvedImdbIdCache[item.id] = resolvedImdbId
+                            }
                             SeriesContentMemoryCache.resolvedImdbIdCache[tmdbId] = resolvedImdbId
                         }
                     }
 
                     // Instant 0ms cache retrieval
-                    val cachedSeasons = SeriesContentMemoryCache.seasonsCache[tmdbId] ?: SeriesContentMemoryCache.seasonsCache[item.id]
-                    val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] ?: SeriesContentMemoryCache.episodesBySeasonCache[item.id]
+                    val cachedSeasons = SeriesContentMemoryCache.seasonsCache[tmdbId] ?: (if (item.id > 0L) SeriesContentMemoryCache.seasonsCache[item.id] else null)
+                    val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[tmdbId] ?: (if (item.id > 0L) SeriesContentMemoryCache.episodesBySeasonCache[item.id] else null)
                     if (cachedSeasons != null && cachedSeasons.isNotEmpty()) {
                         val validCached = cachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
                         _realSeasons.value = validCached
@@ -1957,12 +1994,22 @@ class DetailViewModel(
                         }
 
                         // Use the concurrently preloaded episodes if target matches (0ms delay!)
-                        val selectedEps = if (seasonToSelect == targetSeasonToPreload && preloadedEps.isNotEmpty()) {
+                        var selectedEps = if (seasonToSelect == targetSeasonToPreload && preloadedEps.isNotEmpty()) {
                             preloadedEps
                         } else {
                             val selectedCached = SeriesContentMemoryCache.episodesCache["$tmdbId:$seasonToSelect"]
                             if (!selectedCached.isNullOrEmpty()) selectedCached
                             else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title)
+                        }
+
+                        // Bleach / Anime large season fallback: if TMDb episodes are empty, query AniZip
+                        if (selectedEps.isEmpty() && effectiveAnilistId != null && effectiveAnilistId > 0) {
+                            val aniZipAll = enrichmentRepository.fetchAniZipEpisodes(effectiveAnilistId)
+                            val aniZipBySeason = aniZipAll.groupBy { it.seasonNumber }
+                            val matched = aniZipBySeason[seasonToSelect] ?: aniZipAll
+                            if (matched.isNotEmpty()) {
+                                selectedEps = matched
+                            }
                         }
 
                         if (selectedEps.isNotEmpty()) {
@@ -1999,33 +2046,75 @@ class DetailViewModel(
             }
 
             // 3. AniZip Anime Fallback (for Anime Specials, OVAs, and Side-Stories missing TMDb TV mappings)
-            if (_realSeasons.value.isEmpty() && item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0) {
+            if ((_realSeasons.value.isEmpty() || _realEpisodes.value.isEmpty()) && item.mediaType == MediaType.ANIME && effectiveAnilistId != null && effectiveAnilistId > 0) {
                 try {
-                    val aniZipEps = enrichmentRepository.fetchAniZipEpisodes(item.anilistId)
+                    val aniZipEps = enrichmentRepository.fetchAniZipEpisodes(effectiveAnilistId)
                     if (aniZipEps.isNotEmpty()) {
                         val grouped = aniZipEps.groupBy { it.seasonNumber }
-                        val constructedSeasons = grouped.map { (sNum, eps) ->
-                            com.omnitrack.app.data.model.MediaSeason(
-                                seasonNumber = sNum,
-                                name = if (sNum == 0) "Specials" else "Season $sNum",
-                                episodeCount = eps.size,
-                                posterUrl = null,
-                                airDate = eps.firstOrNull()?.airDate
-                            )
-                        }.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
+                        if (_realSeasons.value.isEmpty()) {
+                            val constructedSeasons = grouped.map { (sNum, eps) ->
+                                com.omnitrack.app.data.model.MediaSeason(
+                                    seasonNumber = sNum,
+                                    name = if (sNum == 0) "Specials" else "Season $sNum",
+                                    episodeCount = eps.size,
+                                    posterUrl = null,
+                                    airDate = eps.firstOrNull()?.airDate
+                                )
+                            }.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
 
-                        _realSeasons.value = constructedSeasons
-                        _episodesBySeason.value = grouped
-                        val defaultSeason = constructedSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber
-                            ?: constructedSeasons.first().seasonNumber
-                        _selectedSeasonNumber.value = defaultSeason
-                        _realEpisodes.value = grouped[defaultSeason].orEmpty()
-                        SeriesContentMemoryCache.seasonsCache[item.id] = constructedSeasons
-                        SeriesContentMemoryCache.episodesBySeasonCache[item.id] = grouped
+                            _realSeasons.value = constructedSeasons
+                            _episodesBySeason.value = grouped
+                            val defaultSeason = constructedSeasons.firstOrNull { it.seasonNumber > 0 }?.seasonNumber
+                                ?: constructedSeasons.first().seasonNumber
+                            _selectedSeasonNumber.value = defaultSeason
+                            _realEpisodes.value = grouped[defaultSeason].orEmpty()
+                            if (item.id > 0L) {
+                                SeriesContentMemoryCache.seasonsCache[item.id] = constructedSeasons
+                                SeriesContentMemoryCache.episodesBySeasonCache[item.id] = grouped
+                            }
+                        } else if (_realEpisodes.value.isEmpty()) {
+                            val selSeason = _selectedSeasonNumber.value
+                            val fallbackSeasonEps = grouped[selSeason] ?: grouped.values.flatten()
+                            if (fallbackSeasonEps.isNotEmpty()) {
+                                val cur = _episodesBySeason.value.toMutableMap()
+                                cur[selSeason] = fallbackSeasonEps
+                                _episodesBySeason.value = cur
+                                _realEpisodes.value = fallbackSeasonEps
+                            }
+                        }
                         refreshNextAiringEpisode(item)
                     }
                 } catch (e: Exception) {
                     AppLogger.d("DetailViewModel", "AniZip fallback episodes error: ${e.message}")
+                }
+            }
+
+            // 4. Synthesize episodes from total progress if catalogue metadata has no granular breakdown
+            if (_realSeasons.value.isEmpty() && _realEpisodes.value.isEmpty() && (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME)) {
+                val totalCount = item.totalProgress?.toInt()
+                if (totalCount != null && totalCount > 0 && totalCount <= 500) {
+                    val synEps = (1..totalCount).map { epNum ->
+                        com.omnitrack.app.data.model.MediaEpisode(
+                            id = epNum.toLong(),
+                            episodeNumber = epNum,
+                            seasonNumber = 1,
+                            title = "Episode $epNum",
+                            overview = null,
+                            stillUrl = null,
+                            airDate = null
+                        )
+                    }
+                    val synSeason = com.omnitrack.app.data.model.MediaSeason(
+                        seasonNumber = 1,
+                        name = "Season 1",
+                        episodeCount = totalCount,
+                        posterUrl = item.coverUrl,
+                        airDate = item.releaseYear
+                    )
+                    _realSeasons.value = listOf(synSeason)
+                    _episodesBySeason.value = mapOf(1 to synEps)
+                    _selectedSeasonNumber.value = 1
+                    _realEpisodes.value = synEps
                 }
             }
         }
@@ -2553,28 +2642,45 @@ class DetailViewModel(
     }
 
     fun navigateToPrevious(): Boolean {
-        val immediate = _previousItem.value
-        if (immediate != null) {
-            _mediaId.value = immediate.id
-            _previewItem.value = null
-            _heroClearLogoUrl.value = immediate.clearartUrl
+        val siblings = _stableSiblingIds.value.ifEmpty {
+            ActiveSiblingHolder.activeSiblingIds
         }
+        if (siblings.isEmpty()) return false
+        val currentId = _mediaId.value
+        val currentIndex = siblings.indexOf(currentId)
+        val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
+        val prevId = siblings[prevIndex]
+        if (prevId == currentId) return false
+
+        // Cancel previous in-flight asynchronous operations
+        recommendationFetchJob?.cancel()
+        seriesFetchJob?.cancel()
+        discussionFetchJob?.cancel()
+        enrichmentFetchJob?.cancel()
+
+        val immediate = _previousItem.value?.takeIf { it.id == prevId }
+        // Single synchronous atomic step!
+        _mediaId.value = prevId
+        _previewItem.value = null
+
+        // Initialise logo cleanly from cache or preloaded item - NEVER let previous logo leak!
+        val cachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevId)]
+            ?: immediate?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(it)] }
+            ?: immediate?.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (immediate.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val immediateLogo = immediate?.clearartUrl?.takeIf {
+            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+        }
+        _heroClearLogoUrl.value = cachedAux?.heroClearLogoUrl ?: immediateLogo
+
+        updateSiblings(prevId)
+
         viewModelScope.launch {
-            val currentId = _mediaId.value
-            val siblings = _stableSiblingIds.value.ifEmpty {
-                ActiveSiblingHolder.activeSiblingIds
-            }
-            if (siblings.isEmpty()) return@launch
-            val currentIndex = siblings.indexOf(currentId)
-            val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
-            val prevId = siblings[prevIndex]
-            val prevItem = immediate?.takeIf { it.id == prevId } ?: repository.getMediaById(prevId).firstOrNull() ?: return@launch
-            _mediaId.value = prevId
-            _previewItem.value = null
-            _heroClearLogoUrl.value = prevItem.clearartUrl
-            updateSiblings(prevId)
-            val cachedSeasons = SeriesContentMemoryCache.seasonsCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.seasonsCache[prevId]
-            val cachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[prevItem.tmdbId ?: prevId] ?: SeriesContentMemoryCache.episodesBySeasonCache[prevId]
+            val prevItem = immediate ?: repository.getMediaById(prevId).firstOrNull() ?: return@launch
+            if (_mediaId.value != prevId) return@launch
+
+            val cachedSeasons = prevItem.tmdbId?.let { SeriesContentMemoryCache.seasonsCache[it] } ?: SeriesContentMemoryCache.seasonsCache[prevId]
+            val cachedGrouped = prevItem.tmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] } ?: SeriesContentMemoryCache.episodesBySeasonCache[prevId]
             if (cachedSeasons != null) {
                 _realSeasons.value = cachedSeasons
                 _episodesBySeason.value = cachedGrouped.orEmpty()
@@ -2586,9 +2692,7 @@ class DetailViewModel(
                 _realEpisodes.value = emptyList()
                 _selectedSeasonNumber.value = 1
             }
-            val cachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevItem)]
-                ?: prevItem.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (prevItem.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
-                ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevId)]
+
             if (cachedAux != null) {
                 _recommendations.value = cachedAux.recommendations
                 _reviews.value = cachedAux.reviews
@@ -2602,38 +2706,58 @@ class DetailViewModel(
                 _animeRelations.value = cachedAux.animeRelations
                 _animeAiring.value = cachedAux.animeAiring
                 _nextAiringEpisode.value = cachedAux.nextAiringEpisode
-                _heroClearLogoUrl.value = cachedAux.heroClearLogoUrl ?: prevItem.clearartUrl
-            } else {
-                _heroClearLogoUrl.value = prevItem.clearartUrl
+                if (cachedAux.heroClearLogoUrl != null) {
+                    _heroClearLogoUrl.value = cachedAux.heroClearLogoUrl
+                }
             }
             loadRecommendationsAndReviews(prevItem)
+            if (prevItem.mediaType == MediaType.SHOW || prevItem.mediaType == MediaType.ANIME) {
+                launchSeriesFetch(prevItem)
+            }
         }
         return true
     }
 
     fun navigateToNext(): Boolean {
-        val immediate = _nextItem.value
-        if (immediate != null) {
-            _mediaId.value = immediate.id
-            _previewItem.value = null
-            _heroClearLogoUrl.value = immediate.clearartUrl
+        val siblings = _stableSiblingIds.value.ifEmpty {
+            ActiveSiblingHolder.activeSiblingIds
         }
+        if (siblings.isEmpty()) return false
+        val currentId = _mediaId.value
+        val currentIndex = siblings.indexOf(currentId)
+        val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
+        val nextId = siblings[nextIndex]
+        if (nextId == currentId) return false
+
+        // Cancel previous in-flight asynchronous operations
+        recommendationFetchJob?.cancel()
+        seriesFetchJob?.cancel()
+        discussionFetchJob?.cancel()
+        enrichmentFetchJob?.cancel()
+
+        val immediate = _nextItem.value?.takeIf { it.id == nextId }
+        // Single synchronous atomic step!
+        _mediaId.value = nextId
+        _previewItem.value = null
+
+        // Initialise logo cleanly from cache or preloaded item - NEVER let previous logo leak!
+        val nextCachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextId)]
+            ?: immediate?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(it)] }
+            ?: immediate?.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (immediate.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val immediateLogo = immediate?.clearartUrl?.takeIf {
+            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+        }
+        _heroClearLogoUrl.value = nextCachedAux?.heroClearLogoUrl ?: immediateLogo
+
+        updateSiblings(nextId)
+
         viewModelScope.launch {
-            val currentId = _mediaId.value
-            val siblings = _stableSiblingIds.value.ifEmpty {
-                ActiveSiblingHolder.activeSiblingIds
-            }
-            if (siblings.isEmpty()) return@launch
-            val currentIndex = siblings.indexOf(currentId)
-            val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
-            val nextId = siblings[nextIndex]
-            val nextItem = immediate?.takeIf { it.id == nextId } ?: repository.getMediaById(nextId).firstOrNull() ?: return@launch
-            _mediaId.value = nextId
-            _previewItem.value = null
-            _heroClearLogoUrl.value = nextItem.clearartUrl
-            updateSiblings(nextId)
-            val nextCachedSeasons = SeriesContentMemoryCache.seasonsCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.seasonsCache[nextId]
-            val nextCachedGrouped = SeriesContentMemoryCache.episodesBySeasonCache[nextItem.tmdbId ?: nextId] ?: SeriesContentMemoryCache.episodesBySeasonCache[nextId]
+            val nextItem = immediate ?: repository.getMediaById(nextId).firstOrNull() ?: return@launch
+            if (_mediaId.value != nextId) return@launch
+
+            val nextCachedSeasons = nextItem.tmdbId?.let { SeriesContentMemoryCache.seasonsCache[it] } ?: SeriesContentMemoryCache.seasonsCache[nextId]
+            val nextCachedGrouped = nextItem.tmdbId?.let { SeriesContentMemoryCache.episodesBySeasonCache[it] } ?: SeriesContentMemoryCache.episodesBySeasonCache[nextId]
             if (nextCachedSeasons != null) {
                 _realSeasons.value = nextCachedSeasons
                 _episodesBySeason.value = nextCachedGrouped.orEmpty()
@@ -2645,9 +2769,7 @@ class DetailViewModel(
                 _realEpisodes.value = emptyList()
                 _selectedSeasonNumber.value = 1
             }
-            val nextCachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextItem)]
-                ?: nextItem.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (nextItem.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
-                ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextId)]
+
             if (nextCachedAux != null) {
                 _recommendations.value = nextCachedAux.recommendations
                 _reviews.value = nextCachedAux.reviews
@@ -2661,11 +2783,14 @@ class DetailViewModel(
                 _animeRelations.value = nextCachedAux.animeRelations
                 _animeAiring.value = nextCachedAux.animeAiring
                 _nextAiringEpisode.value = nextCachedAux.nextAiringEpisode
-                _heroClearLogoUrl.value = nextCachedAux.heroClearLogoUrl ?: nextItem.clearartUrl
-            } else {
-                _heroClearLogoUrl.value = nextItem.clearartUrl
+                if (nextCachedAux.heroClearLogoUrl != null) {
+                    _heroClearLogoUrl.value = nextCachedAux.heroClearLogoUrl
+                }
             }
             loadRecommendationsAndReviews(nextItem)
+            if (nextItem.mediaType == MediaType.SHOW || nextItem.mediaType == MediaType.ANIME) {
+                launchSeriesFetch(nextItem)
+            }
         }
         return true
     }

@@ -128,12 +128,14 @@ class EnrichmentRepository(
         fanartApiKey: String? = null,
         tmdbApiKey: String? = null
     ): String? = withContext(Dispatchers.IO) {
-        if (!item.clearartUrl.isNullOrBlank()) {
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val isStaleTvdbLogo = item.clearartUrl?.contains("thetvdb.com") == true && !item.clearartUrl.contains("tmdb.org")
+        if (!item.clearartUrl.isNullOrBlank() && (!isStaleTvdbLogo || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)) {
             putCachedClearart(item, item.clearartUrl)
             return@withContext item.clearartUrl
         }
         val cached = getCachedClearart(item)
-        if (!cached.isNullOrBlank()) {
+        if (!cached.isNullOrBlank() && (!cached.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)) {
             return@withContext cached
         }
 
@@ -141,11 +143,16 @@ class EnrichmentRepository(
         var effectiveTmdbId = item.tmdbId
         var isMovie = item.mediaType == MediaType.MOVIE
 
-        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME && item.title.isNotBlank()) {
-            val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
-            if (animeTmdb != null) {
-                effectiveTmdbId = animeTmdb.first
-                isMovie = animeTmdb.second
+        if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME) {
+            if (item.anilistId != null && item.anilistId > 0) {
+                effectiveTmdbId = fetchAniZipTmdbId(item.anilistId)
+            }
+            if (effectiveTmdbId == null && item.title.isNotBlank()) {
+                val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
+                if (animeTmdb != null) {
+                    effectiveTmdbId = animeTmdb.first
+                    isMovie = animeTmdb.second
+                }
             }
         }
 
@@ -159,7 +166,7 @@ class EnrichmentRepository(
             }
         }
         if (clearart.isNullOrBlank() && item.anilistId != null && item.anilistId > 0) {
-            clearart = fetchAniZipClearlogo(item.anilistId)
+            clearart = fetchAniZipClearlogo(item.anilistId, effectiveTmdbKey)
         }
 
         if (!clearart.isNullOrBlank()) {
@@ -3340,6 +3347,7 @@ class EnrichmentRepository(
                         }
                     }
 
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                     val images = root["images"]?.jsonArray.orEmpty()
                     val clearlogo = images.firstOrNull { elem ->
                         val type = elem.jsonObject["coverType"].cleanString() ?: ""
@@ -3350,12 +3358,62 @@ class EnrichmentRepository(
                     }
                     val logoUrl = clearlogo?.jsonObject?.get("url").cleanString()
                     if (!logoUrl.isNullOrBlank()) {
+                        if (pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH && logoUrl.contains("thetvdb.com")) {
+                            // In AniZip, TVDB logos are untagged and often Chinese (e.g. Apothecary Diaries).
+                            // When English is preferred, skip Chinese TVDB logo so clean English typography is displayed.
+                            return@withAniZipPacing null
+                        }
                         aniZipLogoMemoryCache[anilistId] = logoUrl
                         logoUrl
                     } else null
                 }
             } catch (e: Exception) {
                 AppLogger.d("EnrichmentRepository", "AniZip clearlogo lookup failed for $anilistId: ${e.message}")
+                null
+            }
+        }
+    }
+
+    suspend fun searchAniListForAnime(title: String, nativeTitle: String? = null): Long? = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext null
+        NetworkPacer.withAniListPacing {
+            try {
+                val candidates = listOfNotNull(title, nativeTitle).filter { it.isNotBlank() }
+                for (queryStr in candidates) {
+                    val gql = """
+                        query (${'$'}search: String) {
+                            Page(page: 1, perPage: 5) {
+                                media(search: ${'$'}search, type: ANIME) {
+                                    id
+                                }
+                            }
+                        }
+                    """.trimIndent()
+                    val payload = buildJsonObject {
+                        put("query", gql)
+                        putJsonObject("variables") {
+                            put("search", queryStr)
+                        }
+                    }
+                    val req = Request.Builder()
+                        .url("https://graphql.anilist.co")
+                        .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                        .header("Accept", "application/json")
+                        .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string() ?: return@use
+                            val root = json.parseToJsonElement(body).jsonObject
+                            val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray
+                            val firstId = mediaList?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                            if (firstId != null && firstId > 0) return@withAniListPacing firstId
+                        }
+                    }
+                }
+                null
+            } catch (e: Exception) {
+                AppLogger.d("EnrichmentRepository", "searchAniListForAnime failed for $title: ${e.message}")
                 null
             }
         }

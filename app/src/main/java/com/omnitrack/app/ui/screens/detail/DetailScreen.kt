@@ -1644,9 +1644,12 @@ private fun DetailHeroHeaderSection(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                 val effectiveClearartUrl = heroClearLogoUrl?.takeIf { it.isNotBlank() }
-                    ?: item.clearartUrl?.takeIf { it.isNotBlank() }
-                    ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
+                    ?: item.clearartUrl?.takeIf { it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE) }
+                    ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)?.takeIf {
+                        !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+                    }
                 var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
                 val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed
                 val context = LocalContext.current
@@ -1833,9 +1836,12 @@ private fun DetailClassicHeaderSection(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                     val effectiveClearartUrl = heroClearLogoUrl?.takeIf { it.isNotBlank() }
-                        ?: item.clearartUrl?.takeIf { it.isNotBlank() }
-                        ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
+                        ?: item.clearartUrl?.takeIf { it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE) }
+                        ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)?.takeIf {
+                            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+                        }
                     var clearartFailed by remember(effectiveClearartUrl) { mutableStateOf(false) }
                     val hasClearart = !effectiveClearartUrl.isNullOrBlank() && !clearartFailed
                     val context = LocalContext.current

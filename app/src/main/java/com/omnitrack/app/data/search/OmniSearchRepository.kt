@@ -3,10 +3,12 @@ package com.omnitrack.app.data.search
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.network.NetworkPacer
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -98,10 +100,27 @@ class OmniSearchRepository(
 
             val rawResults = deferreds.awaitAll().flatten()
 
+            // Primary source priority (AniList and TMDb take precedence over secondary catalogs)
+            val providerPriority = mapOf(
+                "AniList" to 1,
+                "TMDb" to 2,
+                "MangaDex" to 3,
+                "RanobeDB" to 4,
+                "Steam" to 5,
+                "VNDB" to 6,
+                "OpenLibrary" to 7,
+                "WLNUpdates" to 8,
+                "Bangumi" to 10
+            )
+            val prioritized = rawResults.sortedWith(compareBy(
+                { providerPriority[it.sourceProvider] ?: 50 },
+                { -(it.communityScore ?: 0f) }
+            ))
+
             // Deduplicate by clean lower-case title and media vertical
             val seen = mutableSetOf<String>()
             val deduped = mutableListOf<SearchResultItem>()
-            for (item in rawResults) {
+            for (item in prioritized) {
                 val key = "${item.mediaType.name}:${item.title.trim().lowercase()}"
                 if (seen.add(key)) {
                     deduped.add(item)
@@ -133,7 +152,7 @@ class OmniSearchRepository(
             val formatParam = if (formatNovel) ", format: NOVEL" else if (!isAnime) ", format_not: NOVEL" else ""
             val gql = """
                 query (${'$'}search: String) {
-                    Page(page: 1, perPage: 8) {
+                    Page(page: 1, perPage: 25) {
                         media(search: ${'$'}search, type: $typeStr$formatParam) {
                             id
                             idMal
@@ -159,12 +178,24 @@ class OmniSearchRepository(
 
             val request = Request.Builder()
                 .url("https://graphql.anilist.co")
+                .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                .header("Accept", "application/json")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withAniListPacing emptyList()
-                val body = response.body?.string() ?: return@withAniListPacing emptyList()
+            var response = client.newCall(request).execute()
+            if (response.code == 429) {
+                response.close()
+                delay(800)
+                response = client.newCall(request).execute()
+            }
+
+            response.use { resp ->
+                if (!resp.isSuccessful) {
+                    AppLogger.w("OmniSearchRepository", "AniList search returned HTTP ${resp.code} for query: $query")
+                    return@withAniListPacing emptyList()
+                }
+                val body = resp.body?.string() ?: return@withAniListPacing emptyList()
                 val root = json.parseToJsonElement(body).jsonObject
                 val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray
                     ?: return@withAniListPacing emptyList()
@@ -221,7 +252,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -280,7 +312,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -308,8 +341,16 @@ class OmniSearchRepository(
                     val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
                     val nameCn = obj["name_cn"].cleanString()
                     val nameOrig = obj["name"].cleanString() ?: return@mapNotNull null
-                    val title = if (!nameCn.isNullOrBlank()) nameCn else nameOrig
-                    val nativeTitle = if (nameCn != null && nameCn != nameOrig) nameOrig else null
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val (title, nativeTitle) = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> {
+                            nameOrig to (if (!nameCn.isNullOrBlank() && nameCn != nameOrig) nameCn else null)
+                        }
+                        else -> {
+                            val enOrOrig = if (!nameOrig.isNullOrBlank()) nameOrig else nameCn ?: "Title"
+                            enOrOrig to (if (!nameCn.isNullOrBlank() && nameCn != enOrOrig) nameCn else null)
+                        }
+                    }
 
                     val images = obj["images"]?.jsonObject
                     val cover = images?.get("large").cleanString()
@@ -334,7 +375,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -396,7 +438,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -466,7 +509,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -508,7 +552,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -546,7 +591,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -595,7 +641,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -662,7 +709,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -705,7 +753,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -745,7 +794,8 @@ class OmniSearchRepository(
                 }
                 results
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -788,7 +838,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -843,7 +894,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -879,7 +931,8 @@ class OmniSearchRepository(
                     )
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
