@@ -1,5 +1,11 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
@@ -28,12 +36,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -311,8 +322,12 @@ fun UnifiedDiscussionSection(
     val hasReviews = reviews.isNotEmpty()
     if (!hasReviews && !hasAniList) return
 
+    val haptic = LocalHapticFeedback.current
     var selectedTab by remember(hasReviews, hasAniList) {
         mutableIntStateOf(if (hasReviews) 0 else 1)
+    }
+    var isDiscussionExpanded by remember(mediaTitle) {
+        mutableStateOf(false)
     }
 
     Column(
@@ -340,8 +355,10 @@ fun UnifiedDiscussionSection(
                 )
 
                 // Tab 1: Discussion (Right)
+                val discussionCount = comments?.size ?: 0
+                val discussionTabLabel = if (discussionCount > 0) "Discussion ($discussionCount)" else "Discussion"
                 Text(
-                    text = "Discussion",
+                    text = discussionTabLabel,
                     color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
                     fontSize = 20.sp,
                     fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.SemiBold,
@@ -359,30 +376,105 @@ fun UnifiedDiscussionSection(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )
+        } else if (hasAniList) {
+            // Option 1: Collapsible Header Row when ONLY Discussion exists (no Trakt reviews)
+            val discussionCount = comments?.size ?: 0
+            val discussionLabel = if (discussionCount > 0) "Discussion ($discussionCount)" else "Discussion"
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = discussionLabel,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            isDiscussionExpanded = !isDiscussionExpanded
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = if (isDiscussionExpanded) "Collapse" else "Expand",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Icon(
+                        imageVector = if (isDiscussionExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isDiscussionExpanded) "Collapse" else "Expand",
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
         }
 
         if (selectedTab == 0 && hasReviews) {
             ReviewsSection(reviews = reviews, showHeader = false)
         } else if (hasAniList) {
-            DetailCommentsSection(
-                mediaType = mediaType,
-                mediaTitle = mediaTitle,
-                episodeOrChapterCount = episodeOrChapterCount,
-                comments = comments,
-                isLoading = isLoading,
-                seasons = seasons,
-                selectedSeasonNumber = selectedSeasonNumber,
-                currentUsername = currentUsername,
-                onSeasonSelect = onSeasonSelect,
-                onPostComment = onPostComment,
-                onEditComment = onEditComment,
-                onDeleteComment = onDeleteComment,
-                onVote = onVote,
-                onUserClick = onUserClick,
-                onTagSelect = onTagSelect,
-                onSortChange = onSortChange,
-                onLoadReplies = onLoadReplies
-            )
+            if (hasReviews) {
+                // Dual-tab view: user explicitly selected Discussion tab -> render directly
+                DetailCommentsSection(
+                    mediaType = mediaType,
+                    mediaTitle = mediaTitle,
+                    episodeOrChapterCount = episodeOrChapterCount,
+                    comments = comments,
+                    isLoading = isLoading,
+                    seasons = seasons,
+                    selectedSeasonNumber = selectedSeasonNumber,
+                    currentUsername = currentUsername,
+                    onSeasonSelect = onSeasonSelect,
+                    onPostComment = onPostComment,
+                    onEditComment = onEditComment,
+                    onDeleteComment = onDeleteComment,
+                    onVote = onVote,
+                    onUserClick = onUserClick,
+                    onTagSelect = onTagSelect,
+                    onSortChange = onSortChange,
+                    onLoadReplies = onLoadReplies
+                )
+            } else {
+                // Only Discussion exists: smooth animated collapsible accordion (Option 1)
+                AnimatedVisibility(
+                    visible = isDiscussionExpanded,
+                    enter = expandVertically(animationSpec = tween(260)) + fadeIn(animationSpec = tween(200)),
+                    exit = shrinkVertically(animationSpec = tween(220)) + fadeOut(animationSpec = tween(160))
+                ) {
+                    DetailCommentsSection(
+                        mediaType = mediaType,
+                        mediaTitle = mediaTitle,
+                        episodeOrChapterCount = episodeOrChapterCount,
+                        comments = comments,
+                        isLoading = isLoading,
+                        seasons = seasons,
+                        selectedSeasonNumber = selectedSeasonNumber,
+                        currentUsername = currentUsername,
+                        onSeasonSelect = onSeasonSelect,
+                        onPostComment = onPostComment,
+                        onEditComment = onEditComment,
+                        onDeleteComment = onDeleteComment,
+                        onVote = onVote,
+                        onUserClick = onUserClick,
+                        onTagSelect = onTagSelect,
+                        onSortChange = onSortChange,
+                        onLoadReplies = onLoadReplies
+                    )
+                }
+            }
         }
     }
 }
