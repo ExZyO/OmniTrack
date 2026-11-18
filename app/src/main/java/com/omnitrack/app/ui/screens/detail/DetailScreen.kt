@@ -208,14 +208,14 @@ fun DetailScreen(
 
     val scrollState = rememberScrollState()
 
-    BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
+    BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode || viewModel.isPreviewActive()) {
         if (sheetBackStack.isNotEmpty()) {
             sheetBackStack.removeAt(sheetBackStack.lastIndex)
             val restoredOffset = viewModel.popScrollOffset()
             if (restoredOffset != null) {
                 coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
             }
-        } else if (uiState.isPreviewMode) {
+        } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
             val handled = viewModel.closePreview()
             if (!handled) {
                 onBack()
@@ -1005,17 +1005,21 @@ fun DetailScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (uiState.isPreviewMode) {
-                            viewModel.closePreview()
-                            val restoredOffset = viewModel.popScrollOffset()
-                            if (restoredOffset != null) {
-                                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
-                            }
-                        } else if (sheetBackStack.isNotEmpty()) {
+                        if (sheetBackStack.isNotEmpty()) {
                             sheetBackStack.removeAt(sheetBackStack.lastIndex)
                             val restoredOffset = viewModel.popScrollOffset()
                             if (restoredOffset != null) {
                                 coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                            }
+                        } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
+                            val handled = viewModel.closePreview()
+                            if (!handled) {
+                                onBack()
+                            } else {
+                                val restoredOffset = viewModel.popScrollOffset()
+                                if (restoredOffset != null) {
+                                    coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                                }
                             }
                         } else {
                             onBack()
@@ -1043,8 +1047,10 @@ fun DetailScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     val effectiveHeaderClearart = uiState.heroClearLogoUrl?.takeIf { it.isNotBlank() }
-                        ?: item?.clearartUrl?.takeIf { it.isNotBlank() }
-                        ?: item?.let { com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(it) }
+                        ?: item?.clearartUrl?.takeIf { it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE) }
+                        ?: item?.let { com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(it) }?.takeIf {
+                            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+                        }
                     var headerClearartFailed by remember(effectiveHeaderClearart) { mutableStateOf(false) }
                     if (!effectiveHeaderClearart.isNullOrBlank() && !headerClearartFailed) {
                         val headerLogoRequest = remember(effectiveHeaderClearart) {

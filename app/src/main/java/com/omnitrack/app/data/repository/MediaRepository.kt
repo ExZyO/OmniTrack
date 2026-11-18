@@ -65,6 +65,32 @@ class MediaRepository(
 
     fun searchMedia(query: String): Flow<List<MediaItemEntity>> = mediaDao.searchMedia(query).distinctUntilChanged()
 
+    suspend fun findExistingMedia(
+        anilistId: Long? = null,
+        malId: Long? = null,
+        tmdbId: Long? = null,
+        title: String? = null,
+        mediaType: MediaType? = null
+    ): MediaItemEntity? {
+        if (anilistId != null && anilistId > 0) {
+            val found = mediaDao.findByAnilistId(anilistId)
+            if (found != null) return found
+        }
+        if (malId != null && malId > 0) {
+            val found = mediaDao.findByMalId(malId)
+            if (found != null) return found
+        }
+        if (tmdbId != null && tmdbId > 0) {
+            val found = mediaDao.findByTmdbId(tmdbId)
+            if (found != null) return found
+        }
+        if (!title.isNullOrBlank() && mediaType != null) {
+            val found = mediaDao.findByTitleAndType(title.trim(), mediaType)
+            if (found != null) return found
+        }
+        return null
+    }
+
     fun getVisibleCategories(): Flow<List<CategoryEntity>> = categoryDao.getVisibleCategories().distinctUntilChanged()
 
     suspend fun insertMedia(item: MediaItemEntity): Long = mediaDao.insertMedia(item)

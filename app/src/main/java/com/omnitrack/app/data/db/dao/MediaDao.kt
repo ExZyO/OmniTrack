@@ -33,6 +33,18 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE title LIKE '%' || :query || '%' OR nativeTitle LIKE '%' || :query || '%'")
     fun searchMedia(query: String): Flow<List<MediaItemEntity>>
 
+    @Query("SELECT * FROM media_items WHERE anilistId = :anilistId LIMIT 1")
+    suspend fun findByAnilistId(anilistId: Long): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE malId = :malId LIMIT 1")
+    suspend fun findByMalId(malId: Long): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE tmdbId = :tmdbId LIMIT 1")
+    suspend fun findByTmdbId(tmdbId: Long): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND mediaType = :type LIMIT 1")
+    suspend fun findByTitleAndType(title: String, type: MediaType): MediaItemEntity?
+
     @Query("UPDATE media_items SET currentProgress = :progress, lastUpdated = :updated WHERE id = :id")
     suspend fun updateProgress(id: Long, progress: Double, updated: Long = System.currentTimeMillis())
 

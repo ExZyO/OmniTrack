@@ -43,6 +43,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Collections
 
 import com.omnitrack.app.data.model.AnimeTagItem
@@ -492,7 +493,7 @@ class DetailViewModel(
 
         // 0ms Detail Aux Synchronous Cache Hit (Cast, Trailers, Recommendations, Reviews, Companies, Collection):
         val cachedAux = if (mediaId > 0L) {
-            DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(mediaId)]
+            DetailAuxMemoryCache.getCacheKey(mediaId)?.let { DetailAuxMemoryCache.cache[it] }
                 ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let {
                     DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("tv", it)]
                         ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("movie", it)]
@@ -500,7 +501,7 @@ class DetailViewModel(
         } else if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
-                DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(ephemeral)]
+                DetailAuxMemoryCache.getCacheKey(ephemeral)?.let { DetailAuxMemoryCache.cache[it] }
                     ?: ephemeral.tmdbId?.let {
                         val t = if (ephemeral.mediaType == MediaType.MOVIE) "movie" else "tv"
                         DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(t, it)]
@@ -627,14 +628,14 @@ class DetailViewModel(
                             _heroClearLogoUrl.value = earlyLogo
                         }
                         val curr = repository.getMediaById(item.id).firstOrNull() ?: item
-                        if (curr.clearartUrl != earlyLogo) {
+                        if (curr.clearartUrl != earlyLogo && isAllowedLogo) {
                             repository.updateMedia(curr.copy(clearartUrl = earlyLogo))
                         }
                     } else {
                         val currentPreview = _previewItem.value
                         val matchesPreview = currentPreview != null && (currentPreview.id == item.id || currentPreview.title == item.title || (currentPreview.anilistId != null && currentPreview.anilistId == item.anilistId))
                         if (matchesPreview && currentPreview != null) {
-                            val updated = currentPreview.copy(clearartUrl = earlyLogo)
+                            val updated = if (isAllowedLogo) currentPreview.copy(clearartUrl = earlyLogo) else currentPreview
                             _previewItem.value = updated
                             if (isAllowedLogo) {
                                 _heroClearLogoUrl.value = earlyLogo
@@ -843,7 +844,7 @@ class DetailViewModel(
                     companies = aux.companies,
                     collectionName = aux.collectionName,
                     collectionItems = aux.collectionItems,
-                    isPreviewMode = true,
+                    isPreviewMode = aux.previewItem.id <= 0L,
                     isLoading = false,
                     hasPreviousEntry = false,
                     hasNextEntry = false,
@@ -1006,24 +1007,87 @@ class DetailViewModel(
         _nextAiringEpisode.value = null
     }
 
+    fun isPreviewActive(): Boolean =
+        _previewStack.value.isNotEmpty() || _previewItem.value != null || EphemeralPreviewHolder.previewItem != null
+
     fun openPreview(rec: RecommendationItem) {
-        val previewEntity = MediaItemEntity(
-            id = -1L,
-            title = rec.title,
-            coverUrl = rec.coverUrl,
-            bannerUrl = rec.bannerUrl,
-            mediaType = rec.mediaType,
-            synopsis = rec.synopsis,
-            communityScore = rec.rating,
-            tmdbId = rec.tmdbId,
-            anilistId = rec.anilistId,
-            malId = rec.malId,
-            status = TrackingStatus.PLAN_TO_TRACK
-        )
-        openPreview(previewEntity)
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.findExistingMedia(
+                anilistId = rec.anilistId,
+                malId = rec.malId,
+                tmdbId = rec.tmdbId,
+                title = rec.title,
+                mediaType = rec.mediaType
+            )
+            val entityToOpen = existing ?: MediaItemEntity(
+                id = -1L,
+                title = rec.title,
+                coverUrl = rec.coverUrl,
+                bannerUrl = rec.bannerUrl,
+                mediaType = rec.mediaType,
+                synopsis = rec.synopsis,
+                communityScore = rec.rating,
+                tmdbId = rec.tmdbId,
+                anilistId = rec.anilistId,
+                malId = rec.malId,
+                status = TrackingStatus.PLAN_TO_TRACK
+            )
+            withContext(Dispatchers.Main) {
+                openPreviewInternal(entityToOpen)
+            }
+        }
     }
 
     fun openPreview(previewEntity: MediaItemEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = if (previewEntity.id <= 0L) {
+                repository.findExistingMedia(
+                    anilistId = previewEntity.anilistId,
+                    malId = previewEntity.malId,
+                    tmdbId = previewEntity.tmdbId,
+                    title = previewEntity.title,
+                    mediaType = previewEntity.mediaType
+                ) ?: previewEntity
+            } else {
+                previewEntity
+            }
+            withContext(Dispatchers.Main) {
+                openPreviewInternal(target)
+            }
+        }
+    }
+
+    fun openRelationPreview(relation: AnimeRelationItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val format = relation.format.uppercase()
+            val targetType = when {
+                format == "MANGA" -> MediaType.MANGA
+                format == "NOVEL" -> MediaType.NOVEL
+                format == "MOVIE" -> MediaType.MOVIE
+                else -> MediaType.ANIME
+            }
+            val existing = repository.findExistingMedia(
+                anilistId = relation.id,
+                title = relation.title,
+                mediaType = targetType
+            )
+            val entityToOpen = existing ?: MediaItemEntity(
+                id = -1L,
+                title = relation.title,
+                coverUrl = relation.coverUrl ?: "",
+                bannerUrl = relation.bannerUrl,
+                mediaType = targetType,
+                anilistId = relation.id,
+                releaseYear = relation.year?.toString(),
+                status = TrackingStatus.PLAN_TO_TRACK
+            )
+            withContext(Dispatchers.Main) {
+                openPreviewInternal(entityToOpen)
+            }
+        }
+    }
+
+    private fun openPreviewInternal(previewEntity: MediaItemEntity) {
         resetAuxFields()
         val pTmdb = previewEntity.tmdbId
         val pSeasons = (if (pTmdb != null) SeriesContentMemoryCache.seasonsCache[pTmdb] else null) ?: (if (previewEntity.id > 0L) SeriesContentMemoryCache.seasonsCache[previewEntity.id] else null)
@@ -1045,27 +1109,6 @@ class DetailViewModel(
         if (previewEntity.mediaType == MediaType.SHOW || previewEntity.mediaType == MediaType.ANIME) {
             launchSeriesFetch(previewEntity)
         }
-    }
-
-    fun openRelationPreview(relation: AnimeRelationItem) {
-        val format = relation.format.uppercase()
-        val targetType = when {
-            format == "MANGA" -> MediaType.MANGA
-            format == "NOVEL" -> MediaType.NOVEL
-            format == "MOVIE" -> MediaType.MOVIE
-            else -> MediaType.ANIME
-        }
-        val previewEntity = MediaItemEntity(
-            id = -1L,
-            title = relation.title,
-            coverUrl = relation.coverUrl ?: "",
-            bannerUrl = relation.bannerUrl,
-            mediaType = targetType,
-            anilistId = relation.id,
-            releaseYear = relation.year?.toString(),
-            status = TrackingStatus.PLAN_TO_TRACK
-        )
-        openPreview(previewEntity)
     }
 
     fun closePreview(): Boolean {
@@ -1153,7 +1196,7 @@ class DetailViewModel(
         val idKey = if (item.id > 0L) DetailAuxMemoryCache.getCacheKey(item.id) else null
 
         // 1. Instant 0ms Memory Cache Hit
-        val existingCached = DetailAuxMemoryCache.cache[cacheKey]
+        val existingCached = (cacheKey?.let { DetailAuxMemoryCache.cache[it] })
             ?: (itemTmdbKey?.let { DetailAuxMemoryCache.cache[it] })
             ?: (idKey?.let { DetailAuxMemoryCache.cache[it] })
 
@@ -1247,7 +1290,7 @@ class DetailViewModel(
                     seasonMalIds = _seasonMalIds.value,
                     heroClearLogoUrl = _heroClearLogoUrl.value
                 )
-                DetailAuxMemoryCache.cache[cacheKey] = aux
+                if (cacheKey != null) DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
                 if (idKey != null) DetailAuxMemoryCache.cache[idKey] = aux
             }
@@ -2664,8 +2707,8 @@ class DetailViewModel(
         _previewItem.value = null
 
         // Initialise logo cleanly from cache or preloaded item - NEVER let previous logo leak!
-        val cachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(prevId)]
-            ?: immediate?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(it)] }
+        val cachedAux = DetailAuxMemoryCache.getCacheKey(prevId)?.let { DetailAuxMemoryCache.cache[it] }
+            ?: immediate?.let { DetailAuxMemoryCache.getCacheKey(it) }?.let { DetailAuxMemoryCache.cache[it] }
             ?: immediate?.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (immediate.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
         val immediateLogo = immediate?.clearartUrl?.takeIf {
@@ -2741,8 +2784,8 @@ class DetailViewModel(
         _previewItem.value = null
 
         // Initialise logo cleanly from cache or preloaded item - NEVER let previous logo leak!
-        val nextCachedAux = DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(nextId)]
-            ?: immediate?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getCacheKey(it)] }
+        val nextCachedAux = DetailAuxMemoryCache.getCacheKey(nextId)?.let { DetailAuxMemoryCache.cache[it] }
+            ?: immediate?.let { DetailAuxMemoryCache.getCacheKey(it) }?.let { DetailAuxMemoryCache.cache[it] }
             ?: immediate?.tmdbId?.let { DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (immediate.mediaType == MediaType.MOVIE) "movie" else "tv", it)] }
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
         val immediateLogo = immediate?.clearartUrl?.takeIf {
@@ -3083,12 +3126,16 @@ data class CachedDetailAux(
 internal object DetailAuxMemoryCache {
     val cache = java.util.concurrent.ConcurrentHashMap<String, CachedDetailAux>()
 
-    fun getCacheKey(item: MediaItemEntity): String {
-        return "${item.mediaType}_${item.id}_${item.tmdbId}_${item.anilistId}_${item.malId}"
+    fun getCacheKey(item: MediaItemEntity): String? {
+        if (item.id > 0L) return "id_${item.id}"
+        if (item.tmdbId != null && item.tmdbId > 0L) return "tmdb_${if (item.mediaType == MediaType.MOVIE) "movie" else "tv"}_${item.tmdbId}"
+        if (item.anilistId != null && item.anilistId > 0L) return "anilist_${item.anilistId}"
+        if (item.malId != null && item.malId > 0L) return "mal_${item.malId}"
+        return null
     }
 
-    fun getCacheKey(mediaId: Long): String {
-        return "id_$mediaId"
+    fun getCacheKey(mediaId: Long): String? {
+        return if (mediaId > 0L) "id_$mediaId" else null
     }
 
     fun getTmdbCacheKey(type: String, tmdbId: Long): String {
