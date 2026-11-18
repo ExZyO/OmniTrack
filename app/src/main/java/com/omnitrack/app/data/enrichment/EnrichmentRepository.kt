@@ -3330,7 +3330,7 @@ class EnrichmentRepository(
                     val root = json.parseToJsonElement(body).jsonObject
 
                     // 1. Language-matched TMDb clearart check first (prevents Chinese TVDB logos)
-                    val effectiveKey = tmdbKey ?: tmdbApiKey ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+                    val effectiveKey = tmdbKey ?: "844dba0bfd8f3a4f3799f6130ef9e335"
                     val tmdbId = root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.content?.toLongOrNull()
                     if (tmdbId != null && tmdbId > 0) {
                         val tmdbLogo = fetchTmdbClearart(tmdbId, isMovie = false, apiKey = effectiveKey)

@@ -24,6 +24,7 @@ import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
 import com.omnitrack.app.util.AirDateUtils
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -2005,12 +2006,10 @@ class DetailViewModel(
                         val grouped = aniZipEps.groupBy { it.seasonNumber }
                         val constructedSeasons = grouped.map { (sNum, eps) ->
                             com.omnitrack.app.data.model.MediaSeason(
-                                id = sNum.toLong(),
                                 seasonNumber = sNum,
                                 name = if (sNum == 0) "Specials" else "Season $sNum",
-                                overview = null,
-                                posterUrl = null,
                                 episodeCount = eps.size,
+                                posterUrl = null,
                                 airDate = eps.firstOrNull()?.airDate
                             )
                         }.sortedWith(compareBy({ if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }))
