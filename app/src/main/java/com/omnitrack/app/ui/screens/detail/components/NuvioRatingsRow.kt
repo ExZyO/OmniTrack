@@ -46,9 +46,14 @@ private data class RatingBadgeData(
 @Composable
 fun NuvioRatingsRow(
     item: MediaItemEntity,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    anilistScore: Float? = null,
+    malScore: Float? = null,
+    kitsuScore: Float? = null,
+    mangaUpdatesScore: Float? = null,
+    bangumiScore: Float? = null
 ) {
-    val badges = remember(item) {
+    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore) {
         val list = mutableListOf<RatingBadgeData>()
 
         // 1. IMDb (Gold Logo 30x16dp)
@@ -174,56 +179,90 @@ fun NuvioRatingsRow(
         }
 
         // 7. AniList Community Score (100-point % scale, e.g. 84% in cyan #02A9FF)
-        if (item.anilistId != null || ((item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) && item.malId == null && item.bangumiId == null)) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    val aniVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
-                    list.add(
-                        RatingBadgeData(
-                            source = "anilist",
-                            displayName = "AniList",
-                            iconRes = R.drawable.brand_anilist,
-                            valueText = "$aniVal%",
-                            valueColor = Color(0xFF02A9FF)
-                        )
+        val effAniScore = anilistScore ?: if (
+            item.anilistId != null ||
+            ((item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) && item.malId == null && item.bangumiId == null && kitsuScore == null && mangaUpdatesScore == null)
+        ) item.communityScore else null
+        effAniScore?.let { score ->
+            if (score > 0 && item.mediaType in listOf(MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL)) {
+                val aniVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
+                list.add(
+                    RatingBadgeData(
+                        source = "anilist",
+                        displayName = "AniList",
+                        iconRes = R.drawable.brand_anilist,
+                        valueText = "$aniVal%",
+                        valueColor = Color(0xFF02A9FF)
                     )
-                }
+                )
             }
         }
 
         // 8. MyAnimeList Score (10-point decimal scale, e.g. 8.45 / 8.5 in MAL blue #2E51A2)
-        if (item.malId != null) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    val malVal = if (score > 10f) score / 10.0 else score.toDouble()
-                    list.add(
-                        RatingBadgeData(
-                            source = "mal",
-                            displayName = "MyAnimeList",
-                            iconRes = R.drawable.rating_mal,
-                            valueText = formatMalScore(malVal),
-                            valueColor = Color(0xFF2E51A2)
-                        )
+        val effMalScore = malScore ?: if (item.malId != null && item.mediaType in listOf(MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL)) {
+            item.communityScore
+        } else null
+        effMalScore?.let { score ->
+            if (score > 0) {
+                val malVal = if (score > 10f) score / 10.0 else score.toDouble()
+                list.add(
+                    RatingBadgeData(
+                        source = "mal",
+                        displayName = "MyAnimeList",
+                        iconRes = R.drawable.rating_mal,
+                        valueText = formatMalScore(malVal),
+                        valueColor = Color(0xFF5B8BFF)
                     )
-                }
+                )
             }
         }
 
         // 9. Bangumi Score (10-point decimal scale, e.g. 8.2 in pink #F09199)
-        if (item.bangumiId != null) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    val bgmVal = if (score > 10f) score / 10.0 else score.toDouble()
-                    list.add(
-                        RatingBadgeData(
-                            source = "bangumi",
-                            displayName = "Bangumi",
-                            iconRes = R.drawable.brand_bangumi,
-                            valueText = formatOneDecimal(bgmVal),
-                            valueColor = Color(0xFFF09199)
-                        )
+        val effBgmScore = bangumiScore ?: if (item.bangumiId != null) item.communityScore else null
+        effBgmScore?.let { score ->
+            if (score > 0) {
+                val bgmVal = if (score > 10f) score / 10.0 else score.toDouble()
+                list.add(
+                    RatingBadgeData(
+                        source = "bangumi",
+                        displayName = "Bangumi",
+                        iconRes = R.drawable.brand_bangumi,
+                        valueText = formatOneDecimal(bgmVal),
+                        valueColor = Color(0xFFF09199)
                     )
-                }
+                )
+            }
+        }
+
+        // 9b. Kitsu Community Score (% scale, e.g. 85% in coral #F75239)
+        kitsuScore?.let { score ->
+            if (score > 0) {
+                val kitsuVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
+                list.add(
+                    RatingBadgeData(
+                        source = "kitsu",
+                        displayName = "Kitsu",
+                        iconRes = R.drawable.brand_kitsu,
+                        valueText = "$kitsuVal%",
+                        valueColor = Color(0xFFF75239)
+                    )
+                )
+            }
+        }
+
+        // 9c. MangaUpdates Score (10-point decimal scale in arctic blue #64B5F6)
+        mangaUpdatesScore?.let { score ->
+            if (score > 0) {
+                val muVal = if (score > 10f) score / 10.0 else score.toDouble()
+                list.add(
+                    RatingBadgeData(
+                        source = "mangaupdates",
+                        displayName = "MangaUpdates",
+                        iconRes = R.drawable.brand_mangaupdates,
+                        valueText = formatOneDecimal(muVal),
+                        valueColor = Color(0xFF64B5F6)
+                    )
+                )
             }
         }
 

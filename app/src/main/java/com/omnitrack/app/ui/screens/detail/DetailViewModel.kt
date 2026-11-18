@@ -72,6 +72,15 @@ import okhttp3.Request
 
 import com.omnitrack.app.data.model.ExternalLinkItem
 
+data class NovelDetailMeta(
+    val resolvedMode: Boolean? = null,
+    val anilistScore: Float? = null,
+    val malScore: Float? = null,
+    val kitsuScore: Float? = null,
+    val mangaUpdatesScore: Float? = null,
+    val bangumiScore: Float? = null
+)
+
 data class DetailUiState(
     val item: MediaItemEntity? = null,
     val previousItem: MediaItemEntity? = null,
@@ -121,7 +130,9 @@ data class DetailUiState(
     val heroClearLogoUrl: String? = null,
     val isFillerSkipEnabled: Boolean = false,
     val hasFillers: Boolean = false,
-    val isMangaSeasonGrouped: Boolean = false
+    val isMangaSeasonGrouped: Boolean = false,
+    val isLightNovelMode: Boolean = false,
+    val novelDetailMeta: NovelDetailMeta = NovelDetailMeta()
 )
 
 private data class PreviewAndAux(
@@ -165,7 +176,8 @@ private data class PreviewAndAux(
     val externalLinks: List<ExternalLinkItem> = emptyList(),
     val heroClearLogoUrl: String? = null,
     val isFillerSkipEnabled: Boolean = false,
-    val isMangaSeasonGrouped: Boolean = false
+    val isMangaSeasonGrouped: Boolean = false,
+    val novelDetailMeta: NovelDetailMeta = NovelDetailMeta()
 )
 
 class DetailViewModel(
@@ -233,6 +245,7 @@ class DetailViewModel(
     private val _heroClearLogoUrl = MutableStateFlow<String?>(null)
     private val _isFillerSkipEnabled = MutableStateFlow(false)
     private val _isMangaSeasonGrouped = MutableStateFlow(false)
+    private val _novelDetailMeta = MutableStateFlow(NovelDetailMeta())
     private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
@@ -758,7 +771,8 @@ class DetailViewModel(
             _externalLinks,
             _heroClearLogoUrl,
             _isFillerSkipEnabled,
-            _isMangaSeasonGrouped
+            _isMangaSeasonGrouped,
+            _novelDetailMeta
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -803,7 +817,8 @@ class DetailViewModel(
             externalLinks = (args[38] as? List<ExternalLinkItem>).orEmpty(),
             heroClearLogoUrl = args[39] as? String,
             isFillerSkipEnabled = (args[40] as? Boolean) ?: false,
-            isMangaSeasonGrouped = (args[41] as? Boolean) ?: false
+            isMangaSeasonGrouped = (args[41] as? Boolean) ?: false,
+            novelDetailMeta = (args[42] as? NovelDetailMeta) ?: NovelDetailMeta()
         )
     }.flatMapLatest { aux ->
         val hasFillers = aux.realEpisodes.any { it.isFiller } || (aux.episodesBySeason[aux.selectedSeasonNumber]?.any { it.isFiller } == true)
@@ -879,7 +894,18 @@ class DetailViewModel(
                     heroClearLogoUrl = aux.heroClearLogoUrl,
                     isFillerSkipEnabled = aux.isFillerSkipEnabled,
                     hasFillers = hasFillers,
-                    isMangaSeasonGrouped = aux.isMangaSeasonGrouped
+                    isMangaSeasonGrouped = aux.isMangaSeasonGrouped,
+                    isLightNovelMode = if (displayPreviewItem.mediaType == MediaType.NOVEL) {
+                        aux.novelDetailMeta.resolvedMode ?: (com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                            displayPreviewItem.platform,
+                            displayPreviewItem.originCountry,
+                            displayPreviewItem.anilistId,
+                            displayPreviewItem.malId,
+                            displayPreviewItem.totalProgress,
+                            displayPreviewItem.title
+                        ) == "LIGHT_NOVEL")
+                    } else false,
+                    novelDetailMeta = aux.novelDetailMeta
                 )
             }
         } else {
@@ -980,7 +1006,18 @@ class DetailViewModel(
                                 heroClearLogoUrl = aux.heroClearLogoUrl,
                                 isFillerSkipEnabled = aux.isFillerSkipEnabled,
                                 hasFillers = hasFillers,
-                                isMangaSeasonGrouped = aux.isMangaSeasonGrouped
+                                isMangaSeasonGrouped = aux.isMangaSeasonGrouped,
+                                isLightNovelMode = if (displayItem.mediaType == MediaType.NOVEL) {
+                                    aux.novelDetailMeta.resolvedMode ?: (com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                                        displayItem.platform,
+                                        displayItem.originCountry,
+                                        displayItem.anilistId,
+                                        displayItem.malId,
+                                        displayItem.totalProgress,
+                                        displayItem.title
+                                    ) == "LIGHT_NOVEL")
+                                } else false,
+                                novelDetailMeta = aux.novelDetailMeta
                             )
                         }
                     } else {
@@ -1046,6 +1083,7 @@ class DetailViewModel(
         _fillerInfoMap.value = emptyMap()
         _heroClearLogoUrl.value = null
         _isMangaSeasonGrouped.value = false
+        _novelDetailMeta.value = NovelDetailMeta()
     }
 
     fun isPreviewActive(): Boolean =
@@ -1200,17 +1238,18 @@ class DetailViewModel(
         }
         val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
         val isMangaSeries = item.mediaType == MediaType.MANGA
+        val isNovelSeries = item.mediaType == MediaType.NOVEL
 
-        if (isShowOrAnime || isMangaSeries) {
-            val seriesKey = "${item.mediaType}_${item.id.takeIf { it > 0 } ?: item.anilistId ?: item.malId ?: item.tmdbId ?: item.title.lowercase().trim()}"
+        if (isShowOrAnime || isMangaSeries || isNovelSeries) {
+            val seriesKey = "${item.mediaType}_${item.id.takeIf { it > 0 } ?: item.anilistId ?: item.malId ?: item.tmdbId ?: "${item.platform ?: ""}_${item.title.lowercase().trim()}"}"
             val alreadyActiveOrLoaded = activeSeriesFetchKey == seriesKey &&
                 (seriesFetchJob?.isActive == true || (_realSeasons.value.isNotEmpty() && _realEpisodes.value.isNotEmpty()))
             if (!alreadyActiveOrLoaded) {
                 activeSeriesFetchKey = seriesKey
-                if (isMangaSeries) {
-                    launchMangaSeriesFetch(item)
-                } else {
-                    launchSeriesFetch(item)
+                when {
+                    isMangaSeries -> launchMangaSeriesFetch(item)
+                    isNovelSeries -> launchNovelSeriesFetch(item)
+                    else -> launchSeriesFetch(item)
                 }
             }
         }
@@ -1289,6 +1328,8 @@ class DetailViewModel(
                 if (it.externalLinks.isNotEmpty()) _externalLinks.value = it.externalLinks
                 if (it.seasonMalIds.isNotEmpty()) _seasonMalIds.value = it.seasonMalIds
                 if (it.heroClearLogoUrl != null) _heroClearLogoUrl.value = it.heroClearLogoUrl
+                _isMangaSeasonGrouped.value = it.isMangaSeasonGrouped
+                _novelDetailMeta.value = it.novelDetailMeta
             }
 
             fun persistAuxCache() {
@@ -1317,7 +1358,9 @@ class DetailViewModel(
                     endDate = _endDate.value,
                     externalLinks = _externalLinks.value,
                     seasonMalIds = _seasonMalIds.value,
-                    heroClearLogoUrl = _heroClearLogoUrl.value
+                    heroClearLogoUrl = _heroClearLogoUrl.value,
+                    isMangaSeasonGrouped = _isMangaSeasonGrouped.value,
+                    novelDetailMeta = _novelDetailMeta.value
                 )
                 if (cacheKey != null) DetailAuxMemoryCache.cache[cacheKey] = aux
                 if (itemTmdbKey != null) DetailAuxMemoryCache.cache[itemTmdbKey] = aux
@@ -1645,7 +1688,7 @@ class DetailViewModel(
                 }
             }
 
-            // Anime & Manga Enrichment: Next Airing, Characters, Staff/Mangaka, Franchise Relations, Studios/Publishers
+            // Anime, Manga & Novel Enrichment: Characters, Staff/Mangaka/Authors, Franchise Relations, Studios/Publishers
             var resolvedAniListId = item.anilistId
             if (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.anilistId != null) {
                 try {
@@ -1656,12 +1699,13 @@ class DetailViewModel(
                         existingSeasonsCount = _realSeasons.value.size.coerceAtLeast(1),
                         mediaType = item.mediaType
                     )
-                    if (animeDetails != null) {
+                    val isStillCurrentAnime = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id && _previewItem.value?.title == item.title)
+                    if (animeDetails != null && isStillCurrentAnime) {
                         if (!animeDetails.englishTitle.isNullOrBlank()) _englishTitle.value = animeDetails.englishTitle
                         if (!animeDetails.romajiTitle.isNullOrBlank()) _romajiTitle.value = animeDetails.romajiTitle
-                        _animeCharacters.value = animeDetails.characters
-                        _animeStaff.value = animeDetails.staff
-                        _animeRelations.value = animeDetails.relations
+                        if (animeDetails.characters.isNotEmpty()) _animeCharacters.value = animeDetails.characters
+                        if (animeDetails.staff.isNotEmpty()) _animeStaff.value = animeDetails.staff
+                        if (animeDetails.relations.isNotEmpty()) _animeRelations.value = animeDetails.relations
                         if (animeDetails.seasonAniListIds.isNotEmpty()) {
                             _seasonAniListIds.update { it + animeDetails.seasonAniListIds }
                         }
@@ -1670,7 +1714,7 @@ class DetailViewModel(
                         }
                         _animeAiring.value = animeDetails.nextAiring
                         _synonyms.value = animeDetails.synonyms
-                        _tags.value = animeDetails.tags
+                        if (animeDetails.tags.isNotEmpty()) _tags.value = animeDetails.tags
                         _popularity.value = animeDetails.popularity
                         _favourites.value = animeDetails.favourites
                         _durationMinutes.value = animeDetails.durationMinutes
@@ -1682,6 +1726,9 @@ class DetailViewModel(
                         if (!animeDetails.startDate.isNullOrBlank()) _startDate.value = animeDetails.startDate
                         if (!animeDetails.endDate.isNullOrBlank()) _endDate.value = animeDetails.endDate
                         if (animeDetails.externalLinks.isNotEmpty()) _externalLinks.value = animeDetails.externalLinks
+                        if (animeDetails.averageScore != null) {
+                            _novelDetailMeta.update { it.copy(anilistScore = animeDetails.averageScore) }
+                        }
 
                         if (animeDetails.animationStudios.isNotEmpty()) {
                             val studioEntries = animeDetails.animationStudios.map { studioName ->
@@ -1724,6 +1771,11 @@ class DetailViewModel(
                         if (targetMalId != null && targetMalId > 0 && targetMalId != rootMalId) {
                             loadFillersForMalId(targetMalId, item.title)
                         }
+                        val alTotalProg = if (item.mediaType == MediaType.NOVEL) {
+                            animeDetails.totalVolumes?.toDouble() ?: animeDetails.totalChapters?.toDouble()
+                        } else {
+                            animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble()
+                        }
                         if (item.id <= 0 && _previewItem.value != null) {
                             val currentTop = _previewItem.value!!
                             val currentSyn = currentTop.synopsis?.trim()
@@ -1740,7 +1792,7 @@ class DetailViewModel(
                                 coverUrl = if (currentTop.coverUrl.isBlank()) animeDetails.coverUrl ?: currentTop.coverUrl else currentTop.coverUrl,
                                 communityScore = animeDetails.averageScore ?: currentTop.communityScore,
                                 totalProgress = if (currentTop.totalProgress == null || currentTop.totalProgress == 0.0) {
-                                    animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentTop.totalProgress
+                                    alTotalProg ?: currentTop.totalProgress
                                 } else currentTop.totalProgress
                             )
                             _previewItem.value = enriched
@@ -1764,7 +1816,7 @@ class DetailViewModel(
                                         malId = currentItem.malId ?: animeDetails.malId,
                                         originCountry = currentItem.originCountry ?: animeDetails.countryOfOrigin,
                                         totalProgress = if (currentItem.totalProgress == null || currentItem.totalProgress == 0.0) {
-                                            animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentItem.totalProgress
+                                            alTotalProg ?: currentItem.totalProgress
                                         } else currentItem.totalProgress,
                                         synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentItem.synopsis
                                     )
@@ -1778,6 +1830,45 @@ class DetailViewModel(
                             }
                         }
                         persistAuxCache()
+                    }
+
+                    // Web Novel Adaptation Bridge: When CN/KR/EN Web Novels lack a direct AniList NOVEL entry or banner/characters,
+                    // harvest 16:9 hero banner, character portraits, original author, and Donghua/Manhwa adaptation relations!
+                    val isStillCurrentBridge = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id && _previewItem.value?.title == item.title)
+                    if (isStillCurrentBridge && item.mediaType == MediaType.NOVEL &&
+                        (animeDetails == null || animeDetails.bannerUrl.isNullOrBlank() || animeDetails.characters.isEmpty())
+                    ) {
+                        val bridge = enrichmentRepository.fetchAniListAdaptationBridge(item.title, item.nativeTitle)
+                        val stillActiveAfter = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id && _previewItem.value?.title == item.title)
+                        if (bridge != null && stillActiveAfter) {
+                            if (_animeCharacters.value.isEmpty() && bridge.characters.isNotEmpty()) {
+                                _animeCharacters.value = bridge.characters
+                            }
+                            if (_animeStaff.value.isEmpty() && bridge.staff.isNotEmpty()) {
+                                _animeStaff.value = bridge.staff
+                            }
+                            if (bridge.relations.isNotEmpty()) {
+                                _animeRelations.update { existing -> (existing + bridge.relations).distinctBy { it.id } }
+                            }
+                            if (_tags.value.isEmpty() && bridge.tags.isNotEmpty()) {
+                                _tags.value = bridge.tags
+                            }
+                            if (!bridge.bannerUrl.isNullOrBlank()) {
+                                if (item.id <= 0 && _previewItem.value != null && _previewItem.value?.bannerUrl.isNullOrBlank()) {
+                                    val updatedPrev = _previewItem.value!!.copy(bannerUrl = bridge.bannerUrl)
+                                    _previewItem.value = updatedPrev
+                                    _previewStack.update { s -> if (s.isNotEmpty()) s.dropLast(1) + updatedPrev else listOf(updatedPrev) }
+                                } else if (item.id > 0) {
+                                    viewModelScope.launch(Dispatchers.IO) {
+                                        val latest = repository.getMediaById(item.id).firstOrNull()
+                                        if (latest != null && latest.bannerUrl.isNullOrBlank()) {
+                                            repository.updateMedia(latest.copy(bannerUrl = bridge.bannerUrl))
+                                        }
+                                    }
+                                }
+                            }
+                            persistAuxCache()
+                        }
                     }
                 } catch (_: Exception) {}
             }
@@ -2027,6 +2118,163 @@ class DetailViewModel(
                         if (updated != latest) {
                             repository.updateMedia(updated)
                         }
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
+        }
+    }
+
+    private fun launchNovelSeriesFetch(item: MediaItemEntity) {
+        seriesFetchJob?.cancel()
+        seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val content = enrichmentRepository.fetchNovelVolumesAndChapters(
+                    item = item,
+                    knownTotalChapters = item.totalProgress?.toInt(),
+                    knownTotalVolumes = null
+                )
+                val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id && _previewItem.value?.title == item.title)
+                if (!isStillCurrent) return@launch
+
+                _novelDetailMeta.update { curr ->
+                    curr.copy(
+                        resolvedMode = content.isLightNovel,
+                        kitsuScore = content.kitsuDetails?.score ?: curr.kitsuScore,
+                        mangaUpdatesScore = content.mangaUpdatesRating ?: curr.mangaUpdatesScore,
+                        bangumiScore = content.bangumiScore ?: curr.bangumiScore
+                    )
+                }
+
+                if (_format.value.isNullOrBlank()) {
+                    _format.value = if (content.isLightNovel) "NOVEL" else "WEB_NOVEL"
+                }
+
+                if (content.seasons.isNotEmpty()) {
+                    _isMangaSeasonGrouped.value = content.hasBookSplits
+                    _realSeasons.value = content.seasons
+                    _episodesBySeason.value = content.episodesBySeason
+
+                    val currentProg = item.currentProgress.toInt()
+                    val targetSeason = if (currentProg > 0) {
+                        content.episodesBySeason.entries.firstOrNull { (_, eps) ->
+                            eps.any { it.episodeNumber >= currentProg }
+                        }?.key ?: content.seasons.first().seasonNumber
+                    } else {
+                        content.seasons.first().seasonNumber
+                    }
+                    _selectedSeasonNumber.value = targetSeason
+                    _realEpisodes.value = content.episodesBySeason[targetSeason].orEmpty()
+
+                    if (item.id > 0L) {
+                        SeriesContentMemoryCache.putSeasons(item, null, content.seasons, item.anilistId)
+                        SeriesContentMemoryCache.putEpisodesBySeason(item, null, content.episodesBySeason, item.anilistId)
+                    }
+                }
+
+                if (content.publishers.isNotEmpty()) {
+                    _companies.update { existing ->
+                        val pubEntries = content.publishers.map { pubName ->
+                            NetworkProductionCompany(id = null, name = pubName, logoUrl = null, kind = "publisher")
+                        }
+                        (existing + pubEntries).distinctBy { it.name.lowercase().trim() }
+                    }
+                }
+
+                if (_animeStaff.value.isEmpty() && content.ranobeDetails?.staff?.isNotEmpty() == true) {
+                    _animeStaff.value = content.ranobeDetails.staff
+                }
+
+                if (_tags.value.isEmpty() && content.kitsuDetails?.categories?.isNotEmpty() == true) {
+                    _tags.value = content.kitsuDetails.categories.take(16).mapIndexed { i, cat ->
+                        AnimeTagItem(id = i.toLong(), name = cat)
+                    }
+                }
+
+                val targetPlatform = if (content.isLightNovel) "LIGHT_NOVEL" else "WEB_NOVEL"
+                val repairSynopsis = content.ranobeDetails?.synopsis ?: content.kitsuDetails?.synopsis
+                val resolvedMalId = item.malId ?: content.ranobeDetails?.malId
+                val resolvedAnilistId = item.anilistId ?: content.ranobeDetails?.anilistId
+
+                if (item.id > 0L) {
+                    val latest = repository.getMediaById(item.id).firstOrNull()
+                    if (latest != null) {
+                        val nextTotal = when {
+                            latest.totalProgress == null || latest.totalProgress == 0.0 -> content.totalCount?.toDouble()
+                            !content.isLightNovel && (content.totalCount ?: 0) > latest.totalProgress.toInt() -> content.totalCount?.toDouble()
+                            else -> latest.totalProgress
+                        }
+                        val nextSyn = if (latest.synopsis.isNullOrBlank() && !repairSynopsis.isNullOrBlank()) {
+                            repairSynopsis
+                        } else latest.synopsis
+                        val nextBanner = latest.bannerUrl ?: content.kitsuDetails?.bannerUrl
+                        val updated = latest.copy(
+                            platform = targetPlatform,
+                            originCountry = latest.originCountry ?: content.originCountry,
+                            anilistId = latest.anilistId ?: resolvedAnilistId,
+                            malId = latest.malId ?: resolvedMalId,
+                            totalProgress = nextTotal,
+                            synopsis = nextSyn,
+                            bannerUrl = nextBanner
+                        )
+                        if (updated != latest) {
+                            repository.updateMedia(updated)
+                        }
+                    }
+                } else if (_previewItem.value != null) {
+                    val prev = _previewItem.value!!
+                    val updatedPrev = prev.copy(
+                        platform = targetPlatform,
+                        originCountry = prev.originCountry ?: content.originCountry,
+                        anilistId = prev.anilistId ?: resolvedAnilistId,
+                        malId = prev.malId ?: resolvedMalId,
+                        totalProgress = if (prev.totalProgress == null || prev.totalProgress == 0.0) {
+                            content.totalCount?.toDouble() ?: prev.totalProgress
+                        } else prev.totalProgress,
+                        synopsis = if (prev.synopsis.isNullOrBlank() && !repairSynopsis.isNullOrBlank()) repairSynopsis else prev.synopsis,
+                        bannerUrl = prev.bannerUrl ?: content.kitsuDetails?.bannerUrl
+                    )
+                    _previewItem.value = updatedPrev
+                    _previewStack.update { s -> if (s.isNotEmpty()) s.dropLast(1) + updatedPrev else listOf(updatedPrev) }
+                }
+
+                // Fetch MAL/Jikan LN reviews or Kitsu Web Novel reactions if reviews list is still empty
+                if (_reviews.value.isEmpty()) {
+                    val novelRevs = mutableListOf<CommunityReview>()
+                    val kitsuId = content.kitsuDetails?.kitsuId
+                    if (!kitsuId.isNullOrBlank()) {
+                        enrichmentRepository.fetchKitsuNovelReactions(kitsuId).forEach { r ->
+                            novelRevs.add(
+                                CommunityReview(
+                                    author = r.author,
+                                    username = r.author,
+                                    source = r.source,
+                                    rating = r.rating,
+                                    comment = sanitizeCommunityComment(r.comment),
+                                    hasSpoiler = r.isSpoiler,
+                                    isReview = r.comment.length > 150
+                                )
+                            )
+                        }
+                    }
+                    if (novelRevs.isEmpty() && resolvedMalId != null && resolvedMalId > 0) {
+                        enrichmentRepository.fetchJikanMangaReviews(resolvedMalId).forEach { r ->
+                            novelRevs.add(
+                                CommunityReview(
+                                    author = r.author,
+                                    username = r.author,
+                                    source = r.source,
+                                    rating = r.rating,
+                                    comment = sanitizeCommunityComment(r.comment),
+                                    hasSpoiler = r.isSpoiler,
+                                    isReview = true
+                                )
+                            )
+                        }
+                    }
+                    if (novelRevs.isNotEmpty() && (if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id && _previewItem.value?.title == item.title))) {
+                        _reviews.value = novelRevs
                     }
                 }
             } catch (e: Exception) {
@@ -2494,42 +2742,63 @@ class DetailViewModel(
             val nextCh = (currentCh + delta).coerceAtLeast(0).let { n ->
                 if (maxCap != null) n.coerceAtMost(maxCap) else n
             }
+            applyReadingProgressTarget(mediaId, item, nextCh)
+        }
+    }
 
-            val allEps = _episodesBySeason.value
-            if (allEps.isNotEmpty()) {
-                val markTrue = mutableListOf<Pair<Int, Int>>()
-                val markFalse = mutableListOf<Pair<Int, Int>>()
-                for ((sNum, eps) in allEps) {
-                    for (ep in eps) {
-                        if (ep.episodeNumber <= nextCh) {
-                            markTrue.add(sNum to ep.episodeNumber)
-                        } else {
-                            markFalse.add(sNum to ep.episodeNumber)
-                        }
+    fun jumpToChapterOrVolume(target: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
+            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val maxCap = item.totalProgress?.toInt()?.takeIf { it > 0 }
+            val clamped = target.coerceAtLeast(0).let { n ->
+                if (maxCap != null) n.coerceAtMost(maxCap) else n
+            }
+            applyReadingProgressTarget(mediaId, item, clamped)
+        }
+    }
+
+    private suspend fun applyReadingProgressTarget(
+        mediaId: Long,
+        item: MediaItemEntity,
+        nextCh: Int
+    ) {
+        val allEps = _episodesBySeason.value
+        val totalEpCount = allEps.values.sumOf { it.size }
+        if (allEps.isNotEmpty() && totalEpCount <= 200) {
+            val markTrue = mutableListOf<Pair<Int, Int>>()
+            val markFalse = mutableListOf<Pair<Int, Int>>()
+            for ((sNum, eps) in allEps) {
+                for (ep in eps) {
+                    if (ep.episodeNumber <= nextCh) {
+                        markTrue.add(sNum to ep.episodeNumber)
+                    } else {
+                        markFalse.add(sNum to ep.episodeNumber)
                     }
                 }
-                if (markTrue.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markTrue, true)
-                if (markFalse.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markFalse, false)
             }
-
-            val targetProgress = nextCh.toDouble()
-            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                TrackingStatus.COMPLETED
-            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                TrackingStatus.IN_PROGRESS
-            } else {
-                item.status
-            }
-            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-            repository.updateMedia(updated)
-            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-            trackerSyncEngine?.drainQueue()
+            if (markTrue.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markTrue, true)
+            if (markFalse.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markFalse, false)
         }
+
+        val targetProgress = nextCh.toDouble()
+        val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+            TrackingStatus.COMPLETED
+        } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+            TrackingStatus.IN_PROGRESS
+        } else {
+            item.status
+        }
+        val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+        repository.updateMedia(updated)
+        trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+        trackerSyncEngine?.drainQueue()
     }
 
     private fun calculateCumulativeProgress(targetSeason: Int, targetEpisode: Int): Double {
         val activeItem = _previewItem.value ?: latestRoomItemCache[_mediaId.value]
-        if (activeItem?.mediaType == MediaType.MANGA) {
+        if (activeItem?.mediaType == MediaType.MANGA || activeItem?.mediaType == MediaType.NOVEL) {
             return targetEpisode.coerceAtLeast(0).toDouble()
         }
         var cumulative = 0
@@ -2583,6 +2852,16 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
+            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
+            val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
+            if (isLargeReadingEntry) {
+                val currentlyRead = episode.episodeNumber <= item.currentProgress.toInt()
+                val targetCh = if (currentlyRead) (episode.episodeNumber - 1).coerceAtLeast(0) else episode.episodeNumber
+                applyReadingProgressTarget(mediaId, item, targetCh)
+                return@launch
+            }
+
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
             if (!isCurrentlyWatched) {
@@ -2607,20 +2886,17 @@ class DetailViewModel(
             } else {
                 calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber - 1).coerceAtLeast(0.0)
             }
-            val item = repository.getMediaById(mediaId).firstOrNull()
-            if (item != null) {
-                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                    TrackingStatus.COMPLETED
-                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                    TrackingStatus.IN_PROGRESS
-                } else {
-                    item.status
-                }
-                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-                repository.updateMedia(updated)
-                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-                trackerSyncEngine?.drainQueue()
+            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                TrackingStatus.COMPLETED
+            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                TrackingStatus.IN_PROGRESS
+            } else {
+                item.status
             }
+            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+            trackerSyncEngine?.drainQueue()
         }
     }
 
@@ -2628,23 +2904,28 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
+            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
+            val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
+            if (isLargeReadingEntry) {
+                applyReadingProgressTarget(mediaId, item, episode.episodeNumber)
+                return@launch
+            }
+
             val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
             repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
-            val item = repository.getMediaById(mediaId).firstOrNull()
-            if (item != null) {
-                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                    TrackingStatus.COMPLETED
-                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                    TrackingStatus.IN_PROGRESS
-                } else {
-                    item.status
-                }
-                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-                repository.updateMedia(updated)
-                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-                trackerSyncEngine?.drainQueue()
+            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                TrackingStatus.COMPLETED
+            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                TrackingStatus.IN_PROGRESS
+            } else {
+                item.status
             }
+            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+            trackerSyncEngine?.drainQueue()
         }
     }
 
@@ -2652,8 +2933,20 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
+            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val seasonEps = _episodesBySeason.value[seasonNumber] ?: _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
+            val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
+            val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
+            if (isLargeReadingEntry) {
+                val lastCh = seasonEps.maxOfOrNull { it.episodeNumber } ?: 0
+                val firstCh = seasonEps.minOfOrNull { it.episodeNumber } ?: 1
+                val allBookRead = lastCh > 0 && item.currentProgress.toInt() >= lastCh
+                val nextTarget = if (allBookRead) (firstCh - 1).coerceAtLeast(0) else lastCh
+                applyReadingProgressTarget(mediaId, item, nextTarget)
+                return@launch
+            }
+
             val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val seasonEps = _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
             val allWatched = seasonEps.isNotEmpty() && seasonEps.all { ep ->
                 currentProgress.any { it.seasonNumber == ep.seasonNumber && it.episodeNumber == ep.episodeNumber && it.isWatched }
             }
@@ -2661,21 +2954,18 @@ class DetailViewModel(
             repository.setMultipleEpisodesWatched(mediaId, pairs, !allWatched)
             val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
             val watchedCount = updatedProgress.count { it.isWatched }
-            val item = repository.getMediaById(mediaId).firstOrNull()
-            if (item != null) {
-                val targetProgress = watchedCount.toDouble()
-                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                    TrackingStatus.COMPLETED
-                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                    TrackingStatus.IN_PROGRESS
-                } else {
-                    item.status
-                }
-                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-                repository.updateMedia(updated)
-                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-                trackerSyncEngine?.drainQueue()
+            val targetProgress = watchedCount.toDouble()
+            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                TrackingStatus.COMPLETED
+            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                TrackingStatus.IN_PROGRESS
+            } else {
+                item.status
             }
+            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+            trackerSyncEngine?.drainQueue()
         }
     }
 
@@ -3400,7 +3690,9 @@ data class CachedDetailAux(
     val endDate: String? = null,
     val externalLinks: List<ExternalLinkItem> = emptyList(),
     val seasonMalIds: Map<Int, Long> = emptyMap(),
-    val heroClearLogoUrl: String? = null
+    val heroClearLogoUrl: String? = null,
+    val isMangaSeasonGrouped: Boolean = false,
+    val novelDetailMeta: NovelDetailMeta = NovelDetailMeta()
 )
 
 internal object DetailAuxMemoryCache {

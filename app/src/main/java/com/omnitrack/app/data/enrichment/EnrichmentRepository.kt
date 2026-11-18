@@ -318,15 +318,11 @@ class EnrichmentRepository(
                         }
                     }
                 }
-                MediaType.ANIME, MediaType.MANGA -> {
+                MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL -> {
                     if (item.malId != null) {
-                        communityScore = fetchJikanScore(item.malId, isManga = item.mediaType == MediaType.MANGA)
-                    } else if (item.bangumiId != null) {
-                        communityScore = fetchBangumiScore(item.bangumiId)
+                        communityScore = fetchJikanScore(item.malId, isManga = item.mediaType != MediaType.ANIME)
                     }
-                }
-                MediaType.NOVEL -> {
-                    if (item.bangumiId != null) {
+                    if (communityScore == null && item.bangumiId != null) {
                         communityScore = fetchBangumiScore(item.bangumiId)
                     }
                 }
@@ -1782,13 +1778,13 @@ class EnrichmentRepository(
     private fun JsonElement?.cleanString(): String? {
         if (this == null || this is JsonNull) return null
         val str = try { this.jsonPrimitive.contentOrNull?.trim() } catch (_: Exception) { null } ?: return null
-        return if (str.equals("null", ignoreCase = true) || str.isBlank()) null else str
+        return if (str.equals("null", ignoreCase = true) || str.equals("N/A", ignoreCase = true) || str.isBlank()) null else str
     }
 
     private fun String?.cleanString(): String? {
         if (this == null) return null
         val trimmed = this.trim()
-        return if (trimmed.equals("null", ignoreCase = true) || trimmed.isBlank()) null else trimmed
+        return if (trimmed.equals("null", ignoreCase = true) || trimmed.equals("N/A", ignoreCase = true) || trimmed.isBlank()) null else trimmed
     }
 
     suspend fun fetchAnimeDetails(
@@ -1799,9 +1795,11 @@ class EnrichmentRepository(
         mediaType: MediaType = MediaType.ANIME
     ): AnimeEnrichedDetails? = withContext(Dispatchers.IO) {
         try {
-            val query = """
+            fun buildMediaQuery(withNovelFormat: Boolean): String {
+                val formatClause = if (withNovelFormat) ", format: NOVEL" else ""
+                return """
                 query (${'$'}id: Int, ${'$'}idMal: Int, ${'$'}search: String, ${'$'}type: MediaType) {
-                  Media(id: ${'$'}id, idMal: ${'$'}idMal, search: ${'$'}search, type: ${'$'}type) {
+                  Media(id: ${'$'}id, idMal: ${'$'}idMal, search: ${'$'}search, type: ${'$'}type$formatClause) {
                     id
                     idMal
                     title {
@@ -1846,6 +1844,7 @@ class EnrichmentRepository(
                     averageScore
                     episodes
                     chapters
+                    volumes
                     genres
                     tags {
                       id
@@ -1961,6 +1960,7 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
+            }
 
             val anilistMediaType = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "MANGA" else "ANIME"
 
@@ -1979,19 +1979,20 @@ class EnrichmentRepository(
                 })
             }
             if (!title.isNullOrBlank()) {
-                val cleanTitle = title.replace(Regex("[:\\-_–]"), " ").trim()
-                val baseTitle = title.split(":", "-", "–").firstOrNull()?.trim() ?: title
+                val strippedTitle = title.replace(Regex("""\s*\((Light Novel|Web Novel|Novel|LN|WN)\)\s*$""", RegexOption.IGNORE_CASE), "").trim()
+                val cleanTitle = strippedTitle.replace(Regex("[:\\-_–]"), " ").trim()
+                val baseTitle = strippedTitle.split(":", "-", "–").firstOrNull()?.trim() ?: strippedTitle
                 candidateVars.add(buildJsonObject {
-                    put("search", title.trim())
+                    put("search", strippedTitle)
                     put("type", anilistMediaType)
                 })
-                if (cleanTitle != title.trim()) {
+                if (cleanTitle != strippedTitle) {
                     candidateVars.add(buildJsonObject {
                         put("search", cleanTitle)
                         put("type", anilistMediaType)
                     })
                 }
-                if (baseTitle != title.trim() && baseTitle.length >= 3) {
+                if (baseTitle != strippedTitle && baseTitle.length >= 3) {
                     candidateVars.add(buildJsonObject {
                         put("search", baseTitle)
                         put("type", anilistMediaType)
@@ -2000,8 +2001,9 @@ class EnrichmentRepository(
             }
 
             for (vars in candidateVars) {
+                val useNovelFormat = mediaType == MediaType.NOVEL && vars.containsKey("search")
                 val jsonPayload = buildJsonObject {
-                    put("query", query)
+                    put("query", buildMediaQuery(useNovelFormat))
                     put("variables", vars)
                 }.toString()
 
@@ -2032,6 +2034,7 @@ class EnrichmentRepository(
                     val mediaScore = media["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
                     val mediaEpisodes = media["episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaChapters = media["chapters"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val mediaVolumes = media["volumes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     val mediaGenres = media["genres"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
                     val mediaSynonyms = media["synonyms"]?.jsonArray.orEmpty().mapNotNull { it.cleanString() }
                     val mediaPopularity = media["popularity"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
@@ -2359,6 +2362,7 @@ class EnrichmentRepository(
                         durationMinutes = mediaDuration,
                         totalEpisodes = mediaEpisodes,
                         totalChapters = mediaChapters,
+                        totalVolumes = mediaVolumes,
                         genres = mediaGenres,
                         tags = tagList,
                         seasonAniListIds = seasonAniListMap,
@@ -2388,7 +2392,9 @@ class EnrichmentRepository(
         val latestChapter: Int?,
         val totalVolumes: Int?,
         val seasons: List<Triple<Int, String, IntRange>>,
-        val publishers: List<String>
+        val publishers: List<String>,
+        val bayesianRating: Float? = null,
+        val totalStatusChapters: Int? = null
     )
 
     data class MangaSeriesContent(
@@ -2400,14 +2406,113 @@ class EnrichmentRepository(
         val publishers: List<String> = emptyList()
     )
 
-    private val mangaSeriesContentCache = java.util.concurrent.ConcurrentHashMap<String, MangaSeriesContent>()
+    data class WikidataNativeTitles(
+        val zh: String? = null,
+        val ko: String? = null,
+        val ja: String? = null
+    ) {
+        fun allDistinct(): List<String> = listOfNotNull(zh, ko, ja).distinct()
+    }
 
-    private suspend fun fetchMangaUpdatesInfo(title: String): MangaUpdatesSeriesInfo? = withContext(Dispatchers.IO) {
-        if (title.isBlank()) return@withContext null
+    data class RanobeDbVolume(
+        val number: Int,
+        val title: String,
+        val coverUrl: String?,
+        val releaseDate: String?,
+        val synopsis: String?
+    )
+
+    data class RanobeDbSeriesDetails(
+        val seriesId: Long,
+        val title: String,
+        val nativeTitle: String?,
+        val synopsis: String?,
+        val anilistId: Long?,
+        val malId: Long?,
+        val rating: Float?,
+        val originCountry: String?,
+        val volumes: List<RanobeDbVolume>,
+        val publishers: List<String>,
+        val staff: List<AnimeStaffItem>
+    )
+
+    data class KitsuNovelDetails(
+        val kitsuId: String,
+        val title: String,
+        val synopsis: String?,
+        val chapterCount: Int?,
+        val volumeCount: Int?,
+        val status: String?,
+        val score: Float?,
+        val posterUrl: String?,
+        val bannerUrl: String?,
+        val categories: List<String>
+    )
+
+    data class NovelSeriesContent(
+        val isLightNovel: Boolean,
+        val seasons: List<com.omnitrack.app.data.model.MediaSeason>,
+        val episodesBySeason: Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>,
+        val hasBookSplits: Boolean,
+        val totalCount: Int?,
+        val publishers: List<String> = emptyList(),
+        val ranobeDetails: RanobeDbSeriesDetails? = null,
+        val kitsuDetails: KitsuNovelDetails? = null,
+        val mangaUpdatesRating: Float? = null,
+        val bangumiScore: Float? = null,
+        val originCountry: String? = null
+    )
+
+    private val mangaSeriesContentCache = java.util.concurrent.ConcurrentHashMap<String, MangaSeriesContent>()
+    private val novelSeriesContentCache = java.util.concurrent.ConcurrentHashMap<String, NovelSeriesContent>()
+    private val wikidataNativeCache = java.util.concurrent.ConcurrentHashMap<String, WikidataNativeTitles>()
+    private val ranobeDbSeriesCache = java.util.concurrent.ConcurrentHashMap<String, RanobeDbSeriesDetails>()
+    private val kitsuNovelDetailsCache = java.util.concurrent.ConcurrentHashMap<String, KitsuNovelDetails>()
+
+    private fun stripNovelEditionSuffix(title: String): String {
+        return title.replace(Regex("""\s*[\(\[](Light Novel|Web Novel|Novel|LN|WN)[\)\]]\s*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*\(Novel\)\s*""", RegexOption.IGNORE_CASE), " ")
+            .trim()
+    }
+
+    private fun isNovelTitleMatch(query: String, candidates: List<String?>): Boolean {
+        val normQuery = stripNovelEditionSuffix(query).lowercase()
+            .replace(Regex("""[^\p{L}\p{N}\s]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        if (normQuery.isBlank()) return false
+        val qTokens = normQuery.split(" ").filter { it.length >= 2 }.toSet()
+
+        for (raw in candidates) {
+            val c = raw.cleanString() ?: continue
+            val normCand = stripNovelEditionSuffix(c).lowercase()
+                .replace(Regex("""[^\p{L}\p{N}\s]"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
+            if (normCand.isBlank()) continue
+            if (normCand == normQuery) return true
+            if (normQuery.length >= 5 && (normCand.contains(normQuery) || normQuery.contains(normCand))) {
+                // Ensure lengths are reasonably aligned to avoid "Lord" matching "Lord of..."
+                val ratio = minOf(normCand.length, normQuery.length).toFloat() / maxOf(normCand.length, normQuery.length).toFloat()
+                if (ratio >= 0.48f) return true
+            }
+            if (qTokens.isNotEmpty()) {
+                val cTokens = normCand.split(" ").filter { it.length >= 2 }.toSet()
+                val overlap = qTokens.intersect(cTokens).size
+                val coverage = overlap.toFloat() / maxOf(qTokens.size, 1).toFloat()
+                if (coverage >= 0.65f) return true
+            }
+        }
+        return false
+    }
+
+    private suspend fun fetchMangaUpdatesInfo(title: String, preferNovel: Boolean = false): MangaUpdatesSeriesInfo? = withContext(Dispatchers.IO) {
+        val cleanQuery = stripNovelEditionSuffix(title)
+        if (cleanQuery.isBlank()) return@withContext null
         try {
             val payload = buildJsonObject {
-                put("search", title.trim())
-                put("perpage", 5)
+                put("search", cleanQuery)
+                put("perpage", if (preferNovel) 8 else 5)
             }.toString()
             val req = Request.Builder()
                 .url("https://api.mangaupdates.com/v1/series/search")
@@ -2418,10 +2523,20 @@ class EnrichmentRepository(
                 if (!resp.isSuccessful) return@withContext null
                 val body = resp.body?.string() ?: return@withContext null
                 val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray.orEmpty()
-                val exact = results.firstOrNull { node ->
-                    val t = node.jsonObject["record"]?.jsonObject?.get("title").cleanString()
-                    t != null && t.equals(title.trim(), ignoreCase = true)
-                } ?: results.firstOrNull()
+                val filtered = if (preferNovel) {
+                    results.filter {
+                        it.jsonObject["record"]?.jsonObject?.get("type").cleanString().equals("Novel", ignoreCase = true)
+                    }.ifEmpty { results }
+                } else {
+                    results
+                }
+                val exact = filtered.firstOrNull { node ->
+                    val t = node.jsonObject["record"]?.jsonObject?.get("title").cleanString() ?: return@firstOrNull false
+                    stripNovelEditionSuffix(t).equals(cleanQuery, ignoreCase = true)
+                } ?: filtered.firstOrNull { node ->
+                    val t = node.jsonObject["record"]?.jsonObject?.get("title").cleanString() ?: return@firstOrNull false
+                    isNovelTitleMatch(cleanQuery, listOf(t))
+                } ?: filtered.firstOrNull()
                 exact?.jsonObject?.get("record")?.jsonObject?.get("series_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
             } ?: return@withContext null
 
@@ -2435,9 +2550,17 @@ class EnrichmentRepository(
                 val body = resp.body?.string() ?: return@withContext null
                 val root = json.parseToJsonElement(body).jsonObject
                 val latestCh = root["latest_chapter"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val bayesianRating = root["bayesian_rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }
                 val statusText = root["status"].cleanString().orEmpty()
                 val totalVols = Regex("""(\d+)\s+Volumes""", RegexOption.IGNORE_CASE)
                     .find(statusText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+                val mainPlusSide = Regex("""(\d+)\s+Main Story Chapters\s*\+\s*(\d+)\s+Side Stor""", RegexOption.IGNORE_CASE)
+                    .find(statusText)?.let { m ->
+                        (m.groupValues[1].toIntOrNull() ?: 0) + (m.groupValues[2].toIntOrNull() ?: 0)
+                    }
+                val explicitTotalCh = mainPlusSide
+                    ?: Regex("""(\d+)\s+Chapters""", RegexOption.IGNORE_CASE).find(statusText)?.groupValues?.getOrNull(1)?.toIntOrNull()
 
                 val seasons = mutableListOf<Triple<Int, String, IntRange>>()
                 var runningStart = 1
@@ -2480,7 +2603,9 @@ class EnrichmentRepository(
                     latestChapter = latestCh,
                     totalVolumes = totalVols,
                     seasons = seasons,
-                    publishers = publishers
+                    publishers = publishers,
+                    bayesianRating = bayesianRating,
+                    totalStatusChapters = explicitTotalCh
                 )
             }
         } catch (e: Exception) {
@@ -2832,6 +2957,817 @@ class EnrichmentRepository(
                 mangaSeriesContentCache[cacheKey] = result
             }
             result
+        }
+    }
+
+    suspend fun resolveWikidataNativeTitles(title: String): WikidataNativeTitles? = withContext(Dispatchers.IO) {
+        val cleanQuery = stripNovelEditionSuffix(title)
+        if (cleanQuery.isBlank()) return@withContext null
+        val cacheKey = cleanQuery.lowercase()
+        wikidataNativeCache[cacheKey]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("wikidata_$cacheKey") {
+            wikidataNativeCache[cacheKey]?.let { return@coalesce it }
+            try {
+                val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+                val searchReq = Request.Builder()
+                    .url("https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=en&limit=1&format=json")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                val qid = jikanClient.newCall(searchReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@coalesce null
+                    val body = resp.body?.string() ?: return@coalesce null
+                    json.parseToJsonElement(body).jsonObject["search"]?.jsonArray
+                        ?.firstOrNull()?.jsonObject?.get("id").cleanString()
+                } ?: return@coalesce null
+
+                val entReq = Request.Builder()
+                    .url("https://www.wikidata.org/w/api.php?action=wbgetentities&ids=$qid&props=labels&languages=zh|zh-hans|ko|ja&format=json")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                jikanClient.newCall(entReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@coalesce null
+                    val body = resp.body?.string() ?: return@coalesce null
+                    val labels = json.parseToJsonElement(body).jsonObject["entities"]?.jsonObject
+                        ?.get(qid)?.jsonObject?.get("labels")?.jsonObject ?: return@coalesce null
+                    val res = WikidataNativeTitles(
+                        zh = labels["zh-hans"]?.jsonObject?.get("value").cleanString()
+                            ?: labels["zh"]?.jsonObject?.get("value").cleanString(),
+                        ko = labels["ko"]?.jsonObject?.get("value").cleanString(),
+                        ja = labels["ja"]?.jsonObject?.get("value").cleanString()
+                    )
+                    wikidataNativeCache[cacheKey] = res
+                    res
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                null
+            }
+        }
+    }
+
+    suspend fun fetchRanobeDbSeriesDetails(
+        title: String,
+        nativeTitle: String? = null
+    ): RanobeDbSeriesDetails? = withContext(Dispatchers.IO) {
+        val cleanQuery = stripNovelEditionSuffix(title)
+        if (cleanQuery.isBlank()) return@withContext null
+        val cacheKey = cleanQuery.lowercase()
+        ranobeDbSeriesCache[cacheKey]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("ranobedb_$cacheKey") {
+            ranobeDbSeriesCache[cacheKey]?.let { return@coalesce it }
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+                    val searchReq = Request.Builder()
+                        .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=6")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                    val matchedSeriesId = client.newCall(searchReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing null
+                        val body = resp.body?.string() ?: return@withGeneralPacing null
+                        val seriesArr = json.parseToJsonElement(body).jsonObject["series"]?.jsonArray.orEmpty()
+                        val matched = seriesArr.firstOrNull { node ->
+                            val o = node.jsonObject
+                            isNovelTitleMatch(
+                                cleanQuery,
+                                listOf(
+                                    o["title"].cleanString(),
+                                    o["romaji_orig"].cleanString(),
+                                    o["title_orig"].cleanString(),
+                                    nativeTitle
+                                )
+                            )
+                        }
+                        matched?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                    } ?: return@withGeneralPacing null
+
+                    val detailReq = Request.Builder()
+                        .url("https://ranobedb.org/api/v0/series/$matchedSeriesId")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                    client.newCall(detailReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing null
+                        val body = resp.body?.string() ?: return@withGeneralPacing null
+                        val series = json.parseToJsonElement(body).jsonObject["series"]?.jsonObject
+                            ?: return@withGeneralPacing null
+
+                        val sTitle = series["title"].cleanString() ?: cleanQuery
+                        val sNative = series["title_orig"].cleanString()
+                        val sDesc = series["book_description"].cleanString() ?: series["description"].cleanString()
+                        val alId = series["anilist_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val malId = series["mal_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val rating = series["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        val olang = series["olang"].cleanString()?.uppercase()
+
+                        val books = series["books"]?.jsonArray.orEmpty().mapIndexedNotNull { idx, elem ->
+                            val b = elem.jsonObject
+                            val bTitle = b["title"].cleanString() ?: return@mapIndexedNotNull null
+                            val volNum = Regex("""(?:Vol\.?|Volume)\s*(\d+)""", RegexOption.IGNORE_CASE)
+                                .find(bTitle)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: (idx + 1)
+                            val rawDate = b["c_release_date"]?.jsonPrimitive?.contentOrNull?.trim()
+                            val formattedDate = if (rawDate != null && rawDate.length == 8 && rawDate.all { it.isDigit() }) {
+                                "${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}"
+                            } else null
+                            val imgFile = b["image"]?.jsonObject?.get("filename").cleanString()
+                            val covUrl = imgFile?.let { "https://images.ranobedb.org/$it" }
+                            val bDesc = b["description"].cleanString()
+                            RanobeDbVolume(
+                                number = volNum,
+                                title = bTitle,
+                                coverUrl = covUrl,
+                                releaseDate = formattedDate,
+                                synopsis = bDesc
+                            )
+                        }.distinctBy { it.number }
+
+                        val publishers = series["publishers"]?.jsonArray.orEmpty().mapNotNull { elem ->
+                            val p = elem.jsonObject
+                            val name = p["romaji"].cleanString() ?: p["name"].cleanString()
+                            name
+                        }.distinct()
+
+                        val staffSeen = mutableSetOf<String>()
+                        val staffList = series["staff"]?.jsonArray.orEmpty().mapNotNull { elem ->
+                            val st = elem.jsonObject
+                            val roleType = st["role_type"].cleanString()?.lowercase() ?: "staff"
+                            val roleLabel = when (roleType) {
+                                "author" -> "Author"
+                                "artist" -> "Illustrator"
+                                "translator" -> "Translator"
+                                "narrator" -> "Narrator"
+                                else -> st["note"].cleanString() ?: "Staff"
+                            }
+                            val sName = st["romaji"].cleanString() ?: st["name"].cleanString() ?: return@mapNotNull null
+                            val dedupeKey = "${sName.lowercase()}:$roleLabel"
+                            if (!staffSeen.add(dedupeKey)) return@mapNotNull null
+                            val stId = st["staff_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                            AnimeStaffItem(
+                                staffId = stId,
+                                name = sName,
+                                nativeName = st["name"].cleanString(),
+                                role = roleLabel,
+                                imageUrl = null
+                            )
+                        }
+
+                        val res = RanobeDbSeriesDetails(
+                            seriesId = matchedSeriesId,
+                            title = sTitle,
+                            nativeTitle = sNative,
+                            synopsis = sDesc,
+                            anilistId = alId,
+                            malId = malId,
+                            rating = rating,
+                            originCountry = olang,
+                            volumes = books,
+                            publishers = publishers,
+                            staff = staffList
+                        )
+                        ranobeDbSeriesCache[cacheKey] = res
+                        res
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                }
+            }
+        }
+    }
+
+    suspend fun fetchKitsuNovelDetails(title: String): KitsuNovelDetails? = withContext(Dispatchers.IO) {
+        val cleanQuery = stripNovelEditionSuffix(title)
+        if (cleanQuery.isBlank()) return@withContext null
+        val cacheKey = cleanQuery.lowercase()
+        kitsuNovelDetailsCache[cacheKey]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("kitsu_novel_$cacheKey") {
+            kitsuNovelDetailsCache[cacheKey]?.let { return@coalesce it }
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+                    val req = Request.Builder()
+                        .url("https://kitsu.io/api/edge/manga?filter[text]=$encoded&filter[subtype]=novel&include=categories&page[limit]=5")
+                        .header("Accept", "application/vnd.api+json")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing null
+                        val body = resp.body?.string() ?: return@withGeneralPacing null
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val data = root["data"]?.jsonArray.orEmpty()
+                        val matchedNode = data.firstOrNull { elem ->
+                            val attrs = elem.jsonObject["attributes"]?.jsonObject ?: return@firstOrNull false
+                            val titles = attrs["titles"]?.jsonObject
+                            isNovelTitleMatch(
+                                cleanQuery,
+                                listOf(
+                                    attrs["canonicalTitle"].cleanString(),
+                                    titles?.get("en").cleanString(),
+                                    titles?.get("en_us").cleanString(),
+                                    titles?.get("en_jp").cleanString(),
+                                    titles?.get("ja_jp").cleanString()
+                                )
+                            )
+                        }?.jsonObject ?: return@withGeneralPacing null
+
+                        val kitsuId = matchedNode["id"].cleanString() ?: return@withGeneralPacing null
+                        val attrs = matchedNode["attributes"]?.jsonObject ?: return@withGeneralPacing null
+                        val cats = root["included"]?.jsonArray.orEmpty()
+                            .filter { it.jsonObject["type"].cleanString() == "categories" }
+                            .mapNotNull { it.jsonObject["attributes"]?.jsonObject?.get("title").cleanString() }
+                            .distinct()
+
+                        val res = KitsuNovelDetails(
+                            kitsuId = kitsuId,
+                            title = attrs["canonicalTitle"].cleanString() ?: cleanQuery,
+                            synopsis = attrs["synopsis"].cleanString() ?: attrs["description"].cleanString(),
+                            chapterCount = attrs["chapterCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 },
+                            volumeCount = attrs["volumeCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 },
+                            status = attrs["status"].cleanString(),
+                            score = attrs["averageRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f },
+                            posterUrl = attrs["posterImage"]?.jsonObject?.get("original").cleanString()
+                                ?: attrs["posterImage"]?.jsonObject?.get("large").cleanString(),
+                            bannerUrl = attrs["coverImage"]?.jsonObject?.get("original").cleanString()
+                                ?: attrs["coverImage"]?.jsonObject?.get("large").cleanString(),
+                            categories = cats
+                        )
+                        kitsuNovelDetailsCache[cacheKey] = res
+                        res
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                }
+            }
+        }
+    }
+
+    private data class BangumiNovelInfo(
+        val bgmId: Long,
+        val score: Float?,
+        val volumes: Int?,
+        val chapters: Int?,
+        val synopsis: String?,
+        val originCountry: String?,
+        val publishers: List<String>
+    )
+
+    private suspend fun fetchBangumiNovelDetails(
+        title: String,
+        nativeTitle: String? = null,
+        knownBgmId: Long? = null
+    ): BangumiNovelInfo? = withContext(Dispatchers.IO) {
+        try {
+            var targetId = knownBgmId
+            if (targetId == null) {
+                val cleanQuery = stripNovelEditionSuffix(title)
+                val staticAlias = mapOf(
+                    "lord of the mysteries" to "诡秘之主",
+                    "reverend insanity" to "蛊真人",
+                    "omniscient reader" to "全知读者视角",
+                    "omniscient reader's viewpoint" to "全知读者视角",
+                    "coiling dragon" to "盘龙",
+                    "solo leveling" to "나 혼자만 레벨업"
+                )[cleanQuery.lowercase()]
+                val queries = buildList {
+                    nativeTitle.cleanString()?.let { add(it) }
+                    staticAlias?.let { add(it) }
+                    resolveWikidataNativeTitles(cleanQuery)?.allDistinct()?.let { addAll(it) }
+                    add(cleanQuery)
+                }.distinct()
+
+                for (sq in queries) {
+                    val encoded = URLEncoder.encode(sq, "UTF-8")
+                    val req = Request.Builder()
+                        .url("https://api.bgm.tv/search/subject/$encoded?type=1&responseGroup=small&max_results=5")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    val found = NetworkPacer.withBangumiPacing {
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) return@withBangumiPacing null
+                            val body = resp.body?.string() ?: return@withBangumiPacing null
+                            val list = json.parseToJsonElement(body).jsonObject["list"]?.jsonArray.orEmpty()
+                            val hit = list.firstOrNull { node ->
+                                val o = node.jsonObject
+                                isNovelTitleMatch(sq, listOf(o["name"].cleanString(), o["name_cn"].cleanString()))
+                            }
+                            hit?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        }
+                    }
+                    if (found != null) {
+                        targetId = found
+                        break
+                    }
+                }
+            }
+            if (targetId == null) return@withContext null
+
+            NetworkPacer.withBangumiPacing {
+                val req = Request.Builder()
+                    .url("https://api.bgm.tv/v0/subjects/$targetId")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withBangumiPacing null
+                    val body = resp.body?.string() ?: return@withBangumiPacing null
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val score = root["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val volumes = root["volumes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 }
+                    val chapters = root["total_episodes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 }
+                    val summary = root["summary"].cleanString()
+                    val nameOrig = root["name"].cleanString().orEmpty()
+                    val nameCn = root["name_cn"].cleanString().orEmpty()
+                    val origin = when {
+                        Regex("[\\uAC00-\\uD7AF]").containsMatchIn(nameOrig) -> "KR"
+                        Regex("[\\u3040-\\u30FF]").containsMatchIn(nameOrig) -> "JP"
+                        nameOrig.isNotBlank() && nameOrig == nameCn -> "CN"
+                        else -> null
+                    }
+                    val pubs = mutableListOf<String>()
+                    val infobox = root["infobox"]?.jsonArray.orEmpty()
+                    for (entry in infobox) {
+                        val k = entry.jsonObject["key"].cleanString() ?: continue
+                        if (k in listOf("出版社", "连载平台", "连载网站", "连载杂志", "文库")) {
+                            val vEl = entry.jsonObject["value"]
+                            if (vEl is kotlinx.serialization.json.JsonPrimitive) {
+                                vEl.cleanString()?.let { pubs.add(it) }
+                            } else if (vEl is kotlinx.serialization.json.JsonArray) {
+                                vEl.forEach { it.jsonObject["v"].cleanString()?.let { s -> pubs.add(s) } }
+                            }
+                        }
+                    }
+                    BangumiNovelInfo(
+                        bgmId = targetId,
+                        score = score,
+                        volumes = volumes,
+                        chapters = chapters,
+                        synopsis = summary,
+                        originCountry = origin,
+                        publishers = pubs.distinct()
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchSyosetuChapterCount(title: String, nativeTitle: String? = null): Int? = withContext(Dispatchers.IO) {
+        try {
+            val cleanQuery = stripNovelEditionSuffix(title)
+            val jpQuery = when {
+                !nativeTitle.isNullOrBlank() && Regex("[\\u3040-\\u30FF\\u4E00-\\u9FFF]").containsMatchIn(nativeTitle) -> nativeTitle
+                else -> resolveWikidataNativeTitles(cleanQuery)?.ja
+            } ?: return@withContext null
+
+            val encoded = URLEncoder.encode(jpQuery, "UTF-8")
+            val req = Request.Builder()
+                .url("https://api.syosetu.com/novelapi/api/?out=json&lim=3&word=$encoded")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                val arr = json.parseToJsonElement(body).jsonArray
+                if (arr.size <= 1) return@withContext null
+                val match = arr.drop(1).firstOrNull { node ->
+                    isNovelTitleMatch(jpQuery, listOf(node.jsonObject["title"].cleanString()))
+                } ?: return@withContext null
+                match.jsonObject["general_all_no"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    suspend fun fetchAniListAdaptationBridge(
+        title: String,
+        nativeTitle: String? = null
+    ): AnimeEnrichedDetails? = withContext(Dispatchers.IO) {
+        val cleanQuery = stripNovelEditionSuffix(title)
+        if (cleanQuery.isBlank()) return@withContext null
+        try {
+            val wd = resolveWikidataNativeTitles(cleanQuery)
+            val searchCandidates = listOfNotNull(cleanQuery, wd?.ja, nativeTitle, wd?.zh, wd?.ko).distinct()
+            val gql = """
+                query (${'$'}search: String) {
+                  Page(page: 1, perPage: 6) {
+                    media(search: ${'$'}search, sort: [POPULARITY_DESC]) {
+                      id
+                      type
+                      format
+                      title { english romaji native }
+                      coverImage { extraLarge large }
+                      bannerImage
+                      startDate { year }
+                    }
+                  }
+                }
+            """.trimIndent()
+
+            var matchedId: Long? = null
+            var matchedType: MediaType = MediaType.ANIME
+            var matchedTitle: String = cleanQuery
+            var matchedFormat: String = "TV"
+            var matchedCover: String? = null
+            var matchedBanner: String? = null
+            var matchedYear: Int? = null
+
+            for (sq in searchCandidates) {
+                val payload = buildJsonObject {
+                    put("query", gql)
+                    putJsonObject("variables") { put("search", sq) }
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+                val hit = NetworkPacer.withAniListPacing {
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withAniListPacing null
+                        val body = resp.body?.string() ?: return@withAniListPacing null
+                        val list = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
+                            ?.get("Page")?.jsonObject?.get("media")?.jsonArray.orEmpty()
+                        list.firstOrNull { node ->
+                            val o = node.jsonObject
+                            val t = o["title"]?.jsonObject
+                            isNovelTitleMatch(
+                                cleanQuery,
+                                listOf(t?.get("english").cleanString(), t?.get("romaji").cleanString(), t?.get("native").cleanString())
+                            )
+                        }?.jsonObject
+                    }
+                }
+                if (hit != null) {
+                    matchedId = hit["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                    val tStr = hit["type"].cleanString() ?: "ANIME"
+                    matchedFormat = hit["format"].cleanString() ?: "TV"
+                    matchedType = if (tStr.equals("MANGA", true)) MediaType.MANGA else MediaType.ANIME
+                    matchedTitle = hit["title"]?.jsonObject?.get("english").cleanString()
+                        ?: hit["title"]?.jsonObject?.get("romaji").cleanString()
+                        ?: cleanQuery
+                    matchedCover = hit["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                        ?: hit["coverImage"]?.jsonObject?.get("large").cleanString()
+                    matchedBanner = hit["bannerImage"].cleanString()
+                    matchedYear = hit["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    break
+                }
+            }
+
+            if (matchedId == null) return@withContext null
+            val full = fetchAnimeDetails(anilistId = matchedId, mediaType = matchedType) ?: return@withContext null
+
+            val authorOnlyStaff = full.staff.filter { st ->
+                val r = st.role.lowercase()
+                "story" in r || "original" in r || "creator" in r || "author" in r
+            }
+            val combinedRelations = buildList {
+                if (matchedCover != null) {
+                    add(
+                        AnimeRelationItem(
+                            id = matchedId,
+                            title = matchedTitle,
+                            relationType = "ADAPTATION",
+                            format = matchedFormat,
+                            coverUrl = matchedCover,
+                            bannerUrl = matchedBanner,
+                            year = matchedYear,
+                            mediaType = matchedType
+                        )
+                    )
+                }
+                addAll(full.relations.filter { it.id != matchedId })
+            }.distinctBy { it.id }
+
+            full.copy(
+                anilistId = null,
+                malId = null,
+                averageScore = null,
+                totalEpisodes = null,
+                totalChapters = null,
+                totalVolumes = null,
+                staff = authorOnlyStaff,
+                relations = combinedRelations
+            )
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    suspend fun fetchNovelVolumesAndChapters(
+        item: MediaItemEntity,
+        knownTotalChapters: Int? = null,
+        knownTotalVolumes: Int? = null
+    ): NovelSeriesContent = withContext(Dispatchers.IO) {
+        val cleanTitle = stripNovelEditionSuffix(item.title)
+        val cacheKey = "novel:${item.anilistId ?: item.malId ?: item.bangumiId ?: "${item.platform ?: "AUTO"}:${cleanTitle.lowercase()}"}"
+        novelSeriesContentCache[cacheKey]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("novel_series_$cacheKey") {
+            novelSeriesContentCache[cacheKey]?.let { return@coalesce it }
+
+            val (ranobe, kitsu, mu, bgm, syosetuCh) = coroutineScope {
+                val rDef = async { fetchRanobeDbSeriesDetails(item.title, item.nativeTitle) }
+                val kDef = async { fetchKitsuNovelDetails(item.title) }
+                val mDef = async { fetchMangaUpdatesInfo(item.title, preferNovel = true) }
+                val bDef = async { fetchBangumiNovelDetails(item.title, item.nativeTitle, item.bangumiId) }
+                val sDef = async { fetchSyosetuChapterCount(item.title, item.nativeTitle) }
+                val r = rDef.await()
+                val k = kDef.await()
+                val m = mDef.await()
+                val b = bDef.await()
+                val s = sDef.await()
+                NovelBundle5(r, k, m, b, s)
+            }
+
+            val normPlatform = item.platform?.trim()?.uppercase()
+            val lowerTitle = item.title.lowercase()
+            val isLightNovel = when {
+                normPlatform == "LIGHT_NOVEL" || "(light novel)" in lowerTitle || "(ln)" in lowerTitle -> true
+                normPlatform == "WEB_NOVEL" || "(web novel)" in lowerTitle || "(wn)" in lowerTitle -> false
+                ranobe != null && ranobe.volumes.isNotEmpty() && ((kitsu?.chapterCount ?: 0) <= 60) -> true
+                else -> (item.anilistId != null || item.malId != null) &&
+                    (item.originCountry == null || item.originCountry.equals("JP", true)) &&
+                    ((item.totalProgress ?: 0.0) <= 80.0)
+            }
+
+            val seasonsList = mutableListOf<com.omnitrack.app.data.model.MediaSeason>()
+            val epMap = mutableMapOf<Int, MutableList<com.omnitrack.app.data.model.MediaEpisode>>()
+            var hasBookSplits = false
+            val totalCount: Int?
+
+            if (isLightNovel) {
+                val ranobeVols = ranobe?.volumes.orEmpty()
+                val targetVolCount = maxOf(
+                    ranobeVols.size,
+                    knownTotalVolumes ?: 0,
+                    if ((item.totalProgress ?: 0.0) in 1.0..80.0) item.totalProgress?.toInt() ?: 0 else 0
+                )
+                totalCount = targetVolCount.takeIf { it > 0 }
+                if (ranobeVols.isNotEmpty()) {
+                    val volList = ranobeVols.map { v ->
+                        com.omnitrack.app.data.model.MediaEpisode(
+                            id = v.number.toLong(),
+                            episodeNumber = v.number,
+                            seasonNumber = 1,
+                            title = v.title,
+                            overview = v.synopsis ?: ranobe?.synopsis,
+                            stillUrl = v.coverUrl ?: item.coverUrl,
+                            airDate = v.releaseDate
+                        )
+                    }.toMutableList()
+                    seasonsList.add(
+                        com.omnitrack.app.data.model.MediaSeason(
+                            seasonNumber = 1,
+                            name = "Volumes",
+                            episodeCount = volList.size,
+                            posterUrl = volList.firstOrNull()?.stillUrl ?: item.coverUrl
+                        )
+                    )
+                    epMap[1] = volList
+                } else if (targetVolCount > 0) {
+                    val volList = (1..targetVolCount).map { v ->
+                        com.omnitrack.app.data.model.MediaEpisode(
+                            id = v.toLong(),
+                            episodeNumber = v,
+                            seasonNumber = 1,
+                            title = "Volume $v",
+                            overview = null,
+                            stillUrl = item.coverUrl,
+                            airDate = null
+                        )
+                    }.toMutableList()
+                    seasonsList.add(
+                        com.omnitrack.app.data.model.MediaSeason(
+                            seasonNumber = 1,
+                            name = "Volumes",
+                            episodeCount = volList.size,
+                            posterUrl = item.coverUrl
+                        )
+                    )
+                    epMap[1] = volList
+                }
+            } else {
+                // WEB NOVEL: Genuine Books/Parts if present, else 1 continuous All Chapters stream (never 100-ch slices)
+                val totalCh = maxOf(
+                    knownTotalChapters ?: 0,
+                    kitsu?.chapterCount ?: 0,
+                    mu?.totalStatusChapters ?: 0,
+                    mu?.latestChapter ?: 0,
+                    bgm?.chapters ?: 0,
+                    syosetuCh ?: 0,
+                    item.totalProgress?.toInt() ?: 0
+                ).coerceIn(0, 5000)
+                totalCount = totalCh.takeIf { it > 0 }
+
+                if (totalCh > 0) {
+                    val bookCount = maxOf(
+                        kitsu?.volumeCount ?: 0,
+                        mu?.totalVolumes ?: 0,
+                        bgm?.volumes ?: 0
+                    )
+                    if (mu?.seasons?.isNotEmpty() == true) {
+                        hasBookSplits = true
+                        for ((sNum, sLabel, range) in mu.seasons.sortedBy { it.first }) {
+                            val end = range.last.coerceAtMost(totalCh)
+                            if (range.first > totalCh) continue
+                            seasonsList.add(
+                                com.omnitrack.app.data.model.MediaSeason(
+                                    seasonNumber = sNum,
+                                    name = sLabel,
+                                    episodeCount = (end - range.first + 1).coerceAtLeast(1),
+                                    posterUrl = item.coverUrl
+                                )
+                            )
+                            epMap[sNum] = (range.first..end).map { ch ->
+                                com.omnitrack.app.data.model.MediaEpisode(
+                                    id = ch.toLong(),
+                                    episodeNumber = ch,
+                                    seasonNumber = sNum,
+                                    title = "Chapter $ch",
+                                    overview = sLabel,
+                                    stillUrl = item.coverUrl,
+                                    airDate = null
+                                )
+                            }.toMutableList()
+                        }
+                    } else if (bookCount in 2..24 && totalCh >= bookCount * 5) {
+                        hasBookSplits = true
+                        val perBook = kotlin.math.ceil(totalCh.toDouble() / bookCount.toDouble()).toInt().coerceAtLeast(1)
+                        var chCursor = 1
+                        for (book in 1..bookCount) {
+                            if (chCursor > totalCh) break
+                            val end = if (book == bookCount) totalCh else (chCursor + perBook - 1).coerceAtMost(totalCh)
+                            seasonsList.add(
+                                com.omnitrack.app.data.model.MediaSeason(
+                                    seasonNumber = book,
+                                    name = "Book $book ($chCursor–$end)",
+                                    episodeCount = (end - chCursor + 1).coerceAtLeast(1),
+                                    posterUrl = item.coverUrl
+                                )
+                            )
+                            epMap[book] = (chCursor..end).map { ch ->
+                                com.omnitrack.app.data.model.MediaEpisode(
+                                    id = ch.toLong(),
+                                    episodeNumber = ch,
+                                    seasonNumber = book,
+                                    title = "Chapter $ch",
+                                    overview = "Book $book",
+                                    stillUrl = item.coverUrl,
+                                    airDate = null
+                                )
+                            }.toMutableList()
+                            chCursor = end + 1
+                        }
+                    } else {
+                        seasonsList.add(
+                            com.omnitrack.app.data.model.MediaSeason(
+                                seasonNumber = 1,
+                                name = "All Chapters",
+                                episodeCount = totalCh,
+                                posterUrl = item.coverUrl
+                            )
+                        )
+                        epMap[1] = (1..totalCh).map { ch ->
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = ch.toLong(),
+                                episodeNumber = ch,
+                                seasonNumber = 1,
+                                title = "Chapter $ch",
+                                overview = null,
+                                stillUrl = item.coverUrl,
+                                airDate = null
+                            )
+                        }.toMutableList()
+                    }
+                }
+            }
+
+            val publishers = buildList {
+                if (isLightNovel) {
+                    addAll(ranobe?.publishers.orEmpty())
+                    addAll(mu?.publishers.orEmpty())
+                    addAll(bgm?.publishers.orEmpty())
+                } else {
+                    addAll(mu?.publishers.orEmpty())
+                    addAll(bgm?.publishers.orEmpty())
+                    addAll(ranobe?.publishers.orEmpty())
+                }
+            }.distinct()
+
+            val result = NovelSeriesContent(
+                isLightNovel = isLightNovel,
+                seasons = seasonsList,
+                episodesBySeason = epMap,
+                hasBookSplits = hasBookSplits,
+                totalCount = totalCount,
+                publishers = publishers,
+                ranobeDetails = ranobe,
+                kitsuDetails = kitsu,
+                mangaUpdatesRating = mu?.bayesianRating,
+                bangumiScore = bgm?.score,
+                originCountry = ranobe?.originCountry ?: bgm?.originCountry ?: item.originCountry
+            )
+            if (seasonsList.isNotEmpty() || totalCount != null) {
+                novelSeriesContentCache[cacheKey] = result
+            }
+            result
+        }
+    }
+
+    private data class NovelBundle5(
+        val ranobe: RanobeDbSeriesDetails?,
+        val kitsu: KitsuNovelDetails?,
+        val mu: MangaUpdatesSeriesInfo?,
+        val bgm: BangumiNovelInfo?,
+        val syosetuCh: Int?
+    )
+
+    data class NovelReviewItem(
+        val author: String,
+        val source: String,
+        val rating: Float?,
+        val comment: String,
+        val isSpoiler: Boolean = false
+    )
+
+    suspend fun fetchKitsuNovelReactions(kitsuId: String): List<NovelReviewItem> = withContext(Dispatchers.IO) {
+        if (kitsuId.isBlank()) return@withContext emptyList()
+        NetworkPacer.withGeneralPacing {
+            try {
+                val req = Request.Builder()
+                    .url("https://kitsu.io/api/edge/media-reactions?filter[manga_id]=$kitsuId&include=user&page[limit]=10")
+                    .header("Accept", "application/vnd.api+json")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val body = resp.body?.string() ?: return@withGeneralPacing emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val usersById = root["included"]?.jsonArray.orEmpty()
+                        .filter { it.jsonObject["type"].cleanString() == "users" }
+                        .associate {
+                            (it.jsonObject["id"].cleanString() ?: "") to
+                                (it.jsonObject["attributes"]?.jsonObject?.get("name").cleanString() ?: "Kitsu Reader")
+                        }
+                    root["data"]?.jsonArray.orEmpty().mapNotNull { elem ->
+                        val o = elem.jsonObject
+                        val attrs = o["attributes"]?.jsonObject ?: return@mapNotNull null
+                        val txt = attrs["reaction"].cleanString() ?: return@mapNotNull null
+                        val uid = o["relationships"]?.jsonObject?.get("user")?.jsonObject
+                            ?.get("data")?.jsonObject?.get("id").cleanString()
+                        val author = uid?.let { usersById[it] } ?: "Kitsu Reader"
+                        NovelReviewItem(author = author, source = "Kitsu", rating = null, comment = txt)
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchJikanMangaReviews(malId: Long): List<NovelReviewItem> = withContext(Dispatchers.IO) {
+        if (malId <= 0L) return@withContext emptyList()
+        NetworkPacer.withGeneralPacing {
+            try {
+                val req = Request.Builder()
+                    .url("https://jikanfortheweebs.midnightignite.me/v4/manga/$malId/reviews?limit=10")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                jikanClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val body = resp.body?.string() ?: return@withGeneralPacing emptyList()
+                    val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray.orEmpty()
+                    data.take(10).mapNotNull { elem ->
+                        val o = elem.jsonObject
+                        val reviewText = o["review"].cleanString() ?: return@mapNotNull null
+                        val author = o["user"]?.jsonObject?.get("username").cleanString() ?: "MAL Reader"
+                        val score = o["score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        val spoiler = o["is_spoiler"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                        NovelReviewItem(author = author, source = "MAL", rating = score, comment = reviewText, isSpoiler = spoiler)
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                emptyList()
+            }
         }
     }
 

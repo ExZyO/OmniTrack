@@ -30,5 +30,6 @@ data class MediaCardSummary(
     val tmdbId: Long? = null,
     val anilistId: Long? = null,
     val malId: Long? = null,
-    val originCountry: String? = null
+    val originCountry: String? = null,
+    val platform: String? = null
 )

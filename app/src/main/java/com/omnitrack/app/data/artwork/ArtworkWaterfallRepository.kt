@@ -111,10 +111,13 @@ class ArtworkWaterfallRepository(
                     )
                     val effAnilistId = anilistId ?: bridge.anilistId
                     val effMalId = malId ?: bridge.malId
+                    val wdNative = if (mediaType == MediaType.NOVEL && bridge.nativeTitle == null && nativeTitle.isNullOrBlank()) {
+                        fetchWikidataNativeTitlesForArt(clean)
+                    } else null
                     val effOrigin = (originCountry ?: bridge.countryOfOrigin)?.uppercase()
-                    val effNative = bridge.nativeTitle ?: nativeTitle?.takeIf { it.isNotBlank() }
+                    val effNative = bridge.nativeTitle ?: nativeTitle?.takeIf { it.isNotBlank() } ?: wdNative?.firstOrNull()
                     val effRomaji = bridge.romajiTitle ?: romajiTitle?.takeIf { it.isNotBlank() }
-                    val effSynonyms = bridge.synonyms
+                    val effSynonyms = (bridge.synonyms + wdNative.orEmpty()).distinct()
 
                     val koreanQuery = listOfNotNull(
                         effNative?.takeIf { containsHangul(it) },
@@ -125,8 +128,10 @@ class ArtworkWaterfallRepository(
                     val isChinese = effOrigin == "CN" ||
                         effOrigin == "TW" ||
                         containsHanzi(clean) ||
-                        (effNative != null && containsHanzi(effNative))
+                        (effNative != null && containsHanzi(effNative)) ||
+                        effSynonyms.any { containsHanzi(it) }
                     val chineseQuery = listOfNotNull(
+                        effSynonyms.firstOrNull { containsHanzi(it) && !containsJapanese(it) },
                         effNative?.takeIf { containsHanzi(it) },
                         effSynonyms.firstOrNull { containsHanzi(it) },
                         clean.takeIf { containsHanzi(it) }
@@ -148,6 +153,12 @@ class ArtworkWaterfallRepository(
                     ).firstOrNull { it.isNotBlank() && !it.equals(clean, ignoreCase = true) }
 
                     val deferreds = mutableListOf<Deferred<List<ArtworkCandidate>>>()
+                    if (mediaType == MediaType.NOVEL) {
+                        deferreds.add(async { fetchRanobeDbCovers(clean, effNative) })
+                        if (bridge.candidates.none { it.isBanner }) {
+                            deferreds.add(async { fetchAniListAdaptationBanners(clean, effNative ?: wdNative?.firstOrNull()) })
+                        }
+                    }
                     deferreds.add(async {
                         fetchMangaDexCovers(
                             rawTitle = clean,
@@ -160,7 +171,7 @@ class ArtworkWaterfallRepository(
                     if (japaneseQuery != null && !containsHangul(japaneseQuery) && effOrigin != "KR" && effOrigin != "CN") {
                         deferreds.add(async { fetchBookWalkerCovers(japaneseQuery) })
                     }
-                    deferreds.add(async { fetchBangumiCovers(japaneseQuery ?: clean, type = 1) })
+                    deferreds.add(async { fetchBangumiCovers(japaneseQuery ?: chineseQuery ?: koreanQuery ?: clean, type = 1) })
                     if (koreanQuery != null) {
                         val globalQuery = listOfNotNull(
                             bridge.englishTitle,
@@ -1485,20 +1496,189 @@ class ArtworkWaterfallRepository(
         }
     }
 
+    private fun fetchWikidataNativeTitlesForArt(title: String): List<String> {
+        return try {
+            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+            val req = Request.Builder()
+                .url("https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=en&limit=1&format=json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val qid = jikanClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val body = resp.body?.string() ?: return emptyList()
+                (json.parseToJsonElement(body) as? JsonObject)?.get("search")?.let { it as? JsonArray }
+                    ?.firstOrNull()?.jsonObject?.get("id").cleanString()
+            } ?: return emptyList()
+
+            val entReq = Request.Builder()
+                .url("https://www.wikidata.org/w/api.php?action=wbgetentities&ids=$qid&props=labels&languages=zh|zh-hans|ko|ja&format=json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            jikanClient.newCall(entReq).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val body = resp.body?.string() ?: return emptyList()
+                val labels = (json.parseToJsonElement(body) as? JsonObject)
+                    ?.get("entities")?.let { it as? JsonObject }
+                    ?.get(qid)?.let { it as? JsonObject }
+                    ?.get("labels")?.let { it as? JsonObject } ?: return emptyList()
+                listOfNotNull(
+                    labels["zh-hans"]?.jsonObject?.get("value").cleanString() ?: labels["zh"]?.jsonObject?.get("value").cleanString(),
+                    labels["ko"]?.jsonObject?.get("value").cleanString(),
+                    labels["ja"]?.jsonObject?.get("value").cleanString()
+                ).distinct()
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private fun fetchRanobeDbCovers(title: String, nativeTitle: String?): List<ArtworkCandidate> {
+        return try {
+            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+            val req = Request.Builder()
+                .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=5")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val seriesId = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val body = resp.body?.string() ?: return emptyList()
+                val arr = (json.parseToJsonElement(body) as? JsonObject)?.get("series")?.let { it as? JsonArray }
+                    ?: return emptyList()
+                val matched = arr.firstOrNull { node ->
+                    val o = node.jsonObject
+                    val candNames = listOfNotNull(
+                        o["title"].cleanString(),
+                        o["romaji_orig"].cleanString(),
+                        o["title_orig"].cleanString()
+                    )
+                    isTitleMatch(title, candNames) || (nativeTitle != null && candNames.any { it.equals(nativeTitle, ignoreCase = true) })
+                }
+                matched?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            } ?: return emptyList()
+
+            val detailReq = Request.Builder()
+                .url("https://ranobedb.org/api/v0/series/$seriesId")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            client.newCall(detailReq).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val body = resp.body?.string() ?: return emptyList()
+                val seriesObj = (json.parseToJsonElement(body) as? JsonObject)
+                    ?.get("series")?.let { it as? JsonObject } ?: return emptyList()
+                val books = seriesObj["books"] as? JsonArray ?: return emptyList()
+                val candidates = mutableListOf<ArtworkCandidate>()
+                val seenUrls = mutableSetOf<String>()
+                books.reversed().forEachIndexed { revIdx, elem ->
+                    val b = elem as? JsonObject ?: return@forEachIndexed
+                    val filename = (b["image"] as? JsonObject)?.get("filename").cleanString() ?: return@forEachIndexed
+                    val coverUrl = "https://images.ranobedb.org/$filename"
+                    if (!seenUrls.add(coverUrl)) return@forEachIndexed
+                    val bTitle = b["title"].cleanString()
+                    val volNum = bTitle?.let {
+                        Regex("""(?:Vol\.?|Volume)\s*(\d+)""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.getOrNull(1)
+                    } ?: (books.size - revIdx).toString()
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = coverUrl,
+                            sourceName = "RanobeDB",
+                            description = "Vol. $volNum LN",
+                            isBanner = false
+                        )
+                    )
+                }
+                candidates
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private fun fetchAniListAdaptationBanners(title: String, nativeTitle: String?): List<ArtworkCandidate> {
+        return try {
+            val gql = """
+                query (${'$'}search: String) {
+                  Page(page: 1, perPage: 5) {
+                    media(search: ${'$'}search, sort: [POPULARITY_DESC]) {
+                      title { english romaji native }
+                      format
+                      bannerImage
+                      coverImage { extraLarge large }
+                    }
+                  }
+                }
+            """.trimIndent()
+            val candidates = mutableListOf<ArtworkCandidate>()
+            for (sq in listOfNotNull(title, nativeTitle).distinct()) {
+                val payload = buildJsonObject {
+                    put("query", gql)
+                    putJsonObject("variables") { put("search", sq) }
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use
+                    val body = resp.body?.string() ?: return@use
+                    val list = (json.parseToJsonElement(body) as? JsonObject)
+                        ?.get("data")?.let { it as? JsonObject }
+                        ?.get("Page")?.let { it as? JsonObject }
+                        ?.get("media")?.let { it as? JsonArray } ?: return@use
+                    for (node in list) {
+                        val o = node.jsonObject
+                        val tObj = o["title"] as? JsonObject
+                        val names = listOfNotNull(
+                            tObj?.get("english").cleanString(),
+                            tObj?.get("romaji").cleanString(),
+                            tObj?.get("native").cleanString()
+                        )
+                        if (!isTitleMatch(title, names) && (nativeTitle == null || names.none { it.equals(nativeTitle, ignoreCase = true) })) {
+                            continue
+                        }
+                        val fmt = o["format"].cleanString() ?: "Adaptation"
+                        o["bannerImage"].cleanString()?.let { banner ->
+                            candidates.add(
+                                ArtworkCandidate(
+                                    url = banner,
+                                    sourceName = "AniList",
+                                    description = "$fmt Adaptation Banner",
+                                    isBanner = true
+                                )
+                            )
+                        }
+                    }
+                }
+                if (candidates.isNotEmpty()) break
+            }
+            candidates.distinctBy { it.url }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
     companion object {
         private val candidateCache = ConcurrentHashMap<String, List<ArtworkCandidate>>()
 
         private val MANGA_COVER_PRIORITY = mapOf(
-            "MangaDex" to 1,
-            "BookWalker" to 2,
-            "Bangumi" to 3,
-            "AniList" to 4,
-            "Naver" to 5,
-            "Kuaikan" to 6,
-            "Kitsu" to 7,
-            "MyAnimeList" to 8,
-            "Comick" to 9,
-            "Default" to 10
+            "RanobeDB" to 1,
+            "MangaDex" to 2,
+            "BookWalker" to 3,
+            "Bangumi" to 4,
+            "AniList" to 5,
+            "Naver" to 6,
+            "Kuaikan" to 7,
+            "Kitsu" to 8,
+            "MyAnimeList" to 9,
+            "Comick" to 10,
+            "Default" to 11
         )
 
         private val MANGA_BANNER_PRIORITY = mapOf(

@@ -124,6 +124,7 @@ fun HomeScreen(
     var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedMangaSubtype by rememberSaveable { mutableStateOf("ALL") }
+    var selectedNovelSubtype by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -397,6 +398,41 @@ fun HomeScreen(
                             }
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.NOVEL) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (key, label) ->
+                                    val isSelected = selectedNovelSubtype == key
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f),
+                                                shape = RoundedCornerShape(999.dp)
+                                            )
+                                            .clickable { selectedNovelSubtype = key }
+                                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.60f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -418,10 +454,11 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype) {
                                     uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
+                                        (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
@@ -611,5 +648,34 @@ internal fun inferMangaSubtype(originCountry: String?, nativeTitle: String?): St
                 else -> "MANGA"
             }
         }
+    }
+}
+
+internal fun inferNovelSubtype(
+    platform: String?,
+    originCountry: String?,
+    anilistId: Long?,
+    malId: Long?,
+    totalProgress: Double?,
+    title: String
+): String {
+    val normPlatform = platform?.trim()?.uppercase()
+    if (normPlatform == "LIGHT_NOVEL") return "LIGHT_NOVEL"
+    if (normPlatform == "WEB_NOVEL") return "WEB_NOVEL"
+
+    val lowerTitle = title.lowercase()
+    if ("(light novel)" in lowerTitle || "[light novel]" in lowerTitle || "(ln)" in lowerTitle) {
+        return "LIGHT_NOVEL"
+    }
+    if ("(web novel)" in lowerTitle || "[web novel]" in lowerTitle || "(wn)" in lowerTitle) {
+        return "WEB_NOVEL"
+    }
+
+    val upperOrigin = originCountry?.trim()?.uppercase()
+    val hasJpPrintSignal = (anilistId != null || malId != null) && (upperOrigin == null || upperOrigin == "JP")
+    return if (hasJpPrintSignal && (totalProgress == null || totalProgress <= 80.0)) {
+        "LIGHT_NOVEL"
+    } else {
+        "WEB_NOVEL"
     }
 }

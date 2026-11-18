@@ -367,7 +367,8 @@ fun ArtworkPickerBottomSheet(
                             modifier = Modifier.size(32.dp)
                         )
                         val loadingText = when (mediaType) {
-                            MediaType.MANGA, MediaType.NOVEL -> "Querying AniList, MangaDex, BookWalker, Naver, Kuaikan, Bangumi & Kitsu..."
+                            MediaType.NOVEL -> "Querying RanobeDB, AniList, Kitsu, BookWalker, Naver, Kuaikan & Bangumi..."
+                            MediaType.MANGA -> "Querying AniList, MangaDex, BookWalker, Naver, Kuaikan, Bangumi & Kitsu..."
                             MediaType.ANIME -> "Querying AniList, TMDb, Bangumi, Kitsu & MangaDex..."
                             MediaType.SHOW, MediaType.MOVIE -> "Querying TMDb, TVMaze & Bangumi..."
                             MediaType.GAME -> "Querying Steam Artwork..."
@@ -387,6 +388,17 @@ fun ArtworkPickerBottomSheet(
                 when (selectedTab) {
                     // TAB 0: COVERS
                     0 -> {
+                        val latestLnCover = remember(displayedCovers, mediaType) {
+                            if (mediaType != MediaType.NOVEL) null
+                            else displayedCovers.filter { it.sourceName.equals("RanobeDB", ignoreCase = true) }
+                                .mapNotNull { option ->
+                                    val volStr = option.description?.substringAfter("Vol. ", "")?.substringBefore(" ")?.trim()
+                                    val volNum = volStr?.toDoubleOrNull()
+                                    if (volNum != null) volNum to option else null
+                                }
+                                .maxByOrNull { it.first }?.second
+                                ?: displayedCovers.firstOrNull { it.sourceName.equals("RanobeDB", ignoreCase = true) }
+                        }
                         val latestMdCover = remember(displayedCovers) {
                             displayedCovers.filter { it.sourceName.equals("MangaDex", ignoreCase = true) }
                                 .mapNotNull { option ->
@@ -406,6 +418,32 @@ fun ArtworkPickerBottomSheet(
                                     .horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                if (latestLnCover != null) {
+                                    Button(
+                                        onClick = {
+                                            onCoverSelected(latestLnCover.url)
+                                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = AccentArctic,
+                                            contentColor = AmoledBlack
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = latestLnCover.description
+                                                ?.takeIf { it.isNotBlank() }
+                                                ?.let { "Latest LN ($it)" }
+                                                ?: "Latest LN Vol",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                                 if (latestMdCover != null) {
                                     Button(
                                         onClick = {
@@ -890,7 +928,7 @@ fun ArtworkPickerBottomSheet(
                     2 -> {
                         val availableSources = remember(allCandidates) {
                             val standard = listOf(
-                                "AniList", "MangaDex", "BookWalker", "Naver", "Kuaikan",
+                                "RanobeDB", "AniList", "MangaDex", "BookWalker", "Naver", "Kuaikan",
                                 "Bangumi", "Kitsu", "MyAnimeList", "Comick", "TMDb",
                                 "Steam", "TVMaze", "VNDB"
                             )

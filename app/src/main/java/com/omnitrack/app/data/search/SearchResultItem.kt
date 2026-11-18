@@ -26,6 +26,7 @@ data class SearchResultItem(
     val vndbId: String? = null,
     val mangadexId: String? = null,
     val originCountry: String? = null,
+    val platform: String? = null,
     val totalProgress: Double? = null
 ) {
     fun toMediaItemEntity(status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK): MediaItemEntity {
@@ -39,6 +40,7 @@ data class SearchResultItem(
             status = status,
             currentProgress = 0.0,
             totalProgress = totalProgress,
+            platform = platform,
             userRating = null,
             anilistId = anilistId,
             malId = malId,

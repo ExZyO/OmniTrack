@@ -83,7 +83,9 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     imdbId = imdbId,
     tmdbId = tmdbId,
     anilistId = anilistId,
-    malId = malId
+    malId = malId,
+    originCountry = originCountry,
+    platform = platform
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -165,6 +167,7 @@ fun MediaCard(
                 .aspectRatio(if (isLandscape) 16f / 9f else 0.68f)
                 .shadow(10.dp, shape)
                 .clip(shape)
+                .background(DarkSurfaceCard)
                 .glassCardDepth(
                     shape = shape,
                     edgeStrength = cardDepthEdgeStrength,
@@ -415,7 +418,7 @@ fun MediaCard(
 }
 
 private fun formatProgress(item: MediaCardSummary): String {
-    val unit = item.mediaType.unitLabel
+    val unit = if (item.mediaType == MediaType.NOVEL && item.platform == "LIGHT_NOVEL") "Vol" else item.mediaType.unitLabel
     val current = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
         String.format("%.1f", item.currentProgress)
     } else {

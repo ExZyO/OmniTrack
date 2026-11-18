@@ -41,10 +41,12 @@ object NetworkClient {
                     .connectTimeout(15, TimeUnit.SECONDS)
                     .readTimeout(20, TimeUnit.SECONDS)
                     .addInterceptor { chain ->
-                        val request = chain.request().newBuilder()
-                            .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
-                            .build()
-                        chain.proceed(request)
+                        val original = chain.request()
+                        val builder = original.newBuilder()
+                        if (original.header("User-Agent") == null) {
+                            builder.header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                        }
+                        chain.proceed(builder.build())
                     }
 
                 if (cache != null) {

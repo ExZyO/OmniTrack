@@ -42,6 +42,7 @@ class OmniSearchRepository(
 ) {
     companion object {
         private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
+        private val wikidataAliasCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<String, String>>>()
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -52,13 +53,15 @@ class OmniSearchRepository(
         "TMDb" to 3,
         "MAL" to 4,
         "Kitsu" to 5,
-        "MangaDex" to 6,
-        "RanobeDB" to 7,
-        "Steam" to 8,
-        "VNDB" to 9,
-        "OpenLibrary" to 10,
-        "WLNUpdates" to 11,
-        "Bangumi" to 12
+        "RanobeDB" to 6,
+        "MangaDex" to 7,
+        "MangaUpdates" to 8,
+        "Steam" to 9,
+        "VNDB" to 10,
+        "Bangumi" to 11,
+        "Syosetu" to 12,
+        "OpenLibrary" to 13,
+        "WLNUpdates" to 14
     )
 
     private fun prioritizeAndDedupe(
@@ -87,7 +90,8 @@ class OmniSearchRepository(
         val indexByKey = mutableMapOf<String, Int>()
         val deduped = mutableListOf<SearchResultItem>()
         for (item in prioritized) {
-            val key = "${item.mediaType.name}:${item.title.trim().lowercase()}"
+            val subtypeKey = if (item.mediaType == MediaType.NOVEL) ":${item.platform ?: ""}" else ""
+            val key = "${item.mediaType.name}$subtypeKey:${item.title.trim().lowercase()}"
             val existingIdx = indexByKey[key]
             if (existingIdx == null) {
                 indexByKey[key] = deduped.size
@@ -98,8 +102,10 @@ class OmniSearchRepository(
                     tmdbId = existing.tmdbId ?: item.tmdbId,
                     anilistId = existing.anilistId ?: item.anilistId,
                     malId = existing.malId ?: item.malId,
+                    bangumiId = existing.bangumiId ?: item.bangumiId,
                     mangadexId = existing.mangadexId ?: item.mangadexId,
                     originCountry = existing.originCountry ?: item.originCountry,
+                    platform = existing.platform ?: item.platform,
                     bannerUrl = existing.bannerUrl ?: item.bannerUrl,
                     coverUrl = existing.coverUrl.ifBlank { item.coverUrl },
                     synopsis = existing.synopsis ?: item.synopsis,
@@ -149,8 +155,9 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false) })
                     deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
                     deferreds.add(launchProvider { searchRanobeDb(trimmed) })
+                    deferreds.add(launchProvider { searchKitsuNovels(trimmed) })
+                    deferreds.add(launchProvider { searchMangaUpdatesNovels(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
-                    deferreds.add(launchProvider { searchWlnUpdates(trimmed) })
                     deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey) })
                     deferreds.add(launchProvider { searchSteam(trimmed) })
                     deferreds.add(launchProvider { searchVndb(trimmed) })
@@ -173,13 +180,17 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
                 }
                 MediaType.NOVEL -> {
-                    // Multi-source novel discovery: Bangumi with native aliases, RanobeDB, AniList LN, OpenLibrary & WLNUpdates
-                    deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    // Dual-Engine Novel Discovery:
+                    // Light Novels: RanobeDB, AniList NOVEL, Jikan LN
+                    // Web Novels: Kitsu subtype=novel, MangaUpdates type=Novel, Wikidata->Bangumi, Syosetu, OpenLibrary
                     deferreds.add(launchProvider { searchRanobeDb(trimmed) })
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false, formatNovel = true) })
+                    deferreds.add(launchProvider { searchJikanLightNovels(trimmed) })
+                    deferreds.add(launchProvider { searchKitsuNovels(trimmed) })
+                    deferreds.add(launchProvider { searchMangaUpdatesNovels(trimmed) })
+                    deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(launchProvider { searchSyosetu(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
-                    deferreds.add(launchProvider { searchWlnUpdates(trimmed) })
-                    deferreds.add(launchProvider { searchNovelUpdates(trimmed) })
                 }
                 MediaType.SHOW -> {
                     deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.SHOW) })
@@ -243,6 +254,7 @@ class OmniSearchRepository(
                                     startDate { year }
                                     episodes
                                     chapters
+                                    volumes
                                     countryOfOrigin
                                 }
                             }
@@ -314,12 +326,20 @@ class OmniSearchRepository(
                                 else -> MediaType.MANGA
                             }
 
-                            val totalProgress = if (isAnime) {
-                                obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                            } else {
-                                obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            val totalProgress = when {
+                                isAnime -> obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                                formatNovel -> obj["volumes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                                    ?: obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                                else -> obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                             }
                             val originCountry = obj["countryOfOrigin"].cleanString()
+                            val novelPlatform = if (formatNovel) {
+                                if (originCountry == null || originCountry.equals("JP", ignoreCase = true)) {
+                                    "LIGHT_NOVEL"
+                                } else {
+                                    "WEB_NOVEL"
+                                }
+                            } else null
 
                             SearchResultItem(
                                 title = title,
@@ -334,7 +354,8 @@ class OmniSearchRepository(
                                 anilistId = anilistId,
                                 malId = malId,
                                 totalProgress = totalProgress,
-                                originCountry = originCountry
+                                originCountry = originCountry,
+                                platform = novelPlatform
                             )
                         }
                         if (parsed.isNotEmpty()) {
@@ -1088,17 +1109,87 @@ class OmniSearchRepository(
         "the beginning after the end" to "The Beginning After the End"
     )
 
+    private suspend fun resolveWikidataAliases(query: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val key = query.trim().lowercase()
+        wikidataAliasCache[key]?.let { return@withContext it }
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val searchReq = Request.Builder()
+                .url("https://www.wikidata.org/w/api.php?action=wbsearchentities&search=$encoded&language=en&limit=1&format=json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val qid = jikanClient.newCall(searchReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val body = resp.body?.string() ?: return@withContext emptyList()
+                json.parseToJsonElement(body).jsonObject["search"]?.jsonArray
+                    ?.firstOrNull()?.jsonObject?.get("id").cleanString()
+            } ?: return@withContext emptyList()
+
+            val entReq = Request.Builder()
+                .url("https://www.wikidata.org/w/api.php?action=wbgetentities&ids=$qid&props=labels&languages=zh|zh-hans|ko|ja&format=json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val pairs = jikanClient.newCall(entReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyList()
+                val body = resp.body?.string() ?: return@withContext emptyList()
+                val labels = json.parseToJsonElement(body).jsonObject["entities"]?.jsonObject
+                    ?.get(qid)?.jsonObject?.get("labels")?.jsonObject ?: return@withContext emptyList()
+                val list = mutableListOf<Pair<String, String>>()
+                val zh = labels["zh-hans"]?.jsonObject?.get("value").cleanString()
+                    ?: labels["zh"]?.jsonObject?.get("value").cleanString()
+                val ko = labels["ko"]?.jsonObject?.get("value").cleanString()
+                val ja = labels["ja"]?.jsonObject?.get("value").cleanString()
+                if (!zh.isNullOrBlank()) list.add(zh to "CN")
+                if (!ko.isNullOrBlank()) list.add(ko to "KR")
+                if (!ja.isNullOrBlank()) list.add(ja to "JP")
+                list
+            }
+            wikidataAliasCache[key] = pairs
+            pairs
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
     private suspend fun searchBangumiWithAliases(
         query: String,
         type: Int,
         defaultType: MediaType
     ): List<SearchResultItem> = coroutineScope {
         val deferreds = mutableListOf(async { searchBangumi(query, type, defaultType) })
-        val alias = novelAliasMap[query.trim().lowercase()]
-        if (alias != null && !alias.equals(query, ignoreCase = true)) {
-            deferreds.add(async { searchBangumi(alias, type, defaultType) })
+        val staticAlias = novelAliasMap[query.trim().lowercase()]
+        if (staticAlias != null && !staticAlias.equals(query, ignoreCase = true)) {
+            deferreds.add(async { searchBangumi(staticAlias, type, defaultType) })
+        } else if (defaultType == MediaType.NOVEL && query.any { it in 'A'..'Z' || it in 'a'..'z' }) {
+            val wdAliases = resolveWikidataAliases(query)
+            wdAliases.take(2).forEach { (nativeTitle, _) ->
+                if (!nativeTitle.equals(query, ignoreCase = true)) {
+                    deferreds.add(async { searchBangumi(nativeTitle, type, defaultType) })
+                }
+            }
         }
-        deferreds.awaitAll().flatten()
+        deferreds.awaitAll().flatten().map { item ->
+            if (item.mediaType == MediaType.NOVEL) {
+                val nat = item.nativeTitle ?: item.title
+                val hasHangul = Regex("[\\uAC00-\\uD7AF]").containsMatchIn(nat)
+                val hasKana = Regex("[\\u3040-\\u30FF]").containsMatchIn(nat)
+                val origin = when {
+                    hasHangul -> "KR"
+                    hasKana -> "JP"
+                    else -> "CN"
+                }
+                val inferredPlatform = if (origin == "CN" || origin == "KR") "WEB_NOVEL" else item.platform
+                item.copy(
+                    originCountry = item.originCountry ?: origin,
+                    platform = inferredPlatform
+                )
+            } else {
+                item
+            }
+        }
     }
 
     private suspend fun searchOpenLibraryNovels(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
@@ -1126,6 +1217,7 @@ class OmniSearchRepository(
                         coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
                         mediaType = MediaType.NOVEL,
                         releaseYear = year,
+                        platform = "WEB_NOVEL",
                         sourceProvider = "OpenLibrary"
                     )
                 }
@@ -1137,89 +1229,205 @@ class OmniSearchRepository(
         }
     }
 
-    private suspend fun searchWlnUpdates(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+    private suspend fun searchJikanLightNovels(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val request = Request.Builder()
+                .url("https://jikanfortheweebs.midnightignite.me/v4/manga?q=$encoded&type=lightnovel&limit=6")
+                .header("Accept", "application/json")
+                .header("User-Agent", "OmniTrack/1.0 (Android; Linux)")
+                .get()
+                .build()
+            jikanClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                data.mapNotNull { entry ->
+                    val obj = entry.jsonObject
+                    val malId = obj["mal_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                    val title = obj["title_english"].cleanString() ?: obj["title"].cleanString() ?: return@mapNotNull null
+                    val nativeTitle = obj["title_japanese"].cleanString()
+                    val images = obj["images"]?.jsonObject
+                    val coverUrl = images?.get("webp")?.jsonObject?.get("large_image_url").cleanString()
+                        ?: images?.get("jpg")?.jsonObject?.get("large_image_url").cleanString()
+                        ?: images?.get("jpg")?.jsonObject?.get("image_url").cleanString()
+                        ?: return@mapNotNull null
+                    val synopsis = cleanSynopsis(obj["synopsis"].cleanString())
+                    val score = obj["score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val volumes = obj["volumes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val chapters = obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val year = obj["published"]?.jsonObject?.get("prop")?.jsonObject?.get("from")?.jsonObject?.get("year").cleanString()
+                    SearchResultItem(
+                        title = title,
+                        nativeTitle = nativeTitle,
+                        synopsis = synopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        mediaType = MediaType.NOVEL,
+                        releaseYear = year,
+                        communityScore = score,
+                        sourceProvider = "MAL",
+                        malId = malId,
+                        totalProgress = volumes ?: chapters,
+                        originCountry = "JP",
+                        platform = "LIGHT_NOVEL"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private suspend fun searchKitsuNovels(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val request = Request.Builder()
+                .url("https://kitsu.io/api/edge/manga?filter[text]=$encoded&filter[subtype]=novel&page[limit]=8")
+                .header("Accept", "application/vnd.api+json")
+                .header("User-Agent", "OmniTrack/1.0 (Android; Linux)")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                data.mapNotNull { entry ->
+                    val obj = entry.jsonObject
+                    val attrs = obj["attributes"]?.jsonObject ?: return@mapNotNull null
+                    val titlesObj = attrs["titles"]?.jsonObject
+                    val eng = titlesObj?.get("en").cleanString() ?: titlesObj?.get("en_us").cleanString()
+                    val rom = titlesObj?.get("en_jp").cleanString() ?: attrs["canonicalTitle"].cleanString()
+                    val nat = titlesObj?.get("ja_jp").cleanString() ?: titlesObj?.get("ko_kr").cleanString()
+                    val title = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat ?: attrs["canonicalTitle"].cleanString()
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
+                    } ?: return@mapNotNull null
+
+                    val posterObj = attrs["posterImage"]?.jsonObject
+                    val coverUrl = posterObj?.get("original").cleanString()
+                        ?: posterObj?.get("large").cleanString()
+                        ?: posterObj?.get("medium").cleanString()
+                        ?: return@mapNotNull null
+                    val bannerUrl = attrs["coverImage"]?.jsonObject?.get("original").cleanString()
+                        ?: attrs["coverImage"]?.jsonObject?.get("large").cleanString()
+
+                    val synopsis = cleanSynopsis(attrs["synopsis"].cleanString() ?: attrs["description"].cleanString())
+                    val score = attrs["averageRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                    val chapters = attrs["chapterCount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val volumes = attrs["volumeCount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val year = attrs["startDate"].cleanString()?.take(4)
+                    val isWebNovel = (chapters ?: 0.0) > 60.0 || (volumes == null || volumes <= 1.0)
+                    val novelPlatform = if (isWebNovel) "WEB_NOVEL" else "LIGHT_NOVEL"
+                    SearchResultItem(
+                        title = title,
+                        nativeTitle = nat,
+                        synopsis = synopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        bannerUrl = bannerUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        mediaType = MediaType.NOVEL,
+                        releaseYear = year,
+                        communityScore = score,
+                        sourceProvider = "Kitsu",
+                        platform = novelPlatform,
+                        totalProgress = if (novelPlatform == "LIGHT_NOVEL") volumes ?: chapters else chapters ?: volumes
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private suspend fun searchMangaUpdatesNovels(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
         try {
             val payload = buildJsonObject {
-                put("mode", "search-title")
-                put("title", query)
+                put("search", query)
+                put("perpage", 8)
             }
             val request = Request.Builder()
-                .url("https://www.wlnupdates.com/api")
+                .url("https://api.mangaupdates.com/v1/series/search")
+                .header("User-Agent", "OmniTrack/1.0")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withGeneralPacing emptyList()
                 val body = response.body?.string() ?: return@withGeneralPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val error = root["error"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
-                if (error) return@withGeneralPacing emptyList()
-
-                val data = root["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
-                data.mapNotNull { node ->
-                    val obj = node.jsonObject
-                    val title = obj["title"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val covers = obj["covers"]?.jsonArray
-                    val coverUrl = covers?.firstOrNull()?.jsonObject?.get("url")?.jsonPrimitive?.content
-                        ?: covers?.firstOrNull()?.jsonPrimitive?.content
+                val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                results.mapNotNull { node ->
+                    val rec = node.jsonObject["record"]?.jsonObject ?: return@mapNotNull null
+                    val recType = rec["type"].cleanString() ?: return@mapNotNull null
+                    if (!recType.equals("Novel", ignoreCase = true)) return@mapNotNull null
+                    val rawTitle = rec["title"].cleanString() ?: return@mapNotNull null
+                    val cleanMuTitle = rawTitle.replace(Regex("""\s*\(Novel\)\s*$""", RegexOption.IGNORE_CASE), "").trim()
+                    val coverUrl = rec["image"]?.jsonObject?.get("url")?.jsonObject?.get("original").cleanString()
+                        ?: rec["image"]?.jsonObject?.get("url")?.jsonObject?.get("thumb").cleanString()
                         ?: return@mapNotNull null
-                    val chp = obj["tot_chapters"]?.jsonPrimitive?.content?.toDoubleOrNull()
-                    val rating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
-
+                    val rating = rec["bayesian_rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }
+                    val year = rec["year"].cleanString()
+                    val desc = cleanSynopsis(rec["description"].cleanString())
                     SearchResultItem(
-                        title = title,
+                        title = cleanMuTitle,
+                        synopsis = desc,
                         coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
                         mediaType = MediaType.NOVEL,
+                        releaseYear = year,
                         communityScore = rating,
-                        totalProgress = chp,
-                        sourceProvider = "WLNUpdates"
+                        platform = "WEB_NOVEL",
+                        sourceProvider = "MangaUpdates"
                     )
                 }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
 
-    private suspend fun searchNovelUpdates(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+    private suspend fun searchSyosetu(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
         try {
-            val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "https://www.novelupdates.com/?s=$encoded&post_type=seriesposts"
+            val jpQuery = if (Regex("[\\u3040-\\u30FF\\u4E00-\\u9FFF]").containsMatchIn(query)) {
+                query
+            } else {
+                resolveWikidataAliases(query).firstOrNull { it.second == "JP" }?.first ?: return@withGeneralPacing emptyList()
+            }
+            val encoded = URLEncoder.encode(jpQuery, "UTF-8")
             val request = Request.Builder()
-                .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                .header("Referer", "https://www.novelupdates.com/")
+                .url("https://api.syosetu.com/novelapi/api/?out=json&lim=4&word=$encoded")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
                 .build()
-
             client.newCall(request).execute().use { response ->
-                // Cloudflare fast-skip: if 403, 503, or challenge detected, skip instantly without blocking
-                if (response.code in listOf(403, 503)) return@withGeneralPacing emptyList()
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
                 val body = response.body?.string() ?: return@withGeneralPacing emptyList()
-                if (body.contains("Just a moment...") || body.contains("cf-chl-opt")) {
-                    return@withGeneralPacing emptyList() // Fast-skip Cloudflare
-                }
-                val results = mutableListOf<SearchResultItem>()
-                val matches = Regex("""class="search_title_nu"><a href="[^"]*">([^<]+)</a>.*?(?:src="([^"]+)").*?(?:class="search_ratings_nu">\((\d+(?:\.\d+)?)\))?""", RegexOption.DOT_MATCHES_ALL).findAll(body)
-                for (match in matches.take(6)) {
-                    val title = match.groupValues.getOrNull(1)?.trim() ?: continue
-                    val cover = match.groupValues.getOrNull(2) ?: continue
-                    val rating = match.groupValues.getOrNull(3)?.toFloatOrNull()
-                    results.add(
-                        SearchResultItem(
-                            title = title,
-                            coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
-                            mediaType = MediaType.NOVEL,
-                            communityScore = rating,
-                            sourceProvider = "NovelUpdates"
-                        )
+                val arr = json.parseToJsonElement(body).jsonArray
+                if (arr.size <= 1) return@withGeneralPacing emptyList()
+                arr.drop(1).mapNotNull { node ->
+                    val obj = node.jsonObject
+                    val title = obj["title"].cleanString() ?: return@mapNotNull null
+                    val chapters = obj["general_all_no"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val writer = obj["writer"].cleanString()
+                    val story = cleanSynopsis(obj["story"].cleanString())
+                    val year = obj["general_firstup"].cleanString()?.take(4)
+                    SearchResultItem(
+                        title = if (jpQuery != query) "$query (Web Novel)" else title,
+                        nativeTitle = title,
+                        synopsis = if (!writer.isNullOrBlank()) "By $writer\n\n${story.orEmpty()}" else story,
+                        coverUrl = "",
+                        mediaType = MediaType.NOVEL,
+                        releaseYear = year,
+                        totalProgress = chapters,
+                        originCountry = "JP",
+                        platform = "WEB_NOVEL",
+                        sourceProvider = "Syosetu"
                     )
                 }
-                results
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
     }
@@ -1227,7 +1435,7 @@ class OmniSearchRepository(
     private suspend fun searchRanobeDb(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "https://ranobedb.org/api/v0/series?q=$encoded"
+            val url = "https://ranobedb.org/api/v0/series?q=$encoded&limit=8"
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", "OmniTrack/1.0 (Android)")
@@ -1242,22 +1450,28 @@ class OmniSearchRepository(
 
                 series.mapNotNull { node ->
                     val obj = node.jsonObject
-                    val title = obj["title"]?.jsonPrimitive?.content
-                        ?: obj["title_orig"]?.jsonPrimitive?.content
+                    val title = obj["title"]?.cleanString()
+                        ?: obj["title_orig"]?.cleanString()
                         ?: return@mapNotNull null
-                    val nativeTitle = obj["title_orig"]?.jsonPrimitive?.content
+                    val nativeTitle = obj["title_orig"]?.cleanString()
                     val book = obj["book"]?.jsonObject
-                    val filename = book?.get("image")?.jsonObject?.get("filename")?.jsonPrimitive?.content
-                    val cover = if (filename != null) "https://images.ranobedb.org/$filename" else null
-                    val volCount = obj["volumes"]?.jsonObject?.get("count")?.jsonPrimitive?.content?.toDoubleOrNull()
-                        ?: obj["c_num_books"]?.jsonPrimitive?.content?.toDoubleOrNull()
+                    val filename = book?.get("image")?.jsonObject?.get("filename")?.cleanString()
+                    val cover = if (filename != null) "https://images.ranobedb.org/$filename" else return@mapNotNull null
+                    val volCount = obj["volumes"]?.jsonObject?.get("count")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                        ?: obj["c_num_books"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val origin = obj["olang"]?.cleanString()?.uppercase() ?: "JP"
+                    val startDateInt = obj["c_start_date"]?.jsonPrimitive?.contentOrNull
+                    val year = startDateInt?.take(4)?.takeIf { it.length == 4 }
 
                     SearchResultItem(
                         title = title,
                         nativeTitle = if (nativeTitle != title) nativeTitle else null,
-                        coverUrl = LosslessCoverMapper.toLosslessUrl(cover ?: "https://images.ranobedb.org/default.jpg"),
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
                         mediaType = MediaType.NOVEL,
+                        releaseYear = year,
                         totalProgress = volCount,
+                        originCountry = origin,
+                        platform = "LIGHT_NOVEL",
                         sourceProvider = "RanobeDB"
                     )
                 }

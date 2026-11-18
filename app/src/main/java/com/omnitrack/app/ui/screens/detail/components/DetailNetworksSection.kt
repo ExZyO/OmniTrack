@@ -47,10 +47,15 @@ fun DetailNetworksSection(
     onCompanyClick: ((NetworkProductionCompany) -> Unit)? = null
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
-    val isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+    val isManga = item.mediaType == MediaType.MANGA
+    val isNovel = item.mediaType == MediaType.NOVEL
+    val isLightNovel = isNovel && com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+        item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+    ) == "LIGHT_NOVEL"
     val sectionTitle = when {
         item.mediaType == MediaType.ANIME -> "Studios & Networks"
-        isMangaOrNovel -> "Magazines & Publishers"
+        isNovel -> if (isLightNovel) "Imprints & Publishers" else "Web Platforms & Publishers"
+        isManga -> "Magazines & Publishers"
         isSeries -> "Networks"
         else -> "Production"
     }

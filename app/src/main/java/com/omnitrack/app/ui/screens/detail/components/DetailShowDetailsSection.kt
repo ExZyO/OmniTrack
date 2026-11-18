@@ -92,7 +92,7 @@ fun DetailGeneralInfoSection(
         "ONA" -> "ONA"
         "MUSIC" -> "Music Video"
         "MANGA" -> "Manga"
-        "NOVEL" -> "Light Novel"
+        "NOVEL" -> if (item.platform == "WEB_NOVEL") "Web Novel" else "Light Novel"
         "ONE_SHOT" -> "One Shot"
         else -> raw.lowercase().replaceFirstChar { it.uppercase() }
     }

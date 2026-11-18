@@ -148,6 +148,7 @@ fun DiscoverView(
     var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
     var searchGen by remember { mutableStateOf(0L) }
     var selectedMangaSubFilter by remember { mutableStateOf("ALL") }
+    var selectedNovelSubFilter by remember { mutableStateOf("ALL") }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -503,6 +504,41 @@ fun DiscoverView(
             }
         }
 
+        if (selectedFilter == MediaType.NOVEL) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (key, label) ->
+                    val isSubSelected = selectedNovelSubFilter == key
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (isSubSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSubSelected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .clickable { selectedNovelSubFilter = key }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSubSelected) Color.White else Color.White.copy(alpha = 0.60f)
+                        )
+                    }
+                }
+            }
+        }
+
         // AI Resolution Banner
         if (aiResolutionBanner != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -534,13 +570,19 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter) {
+        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
-            if (selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL") {
-                base.filter {
+            when {
+                selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> base.filter {
                     com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == selectedMangaSubFilter
                 }
-            } else base
+                selectedFilter == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> base.filter {
+                    com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                        it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
+                    ) == selectedNovelSubFilter
+                }
+                else -> base
+            }
         }
 
         if (isSearching && visibleResults.isEmpty()) {
@@ -583,11 +625,22 @@ fun DiscoverView(
                     contentPadding = PaddingValues(bottom = 110.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
+                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.vndbId ?: 0L}" }) { item ->
+                    val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
+                        com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                            item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                        )
+                    } else null
+
                     val existingInLibrary = allMedia.firstOrNull { summary ->
                         summary.mediaType == item.mediaType && (
                             summary.title.equals(item.title, ignoreCase = true) ||
                             (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
+                        ) && (
+                            itemNovelSub == null ||
+                            com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                                summary.platform, summary.originCountry, summary.anilistId, summary.malId, summary.totalProgress, summary.title
+                            ) == itemNovelSub
                         )
                     }
 
@@ -605,15 +658,26 @@ fun DiscoverView(
                         customCoverPath = null,
                         customBannerPath = null,
                         artworkRole = "DEFAULT",
+                        originCountry = item.originCountry,
+                        platform = item.platform,
                         lastUpdated = System.currentTimeMillis()
                     )
+
+                    val cardBadgeText = if (existingInLibrary != null) {
+                        "IN LIBRARY"
+                    } else if (itemNovelSub != null) {
+                        val tag = if (itemNovelSub == "LIGHT_NOVEL") "LN" else "WN"
+                        "$tag · ${item.sourceProvider}"
+                    } else {
+                        item.sourceProvider
+                    }
 
                     MediaCard(
                         item = summary,
                         cornerRadiusDp = posterStyle.cornerRadiusDp,
                         isLandscape = posterStyle.isLandscape,
                         hideLabels = posterStyle.hideLabels,
-                        badgeText = if (existingInLibrary != null) "IN LIBRARY" else item.sourceProvider,
+                        badgeText = cardBadgeText,
                         badgeColor = if (existingInLibrary != null) AccentJade else AccentArctic,
                         onCardClick = {
                             if (existingInLibrary != null) {

@@ -702,6 +702,7 @@ fun DetailScreen(
                         englishTitle = uiState.englishTitle,
                         romajiTitle = uiState.romajiTitle,
                         heroClearLogoUrl = uiState.heroClearLogoUrl,
+                        novelDetailMeta = uiState.novelDetailMeta,
                         onToggleTitle = { viewModel.togglePreferredTitle() },
                         onOptionsClick = { showOptionsMenu = true },
                         onEditProgress = { showProgressEditSheet = true },
@@ -717,6 +718,7 @@ fun DetailScreen(
                         englishTitle = uiState.englishTitle,
                         romajiTitle = uiState.romajiTitle,
                         heroClearLogoUrl = uiState.heroClearLogoUrl,
+                        novelDetailMeta = uiState.novelDetailMeta,
                         onToggleTitle = { viewModel.togglePreferredTitle() },
                         onCoverClick = { showArtworkPicker = true },
                         onCoverLoaded = { url ->
@@ -736,7 +738,7 @@ fun DetailScreen(
                 }
 
                 // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
-                val hasProgressControls = item.mediaType in listOf(MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
                 val hasBackdrop = backdropTargetUrl != null
                 if (hasProgressControls) {
                     Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -774,7 +776,8 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.EPISODES -> {
-                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA) {
+                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
+                                val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
                                 DetailSeriesContent(
                                     seasons = uiState.realSeasons,
                                     episodes = uiState.realEpisodes,
@@ -799,11 +802,16 @@ fun DetailScreen(
                                     isFillerSkipEnabled = uiState.isFillerSkipEnabled,
                                     onToggleSkipFillers = { viewModel.toggleSkipFillers() },
                                     onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
-                                    isMangaMode = item.mediaType == MediaType.MANGA,
+                                    isMangaMode = isReadingType,
                                     isMangaSeasonGrouped = uiState.isMangaSeasonGrouped,
+                                    isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode,
+                                    maxTotalProgress = item.totalProgress?.toInt(),
                                     currentTotalProgress = item.currentProgress.toInt(),
-                                    onStepProgress = if (item.mediaType == MediaType.MANGA) {
+                                    onStepProgress = if (isReadingType) {
                                         { delta -> viewModel.stepChapterProgress(delta) }
+                                    } else null,
+                                    onJumpToProgress = if (isReadingType) {
+                                        { target -> viewModel.jumpToChapterOrVolume(target) }
                                     } else null
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
@@ -1165,7 +1173,7 @@ fun DetailScreen(
                     IconButton(
                         onClick = {
                             val nextStatus = if (isCompleted) {
-                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA) {
+                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
                                     TrackingStatus.IN_PROGRESS
                                 } else {
                                     TrackingStatus.PLAN_TO_TRACK
@@ -1393,6 +1401,7 @@ private fun SiblingDetailPreview(
                     englishTitle = cachedAux?.englishTitle,
                     romajiTitle = cachedAux?.romajiTitle,
                     heroClearLogoUrl = siblingClearLogo,
+                    novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -1407,6 +1416,7 @@ private fun SiblingDetailPreview(
                     englishTitle = cachedAux?.englishTitle,
                     romajiTitle = cachedAux?.romajiTitle,
                     heroClearLogoUrl = siblingClearLogo,
+                    novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -1417,7 +1427,7 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            val hasProgressControls = item.mediaType in listOf(MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
             val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -1502,8 +1512,15 @@ private fun UnboxedStatsRow(
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.2).sp
             )
+            val statsUnitLabel = if (item.mediaType == MediaType.NOVEL && com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                    item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                ) == "LIGHT_NOVEL") {
+                "VOLUMES"
+            } else {
+                item.mediaType.unitLabel.uppercase()
+            }
             Text(
-                text = item.mediaType.unitLabel.uppercase(),
+                text = statsUnitLabel,
                 color = AccentArctic,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
@@ -1711,6 +1728,7 @@ private fun DetailHeroHeaderSection(
     englishTitle: String? = null,
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
+    novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -1817,10 +1835,15 @@ private fun DetailHeroHeaderSection(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp)
                 ) {
-                    val heroTypeBadge = if (item.mediaType == MediaType.MANGA) {
-                        com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
-                    } else {
-                        item.mediaType.displayName.uppercase()
+                    val heroTypeBadge = when (item.mediaType) {
+                        MediaType.MANGA -> com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
+                        MediaType.NOVEL -> {
+                            val sub = com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                                item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                            )
+                            if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
+                        }
+                        else -> item.mediaType.displayName.uppercase()
                     }
                     Text(
                         text = heroTypeBadge,
@@ -1829,9 +1852,10 @@ private fun DetailHeroHeaderSection(
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
                     )
-                    if (item.platform != null) {
+                    val heroSubInfo = if (item.mediaType == MediaType.NOVEL) item.originCountry?.uppercase() else item.platform
+                    if (!heroSubInfo.isNullOrBlank()) {
                         Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
-                        Text(text = item.platform, color = Color.White, fontSize = 11.5.sp)
+                        Text(text = heroSubInfo, color = Color.White, fontSize = 11.5.sp)
                     }
                 }
             }
@@ -1852,7 +1876,14 @@ private fun DetailHeroHeaderSection(
         }
 
         DetailNuvioMetaRow(item = item)
-        NuvioRatingsRow(item = item)
+        NuvioRatingsRow(
+            item = item,
+            anilistScore = novelDetailMeta.anilistScore,
+            malScore = novelDetailMeta.malScore,
+            kitsuScore = novelDetailMeta.kitsuScore,
+            mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
+            bangumiScore = novelDetailMeta.bangumiScore
+        )
         UnboxedStatsRow(
             item = item,
             onEditProgress = onEditProgress,
@@ -1871,6 +1902,7 @@ private fun DetailClassicHeaderSection(
     englishTitle: String? = null,
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
+    novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -2031,10 +2063,15 @@ private fun DetailClassicHeaderSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val compactTypeBadge = if (item.mediaType == MediaType.MANGA) {
-                    com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
-                } else {
-                    item.mediaType.displayName.uppercase()
+                val compactTypeBadge = when (item.mediaType) {
+                    MediaType.MANGA -> com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
+                    MediaType.NOVEL -> {
+                        val sub = com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                            item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                        )
+                        if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
+                    }
+                    else -> item.mediaType.displayName.uppercase()
                 }
                 Text(
                     text = compactTypeBadge,
@@ -2043,9 +2080,10 @@ private fun DetailClassicHeaderSection(
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
                 )
-                if (item.platform != null) {
+                val compactSubInfo = if (item.mediaType == MediaType.NOVEL) item.originCountry?.uppercase() else item.platform
+                if (!compactSubInfo.isNullOrBlank()) {
                     Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 10.5.sp)
-                    Text(text = item.platform, color = Color.White, fontSize = 11.sp)
+                    Text(text = compactSubInfo, color = Color.White, fontSize = 11.sp)
                 }
             }
         }
@@ -2058,7 +2096,14 @@ private fun DetailClassicHeaderSection(
     ) {
         Column {
             DetailNuvioMetaRow(item = item)
-            NuvioRatingsRow(item = item)
+            NuvioRatingsRow(
+                item = item,
+                anilistScore = novelDetailMeta.anilistScore,
+                malScore = novelDetailMeta.malScore,
+                kitsuScore = novelDetailMeta.kitsuScore,
+                mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
+                bangumiScore = novelDetailMeta.bangumiScore
+            )
             UnboxedStatsRow(
                 item = item,
                 onEditProgress = onEditProgress,
