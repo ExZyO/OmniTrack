@@ -390,9 +390,21 @@ fun DetailScreen(
         }
     }
 
+    var frozenPrevPreview by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var frozenNextPreview by remember { mutableStateOf<MediaItemEntity?>(null) }
+
+    LaunchedEffect(uiState.previousItem, uiState.nextItem, item?.id) {
+        if (animatableOffsetX.value == 0f) {
+            frozenPrevPreview = uiState.previousItem
+            frozenNextPreview = uiState.nextItem
+        }
+    }
+
     LaunchedEffect(item?.id) {
         animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
+        frozenPrevPreview = uiState.previousItem
+        frozenNextPreview = uiState.nextItem
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
         }
@@ -406,9 +418,11 @@ fun DetailScreen(
         val density = LocalDensity.current
         val screenWidthPx = with(density) { maxWidth.toPx() }
         val currentOffsetX = animatableOffsetX.value
+        val activePrevPreview = frozenPrevPreview ?: uiState.previousItem
+        val activeNextPreview = frozenNextPreview ?: uiState.nextItem
 
         // 1. PREVIOUS SIBLING PREVIEW (Slides in from the left when user drags right)
-        if (uiState.hasPreviousEntry && uiState.previousItem != null && currentOffsetX > 0f) {
+        if (uiState.hasPreviousEntry && activePrevPreview != null && currentOffsetX > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -418,14 +432,14 @@ fun DetailScreen(
                     }
             ) {
                 SiblingDetailPreview(
-                    item = uiState.previousItem!!,
+                    item = activePrevPreview,
                     presentationSettings = presentationSettings
                 )
             }
         }
 
         // 2. NEXT SIBLING PREVIEW (Slides in from the right when user drags left)
-        if (uiState.hasNextEntry && uiState.nextItem != null && currentOffsetX < 0f) {
+        if (uiState.hasNextEntry && activeNextPreview != null && currentOffsetX < 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -435,7 +449,7 @@ fun DetailScreen(
                     }
             ) {
                 SiblingDetailPreview(
-                    item = uiState.nextItem!!,
+                    item = activeNextPreview,
                     presentationSettings = presentationSettings
                 )
             }
@@ -471,8 +485,10 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        viewModel.navigateToPrevious()
-                                        animatableOffsetX.snapTo(0f)
+                                        val navigated = viewModel.navigateToPrevious()
+                                        if (!navigated) {
+                                            animatableOffsetX.snapTo(0f)
+                                        }
                                     }
                                 }
                                 // Swiping left: navigate to next sibling entry
@@ -485,8 +501,10 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        viewModel.navigateToNext()
-                                        animatableOffsetX.snapTo(0f)
+                                        val navigated = viewModel.navigateToNext()
+                                        if (!navigated) {
+                                            animatableOffsetX.snapTo(0f)
+                                        }
                                     }
                                 }
                                 // Swiping right past threshold when at start of single-entry list: return to library

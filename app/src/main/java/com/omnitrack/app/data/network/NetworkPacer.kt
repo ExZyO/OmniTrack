@@ -1,8 +1,10 @@
 package com.omnitrack.app.data.network
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -20,6 +22,12 @@ object NetworkPacer {
     private val aniListSemaphore = Semaphore(4)
     private var lastAniListCallTime = 0L
     private const val ANILIST_MIN_INTERVAL_MS = 50L // Parallel GraphQL queries with fast burst
+
+    private val aniListSearchSemaphore = Semaphore(2)
+    @Volatile private var lastAniListSearchCallTime = 0L
+    private const val ANILIST_SEARCH_MIN_INTERVAL_MS = 25L
+
+    private val coalesceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val mangaDexSemaphore = Semaphore(2)
     private var lastMangaDexCallTime = 0L
@@ -66,6 +74,19 @@ object NetworkPacer {
             block()
         } finally {
             lastAniListCallTime = System.currentTimeMillis()
+        }
+    }
+
+    suspend fun <T> withAniListSearchPacing(block: suspend () -> T): T = aniListSearchSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastAniListSearchCallTime
+        if (elapsed < ANILIST_SEARCH_MIN_INTERVAL_MS) {
+            delay(ANILIST_SEARCH_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastAniListSearchCallTime = System.currentTimeMillis()
         }
     }
 
@@ -183,20 +204,24 @@ object NetworkPacer {
 
     /**
      * Executes the block or joins an existing in-flight execution for the same cacheKey.
+     * Uses a SupervisorJob scope so caller cancellation does not abort shared in-flight work.
      */
     @Suppress("UNCHECKED_CAST")
-    suspend fun <T> coalesce(cacheKey: String, block: suspend () -> T): T = coroutineScope {
+    suspend fun <T> coalesce(cacheKey: String, block: suspend () -> T): T {
         val deferred = coalescingMutex.withLock {
-            inFlightRequests.getOrPut(cacheKey) {
-                async {
+            val existing = inFlightRequests[cacheKey]
+            if (existing != null && existing.isActive) {
+                existing
+            } else {
+                coalesceScope.async {
                     try {
                         block()
                     } finally {
                         inFlightRequests.remove(cacheKey)
                     }
-                }
+                }.also { inFlightRequests[cacheKey] = it }
             }
         }
-        deferred.await() as T
+        return deferred.await() as T
     }
 }

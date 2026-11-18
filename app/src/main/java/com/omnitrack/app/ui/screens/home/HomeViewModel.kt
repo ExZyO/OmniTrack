@@ -44,6 +44,13 @@ class HomeViewModel(
     val discoverSearchResults = MutableStateFlow<List<com.omnitrack.app.data.search.SearchResultItem>>(emptyList())
     val discoverIsSearching = MutableStateFlow(false)
     val discoverAiResolutionBanner = MutableStateFlow<String?>(null)
+    val discoverUseAiSearch = MutableStateFlow<Boolean?>(null)
+    var discoverLastDebounceQuery: String? = null
+    var discoverLastExecutedQuery: String? = null
+    var discoverLastExecutedFilter: MediaType? = null
+    var discoverLastExecutedAi: Boolean? = null
+    var discoverLastEffectiveQuery: String? = null
+    var discoverLastEffectiveFilter: MediaType? = null
     var discoverGridScrollIndex: Int = 0
     var discoverGridScrollOffset: Int = 0
 

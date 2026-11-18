@@ -109,17 +109,28 @@ fun DiscoverView(
     val isSearchingFlow = remember(homeViewModel) { homeViewModel?.discoverIsSearching ?: MutableStateFlow(false) }
     val resultsFlow = remember(homeViewModel) { homeViewModel?.discoverSearchResults ?: MutableStateFlow<List<SearchResultItem>>(emptyList()) }
     val bannerFlow = remember(homeViewModel) { homeViewModel?.discoverAiResolutionBanner ?: MutableStateFlow<String?>(null) }
+    val useAiFlow = remember(homeViewModel) { homeViewModel?.discoverUseAiSearch ?: MutableStateFlow<Boolean?>(null) }
 
     val searchQuery by queryFlow.collectAsState()
     val selectedFilter by filterFlow.collectAsState()
     val isSearching by isSearchingFlow.collectAsState()
     val searchResults by resultsFlow.collectAsState()
     val aiResolutionBanner by bannerFlow.collectAsState()
-    var useAiSearch by remember(aiSearchSetting) { mutableStateOf(aiSearchSetting) }
+    val storedUseAi by useAiFlow.collectAsState()
+    val useAiSearch = storedUseAi ?: aiSearchSetting
 
-    var lastExecutedQuery by remember { mutableStateOf<String?>(if (resultsFlow.value.isNotEmpty()) queryFlow.value else null) }
-    var lastExecutedFilter by remember { mutableStateOf<MediaType?>(if (resultsFlow.value.isNotEmpty()) filterFlow.value else null) }
-    var lastExecutedAi by remember { mutableStateOf<Boolean?>(if (resultsFlow.value.isNotEmpty()) useAiSearch else null) }
+    LaunchedEffect(aiSearchSetting) {
+        if (useAiFlow.value == null) {
+            useAiFlow.value = aiSearchSetting
+        }
+    }
+
+    var localLastDebounceQuery by remember { mutableStateOf(homeViewModel?.discoverLastDebounceQuery) }
+    var localLastExecutedQuery by remember { mutableStateOf(homeViewModel?.discoverLastExecutedQuery) }
+    var localLastExecutedFilter by remember { mutableStateOf(homeViewModel?.discoverLastExecutedFilter) }
+    var localLastExecutedAi by remember { mutableStateOf(homeViewModel?.discoverLastExecutedAi) }
+    var localLastEffectiveQuery by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveQuery) }
+    var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -136,60 +147,120 @@ fun DiscoverView(
     // Multi-Vertical OmniSearch Trigger
     LaunchedEffect(searchQuery, selectedFilter, useAiSearch) {
         val trimmed = searchQuery.trim()
+        val prevQuery = homeViewModel?.discoverLastExecutedQuery ?: localLastExecutedQuery
+        val prevFilter = homeViewModel?.discoverLastExecutedFilter ?: localLastExecutedFilter
+        val prevAi = homeViewModel?.discoverLastExecutedAi ?: localLastExecutedAi
+        val prevDebounceQuery = homeViewModel?.discoverLastDebounceQuery ?: localLastDebounceQuery
+
         if (trimmed.length >= 2) {
-            if (resultsFlow.value.isNotEmpty() && trimmed == lastExecutedQuery && selectedFilter == lastExecutedFilter && useAiSearch == lastExecutedAi) {
+            if (resultsFlow.value.isNotEmpty() && trimmed == prevQuery && selectedFilter == prevFilter && useAiSearch == prevAi) {
                 // Preserved search results restored from previous navigation! Don't re-trigger.
                 return@LaunchedEffect
             }
-            delay(400)
-            lastExecutedQuery = trimmed
-            lastExecutedFilter = selectedFilter
-            lastExecutedAi = useAiSearch
-            isSearchingFlow.value = true
-            bannerFlow.value = null
-            try {
-                var queryToRun = trimmed
-                var filterToRun = selectedFilter
+            if (trimmed != prevDebounceQuery) {
+                delay(400)
+                localLastDebounceQuery = trimmed
+                homeViewModel?.discoverLastDebounceQuery = trimmed
+            }
 
-                if (useAiSearch) {
-                    val aiResult = aiEngine.resolveQuery(
-                        rawQuery = trimmed,
-                        geminiApiKey = geminiKey.ifBlank { null },
-                        openRouterApiKey = openRouterKey.ifBlank { null }
-                    )
-                    if (aiResult.isAiResolved) {
+            var queryToRun = trimmed
+            var filterToRun = selectedFilter
+            var resolvedBanner: String? = null
+
+            if (useAiSearch) {
+                val aiResult = aiEngine.resolveQuery(
+                    rawQuery = trimmed,
+                    geminiApiKey = geminiKey.ifBlank { null },
+                    openRouterApiKey = openRouterKey.ifBlank { null }
+                )
+                if (aiResult.isAiResolved) {
+                    queryToRun = aiResult.resolvedTitle
+                    resolvedBanner = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
+                        (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
+                        (aiResult.explanation?.let { " • $it" } ?: "")
+                    if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
+                        filterToRun = aiResult.detectedType
+                    }
+                } else {
+                    if (aiResult.resolvedTitle != trimmed) {
                         queryToRun = aiResult.resolvedTitle
-                        bannerFlow.value = "AI Resolved: \"${aiResult.resolvedTitle}\"" +
-                            (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
-                            (aiResult.explanation?.let { " • $it" } ?: "")
-                        if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
-                            filterToRun = aiResult.detectedType
+                    }
+                    if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
+                        filterToRun = aiResult.detectedType
+                    }
+                    if (geminiKey.isBlank() && openRouterKey.isBlank()) {
+                        resolvedBanner = if (aiResult.resolvedTitle != trimmed || aiResult.detectedType != null) {
+                            "Smart Match: \"${aiResult.resolvedTitle}\"" +
+                                (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
+                                " • Add a Gemini/OpenRouter key in Settings for full AI"
+                        } else {
+                            "AI Smart Mode (No API key in Settings) — Try natural phrases like 'anime about alchemy', or add a Gemini key."
                         }
-                    } else if (aiResult.resolvedTitle != trimmed) {
-                        queryToRun = aiResult.resolvedTitle
-                        if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
-                            filterToRun = aiResult.detectedType
-                        }
+                    } else {
+                        resolvedBanner = "AI Mode: searching exact title \"$queryToRun\""
                     }
                 }
+            }
+            bannerFlow.value = resolvedBanner
 
+            val lastEffQuery = homeViewModel?.discoverLastEffectiveQuery ?: localLastEffectiveQuery
+            val lastEffFilter = homeViewModel?.discoverLastEffectiveFilter ?: localLastEffectiveFilter
+            if (resultsFlow.value.isNotEmpty() && queryToRun == lastEffQuery && filterToRun == lastEffFilter) {
+                localLastExecutedQuery = trimmed
+                localLastExecutedFilter = selectedFilter
+                localLastExecutedAi = useAiSearch
+                homeViewModel?.discoverLastExecutedQuery = trimmed
+                homeViewModel?.discoverLastExecutedFilter = selectedFilter
+                homeViewModel?.discoverLastExecutedAi = useAiSearch
+                isSearchingFlow.value = false
+                return@LaunchedEffect
+            }
+
+            localLastExecutedQuery = trimmed
+            localLastExecutedFilter = selectedFilter
+            localLastExecutedAi = useAiSearch
+            localLastEffectiveQuery = queryToRun
+            localLastEffectiveFilter = filterToRun
+            homeViewModel?.discoverLastExecutedQuery = trimmed
+            homeViewModel?.discoverLastExecutedFilter = selectedFilter
+            homeViewModel?.discoverLastExecutedAi = useAiSearch
+            homeViewModel?.discoverLastEffectiveQuery = queryToRun
+            homeViewModel?.discoverLastEffectiveFilter = filterToRun
+
+            isSearchingFlow.value = true
+            try {
                 val results = searchRepository.searchAll(
                     query = queryToRun,
                     filter = filterToRun,
-                    tmdbApiKey = tmdbKey.ifBlank { null }
+                    tmdbApiKey = tmdbKey.ifBlank { null },
+                    onPartialResults = { partial ->
+                        resultsFlow.value = partial
+                    }
                 )
                 resultsFlow.value = results
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 resultsFlow.value = emptyList()
             } finally {
                 isSearchingFlow.value = false
             }
         } else {
-            lastExecutedQuery = null
-            lastExecutedFilter = null
-            lastExecutedAi = null
+            localLastDebounceQuery = null
+            localLastExecutedQuery = null
+            localLastExecutedFilter = null
+            localLastExecutedAi = null
+            localLastEffectiveQuery = null
+            localLastEffectiveFilter = null
+            homeViewModel?.discoverLastDebounceQuery = null
+            homeViewModel?.discoverLastExecutedQuery = null
+            homeViewModel?.discoverLastExecutedFilter = null
+            homeViewModel?.discoverLastExecutedAi = null
+            homeViewModel?.discoverLastEffectiveQuery = null
+            homeViewModel?.discoverLastEffectiveFilter = null
             resultsFlow.value = emptyList()
-            bannerFlow.value = null
+            if (!useAiSearch) {
+                bannerFlow.value = null
+            }
             isSearchingFlow.value = false
         }
     }
@@ -255,7 +326,18 @@ fun DiscoverView(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (useAiSearch) AccentArctic.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
-                    .clickable { useAiSearch = !useAiSearch }
+                    .clickable {
+                        val nextAi = !useAiSearch
+                        useAiFlow.value = nextAi
+                        scope.launch { prefManager.updateAiSemanticSearchEnabled(nextAi) }
+                        if (nextAi) {
+                            if (geminiKey.isBlank() && openRouterKey.isBlank()) {
+                                bannerFlow.value = "AI Smart Mode enabled (Local heuristics) — Describe what you're looking for, or add a Gemini / OpenRouter key in Settings for full AI search."
+                            }
+                        } else {
+                            bannerFlow.value = null
+                        }
+                    }
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -356,18 +438,30 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        if (isSearching) {
+        if (isSearching && searchResults.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
         } else if (searchResults.isNotEmpty()) {
-            Text(
-                text = "Results (${searchResults.size})",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextMuted,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 8.dp)
-            )
+            ) {
+                Text(
+                    text = "Results (${searchResults.size})",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextMuted
+                )
+                if (isSearching) {
+                    CircularProgressIndicator(
+                        color = AccentArctic,
+                        strokeWidth = 1.8.dp,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
 
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val isPhone = maxWidth < 600.dp

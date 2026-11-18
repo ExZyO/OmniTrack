@@ -87,23 +87,28 @@ class AiQueryEngine(
                     })
                 }
 
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"
-                val request = Request.Builder()
-                    .url(url)
-                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
+                val modelsToTry = listOf("gemini-2.5-flash", "gemini-2.0-flash")
+                for (modelName in modelsToTry) {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
 
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withGeneralPacing null
-                    val body = response.body?.string() ?: return@withGeneralPacing null
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val candidates = root["candidates"]?.jsonArray ?: return@withGeneralPacing null
-                    val candidate = candidates.firstOrNull()?.jsonObject ?: return@withGeneralPacing null
-                    val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()
-                        ?.jsonObject?.get("text")?.jsonPrimitive?.content ?: return@withGeneralPacing null
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) return@use
+                        val body = response.body?.string() ?: return@use
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val candidates = root["candidates"]?.jsonArray ?: return@use
+                        val candidate = candidates.firstOrNull()?.jsonObject ?: return@use
+                        val text = candidate["content"]?.jsonObject?.get("parts")?.jsonArray?.firstOrNull()
+                            ?.jsonObject?.get("text")?.jsonPrimitive?.content ?: return@use
 
-                    parseAiResponseJson(text)
+                        val parsed = parseAiResponseJson(text)
+                        if (parsed != null) return@withGeneralPacing parsed
+                    }
                 }
+                null
             } catch (_: Exception) {
                 null
             }

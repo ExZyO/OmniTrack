@@ -9,6 +9,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -36,97 +38,113 @@ class OmniSearchRepository(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.getClient()
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
+
+    private val providerPriority = mapOf(
+        "AniList" to 1,
+        "TMDb" to 2,
+        "MangaDex" to 3,
+        "RanobeDB" to 4,
+        "Steam" to 5,
+        "VNDB" to 6,
+        "OpenLibrary" to 7,
+        "WLNUpdates" to 8,
+        "Bangumi" to 10
+    )
+
+    private fun prioritizeAndDedupe(rawResults: List<SearchResultItem>): List<SearchResultItem> {
+        val prioritized = rawResults.sortedWith(compareBy(
+            { providerPriority[it.sourceProvider] ?: 50 },
+            { -(it.communityScore ?: 0f) }
+        ))
+        val seen = mutableSetOf<String>()
+        val deduped = mutableListOf<SearchResultItem>()
+        for (item in prioritized) {
+            val key = "${item.mediaType.name}:${item.title.trim().lowercase()}"
+            if (seen.add(key)) {
+                deduped.add(item)
+            }
+        }
+        return deduped
+    }
 
     suspend fun searchAll(
         query: String,
         filter: MediaType = MediaType.ALL,
-        tmdbApiKey: String? = null
+        tmdbApiKey: String? = null,
+        onPartialResults: ((List<SearchResultItem>) -> Unit)? = null
     ): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         if (trimmed.length < 2) return@withContext emptyList()
 
         coroutineScope {
             val deferreds = mutableListOf<kotlinx.coroutines.Deferred<List<SearchResultItem>>>()
+            val accumulated = java.util.Collections.synchronizedList(mutableListOf<SearchResultItem>())
+            val emitMutex = Mutex()
+
+            fun launchProvider(block: suspend () -> List<SearchResultItem>) = async {
+                val res = block()
+                if (res.isNotEmpty() && onPartialResults != null) {
+                    val snapshot = emitMutex.withLock {
+                        accumulated.addAll(res)
+                        prioritizeAndDedupe(accumulated.toList())
+                    }
+                    onPartialResults(snapshot)
+                }
+                res
+            }
 
             when (filter) {
                 MediaType.ALL -> {
-                    deferreds.add(async { searchAniList(trimmed, isAnime = true) })
-                    deferreds.add(async { searchAniList(trimmed, isAnime = false) })
-                    deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
-                    deferreds.add(async { searchRanobeDb(trimmed) })
-                    deferreds.add(async { searchOpenLibraryNovels(trimmed) })
-                    deferreds.add(async { searchWlnUpdates(trimmed) })
-                    deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey) })
-                    deferreds.add(async { searchSteam(trimmed) })
-                    deferreds.add(async { searchVndb(trimmed) })
-                    deferreds.add(async { searchBooks(trimmed) })
+                    deferreds.add(launchProvider { searchAniList(trimmed, isAnime = true) })
+                    deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false) })
+                    deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(launchProvider { searchRanobeDb(trimmed) })
+                    deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
+                    deferreds.add(launchProvider { searchWlnUpdates(trimmed) })
+                    deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey) })
+                    deferreds.add(launchProvider { searchSteam(trimmed) })
+                    deferreds.add(launchProvider { searchVndb(trimmed) })
+                    deferreds.add(launchProvider { searchBooks(trimmed) })
                 }
                 MediaType.BOOK -> {
-                    deferreds.add(async { searchBooks(trimmed) })
+                    deferreds.add(launchProvider { searchBooks(trimmed) })
                 }
                 MediaType.ANIME -> {
-                    deferreds.add(async { searchAniList(trimmed, isAnime = true) })
-                    deferreds.add(async { searchBangumi(trimmed, type = 2, defaultType = MediaType.ANIME) })
+                    deferreds.add(launchProvider { searchAniList(trimmed, isAnime = true) })
+                    deferreds.add(launchProvider { searchBangumi(trimmed, type = 2, defaultType = MediaType.ANIME) })
                 }
                 MediaType.MANGA -> {
-                    deferreds.add(async { searchMangaDex(trimmed) })
-                    deferreds.add(async { searchAniList(trimmed, isAnime = false, formatNovel = false) })
-                    deferreds.add(async { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
+                    deferreds.add(launchProvider { searchMangaDex(trimmed) })
+                    deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false, formatNovel = false) })
+                    deferreds.add(launchProvider { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
                 }
                 MediaType.NOVEL -> {
                     // Multi-source novel discovery: Bangumi with native aliases, RanobeDB, AniList LN, OpenLibrary & WLNUpdates
-                    deferreds.add(async { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
-                    deferreds.add(async { searchRanobeDb(trimmed) })
-                    deferreds.add(async { searchAniList(trimmed, isAnime = false, formatNovel = true) })
-                    deferreds.add(async { searchOpenLibraryNovels(trimmed) })
-                    deferreds.add(async { searchWlnUpdates(trimmed) })
-                    deferreds.add(async { searchNovelUpdates(trimmed) })
+                    deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(launchProvider { searchRanobeDb(trimmed) })
+                    deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false, formatNovel = true) })
+                    deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
+                    deferreds.add(launchProvider { searchWlnUpdates(trimmed) })
+                    deferreds.add(launchProvider { searchNovelUpdates(trimmed) })
                 }
                 MediaType.SHOW -> {
-                    deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.SHOW) })
+                    deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.SHOW) })
                 }
                 MediaType.MOVIE -> {
-                    deferreds.add(async { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.MOVIE) })
+                    deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.MOVIE) })
                 }
                 MediaType.GAME -> {
-                    deferreds.add(async { searchSteam(trimmed) })
-                    deferreds.add(async { searchBangumi(trimmed, type = 4, defaultType = MediaType.GAME) })
+                    deferreds.add(launchProvider { searchSteam(trimmed) })
+                    deferreds.add(launchProvider { searchBangumi(trimmed, type = 4, defaultType = MediaType.GAME) })
                 }
                 MediaType.VISUAL_NOVEL -> {
-                    deferreds.add(async { searchVndb(trimmed) })
-                    deferreds.add(async { searchBangumi(trimmed, type = 4, defaultType = MediaType.VISUAL_NOVEL) })
+                    deferreds.add(launchProvider { searchVndb(trimmed) })
+                    deferreds.add(launchProvider { searchBangumi(trimmed, type = 4, defaultType = MediaType.VISUAL_NOVEL) })
                 }
             }
 
-            val rawResults = deferreds.awaitAll().flatten()
-
-            // Primary source priority (AniList and TMDb take precedence over secondary catalogs)
-            val providerPriority = mapOf(
-                "AniList" to 1,
-                "TMDb" to 2,
-                "MangaDex" to 3,
-                "RanobeDB" to 4,
-                "Steam" to 5,
-                "VNDB" to 6,
-                "OpenLibrary" to 7,
-                "WLNUpdates" to 8,
-                "Bangumi" to 10
-            )
-            val prioritized = rawResults.sortedWith(compareBy(
-                { providerPriority[it.sourceProvider] ?: 50 },
-                { -(it.communityScore ?: 0f) }
-            ))
-
-            // Deduplicate by clean lower-case title and media vertical
-            val seen = mutableSetOf<String>()
-            val deduped = mutableListOf<SearchResultItem>()
-            for (item in prioritized) {
-                val key = "${item.mediaType.name}:${item.title.trim().lowercase()}"
-                if (seen.add(key)) {
-                    deduped.add(item)
-                }
-            }
-            deduped
+            prioritizeAndDedupe(deferreds.awaitAll().flatten())
         }
     }
 
@@ -146,115 +164,133 @@ class OmniSearchRepository(
         query: String,
         isAnime: Boolean,
         formatNovel: Boolean = false
-    ): List<SearchResultItem> = NetworkPacer.withAniListPacing {
-        try {
-            val typeStr = if (isAnime) "ANIME" else "MANGA"
-            val formatParam = if (formatNovel) ", format: NOVEL" else if (!isAnime) ", format_not: NOVEL" else ""
-            val gql = """
-                query (${'$'}search: String) {
-                    Page(page: 1, perPage: 25) {
-                        media(search: ${'$'}search, type: $typeStr$formatParam) {
-                            id
-                            idMal
-                            title { romaji english native }
-                            coverImage { extraLarge large }
-                            bannerImage
-                            description(asHtml: false)
-                            averageScore
-                            startDate { year }
-                            episodes
-                            chapters
+    ): List<SearchResultItem> {
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val cacheKey = "anilist_${query.lowercase()}_${isAnime}_${formatNovel}_$pref"
+        providerSearchCache[cacheKey]?.let { return it }
+
+        return NetworkPacer.coalesce(cacheKey) {
+            providerSearchCache[cacheKey]?.let { return@coalesce it }
+            NetworkPacer.withAniListSearchPacing {
+                try {
+                    val typeStr = if (isAnime) "ANIME" else "MANGA"
+                    val formatParam = if (formatNovel) ", format: NOVEL" else if (!isAnime) ", format_not: NOVEL" else ""
+                    val gql = """
+                        query (${'$'}search: String) {
+                            Page(page: 1, perPage: 25) {
+                                media(search: ${'$'}search, type: $typeStr$formatParam) {
+                                    id
+                                    idMal
+                                    title { romaji english native }
+                                    coverImage { extraLarge large }
+                                    bannerImage
+                                    description(asHtml: false)
+                                    averageScore
+                                    startDate { year }
+                                    episodes
+                                    chapters
+                                }
+                            }
+                        }
+                    """.trimIndent()
+
+                    val payload = buildJsonObject {
+                        put("query", gql)
+                        putJsonObject("variables") {
+                            put("search", query)
                         }
                     }
-                }
-            """.trimIndent()
 
-            val payload = buildJsonObject {
-                put("query", gql)
-                putJsonObject("variables") {
-                    put("search", query)
-                }
-            }
+                    val request = Request.Builder()
+                        .url("https://graphql.anilist.co")
+                        .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                        .header("Accept", "application/json")
+                        .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
 
-            val request = Request.Builder()
-                .url("https://graphql.anilist.co")
-                .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
-                .header("Accept", "application/json")
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            var response = client.newCall(request).execute()
-            if (response.code == 429) {
-                response.close()
-                delay(800)
-                response = client.newCall(request).execute()
-            }
-
-            response.use { resp ->
-                if (!resp.isSuccessful) {
-                    AppLogger.w("OmniSearchRepository", "AniList search returned HTTP ${resp.code} for query: $query")
-                    return@withAniListPacing emptyList()
-                }
-                val body = resp.body?.string() ?: return@withAniListPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray
-                    ?: return@withAniListPacing emptyList()
-
-                mediaList.mapNotNull { node ->
-                    val obj = node.jsonObject
-                    val titleObj = obj["title"]?.jsonObject
-                    val eng = titleObj?.get("english").cleanString()
-                    val rom = titleObj?.get("romaji").cleanString()
-                    val nat = titleObj?.get("native").cleanString()
-                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
-                    val title = when (pref) {
-                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat
-                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
-                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
-                    } ?: return@mapNotNull null
-
-                    val nativeTitle = nat
-                    val cover = obj["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
-                        ?: obj["coverImage"]?.jsonObject?.get("large").cleanString()
-                        ?: return@mapNotNull null
-                    val banner = obj["bannerImage"].cleanString()
-                    val synopsis = cleanSynopsis(obj["description"].cleanString())
-                    val score = obj["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
-                    val year = obj["startDate"]?.jsonObject?.get("year").cleanString()
-                    val anilistId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                    val malId = obj["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-
-                    val targetType = when {
-                        formatNovel -> MediaType.NOVEL
-                        isAnime -> MediaType.ANIME
-                        else -> MediaType.MANGA
+                    var response = client.newCall(request).execute()
+                    if (response.code == 429) {
+                        response.close()
+                        delay(600)
+                        response = client.newCall(request).execute()
+                    }
+                    if (response.code == 429) {
+                        response.close()
+                        delay(1000)
+                        response = client.newCall(request).execute()
                     }
 
-                    val totalProgress = if (isAnime) {
-                        obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    } else {
-                        obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    }
+                    response.use { resp ->
+                        if (!resp.isSuccessful) {
+                            AppLogger.w("OmniSearchRepository", "AniList search returned HTTP ${resp.code} for query: $query")
+                            return@withAniListSearchPacing emptyList()
+                        }
+                        val body = resp.body?.string() ?: return@withAniListSearchPacing emptyList()
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray
+                            ?: return@withAniListSearchPacing emptyList()
 
-                    SearchResultItem(
-                        title = title,
-                        nativeTitle = nativeTitle,
-                        synopsis = synopsis,
-                        coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
-                        bannerUrl = banner?.let { LosslessCoverMapper.toLosslessUrl(it) },
-                        mediaType = targetType,
-                        releaseYear = year,
-                        communityScore = score,
-                        sourceProvider = "AniList",
-                        anilistId = anilistId,
-                        malId = malId,
-                        totalProgress = totalProgress
-                    )
+                        val parsed = mediaList.mapNotNull { node ->
+                            val obj = node.jsonObject
+                            val titleObj = obj["title"]?.jsonObject
+                            val eng = titleObj?.get("english").cleanString()
+                            val rom = titleObj?.get("romaji").cleanString()
+                            val nat = titleObj?.get("native").cleanString()
+                            val title = when (pref) {
+                                com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat
+                                com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
+                                com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
+                            } ?: return@mapNotNull null
+
+                            val nativeTitle = nat
+                            val cover = obj["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                                ?: obj["coverImage"]?.jsonObject?.get("large").cleanString()
+                                ?: return@mapNotNull null
+                            val banner = obj["bannerImage"].cleanString()
+                            val synopsis = cleanSynopsis(obj["description"].cleanString())
+                            val score = obj["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                            val year = obj["startDate"]?.jsonObject?.get("year").cleanString()
+                            val anilistId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                            val malId = obj["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+
+                            val targetType = when {
+                                formatNovel -> MediaType.NOVEL
+                                isAnime -> MediaType.ANIME
+                                else -> MediaType.MANGA
+                            }
+
+                            val totalProgress = if (isAnime) {
+                                obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            } else {
+                                obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            }
+
+                            SearchResultItem(
+                                title = title,
+                                nativeTitle = nativeTitle,
+                                synopsis = synopsis,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                                bannerUrl = banner?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                                mediaType = targetType,
+                                releaseYear = year,
+                                communityScore = score,
+                                sourceProvider = "AniList",
+                                anilistId = anilistId,
+                                malId = malId,
+                                totalProgress = totalProgress
+                            )
+                        }
+                        if (parsed.isNotEmpty()) {
+                            providerSearchCache[cacheKey] = parsed
+                        }
+                        parsed
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
+                    emptyList()
                 }
             }
-        } catch (e: Exception) {
-            AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
-            emptyList()
         }
     }
 

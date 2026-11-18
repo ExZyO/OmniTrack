@@ -85,6 +85,7 @@ class EnrichmentRepository(
     companion object {
         private val clearartMemoryCache = java.util.concurrent.ConcurrentHashMap<String, String>()
         private val aniZipLogoMemoryCache = java.util.concurrent.ConcurrentHashMap<Long, String>()
+        private val aniZipRootCache = java.util.concurrent.ConcurrentHashMap<Long, JsonObject>()
         private val episodeFillerMemoryCache = java.util.concurrent.ConcurrentHashMap<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>()
         @Volatile private var jikanCircuitBreakerUntil = 0L
 
@@ -211,8 +212,14 @@ class EnrichmentRepository(
         }
 
         // 1. Resolve Transparent Clearart Logo (TMDb / Fanart first with language matching; replace stale TVDB logos)
-        val isStaleTvdbLogo = clearart?.contains("thetvdb.com") == true && !clearart.contains("tmdb.org")
-        if (clearart.isNullOrBlank() || isStaleTvdbLogo) {
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val isStaleTvdbLogo = clearart?.contains("thetvdb.com") == true &&
+            !clearart.contains("tmdb.org") &&
+            pref != com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+        if (isStaleTvdbLogo) {
+            clearart = null
+        }
+        if (clearart.isNullOrBlank()) {
             var newClearart: String? = null
             if (effectiveTmdbId != null) {
                 if (!effectiveTmdbKey.isNullOrBlank()) {
@@ -231,9 +238,13 @@ class EnrichmentRepository(
         }
 
         if (!clearart.isNullOrBlank()) {
-            putCachedClearart(item, clearart)
-            if (clearart != item.clearartUrl) {
-                onClearartResolved?.invoke(clearart, effectiveTmdbId)
+            val isAllowedClearart = !clearart.contains("thetvdb.com") ||
+                pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+            if (isAllowedClearart) {
+                putCachedClearart(item, clearart)
+                if (clearart != item.clearartUrl) {
+                    onClearartResolved?.invoke(clearart, effectiveTmdbId)
+                }
             }
         }
 
@@ -876,52 +887,56 @@ class EnrichmentRepository(
 
     suspend fun fetchCinemetaVideos(imdbId: String): List<com.omnitrack.app.data.model.MediaEpisode> = withContext(Dispatchers.IO) {
         cinemetaVideosCache[imdbId]?.let { return@withContext it }
-        try {
-            val url = "https://v3-cinemeta.strem.io/meta/series/$imdbId.json"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@withContext emptyList()
-                val body = response.body?.string() ?: return@withContext emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val meta = root["meta"]?.jsonObject ?: return@withContext emptyList()
-                val videos = meta["videos"]?.jsonArray ?: return@withContext emptyList()
-                val result = videos.mapNotNull { node ->
-                    val obj = node.jsonObject
-                    val sNum = obj["season"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val epNum = obj["episode"]?.jsonPrimitive?.content?.toIntOrNull()
-                        ?: obj["number"]?.jsonPrimitive?.content?.toIntOrNull()
-                        ?: return@mapNotNull null
-                    val title = obj["name"]?.jsonPrimitive?.content
-                        ?: obj["title"]?.jsonPrimitive?.content
-                        ?: "Episode $epNum"
-                    val desc = obj["overview"]?.jsonPrimitive?.content
-                        ?: obj["description"]?.jsonPrimitive?.content
-                    val thumb = obj["thumbnail"]?.jsonPrimitive?.content
-                    val rel = obj["released"]?.jsonPrimitive?.content
-                        ?: obj["firstAired"]?.jsonPrimitive?.content
-                    val dateOnly = rel?.take(10)
-                    val rawRating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
-                    val voteAvg = if (rawRating != null && rawRating > 0f) rawRating else null
+        NetworkPacer.coalesce("cinemeta_$imdbId") {
+            cinemetaVideosCache[imdbId]?.let { return@coalesce it }
+            try {
+                val url = "https://v3-cinemeta.strem.io/meta/series/$imdbId.json"
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { response ->
+                    if (!response.isSuccessful) return@coalesce emptyList()
+                    val body = response.body?.string() ?: return@coalesce emptyList()
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val meta = root["meta"]?.jsonObject ?: return@coalesce emptyList()
+                    val videos = meta["videos"]?.jsonArray ?: return@coalesce emptyList()
+                    val result = videos.mapNotNull { node ->
+                        val obj = node.jsonObject
+                        val sNum = obj["season"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val epNum = obj["episode"]?.jsonPrimitive?.content?.toIntOrNull()
+                            ?: obj["number"]?.jsonPrimitive?.content?.toIntOrNull()
+                            ?: return@mapNotNull null
+                        val title = obj["name"]?.jsonPrimitive?.content
+                            ?: obj["title"]?.jsonPrimitive?.content
+                            ?: "Episode $epNum"
+                        val desc = obj["overview"]?.jsonPrimitive?.content
+                            ?: obj["description"]?.jsonPrimitive?.content
+                        val thumb = obj["thumbnail"]?.jsonPrimitive?.content
+                        val rel = obj["released"]?.jsonPrimitive?.content
+                            ?: obj["firstAired"]?.jsonPrimitive?.content
+                        val dateOnly = rel?.take(10)
+                        val rawRating = obj["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                        val voteAvg = if (rawRating != null && rawRating > 0f) rawRating else null
 
-                    com.omnitrack.app.data.model.MediaEpisode(
-                        id = sNum * 1000L + epNum,
-                        episodeNumber = epNum,
-                        seasonNumber = sNum,
-                        title = title,
-                        overview = desc,
-                        stillUrl = thumb,
-                        airDate = dateOnly,
-                        runtimeMinutes = null,
-                        voteAverage = voteAvg
-                    )
+                        com.omnitrack.app.data.model.MediaEpisode(
+                            id = sNum * 1000L + epNum,
+                            episodeNumber = epNum,
+                            seasonNumber = sNum,
+                            title = title,
+                            overview = desc,
+                            stillUrl = thumb,
+                            airDate = dateOnly,
+                            runtimeMinutes = null,
+                            voteAverage = voteAvg
+                        )
+                    }
+                    if (result.isNotEmpty()) {
+                        cinemetaVideosCache[imdbId] = result
+                    }
+                    result
                 }
-                if (result.isNotEmpty()) {
-                    cinemetaVideosCache[imdbId] = result
-                }
-                result
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                emptyList()
             }
-        } catch (_: Exception) {
-            emptyList()
         }
     }
 
@@ -959,7 +974,8 @@ class EnrichmentRepository(
                     }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             emptyList()
         }
 
@@ -981,12 +997,18 @@ class EnrichmentRepository(
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
 
-                // Parallel AniList season poster discovery (Chimanew / Nuvio concurrent async parity)
-                val missingSeasonNumbers = cinemetaSeasons.keys.filter { sNum -> mergedList.none { it.seasonNumber == sNum } }
-                val aniListPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && missingSeasonNumbers.isNotEmpty()) {
+                // Parallel season poster discovery capped at <= 5 seasons to prevent request storms on long-running anime (e.g. Bleach 16 seasons)
+                val seasonsNeedingPosters = cinemetaSeasons.keys.filter { sNum ->
+                    sNum > 0 && mergedList.find { it.seasonNumber == sNum }?.posterUrl.isNullOrBlank()
+                }
+                val seasonPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && seasonsNeedingPosters.isNotEmpty() && seasonsNeedingPosters.size <= 5) {
                     coroutineScope {
-                        missingSeasonNumbers.map { sNum ->
-                            async { sNum to fetchAniListSeasonPoster(showTitle, sNum) }
+                        seasonsNeedingPosters.map { sNum ->
+                            async {
+                                val poster = fetchAniListSeasonPoster(showTitle, sNum)
+                                    ?: fetchKitsuSeasonData(showTitle, sNum)?.posterUrl
+                                sNum to poster
+                            }
                         }.awaitAll().toMap()
                     }
                 } else emptyMap()
@@ -1015,9 +1037,7 @@ class EnrichmentRepository(
                     val existing = mergedList.find { it.seasonNumber == sNum }
                     if (existing == null) {
                         // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
-                        val aniListPoster = aniListPosters[sNum]
-                        val kitsuData = if (aniListPoster.isNullOrBlank() && !showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
-                        val resolvedPoster = aniListPoster ?: kitsuData?.posterUrl
+                        val resolvedPoster = seasonPosters[sNum]
 
                         val posterUrl = if (sNum <= 0) {
                             mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: resolvedPoster
@@ -1042,11 +1062,8 @@ class EnrichmentRepository(
                         mergedList[idx] = existing.copy(episodeCount = eps.size)
                     } else if (existing.episodeCount <= 0 && eps.isNotEmpty()) {
                         val idx = mergedList.indexOf(existing)
-                        val aniListPoster = if (!showTitle.isNullOrBlank()) fetchAniListSeasonPoster(showTitle, sNum) else null
-                        val kitsuData = if (aniListPoster.isNullOrBlank() && !showTitle.isNullOrBlank()) fetchKitsuSeasonData(showTitle, sNum) else null
-                        val resolvedPoster = aniListPoster ?: kitsuData?.posterUrl ?: existing.posterUrl
-                        val enhancedPoster = if (existing.posterUrl.isNullOrBlank()) resolvedPoster else existing.posterUrl
-                        mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = enhancedPoster)
+                        val resolvedPoster = existing.posterUrl?.takeIf { it.isNotBlank() } ?: seasonPosters[sNum]
+                        mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = resolvedPoster)
                     }
                 }
                 return@withTmdbPacing mergedList
@@ -1100,7 +1117,8 @@ class EnrichmentRepository(
                     }.sortedBy { it.episodeNumber }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             emptyList()
         }
 
@@ -1162,7 +1180,8 @@ class EnrichmentRepository(
                             mapped
                         } else emptyList()
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     emptyList()
                 }
 
@@ -1293,7 +1312,7 @@ class EnrichmentRepository(
                   }
                 }
             """.trimIndent()
-            val suffix = when (seasonNumber % 10) {
+            val suffix = if (seasonNumber in 11..13) "th" else when (seasonNumber % 10) {
                 1 -> "st"
                 2 -> "nd"
                 3 -> "rd"
@@ -1304,10 +1323,7 @@ class EnrichmentRepository(
             } else {
                 listOf(
                     "$strippedTitle Season $seasonNumber",
-                    "$strippedTitle $seasonNumber$suffix Season",
-                    "$strippedTitle Season $seasonNumber Part 1",
-                    "$strippedTitle ${seasonNumber}nd Season",
-                    "$strippedTitle ${seasonNumber}rd Season"
+                    "$strippedTitle $seasonNumber$suffix Season"
                 ).distinct()
             }
             for (sq in searchQueries) {
@@ -1322,9 +1338,10 @@ class EnrichmentRepository(
                     .post(jsonPayload.toRequestBody("application/json".toMediaType()))
                     .header("User-Agent", "OmniTrack/1.0")
                     .build()
-                client.newCall(req).execute().use { resp ->
-                    if (resp.isSuccessful) {
-                        val body = resp.body?.string() ?: return@use
+                val foundImg = NetworkPacer.withAniListPacing {
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withAniListPacing null
+                        val body = resp.body?.string() ?: return@withAniListPacing null
                         val root = json.parseToJsonElement(body).jsonObject
                         val media = root["data"]?.jsonObject?.get("Media")?.jsonObject
                         if (seasonNumber >= 2) {
@@ -1338,20 +1355,21 @@ class EnrichmentRepository(
                                 combined.contains("${seasonNumber}th") ||
                                 combined.contains("part $seasonNumber") ||
                                 combined.contains(" $seasonNumber")
-                            if (!hasSeason) return@use
+                            if (!hasSeason) return@withAniListPacing null
                         }
                         val cover = media?.get("coverImage")?.jsonObject
-                        val img = cover?.get("extraLarge")?.jsonPrimitive?.content
-                            ?: cover?.get("large")?.jsonPrimitive?.content
-                        if (!img.isNullOrBlank()) {
-                            aniListSeasonPosterCache[cacheKey] = img
-                            return@withContext img
-                        }
+                        cover?.get("extraLarge")?.jsonPrimitive?.contentOrNull
+                            ?: cover?.get("large")?.jsonPrimitive?.contentOrNull
                     }
+                }
+                if (!foundImg.isNullOrBlank()) {
+                    aniListSeasonPosterCache[cacheKey] = foundImg
+                    return@withContext foundImg
                 }
             }
             null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             null
         }
     }
@@ -3320,57 +3338,73 @@ class EnrichmentRepository(
         }
     }
 
+    private suspend fun fetchAniZipRoot(anilistId: Long): JsonObject? = withContext(Dispatchers.IO) {
+        aniZipRootCache[anilistId]?.let { return@withContext it }
+        NetworkPacer.coalesce("anizip_root_$anilistId") {
+            aniZipRootCache[anilistId]?.let { return@coalesce it }
+            NetworkPacer.withAniZipPacing {
+                try {
+                    val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
+                    val req = Request.Builder()
+                        .url(url)
+                        .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withAniZipPacing null
+                        val body = resp.body?.string() ?: return@withAniZipPacing null
+                        val root = json.parseToJsonElement(body).jsonObject
+                        aniZipRootCache[anilistId] = root
+                        root
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                }
+            }
+        }
+    }
+
     suspend fun fetchAniZipClearlogo(anilistId: Long, tmdbKey: String? = null): String? = withContext(Dispatchers.IO) {
         val cached = aniZipLogoMemoryCache[anilistId]
         if (!cached.isNullOrBlank()) return@withContext cached
 
-        NetworkPacer.withAniZipPacing {
-            try {
-                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
-                    .build()
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withAniZipPacing null
-                    val body = resp.body?.string() ?: return@withAniZipPacing null
-                    val root = json.parseToJsonElement(body).jsonObject
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext null
 
-                    // 1. Language-matched TMDb clearart check first (prevents Chinese TVDB logos)
-                    val effectiveKey = tmdbKey ?: "844dba0bfd8f3a4f3799f6130ef9e335"
-                    val tmdbId = root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.content?.toLongOrNull()
-                    if (tmdbId != null && tmdbId > 0) {
-                        val tmdbLogo = fetchTmdbClearart(tmdbId, isMovie = false, apiKey = effectiveKey)
-                        if (!tmdbLogo.isNullOrBlank()) {
-                            aniZipLogoMemoryCache[anilistId] = tmdbLogo
-                            return@withAniZipPacing tmdbLogo
-                        }
-                    }
-
-                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
-                    val images = root["images"]?.jsonArray.orEmpty()
-                    val clearlogo = images.firstOrNull { elem ->
-                        val type = elem.jsonObject["coverType"].cleanString() ?: ""
-                        type.equals("Clearlogo", ignoreCase = true)
-                    } ?: images.firstOrNull { elem ->
-                        val type = elem.jsonObject["coverType"].cleanString() ?: ""
-                        type.equals("Clearart", ignoreCase = true)
-                    }
-                    val logoUrl = clearlogo?.jsonObject?.get("url").cleanString()
-                    if (!logoUrl.isNullOrBlank()) {
-                        if (pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH && logoUrl.contains("thetvdb.com")) {
-                            // In AniZip, TVDB logos are untagged and often Chinese (e.g. Apothecary Diaries).
-                            // When English is preferred, skip Chinese TVDB logo so clean English typography is displayed.
-                            return@withAniZipPacing null
-                        }
-                        aniZipLogoMemoryCache[anilistId] = logoUrl
-                        logoUrl
-                    } else null
+            // 1. Language-matched TMDb clearart check first (prevents Chinese TVDB logos)
+            val effectiveKey = tmdbKey ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            val tmdbId = root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            if (tmdbId != null && tmdbId > 0) {
+                val tmdbLogo = fetchTmdbClearart(tmdbId, isMovie = false, apiKey = effectiveKey)
+                if (!tmdbLogo.isNullOrBlank()) {
+                    aniZipLogoMemoryCache[anilistId] = tmdbLogo
+                    return@withContext tmdbLogo
                 }
-            } catch (e: Exception) {
-                AppLogger.d("EnrichmentRepository", "AniZip clearlogo lookup failed for $anilistId: ${e.message}")
-                null
             }
+
+            val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+            val images = root["images"]?.jsonArray.orEmpty()
+            val clearlogo = images.firstOrNull { elem ->
+                val type = elem.jsonObject["coverType"].cleanString() ?: ""
+                type.equals("Clearlogo", ignoreCase = true)
+            } ?: images.firstOrNull { elem ->
+                val type = elem.jsonObject["coverType"].cleanString() ?: ""
+                type.equals("Clearart", ignoreCase = true)
+            }
+            val logoUrl = clearlogo?.jsonObject?.get("url").cleanString()
+            if (!logoUrl.isNullOrBlank()) {
+                if (pref != com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE && logoUrl.contains("thetvdb.com")) {
+                    // In AniZip, TVDB logos are untagged and often Chinese (e.g. Apothecary Diaries).
+                    // When English or Romaji is preferred, skip Chinese TVDB logo so clean typography is displayed.
+                    return@withContext null
+                }
+                aniZipLogoMemoryCache[anilistId] = logoUrl
+                logoUrl
+            } else null
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            AppLogger.d("EnrichmentRepository", "AniZip clearlogo lookup failed for $anilistId: ${e.message}")
+            null
         }
     }
 
@@ -3420,22 +3454,12 @@ class EnrichmentRepository(
     }
 
     suspend fun fetchAniZipTmdbId(anilistId: Long): Long? = withContext(Dispatchers.IO) {
-        NetworkPacer.withAniZipPacing {
-            try {
-                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
-                    .build()
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withAniZipPacing null
-                    val body = resp.body?.string() ?: return@withAniZipPacing null
-                    val root = json.parseToJsonElement(body).jsonObject
-                    root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.content?.toLongOrNull()
-                }
-            } catch (_: Exception) {
-                null
-            }
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext null
+            root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
         }
     }
 
@@ -3445,70 +3469,61 @@ class EnrichmentRepository(
         val cached = aniZipEpisodesMemoryCache[anilistId]
         if (!cached.isNullOrEmpty()) return@withContext cached
 
-        NetworkPacer.withAniZipPacing {
-            try {
-                val url = "https://api.ani.zip/mappings?anilist_id=$anilistId"
-                val req = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux; S24 Ultra)")
-                    .build()
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withAniZipPacing emptyList()
-                    val body = resp.body?.string() ?: return@withAniZipPacing emptyList()
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val episodesObj = root["episodes"]?.jsonObject ?: return@withAniZipPacing emptyList()
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext emptyList()
+            val episodesObj = root["episodes"]?.jsonObject ?: return@withContext emptyList()
 
-                    val epsList = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
-                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+            val epsList = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
+            val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
 
-                    episodesObj.entries.forEach { (key, elem) ->
-                        val o = elem.jsonObject
-                        val epNum = o["episodeNumber"]?.jsonPrimitive?.content?.toIntOrNull()
-                            ?: key.replace(Regex("[^0-9]"), "").toIntOrNull()
-                            ?: return@forEach
-                        val sNum = o["seasonNumber"]?.jsonPrimitive?.content?.toIntOrNull()
-                            ?: if (key.startsWith("S", ignoreCase = true)) 0 else 1
-                        val titlesObj = o["title"]?.jsonObject
-                        val titleEn = titlesObj?.get("en")?.jsonPrimitive?.content
-                        val titleJa = titlesObj?.get("ja")?.jsonPrimitive?.content
-                        val titleRom = titlesObj?.get("x-jat")?.jsonPrimitive?.content
-                        val resolvedTitle = when (pref) {
-                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> titleJa ?: titleRom ?: titleEn
-                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> titleRom ?: titleEn ?: titleJa
-                            else -> titleEn ?: titleRom ?: titleJa
-                        } ?: "Episode $epNum"
+            episodesObj.entries.forEach { (key, elem) ->
+                val o = elem.jsonObject
+                val epNum = o["episodeNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: key.replace(Regex("[^0-9]"), "").toIntOrNull()
+                    ?: return@forEach
+                val sNum = o["seasonNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: if (key.startsWith("S", ignoreCase = true)) 0 else 1
+                val titlesObj = o["title"]?.jsonObject
+                val titleEn = titlesObj?.get("en").cleanString()
+                val titleJa = titlesObj?.get("ja").cleanString()
+                val titleRom = titlesObj?.get("x-jat").cleanString()
+                val resolvedTitle = when (pref) {
+                    com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> titleJa ?: titleRom ?: titleEn
+                    com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> titleRom ?: titleEn ?: titleJa
+                    else -> titleEn ?: titleRom ?: titleJa
+                } ?: "Episode $epNum"
 
-                        val overview = o["overview"]?.jsonPrimitive?.content ?: o["summary"]?.jsonPrimitive?.content
-                        val image = o["image"]?.jsonPrimitive?.content
-                        val airDate = o["airDate"]?.jsonPrimitive?.content ?: o["airdate"]?.jsonPrimitive?.content
-                        val runtime = o["runtime"]?.jsonPrimitive?.content?.toIntOrNull() ?: o["length"]?.jsonPrimitive?.content?.toIntOrNull()
-                        val rating = o["rating"]?.jsonPrimitive?.content?.toFloatOrNull()
+                val overview = o["overview"].cleanString() ?: o["summary"].cleanString()
+                val image = o["image"].cleanString()
+                val airDate = (o["airDate"].cleanString() ?: o["airdate"].cleanString())?.take(10)
+                val runtime = o["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    ?: o["length"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val rating = o["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
 
-                        epsList.add(
-                            com.omnitrack.app.data.model.MediaEpisode(
-                                id = sNum * 1000L + epNum,
-                                episodeNumber = epNum,
-                                seasonNumber = sNum,
-                                title = resolvedTitle,
-                                overview = overview,
-                                stillUrl = image,
-                                airDate = airDate?.take(10),
-                                runtimeMinutes = runtime,
-                                voteAverage = rating
-                            )
-                        )
-                    }
-
-                    val sorted = epsList.sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
-                    if (sorted.isNotEmpty()) {
-                        aniZipEpisodesMemoryCache[anilistId] = sorted
-                    }
-                    sorted
-                }
-            } catch (e: Exception) {
-                AppLogger.d("EnrichmentRepository", "AniZip episodes lookup failed for $anilistId: ${e.message}")
-                emptyList()
+                epsList.add(
+                    com.omnitrack.app.data.model.MediaEpisode(
+                        id = sNum * 1000L + epNum,
+                        episodeNumber = epNum,
+                        seasonNumber = sNum,
+                        title = resolvedTitle,
+                        overview = overview,
+                        stillUrl = image,
+                        airDate = airDate,
+                        runtimeMinutes = runtime,
+                        voteAverage = rating
+                    )
+                )
             }
+
+            val sorted = epsList.sortedWith(compareBy({ it.seasonNumber }, { it.episodeNumber }))
+            if (sorted.isNotEmpty()) {
+                aniZipEpisodesMemoryCache[anilistId] = sorted
+            }
+            sorted
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            AppLogger.d("EnrichmentRepository", "AniZip episodes lookup failed for $anilistId: ${e.message}")
+            emptyList()
         }
     }
 

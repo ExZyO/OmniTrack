@@ -83,23 +83,13 @@ When navigating between entries using horizontal PowerAmp swipe gestures (e.g., 
    - **Every single search preview item shares the identical cache entry!** Opening Dandadan caches its logo and aux data under `"id_0"`. Opening Apothecary Diaries or Solo Leveling immediately retrieves Dandadan's cached logo from `"id_0"`.
 
 2. **Unfiltered TVDB Logo Stored in Database**:
-   In `DetailViewModel.kt` (`maybeEnrich`):
-   ```kotlin
-   onClearartResolved = { earlyLogo, _ ->
-       EnrichmentRepository.putCachedClearart(item, earlyLogo)
-       if (_mediaId.value == item.id) {
-           _heroClearLogoUrl.value = earlyLogo
-       }
-       if (curr.clearartUrl != earlyLogo) {
-           repository.updateMedia(curr.copy(clearartUrl = earlyLogo)) // Persisted to Room!
-       }
-   }
-   ```
-   AniZip returns clearlogos scraped from TheTVDB. TheTVDB clearlogos are frequently Chinese or Japanese localized text. `onClearartResolved` does not verify whether `earlyLogo` is from TVDB when English is preferred, and writes this Chinese logo directly into the Room DB entity (`item.clearartUrl`).
-   Once saved to the database, `DetailScreen.kt` line 1045 loads `item.clearartUrl` on future visits without filtering.
+   In `DetailViewModel.kt` (`maybeEnrich`), `onClearartResolved` cached and saved TVDB URLs into Room (`item.clearartUrl`) without filtering for Preferred Title Language, and `needsEnrichment` skipped scrubbing already-saved TVDB URLs when no replacement clearlogo existed (`EnrichmentRepository.enrich` left `clearart = item.clearartUrl` intact if no TMDb/Fanart logo existed).
 
-3. **In-Flight Job Race Condition**:
-   When switching entries via gesture, previous asynchronous enrichment jobs were continuing in the background. When their callbacks fired, if `item.id` was 0 (as in preview items), the identity check `_mediaId.value == item.id` (`0 == 0`) passed, overwriting the new entry's logo with the previous entry's resolved logo.
+3. **Un-reset Title & Auxiliary State on Sibling Switch**:
+   `DetailViewModel.navigateToPrevious()` / `navigateToNext()` did not reset `_englishTitle`, `_romajiTitle`, `_synonyms`, `_tags`, `_heroClearLogoUrl`, etc., causing the previous entry's localized title (e.g., `"DAN DA DAN"`) and clearlogo to bleed onto the newly selected sibling. Furthermore, `DetailAuxMemoryCache.getCacheKey` previously collided on `"id_0"` for ephemeral items.
+
+4. **In-Flight Job Race Condition**:
+   When switching entries via gesture, previous asynchronous enrichment jobs were continuing in the background and overwriting the active entry.
 
 ---
 
@@ -119,7 +109,7 @@ When performing a PowerAmp horizontal swipe gesture to switch from Dandadan to T
 ```
 
 #### Code Inspection & Root Cause
-In `DetailScreen.kt` lines 465–490:
+In `DetailScreen.kt` (`detectHorizontalDragGestures`):
 ```kotlin
 // Swiping right: navigate to previous sibling entry
 currentX > threshold && uiState.hasPreviousEntry -> {
@@ -133,11 +123,9 @@ currentX > threshold && uiState.hasPreviousEntry -> {
     }
 }
 ```
-1. `animatableOffsetX.animateTo(screenWidthPx)` smoothly slides Entry A (Dandadan) completely off the right edge of the display.
-2. `viewModel.navigateToPrevious()` is invoked. Inside the ViewModel, `_mediaId.value = prevId` triggers an asynchronous Room DB query via `repository.getMediaById(prevId).flatMapLatest { ... }` on `Dispatchers.IO`.
-3. In the very next line of the coroutine, `animatableOffsetX.snapTo(0f)` executes **immediately**.
-4. Because the Room DB query and Compose recomposition take 30–100ms to fetch and emit the new entity into `uiState`, Compose executes a frame where `offsetX == 0f`, but `uiState.item` is **still Entry A (Dandadan)**!
-5. This draws Dandadan centered at `x = 0`, causing a visible visual snap/flash before Apothecary Diaries is emitted.
+1. `animatableOffsetX.animateTo(screenWidthPx)` smoothly slides Entry A (Dandadan) completely off the right edge of the display while `SiblingDetailPreview` holds Entry B at center.
+2. `viewModel.navigateToPrevious()` triggers asynchronous Room DB queries (`repository.getMediaById` and `getEpisodeProgress`) before emitting the new `DetailUiState`.
+3. Because `animatableOffsetX.snapTo(0f)` executed **immediately** after calling `navigateToPrevious()` (before `uiState.item` changed), Compose drew Entry A back at `x = 0` for 1–3 frames until `LaunchedEffect(item?.id)` fired. Additionally, waiting on uncached Room DB flows delayed `uiState.item` updates.
 
 ---
 
@@ -155,45 +143,12 @@ When searching for "Bleach" in the Discover view with the "Anime" filter enabled
 ```
 
 #### Code Inspection & Root Cause
-In `OmniSearchRepository.kt`:
-```kotlin
-MediaType.ANIME -> {
-    deferreds.add(async { searchAniList(trimmed, isAnime = true) })
-    deferreds.add(async { searchBangumi(trimmed, type = 2, defaultType = MediaType.ANIME) })
-}
-```
-1. **Network Pacing Bottleneck**:
-   `searchAniList` is wrapped inside `NetworkPacer.withAniListPacing`:
-   ```kotlin
-   private val anilistSemaphore = Semaphore(4)
-   suspend fun <T> withAniListPacing(block: suspend () -> T): T {
-       anilistSemaphore.withPermit {
-           delay(50) // Global pacer delay
-           block()
-       }
-   }
-   ```
-   When the user navigates between screens or opens items, multiple background tasks (`dantotsuCommentsRepository.getComments`, `enrichmentRepository.searchAniListForAnime`, `fetchAniZipEpisodes`) also consume permits from the shared AniList semaphore.
-2. **HTTP 429 Rate Limiting & Backoff**:
-   AniList enforces a strict 90 requests/minute limit. When burst requests occur, AniList responds with HTTP 429.
-   In `searchAniList`:
-   ```kotlin
-   var response = client.newCall(request).execute()
-   if (response.code == 429) {
-       response.close()
-       delay(800)
-       response = client.newCall(request).execute()
-   }
-   ```
-   If a 429 occurs, it delays for 800ms while holding the coroutine.
-3. **Bangumi Runs Unthrottled**:
-   Bangumi uses `withBangumiPacing` (a separate semaphore with no competing background workers) and hits an unauthenticated HTTP REST endpoint returning small JSON payloads, finishing in ~120ms.
-4. **`awaitAll()` Barrier**:
-   In `OmniSearchRepository.kt`:
-   ```kotlin
-   val rawResults = deferreds.awaitAll().flatten()
-   ```
-   Because `awaitAll()` waits for **both** AniList and Bangumi before emitting any results to `resultsFlow`, the entire search UI is blocked until AniList finishes. If AniList is delayed, the user sees nothing; if AniList times out or fails silently, only Bangumi is returned.
+1. **Shared `aniListSemaphore` & Duplicate Requests**:
+   `searchAniList` shared `NetworkPacer.withAniListPacing` with background detail/discussion/season-poster requests (where `fetchAniListSeasonPoster` in `EnrichmentRepository.kt` also fired dozens of unpaced GraphQL requests on multi-season anime), saturating AniList's 90 req/min rate limit and triggering HTTP 429 delays.
+2. **Lack of Search Caching, Filter-Chip Debounce Penalty & Unsafe Coalescing**:
+   Typing `"bleach"` under `All Verticals` launched AniList Anime + Manga searches, then clicking the `"Anime"` filter chip waited another 400ms debounce and launched a 3rd redundant AniList Anime query without caching or safe coalescing (`NetworkPacer.coalesce` previously bound shared `Deferred`s to Caller A's `coroutineScope`, aborting when `LaunchedEffect` restarted).
+3. **`awaitAll()` Barrier & Full-Screen Spinner**:
+   `OmniSearchRepository.searchAll()` blocked on `deferreds.awaitAll()` before emitting fast Bangumi results, and `DiscoverView` hid the entire grid whenever `isSearching == true`.
 
 ---
 
@@ -213,32 +168,12 @@ When opening Bleach from search results:
 ```
 
 #### Code Inspection & Root Cause
-1. **Search Preview Lacks TMDb ID**:
-   When Bleach is opened from AniList search results, the item has `id = 0`, `anilistId = 269`, `totalProgress = 366`, but `tmdbId = null`.
-2. **Serial Multi-Step Network Resolution**:
-   Inside `launchSeriesFetch(item)`:
-   - Step 1: `enrichmentRepository.fetchAniZipTmdbId(269)` $\to$ returns TMDb ID `30984`.
-   - Step 2: `enrichmentRepository.fetchTmdbImdbId(30984)` $\to$ network call.
-   - Step 3: `enrichmentRepository.fetchTvSeasons(30984)` $\to$ returns 16 seasons.
-   - Step 4: `enrichmentRepository.fetchTvSeasonEpisodes(30984, seasonNumber = 1)` $\to$ TMDb Season 1 contains 366 episodes in a single ~1.2 MB JSON response.
-3. **Optimistic Synthesis Fallback Race**:
-   At the tail end of `launchSeriesFetch`:
-   ```kotlin
-   // 4. Synthesize episodes from total progress if catalogue metadata has no granular breakdown
-   if (_realSeasons.value.isEmpty() && _realEpisodes.value.isEmpty()) {
-       val totalCount = item.totalProgress?.toInt() // 366
-       if (totalCount != null && totalCount > 0 && totalCount <= 500) {
-           val synEps = (1..totalCount).map { epNum ->
-               MediaEpisode(id = epNum.toLong(), episodeNumber = epNum, seasonNumber = 1, title = "Episode $epNum", stillUrl = null)
-           }
-           _realSeasons.value = listOf(synSeason)
-           _episodesBySeason.value = mapOf(1 to synEps)
-           _realEpisodes.value = synEps
-       }
-   }
-   ```
-   Because TMDb's 1.2 MB Season 1 payload takes 2–4 seconds to download and parse on mobile data/Wi-Fi, the initial state shows either nothing or the synthesized 366 generic episodes. In `DetailScreen.kt`, when `episode.stillUrl == null`, the UI falls back to rendering `item.bannerUrl ?: item.coverUrl`.
-   Once TMDb finishes parsing, `_realSeasons.value` is overwritten with the 16 real TMDb seasons, causing the layout to jump and reload all episode cards.
+1. **`CancellationException` Swallowed in `launchSeriesFetch()`**:
+   Opening a search preview started `launchSeriesFetch` twice (`openPreviewInternal` / `loadRecommendationsAndReviews` and again when `maybeEnrich` finished). When job #1 was cancelled, catch blocks at `DetailViewModel` (`catch (_: Exception)`) swallowed `CancellationException` (`StandaloneCoroutine was cancelled`). The cancelled coroutine fell straight through to Step 4 (`// 4. Synthesize episodes from total progress` with limit `<= 500`), publishing **1 synthetic season** (hiding the Seasons rail since `seasons.size == 1`) and **366 blank episodes** (`stillUrl == null`, falling back to the detail page banner).
+2. **Triple Duplicate AniZip & Double Cinemeta Downloads**:
+   `fetchAniZipTmdbId`, `fetchAniZipClearlogo`, and `fetchAniZipEpisodes` separately fetched `https://api.ani.zip/mappings?anilist_id=269`, while `fetchTvSeasons` and `fetchTvSeasonEpisodes` concurrently fetched `fetchCinemetaVideos(imdbId)` without coalescing.
+3. **135-Request Season Poster Storm on 16-Season Cinemeta Series (`EnrichmentRepository.fetchTvSeasons`)**:
+   Because Bleach has 16 story-arc seasons in Cinemeta vs 1 season on TMDb (`hasLumpedSeason1 == true`), `fetchTvSeasons` launched `fetchAniListSeasonPoster` for all 15 missing seasons (up to 5 unpaced AniList queries each = 75 calls) followed by a synchronous sequential `forEach` loop calling `fetchKitsuSeasonData` (~60 sequential Kitsu HTTP calls) before returning the seasons list, causing the multi-second delay before the 16 seasons appeared.
 
 ---
 
@@ -257,80 +192,11 @@ When opening Bleach from search results:
 ```
 
 #### Code Inspection & Root Cause
-1. **Ignored Return Value in Header Back Button**:
-   In `DetailScreen.kt` lines 1007–1023:
-   ```kotlin
-   IconButton(
-       onClick = {
-           if (uiState.isPreviewMode) {
-               viewModel.closePreview() // <-- RETURNS FALSE, BUT RETURN VALUE IS DISCARDED!
-               val restoredOffset = viewModel.popScrollOffset()
-               if (restoredOffset != null) {
-                   coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
-               }
-           } else if (sheetBackStack.isNotEmpty()) {
-               sheetBackStack.removeAt(sheetBackStack.lastIndex)
-           } else {
-               onBack()
-           }
-       }
-   )
-   ```
-   Now check `viewModel.closePreview()` in `DetailViewModel.kt`:
-   ```kotlin
-   fun closePreview(): Boolean {
-       if (_previewStack.value.size > 1) {
-           _previewStack.update { it.dropLast(1) }
-           // ... restore previous preview
-           return true
-       }
-       _previewStack.value = emptyList()
-       _previewItem.value = null
-       EphemeralPreviewHolder.previewItem = null
-       val currentId = _mediaId.value
-       resetAuxFields()
-       if (currentId > 0L) {
-           // ... restore library item
-           return true
-       }
-       return false // <-- Indicates there is nothing left to preview, must exit screen!
-   }
-   ```
-   - For a search preview item, `_previewStack.value.size` is 1 and `_mediaId.value` is `-1L`.
-   - `closePreview()` clears `_previewItem.value = null` and returns `false`.
-   - But `DetailScreen.kt` **never checks the boolean result** and does **not** call `onBack()`!
-   - Now `uiState.item` becomes `null`. In `DetailScreen.kt`:
-     ```kotlin
-     if (uiState.isLoading && item == null) {
-         NuvioLoadingIndicator()
-     } else if (item != null) {
-         // ... Detail content
-     }
-     ```
-     Since `isLoading` is false and `item` is null, **neither branch executes**! The composable renders an empty `Box(Modifier.fillMaxSize())` with a black background!
-   - Compare this to the system back handler at line 218:
-     ```kotlin
-     val handled = viewModel.closePreview()
-     if (!handled) {
-         onBack() // System back gesture works because it checked `!handled`!
-     }
-     ```
-
-2. **Search Page Reload on Return**:
-   In `DiscoverView.kt`:
-   ```kotlin
-   var lastExecutedQuery by remember { mutableStateOf<String?>(if (resultsFlow.value.isNotEmpty()) queryFlow.value else null) }
-   var lastExecutedFilter by remember { mutableStateOf<MediaType?>(if (resultsFlow.value.isNotEmpty()) filterFlow.value else null) }
-   var lastExecutedAi by remember { mutableStateOf<Boolean?>(if (resultsFlow.value.isNotEmpty()) useAiSearch else null) }
-   ```
-   When navigating away from `DiscoverView` to `DetailScreen`, if `DiscoverView` leaves composition, `remember` state is disposed.
-   When navigating back, `lastExecutedQuery` is re-initialized. In `LaunchedEffect(searchQuery, selectedFilter, useAiSearch)`:
-   ```kotlin
-   if (resultsFlow.value.isNotEmpty() && trimmed == lastExecutedQuery && ...) {
-       return@LaunchedEffect
-   }
-   ```
-   If any timing mismatch occurs between `queryFlow` and `lastExecutedQuery` during re-composition, it falls through to `delay(400)` and re-executes `searchRepository.searchAll(...)`, discarding the preserved scroll position and reloading from the network.
+1. **Ignored Return Value & Premature `_previewItem` Clear in `closePreview()`**:
+   - Header Back button in `DetailScreen.kt` previously ignored the boolean return value of `viewModel.closePreview()`, failing to call `onBack()` when popping the root preview and leaving `item == null` (pitch-black Box).
+   - Even after calling `onBack()`, root `closePreview()` set `_previewItem.value = null` immediately while `NavHost` played its 250ms `popExitTransition`, flashing black during the slide-out animation.
+2. **Ephemeral `remember` State in `DiscoverView`**:
+   `lastExecutedQuery`, `lastExecutedFilter`, and `lastExecutedAi` were stored in local `remember` (disposed upon navigating to `DetailScreen`) and initialized with untrimmed `queryFlow.value`. DataStore `aiSearchSetting` also re-emitted on back navigation, causing `LaunchedEffect` to re-run `searchRepository.searchAll(...)`.
 
 ---
 
@@ -340,7 +206,7 @@ In the logcat:
 W/WindowOnBackDispatcher(11650): OnBackInvokedCallback is not enabled for the application.
 W/WindowOnBackDispatcher(11650): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
 ```
-`AndroidManifest.xml` lacks `android:enableOnBackInvokedCallback="true"`, causing Android 13/14 predictive back animations to fail and fall back to legacy window dismissal.
+`AndroidManifest.xml` lacked `android:enableOnBackInvokedCallback="true"`.
 
 ---
 
@@ -356,129 +222,48 @@ Tapping the Sparkle/AI icon button in the search text field triggers a progress 
 ```
 
 #### Code Inspection & Root Cause
-In `DiscoverView.kt` lines 257–268:
-```kotlin
-.clickable { useAiSearch = !useAiSearch }
-```
-When tapped:
-1. `useAiSearch` toggles from `false` to `true`.
-2. `LaunchedEffect(searchQuery, selectedFilter, useAiSearch)` triggers because `useAiSearch != lastExecutedAi`.
-3. In `DiscoverView.kt`:
-   ```kotlin
-   val geminiKey by prefManager.geminiApiKey.collectAsState(initial = "")
-   val openRouterKey by prefManager.openRouterApiKey.collectAsState(initial = "")
-   // ...
-   if (useAiSearch) {
-       val aiResult = aiEngine.resolveQuery(
-           rawQuery = trimmed,
-           geminiApiKey = geminiKey.ifBlank { null },
-           openRouterApiKey = openRouterKey.ifBlank { null }
-       )
-   ```
-4. In `AiQueryEngine.kt`:
-   ```kotlin
-   suspend fun resolveQuery(rawQuery: String, geminiApiKey: String?, openRouterApiKey: String?): AiQueryResult {
-       if (!geminiApiKey.isNullOrBlank()) { ... }
-       if (!openRouterApiKey.isNullOrBlank()) { ... }
-       // 3. Smart Local Heuristic Fallback
-       resolveWithLocalHeuristics(trimmed)
-   }
-   ```
-   If the user has **not configured a Gemini or OpenRouter API key** in Settings, `AiQueryEngine` falls back to `resolveWithLocalHeuristics`.
-5. For an exact title query like `"bleach"`, `resolveWithLocalHeuristics("bleach")` returns:
-   `AiQueryResult(resolvedTitle = "bleach", detectedType = null, isAiResolved = false)`.
-6. Back in `DiscoverView.kt`:
-   - `aiResult.isAiResolved` is `false`.
-   - `aiResult.resolvedTitle == trimmed` (`"bleach" == "bleach"`).
-   - Therefore, `bannerFlow.value` remains `null`. No banner or notification appears.
-7. Next, line 176 executes:
-   `val results = searchRepository.searchAll(query = "bleach", filter = filterToRun)`
-   This runs the identical network search again, showing the loading indicator, and delivers the exact same results.
-8. To the user, tapping the AI button appears broken: it blinks/reloads the screen and changes nothing, with zero feedback informing them that no AI API key is configured.
+In `DiscoverView.kt` & `AiQueryEngine.kt`:
+1. `useAiSearch` was stored only in local `remember` (not persisted to `PreferenceManager`), and toggling it re-triggered `LaunchedEffect`.
+2. Without a Gemini or OpenRouter API key, `AiQueryEngine` fell back to `resolveWithLocalHeuristics`, which returned the exact same query string with `isAiResolved = false`, left `bannerFlow.value = null`, and unconditionally re-executed `searchRepository.searchAll(...)` with a loading spinner.
+3. Furthermore, `AiQueryEngine.resolveWithGemini` targeted retired `gemini-1.5-flash` instead of `gemini-2.5-flash` / `gemini-2.0-flash`.
 
 ---
 
-## 4. Proposed Fixes & Architectural Recommendations
+## 4. Implemented Fixes & Architectural Optimizations
 
-### Fix for Bug 1 (Logo Bleed & Foreign TVDB Logos)
-1. **Guard `DetailAuxMemoryCache` against Non-Positive IDs**:
-   In `DetailAuxMemoryCache`:
-   ```kotlin
-   fun getCacheKey(item: MediaItemEntity): String? {
-       val key = item.tmdbId?.let { "tmdb_${it}" }
-           ?: item.anilistId?.let { "anilist_${it}" }
-           ?: if (item.id > 0L) "id_${item.id}" else null
-       return key
-   }
-   ```
-   Never generate a cache key like `"id_0"`, `"id_-1"`, or `"ANIME_0_null_null_null"`. If an item has no positive ID or catalog key, bypass in-memory aux caching entirely.
-2. **Strict TVDB Logo Filtering in Database Updates**:
-   In `DetailViewModel.kt` `onClearartResolved`:
-   ```kotlin
-   val isTvdb = earlyLogo.contains("thetvdb.com", ignoreCase = true)
-   val pref = preferenceManager?.cachedPreferredTitleLanguage ?: PreferredTitleLanguage.ENGLISH
-   if (isTvdb && pref != PreferredTitleLanguage.NATIVE) {
-       // Reject TVDB Chinese logo when English is preferred!
-       return@onClearartResolved
-   }
-   ```
-3. **DetailScreen Header Clearart Check**:
-   Apply the same TVDB filter to `effectiveHeaderClearart` at line 1045 of `DetailScreen.kt`.
+### Fix for Bug 1 (Logo Bleed, Foreign TVDB Logos & Title Bleed)
+1. **Guard `DetailAuxMemoryCache` & Clean Auxiliary Reset (`DetailViewModel.kt`)**:
+   `DetailAuxMemoryCache.getCacheKey` returns `null` for non-positive/unidentified previews, and `resetAuxFields()` clears all auxiliary flows (`_englishTitle`, `_romajiTitle`, `_synonyms`, `_tags`, `_heroClearLogoUrl`, `_seasonMalIds`, etc.) before loading a sibling or preview.
+2. **Strict TVDB Logo Filtering & Room Scrubbing (`DetailViewModel.kt`, `EnrichmentRepository.kt`, `DetailScreen.kt`)**:
+   TVDB URLs (`thetvdb.com`) are rejected when preferred language is not `NATIVE`, never re-cached into `clearartMemoryCache`, and existing stale TVDB URLs in Room are scrubbed cleanly during `maybeEnrich()`.
 
-### Fix for Bug 2 (PowerAmp Navigation Flash)
-1. **Coordinate Animation Reset with State Emission**:
-   Do NOT call `animatableOffsetX.snapTo(0f)` immediately after calling `viewModel.navigateToNext()`.
-   Instead, when `viewModel.navigateToNext()` succeeds:
-   - Position `animatableOffsetX` at `+screenWidthPx` (entering from the opposite side).
-   - Once the new `uiState.item` is collected, animate `animatableOffsetX` from `screenWidthPx` $\to$ `0f` (a true bilateral slide-through transition).
-   - Alternatively, hide the content or hold the offset until `uiState.item.id == nextId`.
+### Fix for Bug 2 (Zero-Flash PowerAmp Sibling Gesture)
+1. **Synchronized Offset Snap & Frozen Sibling Previews (`DetailScreen.kt`)**:
+   Removed immediate `animatableOffsetX.snapTo(0f)` after `navigateToPrevious()` / `navigateToNext()`. Instead, `animatableOffsetX` only resets in `LaunchedEffect(item?.id)` once the new item renders, while `frozenPrevPreview` / `frozenNextPreview` hold the target sibling preview steady during the transition frame.
+2. **0ms Room Item & Progress Caching (`DetailViewModel.kt`)**:
+   Added `latestRoomItemCache` and `latestEpisodeProgressCache` with `.onStart { ... }.distinctUntilChanged()` on Room flows inside `uiState`, plus unified `navigateToSibling(...)` helper so switching siblings emits immediately in 0ms.
 
-### Fix for Bug 3 (AniList Search Delays)
-1. **Progressive Search Emission (Streaming / Asynchronous Merge)**:
-   Do not use `val rawResults = deferreds.awaitAll().flatten()`.
-   Instead, use a Kotlin `Flow` or emit results progressively:
-   - As soon as Bangumi finishes (~150ms), emit Bangumi results to the UI.
-   - When AniList finishes, merge and prioritize AniList results to the top of the list.
-2. **Dedicated Search Pacer**:
-   Do not force user-facing search queries to wait behind background discussion comment fetches. Allocate a dedicated high-priority slot in `NetworkPacer` for interactive search.
+### Fix for Bug 3 (Fast, Coalesced, Progressive AniList Search)
+1. **Dedicated Interactive Pacer & Safe `SupervisorJob` Coalescer (`NetworkPacer.kt`)**:
+   Added `withAniListSearchPacing` (separate from background enrichment) and upgraded `NetworkPacer.coalesce` to use `CoroutineScope(SupervisorJob() + Dispatchers.IO)` so filter-chip switches never cancel shared in-flight requests.
+2. **Search Result Cache, 429 Retries & Progressive UI (`OmniSearchRepository.kt`, `DiscoverView.kt`)**:
+   Added `providerSearchCache` + `NetworkPacer.coalesce` around `searchAniList` (eliminating duplicate requests when toggling `All` $\leftrightarrow$ `Anime`), 0ms chip-switch skip on debounce, and thread-safe `onPartialResults` streaming so Bangumi shows immediately while AniList merges in with an inline spinner.
 
-### Fix for Bug 4 (Bleach 366 Episodes & Generic Thumbnails)
-1. **Parallel Episode Fetching & Cache Seed**:
-   Seed `SeriesContentMemoryCache` with the TMDb ID from search results before opening `DetailScreen`.
-2. **Refine Placeholder Synthesizer**:
-   When synthesizing placeholder episodes from `totalProgress`:
-   - Limit synthesis to small counts ($\le 26$), or display an explicit "Fetching season details from TMDb..." progress state rather than generating 366 generic episodes with duplicate backdrop artwork.
+### Fix for Bug 4 (Bleach 366 Episodes & Fast Cinemeta Season Resolution)
+1. **Proper `CancellationException` Propagation & Series Fetch Deduplication (`DetailViewModel.kt`, `EnrichmentRepository.kt`)**:
+   Rethrows `CancellationException` in all catch blocks, calls `currentCoroutineContext().ensureActive()` before fallback synthesis, limits synthetic episode fallback to short series ($\le 26$ episodes), and deduplicates `launchSeriesFetch` calls across `openPreview`/`maybeEnrich`/`loadRecommendationsAndReviews` via `activeSeriesFetchKey`.
+2. **Single-Shot AniZip & Cinemeta + Capped Poster Discovery (`EnrichmentRepository.kt`)**:
+   Coalesces `fetchAniZipRoot` and `fetchCinemetaVideos`, paces `fetchAniListSeasonPoster` via `NetworkPacer.withAniListPacing`, and caps automatic extra per-season poster lookups in `fetchTvSeasons` at `<= 5` missing seasons so 16-season series like Bleach load without triggering a 135-request storm.
 
-### Fix for Bug 5 (Back Button Black Screen & Manifest Back Flag)
-1. **Check Boolean Return Value on ClosePreview**:
-   In `DetailScreen.kt` lines 1008 & 1134:
-   ```kotlin
-   if (uiState.isPreviewMode) {
-       val handled = viewModel.closePreview()
-       if (!handled) {
-           onBack()
-       } else {
-           val restoredOffset = viewModel.popScrollOffset()
-           if (restoredOffset != null) {
-               coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
-           }
-       }
-   }
-   ```
-2. **Enable Predictive Back in Manifest**:
-   In `app/src/main/AndroidManifest.xml`:
-   ```xml
-   <application
-       android:enableOnBackInvokedCallback="true"
-       ... >
-   ```
+### Fix for Bug 5 (Back Navigation & Zero-Reload Discover State)
+1. **Root Preview Preservation on Pop Exit & Back Handler (`DetailViewModel.kt`, `DetailScreen.kt`, `AndroidManifest.xml`)**:
+   Header Back button and `BackHandler` honor `closePreview()`'s boolean return value; root `closePreview()` preserves `_previewItem` in memory during `NavHost.popExitTransition` so the screen never flashes black; `android:enableOnBackInvokedCallback="true"` is enabled.
+2. **ViewModel-Backed Discover Search Execution State (`HomeViewModel.kt`, `DiscoverView.kt`)**:
+   Moved `discoverLastExecutedQuery`, `discoverLastExecutedFilter`, `discoverLastExecutedAi`, `discoverLastEffectiveQuery`, `discoverLastEffectiveFilter`, and `discoverUseAiSearch` into `HomeViewModel` so returning from `DetailScreen` never reloads or loses scroll position.
 
-### Fix for Bug 6 (AI Button Behavior & Feedback)
-1. **User Feedback Dialog / Toast when Keys are Missing**:
-   If `geminiKey.isBlank() && openRouterKey.isBlank()`:
-   - Display a Snackbar or Dialog: *"AI Semantic Search requires a Gemini or OpenRouter API key. Configure it in Settings $\to$ API Keys, or use natural language queries like 'anime with death note'."*
-2. **Do Not Re-query if Query Has Not Changed**:
-   If `aiResult.resolvedTitle == trimmed` and `!aiResult.isAiResolved`, do not trigger a full search reload. Simply show a subtle hint that the query was already specific.
+### Fix for Bug 6 (AI Search Feedback, No-Reload Toggle & Gemini 2.5 Flash)
+1. **Model Update & No-Op Reload Elimination (`AiQueryEngine.kt`, `DiscoverView.kt`)**:
+   Upgraded `resolveWithGemini` from retired `gemini-1.5-flash` to `gemini-2.5-flash` (with `gemini-2.0-flash` fallback), persisted AI toggle state in `PreferenceManager`, shows clear setup/heuristic banners when no API key is configured, and skips redundant `searchRepository.searchAll(...)` reloads when `queryToRun` and `filterToRun` have not changed.
 
 ---
 
