@@ -101,7 +101,6 @@ private fun ExternalLinkPill(
             .height(36.dp)
             .clip(pillShape)
             .background(Color.White.copy(alpha = 0.08f))
-            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)), pillShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center

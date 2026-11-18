@@ -212,14 +212,14 @@ fun DetailScreen(
     val scrollState = rememberScrollState()
 
     BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode) {
-        if (uiState.isPreviewMode) {
-            viewModel.closePreview()
+        if (sheetBackStack.isNotEmpty()) {
+            sheetBackStack.removeAt(sheetBackStack.lastIndex)
             val restoredOffset = viewModel.popScrollOffset()
             if (restoredOffset != null) {
                 coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
             }
-        } else if (sheetBackStack.isNotEmpty()) {
-            sheetBackStack.removeAt(sheetBackStack.lastIndex)
+        } else if (uiState.isPreviewMode) {
+            viewModel.closePreview()
             val restoredOffset = viewModel.popScrollOffset()
             if (restoredOffset != null) {
                 coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
@@ -229,7 +229,7 @@ fun DetailScreen(
         }
     }
 
-    val currentSheet = if (uiState.isPreviewMode) null else sheetBackStack.lastOrNull()
+    val currentSheet = sheetBackStack.lastOrNull()
     when (currentSheet) {
         is DetailSheetTarget.UserProfile -> {
             UserProfileSheet(
@@ -679,7 +679,7 @@ fun DetailScreen(
                     Spacer(modifier = Modifier.height(10.dp))
                 } else {
                     val hasBackdrop = backdropTargetUrl != null
-                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-18).dp else 8.dp))
+                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-26).dp else (-2).dp))
                 }
 
                 // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
@@ -688,7 +688,7 @@ fun DetailScreen(
                         synopsis = item.synopsis,
                         dominantAccent = dominantAccent
                     )
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
 
                 // 3. Dynamic Reorderable Sections (configured in Settings > Layout > Details Page)
@@ -712,6 +712,7 @@ fun DetailScreen(
                                     watchedEpisodes = uiState.watchedEpisodes,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
                                     fallbackBackdropUrl = item.bannerUrl,
+                                    fallbackCoverUrl = item.coverUrl,
                                     layoutMode = episodeLayoutMode,
                                     layoutScale = episodeLayoutScale,
                                     initialSeasonViewMode = seasonViewMode,
@@ -2002,7 +2003,6 @@ private fun DetailSynopsisSection(
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(if (isSpeaking) dominantAccent.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
-                    .border(1.dp, if (isSpeaking) dominantAccent else GlassBorder, RoundedCornerShape(999.dp))
                     .clickable {
                         if (isSpeaking) {
                             ttsInstance?.stop()

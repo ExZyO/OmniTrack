@@ -104,6 +104,7 @@ fun DetailSeriesContent(
     watchedEpisodes: Set<Pair<Int, Int>>, // Set of (seasonNumber, episodeNumber)
     selectedSeasonNumber: Int,
     fallbackBackdropUrl: String?,
+    fallbackCoverUrl: String? = null,
     onSelectSeason: (Int) -> Unit,
     onToggleEpisodeWatched: (MediaEpisode) -> Unit,
     onMarkPreviousWatched: (MediaEpisode) -> Unit,
@@ -215,7 +216,6 @@ fun DetailSeriesContent(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
                                 .clickable {
                                     val next = if (currentSeasonViewMode == "Posters") "Text" else "Posters"
                                     currentSeasonViewMode = next
@@ -247,7 +247,7 @@ fun DetailSeriesContent(
                             episodes = episodes,
                             episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
-                            fallbackImageUrl = fallbackBackdropUrl,
+                            fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
                             onSelectSeason = onSelectSeason
                         )
                     } else {
@@ -305,11 +305,6 @@ fun DetailSeriesContent(
                             .height(28.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
-                            .border(
-                                1.dp,
-                                if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.50f) else Color.White.copy(alpha = 0.14f),
-                                RoundedCornerShape(14.dp)
-                            )
                             .clickable { onToggleSkipFillers?.invoke() }
                             .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center
@@ -405,7 +400,7 @@ fun DetailSeriesContent(
                             EpisodeHorizontalRow(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -416,7 +411,7 @@ fun DetailSeriesContent(
                             EpisodeListColumn(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -427,7 +422,7 @@ fun DetailSeriesContent(
                             EpisodeVerticalCardColumn(
                                 episodes = activeSeasonEps,
                                 watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = fallbackBackdropUrl,
+                                fallbackImageUrl = fallbackCoverUrl ?: fallbackBackdropUrl,
                                 scale = layoutScale,
                                 onToggleWatched = handleEpisodeClick,
                                 onLongPress = { activeActionSheetEpisode = it }
@@ -724,7 +719,7 @@ private fun EpisodeHorizontalCard(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(12.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -732,14 +727,13 @@ private fun EpisodeHorizontalCard(
             .height(cardHeight)
             .clip(cardShape)
             .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
                 onLongClick = onLongPress
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        val effectiveUrl = if (loadFailed) null else imgModel
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -927,7 +921,7 @@ private fun EpisodeListCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(8.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -935,7 +929,6 @@ private fun EpisodeListCardItem(
             .height(cardHeight)
             .clip(cardShape)
             .background(Color(0xFF222224).copy(alpha = 0.45f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
                 onLongClick = onLongPress
@@ -951,7 +944,7 @@ private fun EpisodeListCardItem(
                     .background(Color(0xFF0D0D0D))
             ) {
                 var loadFailed by remember(imgModel) { mutableStateOf(false) }
-                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+                val effectiveUrl = if (loadFailed) null else imgModel
                 if (!effectiveUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = effectiveUrl,
@@ -1119,7 +1112,7 @@ private fun EpisodeVerticalCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
-    val imgModel = episode.stillUrl ?: fallbackImageUrl
+    val imgModel = episode.stillUrl
 
     Box(
         modifier = Modifier
@@ -1127,14 +1120,13 @@ private fun EpisodeVerticalCardItem(
             .aspectRatio(16f / 9f)
             .clip(cardShape)
             .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, cardShape)
             .combinedClickable(
                 onClick = onToggleWatched,
                 onLongClick = onLongPress
             )
     ) {
         var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
+        val effectiveUrl = if (loadFailed) null else imgModel
         if (!effectiveUrl.isNullOrBlank()) {
             AsyncImage(
                 model = effectiveUrl,
@@ -1304,15 +1296,14 @@ private fun SeasonPosterScrollRow(
                         .height(150.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(DarkSurfaceElevated)
-                        .border(
-                            width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) Color(0xFFE52E5E) else Color.White.copy(alpha = 0.10f),
-                            shape = RoundedCornerShape(8.dp)
+                        .then(
+                            if (isSelected) Modifier.border(2.dp, Color(0xFFE52E5E), RoundedCornerShape(8.dp))
+                            else Modifier
                         )
                 ) {
                     val posterModel = season.posterUrl ?: fallbackImageUrl
                     var loadFailed by remember(posterModel) { mutableStateOf(false) }
-                    val effectivePoster = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else posterModel
+                    val effectivePoster = if (loadFailed) null else posterModel
                     if (!effectivePoster.isNullOrBlank()) {
                         AsyncImage(
                             model = effectivePoster,

@@ -236,17 +236,17 @@ fun CommentDetailSheet(
                 }
             }
 
-            // 1:1 Nuvio REVIEW Badge
+            // Clean Transparent White REVIEW Badge (No Border)
             if (currentReview.isReview) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xFF1B3D2F))
+                        .background(Color.White.copy(alpha = 0.08f))
                         .padding(horizontal = 12.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = "REVIEW",
-                        color = Color(0xFF00E054),
+                        color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp
@@ -333,20 +333,20 @@ fun CommentDetailSheet(
                             horizontalArrangement = Arrangement.spacedBy(3.dp),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(AccentGold.copy(alpha = 0.15f))
+                                .background(Color.White.copy(alpha = 0.08f))
                                 .padding(horizontal = 9.dp, vertical = 3.5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Star,
                                 contentDescription = null,
-                                tint = AccentGold,
+                                tint = Color.White.copy(alpha = 0.85f),
                                 modifier = Modifier.size(12.dp)
                             )
                             Text(
                                 text = "${rating.toInt()}/10",
-                                color = AccentGold,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }

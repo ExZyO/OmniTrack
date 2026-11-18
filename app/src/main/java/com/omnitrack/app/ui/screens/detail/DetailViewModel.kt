@@ -201,7 +201,9 @@ class DetailViewModel(
     private val _popularity = MutableStateFlow<Int?>(null)
     private val _favourites = MutableStateFlow<Int?>(null)
     private val _durationMinutes = MutableStateFlow<Int?>(null)
-    private val _preferredTitleLanguage = MutableStateFlow(PreferredTitleLanguage.ROMAJI)
+    private val _preferredTitleLanguage = MutableStateFlow(
+        com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+    )
     private val _animeRelations = MutableStateFlow<List<AnimeRelationItem>>(emptyList())
     private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
     private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
@@ -787,10 +789,22 @@ class DetailViewModel(
         )
     }.flatMapLatest { aux ->
         val hasFillers = aux.realEpisodes.any { it.isFiller } || (aux.episodesBySeason[aux.selectedSeasonNumber]?.any { it.isFiller } == true)
+        val pref = _preferredTitleLanguage.value
         if (aux.previewItem != null) {
+            val resolvedPreviewTitle = when (pref) {
+                PreferredTitleLanguage.ENGLISH -> aux.englishTitle ?: aux.previewItem.title
+                PreferredTitleLanguage.ROMAJI -> aux.romajiTitle ?: aux.previewItem.title
+                PreferredTitleLanguage.NATIVE -> aux.previewItem.nativeTitle ?: aux.romajiTitle ?: aux.previewItem.title
+            }
+            val resolvedPreviewNative = if (resolvedPreviewTitle == aux.previewItem.nativeTitle) {
+                aux.englishTitle ?: aux.romajiTitle ?: aux.previewItem.title
+            } else {
+                aux.previewItem.nativeTitle
+            }
+            val displayPreviewItem = aux.previewItem.copy(title = resolvedPreviewTitle, nativeTitle = resolvedPreviewNative)
             flowOf(
                 DetailUiState(
-                    item = aux.previewItem,
+                    item = displayPreviewItem,
                     previousItem = null,
                     nextItem = null,
                     seasons = emptyList(),
@@ -859,8 +873,19 @@ class DetailViewModel(
                             val currentIndex = siblings.indexOf(effectiveItem.id)
                             val watchedSet = progressList.filter { it.isWatched }
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
+                            val resolvedTitle = when (pref) {
+                                PreferredTitleLanguage.ENGLISH -> aux.englishTitle ?: effectiveItem.title
+                                PreferredTitleLanguage.ROMAJI -> aux.romajiTitle ?: effectiveItem.title
+                                PreferredTitleLanguage.NATIVE -> effectiveItem.nativeTitle ?: aux.romajiTitle ?: effectiveItem.title
+                            }
+                            val resolvedNative = if (resolvedTitle == effectiveItem.nativeTitle) {
+                                aux.englishTitle ?: aux.romajiTitle ?: effectiveItem.title
+                            } else {
+                                effectiveItem.nativeTitle
+                            }
+                            val displayItem = effectiveItem.copy(title = resolvedTitle, nativeTitle = resolvedNative)
                             DetailUiState(
-                                item = effectiveItem,
+                                item = displayItem,
                                 previousItem = aux.previousItem,
                                 nextItem = aux.nextItem,
                                 seasons = emptyList(),
@@ -2048,8 +2073,10 @@ class DetailViewModel(
             if (eps.isNotEmpty()) {
                 val fillerMap = _fillerInfoMap.value[malIdForSeason] ?: emptyMap()
                 val enrichedEps = if (fillerMap.isNotEmpty()) {
+                    val offset = getCumulativeOffsetForSeason(seasonNumber)
                     eps.map { ep ->
-                        val info = fillerMap[ep.episodeNumber]
+                        val absoluteNum = offset + ep.episodeNumber
+                        val info = fillerMap[absoluteNum] ?: fillerMap[ep.episodeNumber]
                         if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
                     }
                 } else eps
@@ -2088,6 +2115,14 @@ class DetailViewModel(
         }
     }
 
+    private fun getCumulativeOffsetForSeason(seasonNumber: Int): Int {
+        val seasons = _realSeasons.value
+        if (seasons.isEmpty() || seasonNumber <= 1) return 0
+        return seasons
+            .filter { it.seasonNumber in 1 until seasonNumber }
+            .sumOf { it.episodeCount }
+    }
+
     private fun loadFillersForMalId(malId: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             val fillers = enrichmentRepository.fetchEpisodeFillers(malId)
@@ -2095,14 +2130,18 @@ class DetailViewModel(
                 _fillerInfoMap.update { it + (malId to fillers) }
                 _realEpisodes.update { list ->
                     list.map { ep ->
-                        val info = fillers[ep.episodeNumber]
+                        val offset = getCumulativeOffsetForSeason(ep.seasonNumber)
+                        val absoluteNum = offset + ep.episodeNumber
+                        val info = fillers[absoluteNum] ?: fillers[ep.episodeNumber]
                         if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
                     }
                 }
                 _episodesBySeason.update { map ->
-                    map.mapValues { (_, eps) ->
+                    map.mapValues { (sNum, eps) ->
+                        val offset = getCumulativeOffsetForSeason(sNum)
                         eps.map { ep ->
-                            val info = fillers[ep.episodeNumber]
+                            val absoluteNum = offset + ep.episodeNumber
+                            val info = fillers[absoluteNum] ?: fillers[ep.episodeNumber]
                             if (info != null) ep.copy(isFiller = info.isFiller, isRecap = info.isRecap) else ep
                         }
                     }
@@ -2393,31 +2432,6 @@ class DetailViewModel(
 
     fun applyPreferredTitleLanguage(pref: PreferredTitleLanguage) {
         _preferredTitleLanguage.value = pref
-        val eng = _englishTitle.value
-        val rom = _romajiTitle.value
-        viewModelScope.launch(Dispatchers.IO) {
-            val currentItem = _previewItem.value
-                ?: (if (_mediaId.value > 0) repository.getMediaById(_mediaId.value).firstOrNull() else null)
-                ?: return@launch
-            val native = currentItem.nativeTitle
-
-            val targetTitle = when (pref) {
-                PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: currentItem.title
-                PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: currentItem.title
-                PreferredTitleLanguage.NATIVE -> native ?: rom ?: eng ?: currentItem.title
-            }
-
-            if (targetTitle.isNotBlank() && targetTitle != currentItem.title) {
-                if (_previewItem.value != null) {
-                    _previewItem.value = _previewItem.value?.copy(title = targetTitle)
-                } else if (currentItem.id > 0) {
-                    val dbItem = repository.getMediaById(currentItem.id).firstOrNull()
-                    if (dbItem != null) {
-                        repository.updateMedia(dbItem.copy(title = targetTitle))
-                    }
-                }
-            }
-        }
     }
 
     fun togglePreferredTitle() {
@@ -2498,6 +2512,11 @@ class DetailViewModel(
     }
 
     fun navigateToPrevious(): Boolean {
+        val immediate = _previousItem.value
+        if (immediate != null) {
+            _mediaId.value = immediate.id
+            _previewItem.value = null
+        }
         viewModelScope.launch {
             val currentId = _mediaId.value
             val siblings = _stableSiblingIds.value.ifEmpty {
@@ -2507,7 +2526,7 @@ class DetailViewModel(
             val currentIndex = siblings.indexOf(currentId)
             val prevIndex = if (currentIndex > 0) currentIndex - 1 else siblings.size - 1
             val prevId = siblings[prevIndex]
-            val prevItem = repository.getMediaById(prevId).firstOrNull() ?: return@launch
+            val prevItem = immediate?.takeIf { it.id == prevId } ?: repository.getMediaById(prevId).firstOrNull() ?: return@launch
             _mediaId.value = prevId
             _previewItem.value = null
             updateSiblings(prevId)
@@ -2547,6 +2566,11 @@ class DetailViewModel(
     }
 
     fun navigateToNext(): Boolean {
+        val immediate = _nextItem.value
+        if (immediate != null) {
+            _mediaId.value = immediate.id
+            _previewItem.value = null
+        }
         viewModelScope.launch {
             val currentId = _mediaId.value
             val siblings = _stableSiblingIds.value.ifEmpty {
@@ -2556,7 +2580,7 @@ class DetailViewModel(
             val currentIndex = siblings.indexOf(currentId)
             val nextIndex = if (currentIndex in 0 until siblings.size - 1) currentIndex + 1 else 0
             val nextId = siblings[nextIndex]
-            val nextItem = repository.getMediaById(nextId).firstOrNull() ?: return@launch
+            val nextItem = immediate?.takeIf { it.id == nextId } ?: repository.getMediaById(nextId).firstOrNull() ?: return@launch
             _mediaId.value = nextId
             _previewItem.value = null
             updateSiblings(nextId)

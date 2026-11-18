@@ -242,14 +242,17 @@ class PreferenceManager(private val context: Context) {
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
             val raw = prefs[PreferencesKeys.PREFERRED_TITLE_LANGUAGE]
-            try {
+            val resolved = try {
                 if (raw != null) PreferredTitleLanguage.valueOf(raw) else PreferredTitleLanguage.ROMAJI
             } catch (_: Exception) {
                 PreferredTitleLanguage.ROMAJI
             }
+            cachedPreferredTitleLanguage = resolved
+            resolved
         }
 
     suspend fun updatePreferredTitleLanguage(language: PreferredTitleLanguage) {
+        cachedPreferredTitleLanguage = language
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.PREFERRED_TITLE_LANGUAGE] = language.name
         }
@@ -497,6 +500,9 @@ class PreferenceManager(private val context: Context) {
     }
 
     companion object {
+        @Volatile
+        var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
+
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")
             MediaType.MANGA -> listOf("MangaDex API", "AniList", "Comick")

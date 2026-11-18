@@ -396,7 +396,6 @@ fun DetailNamesSynonymsSection(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(Color.White.copy(alpha = 0.06f))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                                 .clickable {
                                     clipboardManager.setText(AnnotatedString(syn))
                                     Toast.makeText(context, "Copied \"$syn\"", Toast.LENGTH_SHORT).show()
@@ -462,7 +461,6 @@ fun DetailGenresTagsSection(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(AccentArctic.copy(alpha = 0.12f))
-                        .border(1.dp, AccentArctic.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(genre, false)
                         }
@@ -483,7 +481,6 @@ fun DetailGenresTagsSection(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(tagItem.name, true)
                         }

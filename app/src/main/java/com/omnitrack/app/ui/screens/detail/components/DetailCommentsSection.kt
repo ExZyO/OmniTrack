@@ -322,11 +322,6 @@ fun DetailCommentsSection(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) AccentArctic else GlassBorder,
-                                shape = RoundedCornerShape(999.dp)
-                            )
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = "All"
@@ -357,7 +352,6 @@ fun DetailCommentsSection(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                         .clickable { sortMenuExpanded = true }
                         .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
@@ -419,11 +413,6 @@ fun DetailCommentsSection(
                         modifier = Modifier
                             .clip(RoundedCornerShape(999.dp))
                             .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) AccentArctic else GlassBorder,
-                                shape = RoundedCornerShape(999.dp)
-                            )
                             .clickable {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 selectedTag = tag
@@ -449,7 +438,6 @@ fun DetailCommentsSection(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
                 .background(Color.White.copy(alpha = 0.04f))
-                .border(1.dp, GlassBorder.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1016,7 +1004,6 @@ private fun CommentNodeRow(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.05f))
-                            .border(1.dp, GlassBorder, CircleShape)
                             .clickable(onClick = onReplyClick)
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1106,7 +1093,6 @@ fun DartotsuLikeDislikeCapsule(
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
             .padding(horizontal = 6.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)

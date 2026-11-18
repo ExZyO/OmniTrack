@@ -172,12 +172,17 @@ class OmniSearchRepository(
                 mediaList.mapNotNull { node ->
                     val obj = node.jsonObject
                     val titleObj = obj["title"]?.jsonObject
-                    val title = titleObj?.get("english").cleanString()
-                        ?: titleObj?.get("romaji").cleanString()
-                        ?: titleObj?.get("native").cleanString()
-                        ?: return@mapNotNull null
+                    val eng = titleObj?.get("english").cleanString()
+                    val rom = titleObj?.get("romaji").cleanString()
+                    val nat = titleObj?.get("native").cleanString()
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val title = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
+                    } ?: return@mapNotNull null
 
-                    val nativeTitle = titleObj?.get("native").cleanString()
+                    val nativeTitle = nat
                     val cover = obj["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
                         ?: obj["coverImage"]?.jsonObject?.get("large").cleanString()
                         ?: return@mapNotNull null

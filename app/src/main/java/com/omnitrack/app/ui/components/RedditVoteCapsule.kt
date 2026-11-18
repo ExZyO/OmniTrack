@@ -4,7 +4,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,14 +73,12 @@ fun RedditVoteCapsule(
         label = "downvote_color"
     )
 
-    val borderColor = Color(0x22FFFFFF)
     val capsuleBackground = Color.White.copy(alpha = 0.06f)
 
     Row(
         modifier = modifier
             .clip(CircleShape)
             .background(capsuleBackground)
-            .border(1.dp, borderColor, CircleShape)
             .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)

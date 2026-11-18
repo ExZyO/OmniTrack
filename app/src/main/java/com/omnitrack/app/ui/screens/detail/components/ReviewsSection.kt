@@ -109,7 +109,6 @@ fun ReviewsSection(
                         .height(cardHeight)
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF242424).copy(alpha = 0.40f))
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                         .clickable { selectedIndex = index }
                         .padding(16.dp)
                 ) {
@@ -160,36 +159,36 @@ fun ReviewsSection(
                                         horizontalArrangement = Arrangement.spacedBy(3.dp),
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(999.dp))
-                                            .background(AccentGold.copy(alpha = 0.15f))
+                                            .background(Color.White.copy(alpha = 0.08f))
                                             .padding(horizontal = 8.dp, vertical = 3.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Star,
                                             contentDescription = null,
-                                            tint = AccentGold,
+                                            tint = Color.White.copy(alpha = 0.85f),
                                             modifier = Modifier.size(11.dp)
                                         )
                                         Text(
                                             text = "${rev.rating.toInt()}/10",
-                                            color = AccentGold,
+                                            color = Color.White.copy(alpha = 0.85f),
                                             fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
                             }
 
-                            // 1:1 Nuvio Green REVIEW Badge
+                            // Clean Transparent White REVIEW Badge (No Border)
                             if (rev.isReview) {
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(999.dp))
-                                        .background(Color(0xFF1B3D2F))
+                                        .background(Color.White.copy(alpha = 0.08f))
                                         .padding(horizontal = 10.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = "REVIEW",
-                                        color = Color(0xFF00E054),
+                                        color = Color.White.copy(alpha = 0.85f),
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 0.5.sp
@@ -309,38 +308,38 @@ fun UnifiedDiscussionSection(
     onLoadReplies: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Comments/Reviews (Default), 1: Discussion
+    val hasReviews = reviews.isNotEmpty()
+    if (!hasReviews && !hasAniList) return
+
+    var selectedTab by remember(hasReviews, hasAniList) {
+        mutableIntStateOf(if (hasReviews) 0 else 1)
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Unboxed Header Tabs: Comments/Reviews first, Discussion second
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            val commentsLabel = when {
-                reviews.isNotEmpty() -> "Comments (${reviews.size})"
-                else -> "Comments"
-            }
-
-            // Tab 0: Comments / Reviews (Left, Default)
-            Text(
-                text = commentsLabel,
-                color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.55f),
-                fontSize = 20.sp,
-                fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
+        if (hasReviews && hasAniList) {
+            // Unboxed Header Tabs when both Comments and Discussion are available
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable { selectedTab = 0 }
-            )
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                // Tab 0: Comments / Reviews (Left, Default)
+                Text(
+                    text = "Comments (${reviews.size})",
+                    color = if (selectedTab == 0) Color.White else Color.White.copy(alpha = 0.55f),
+                    fontSize = 20.sp,
+                    fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { selectedTab = 0 }
+                )
 
-            // Tab 1: Discussion (Right, only if entry has AniList ID / anime / manga)
-            if (hasAniList) {
+                // Tab 1: Discussion (Right)
                 Text(
                     text = "Discussion",
                     color = if (selectedTab == 1) Color.White else Color.White.copy(alpha = 0.55f),
@@ -351,11 +350,20 @@ fun UnifiedDiscussionSection(
                         .clickable { selectedTab = 1 }
                 )
             }
+        } else if (hasReviews) {
+            // Single Header when only Comments / Reviews exist
+            Text(
+                text = "Comments (${reviews.size})",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
         }
 
-        if (selectedTab == 0 || !hasAniList) {
+        if (selectedTab == 0 && hasReviews) {
             ReviewsSection(reviews = reviews, showHeader = false)
-        } else {
+        } else if (hasAniList) {
             DetailCommentsSection(
                 mediaType = mediaType,
                 mediaTitle = mediaTitle,

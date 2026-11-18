@@ -130,7 +130,6 @@ fun DetailTrailersSection(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color.White.copy(alpha = 0.08f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
                         .clickable { menuExpanded = true }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -155,7 +154,7 @@ fun DetailTrailersSection(
                     onDismissRequest = { menuExpanded = false },
                     modifier = Modifier
                         .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
                 ) {
                     grouped.keys.forEach { cat ->
                         val count = grouped[cat]?.size ?: 0
@@ -165,7 +164,7 @@ fun DetailTrailersSection(
                                     text = "$cat ($count)",
                                     fontSize = 13.sp,
                                     fontWeight = if (cat == selectedCategory) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (cat == selectedCategory) Color(0xFF00E676) else TextPrimary
+                                    color = if (cat == selectedCategory) com.omnitrack.app.ui.theme.AccentArctic else TextPrimary
                                 )
                             },
                             onClick = {
