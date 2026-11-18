@@ -118,9 +118,20 @@ class EnrichmentRepository(
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
+    private data class TmdbRawSeasonMeta(
+        val seasonNumber: Int,
+        val rawName: String,
+        val episodeCount: Int,
+        val posterUrl: String?,
+        val airDate: String?
+    )
+
     private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
+    private val tmdbSeasonMetaCache = java.util.concurrent.ConcurrentHashMap<Long, List<TmdbRawSeasonMeta>>()
+    private val tmdbSeasonRawEpisodesCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val aniListSeasonPosterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val aniListSubSeriesCoursCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<Long, String?>>>()
     private val kitsuSeasonDataCache = java.util.concurrent.ConcurrentHashMap<String, KitsuSeasonData>()
     private val userMediaListCache = java.util.concurrent.ConcurrentHashMap<String, List<UserMediaListItem>>()
 
@@ -940,62 +951,268 @@ class EnrichmentRepository(
         }
     }
 
+    private suspend fun fetchTmdbRawSeasonMeta(tmdbId: Long, apiKey: String): List<TmdbRawSeasonMeta> {
+        tmdbSeasonMetaCache[tmdbId]?.let { return it }
+        return NetworkPacer.coalesce("tmdb_tv_meta_$tmdbId") {
+            tmdbSeasonMetaCache[tmdbId]?.let { return@coalesce it }
+            NetworkPacer.withTmdbPacing {
+                try {
+                    val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
+                    val req = Request.Builder().url(url).get().build()
+                    client.newCall(req).execute().use { response ->
+                        if (!response.isSuccessful) return@withTmdbPacing emptyList()
+                        val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val seasons = root["seasons"]?.jsonArray ?: return@withTmdbPacing emptyList()
+                        val parsed = seasons.mapNotNull { node ->
+                            val obj = node.jsonObject
+                            val seasonNumber = obj["season_number"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                ?: return@mapNotNull null
+                            val rawName = obj["name"].cleanString().orEmpty()
+                            val epCount = obj["episode_count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            val posterPath = obj["poster_path"].cleanString()
+                            val airDate = obj["air_date"].cleanString()
+                            TmdbRawSeasonMeta(
+                                seasonNumber = seasonNumber,
+                                rawName = rawName,
+                                episodeCount = epCount,
+                                posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w342$it" },
+                                airDate = airDate
+                            )
+                        }
+                        if (parsed.isNotEmpty()) {
+                            tmdbSeasonMetaCache[tmdbId] = parsed
+                        }
+                        parsed
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchTmdbRawSeasonEpisodes(
+        tmdbId: Long,
+        rawSeasonNumber: Int,
+        apiKey: String
+    ): List<com.omnitrack.app.data.model.MediaEpisode> {
+        val cacheKey = "$tmdbId:$rawSeasonNumber"
+        tmdbSeasonRawEpisodesCache[cacheKey]?.let { return it }
+        return NetworkPacer.coalesce("tmdb_raw_season_${tmdbId}_$rawSeasonNumber") {
+            tmdbSeasonRawEpisodesCache[cacheKey]?.let { return@coalesce it }
+            NetworkPacer.withTmdbPacing {
+                try {
+                    val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$rawSeasonNumber?api_key=$apiKey"
+                    val req = Request.Builder().url(url).get().build()
+                    client.newCall(req).execute().use { response ->
+                        if (!response.isSuccessful) return@withTmdbPacing emptyList()
+                        val body = response.body?.string() ?: return@withTmdbPacing emptyList()
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val episodes = root["episodes"]?.jsonArray ?: return@withTmdbPacing emptyList()
+                        val parsed = episodes.mapNotNull { node ->
+                            val obj = node.jsonObject
+                            val epNumber = obj["episode_number"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                ?: return@mapNotNull null
+                            val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                                ?: (rawSeasonNumber * 1000L + epNumber)
+                            val name = obj["name"].cleanString() ?: "Episode $epNumber"
+                            val overview = obj["overview"].cleanString()
+                            val stillPath = obj["still_path"].cleanString()
+                            val airDate = obj["air_date"].cleanString()
+                            val runtime = obj["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                            val voteAverage = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = id,
+                                episodeNumber = epNumber,
+                                seasonNumber = rawSeasonNumber,
+                                title = name,
+                                overview = overview,
+                                stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                                airDate = airDate,
+                                runtimeMinutes = runtime,
+                                voteAverage = voteAverage
+                            )
+                        }.sortedBy { it.episodeNumber }
+                        if (parsed.isNotEmpty()) {
+                            tmdbSeasonRawEpisodesCache[cacheKey] = parsed
+                            if (rawSeasonNumber == 1) {
+                                tmdbSeason1StillsCache[tmdbId] = parsed
+                            }
+                        }
+                        parsed
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+        }
+    }
+
+    private fun findMatchedSubSeason(rawSeasons: List<TmdbRawSeasonMeta>, showTitle: String?): TmdbRawSeasonMeta? {
+        if (showTitle.isNullOrBlank()) return null
+        return rawSeasons.firstOrNull { s ->
+            s.seasonNumber >= 2 &&
+                s.rawName.length >= 5 &&
+                !s.rawName.startsWith("Season", ignoreCase = true) &&
+                showTitle.contains(s.rawName, ignoreCase = true)
+        }
+    }
+
+    private fun splitEpisodesIntoCours(rawEps: List<com.omnitrack.app.data.model.MediaEpisode>): List<List<com.omnitrack.app.data.model.MediaEpisode>> {
+        if (rawEps.isEmpty()) return emptyList()
+        val sorted = rawEps.sortedBy { it.episodeNumber }
+        val cours = mutableListOf<MutableList<com.omnitrack.app.data.model.MediaEpisode>>()
+        var current = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
+        var prevDate: java.time.LocalDate? = null
+        for (ep in sorted) {
+            val curDate = ep.airDate?.take(10)?.let {
+                runCatching { java.time.LocalDate.parse(it) }.getOrNull()
+            }
+            if (prevDate != null && curDate != null && java.time.temporal.ChronoUnit.DAYS.between(prevDate, curDate) > 90L && current.isNotEmpty()) {
+                cours.add(current)
+                current = mutableListOf()
+            }
+            current.add(ep)
+            if (curDate != null) prevDate = curDate
+        }
+        if (current.isNotEmpty()) cours.add(current)
+        return cours
+    }
+
+    private suspend fun fetchAniListSubSeriesCours(subSeriesTitle: String): List<Pair<Long, String?>> = withContext(Dispatchers.IO) {
+        val normKey = subSeriesTitle.lowercase().trim()
+        aniListSubSeriesCoursCache[normKey]?.let { return@withContext it }
+        NetworkPacer.coalesce("anilist_subseries_$normKey") {
+            aniListSubSeriesCoursCache[normKey]?.let { return@coalesce it }
+            NetworkPacer.withAniListPacing {
+                try {
+                    val query = """
+                        query (${'$'}search: String) {
+                          Page(page: 1, perPage: 10) {
+                            media(search: ${'$'}search, type: ANIME, format: TV) {
+                              id
+                              title { romaji english }
+                              startDate { year month }
+                              coverImage { extraLarge large }
+                            }
+                          }
+                        }
+                    """.trimIndent()
+                    val jsonPayload = buildJsonObject {
+                        put("query", query)
+                        putJsonObject("variables") { put("search", subSeriesTitle.trim()) }
+                    }.toString()
+                    val req = Request.Builder()
+                        .url("https://graphql.anilist.co")
+                        .post(jsonPayload.toRequestBody("application/json".toMediaType()))
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .build()
+                    val subPart = subSeriesTitle.substringAfter(":", "").substringBefore(" - ").trim().lowercase()
+                    data class CourEntry(val id: Long, val year: Int, val month: Int, val posterUrl: String?)
+                    val entries = client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withAniListPacing emptyList<Pair<Long, String?>>()
+                        val body = resp.body?.string() ?: return@withAniListPacing emptyList<Pair<Long, String?>>()
+                        val root = json.parseToJsonElement(body).jsonObject
+                        val mediaList = root["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray.orEmpty()
+                        mediaList.mapNotNull { elem ->
+                            val obj = elem.jsonObject
+                            val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                            val tObj = obj["title"]?.jsonObject
+                            val eng = tObj?.get("english").cleanString()
+                            val rom = tObj?.get("romaji").cleanString()
+                            val matchesPrefix = eng?.lowercase()?.startsWith(normKey) == true ||
+                                rom?.lowercase()?.startsWith(normKey) == true ||
+                                (subPart.length >= 5 && (eng?.lowercase()?.contains(subPart) == true || rom?.lowercase()?.contains(subPart) == true))
+                            if (!matchesPrefix) return@mapNotNull null
+                            val year = obj["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: Int.MAX_VALUE
+                            val month = obj["startDate"]?.jsonObject?.get("month")?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: Int.MAX_VALUE
+                            val coverObj = obj["coverImage"]?.jsonObject
+                            val poster = coverObj?.get("extraLarge").cleanString() ?: coverObj?.get("large").cleanString()
+                            CourEntry(id, year, month, poster)
+                        }.sortedWith(compareBy<CourEntry> { it.year }.thenBy { it.month }.thenBy { it.id })
+                            .map { it.id to it.posterUrl }
+                    }
+                    if (entries.isNotEmpty()) {
+                        aniListSubSeriesCoursCache[normKey] = entries
+                    }
+                    entries
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+        }
+    }
+
+    private fun isAirDateWithinDays(dateA: String?, dateB: String?, maxDays: Long): Boolean {
+        if (dateA.isNullOrBlank() || dateB.isNullOrBlank()) return false
+        val parsedA = runCatching { java.time.LocalDate.parse(dateA.trim().take(10)) }.getOrNull() ?: return false
+        val parsedB = runCatching { java.time.LocalDate.parse(dateB.trim().take(10)) }.getOrNull() ?: return false
+        return kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(parsedA, parsedB)) <= maxDays
+    }
+
     suspend fun fetchTvSeasons(
         tmdbId: Long,
         apiKey: String,
         showTitle: String? = null,
         imdbId: String? = null
-    ): List<com.omnitrack.app.data.model.MediaSeason> = NetworkPacer.withTmdbPacing {
-        val tmdbSeasons = try {
-            val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) emptyList()
-                else {
-                    val body = response.body?.string() ?: return@use emptyList()
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val seasons = root["seasons"]?.jsonArray ?: return@use emptyList()
-                    seasons.mapNotNull { node ->
-                        val obj = node.jsonObject
-                        val seasonNumber = obj["season_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                        val cleanName = if (seasonNumber <= 0) "Specials" else "Season $seasonNumber"
-                        val epCount = obj["episode_count"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                        val posterPath = obj["poster_path"]?.jsonPrimitive?.content
-                        val airDate = obj["air_date"]?.jsonPrimitive?.content
-                        // Retain upcoming/announced seasons even before episode counts are locked in TMDb
-                        if (seasonNumber == 0 && epCount <= 0) return@mapNotNull null
-                        com.omnitrack.app.data.model.MediaSeason(
-                            seasonNumber = seasonNumber,
-                            name = cleanName,
-                            episodeCount = epCount,
-                            posterUrl = posterPath?.let { "https://image.tmdb.org/t/p/w342$it" },
-                            airDate = airDate
-                        )
-                    }
+    ): List<com.omnitrack.app.data.model.MediaSeason> {
+        val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
+        val tmdbSeasons = rawSeasons.mapNotNull { meta ->
+            if (meta.seasonNumber == 0 && meta.episodeCount <= 0) return@mapNotNull null
+            com.omnitrack.app.data.model.MediaSeason(
+                seasonNumber = meta.seasonNumber,
+                name = if (meta.seasonNumber <= 0) "Specials" else "Season ${meta.seasonNumber}",
+                episodeCount = meta.episodeCount,
+                posterUrl = meta.posterUrl,
+                airDate = meta.airDate
+            )
+        }
+
+        // Sub-Series Detection (e.g. "BLEACH: Thousand-Year Blood War" matching TMDb Season 2 on umbrella tmdbId=30984)
+        val matchedSubSeason = findMatchedSubSeason(rawSeasons, showTitle)
+        if (matchedSubSeason != null && !showTitle.isNullOrBlank()) {
+            val (rawEps, aniListCours) = coroutineScope {
+                val epsDeferred = async { fetchTmdbRawSeasonEpisodes(tmdbId, matchedSubSeason.seasonNumber, apiKey) }
+                val coursDeferred = async { fetchAniListSubSeriesCours(showTitle) }
+                epsDeferred.await() to coursDeferred.await()
+            }
+            val cours = splitEpisodesIntoCours(rawEps)
+            if (cours.isNotEmpty()) {
+                return cours.mapIndexed { idx, courEps ->
+                    val courNum = idx + 1
+                    com.omnitrack.app.data.model.MediaSeason(
+                        seasonNumber = courNum,
+                        name = "Season $courNum",
+                        episodeCount = courEps.size,
+                        posterUrl = aniListCours.getOrNull(idx)?.second ?: matchedSubSeason.posterUrl,
+                        airDate = courEps.firstOrNull()?.airDate
+                    )
                 }
             }
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            emptyList()
         }
 
         // Fast path: if TMDb returned multiple regular seasons with episodes (e.g. standard multi-season TV shows like Breaking Bad), return immediately.
-        // If TMDb only returned <= 1 regular season or Season 1 has > 26 episodes (lumped anime runs like The Apothecary Diaries), consult Cinemeta for split seasons!
+        // If TMDb only returned <= 1 regular season or Season 1 has > 26 episodes (lumped anime runs like Bleach / The Apothecary Diaries), consult Cinemeta for split seasons!
         val hasMultiSeasonTmdb = tmdbSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 } > 1
         val hasLumpedSeason1 = tmdbSeasons.any { it.seasonNumber == 1 && it.episodeCount > 26 }
         if (hasMultiSeasonTmdb && !hasLumpedSeason1) {
-            return@withTmdbPacing tmdbSeasons
+            return tmdbSeasons
                 .distinctBy { it.seasonNumber }
                 .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
         }
 
-        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
+        // Cinemeta fallback & merge for missing anime seasons (e.g. Frieren Season 2, Bleach S1-16, or Apothecary Diaries S2/3)
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         if (!effectiveImdbId.isNullOrBlank()) {
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
             if (cinemetaVideos.isNotEmpty()) {
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
+                val tmdbSeason1Poster = tmdbSeasons.find { it.seasonNumber == 1 }?.posterUrl
 
                 // Parallel season poster discovery capped at <= 5 seasons to prevent request storms on long-running anime (e.g. Bleach 16 seasons)
                 val seasonsNeedingPosters = cinemetaSeasons.keys.filter { sNum ->
@@ -1014,7 +1231,7 @@ class EnrichmentRepository(
                 } else emptyMap()
 
                 cinemetaSeasons.forEach { (sNum, eps) ->
-                    // 1. Sanity check: Discard empty or unreleased dummy phantom seasons (e.g. Cinemeta "Season 3" with 1 dummy unreleased placeholder)
+                    // 1. Sanity check: Discard empty or unreleased dummy phantom seasons
                     val isPhantom = eps.isEmpty() || (
                         eps.size <= 1 &&
                         eps.all { it.airDate.isNullOrBlank() } &&
@@ -1022,9 +1239,7 @@ class EnrichmentRepository(
                     )
                     if (isPhantom) return@forEach
 
-                    // 2. Specials (sNum <= 0) Sanity Check:
-                    // Only include Season 0 if TMDb explicitly listed Specials, OR if the episodes have legitimate release dates
-                    // and are not promotional interview clips, scene breakdowns, or screening talks.
+                    // 2. Specials (sNum <= 0) Sanity Check
                     if (sNum <= 0) {
                         val tmdbHasSpecials = tmdbSeasons.any { it.seasonNumber == 0 && it.episodeCount > 0 }
                         val isPromoOnly = eps.all { ep ->
@@ -1035,17 +1250,20 @@ class EnrichmentRepository(
                     }
 
                     val existing = mergedList.find { it.seasonNumber == sNum }
-                    if (existing == null) {
-                        // Season not in TMDb (e.g. Frieren Season 2 or Apothecary Diaries Season 2/3 in Cinemeta)
-                        val resolvedPoster = seasonPosters[sNum]
+                    val existingYear = existing?.airDate?.take(4)?.toIntOrNull()
+                    val cmYear = eps.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
+                    val isYearMismatch = existing != null && sNum >= 2 && existingYear != null && cmYear != null &&
+                        kotlin.math.abs(existingYear - cmYear) > 1
 
+                    if (existing == null) {
+                        val resolvedPoster = seasonPosters[sNum]
                         val posterUrl = if (sNum <= 0) {
                             mergedList.find { it.seasonNumber == 0 }?.posterUrl ?: resolvedPoster
                         } else if (sNum == 1) {
                             mergedList.find { it.seasonNumber == 1 }?.posterUrl ?: resolvedPoster
                         } else {
-                            // Distinct season poster for Season 2, Season 3, etc. NEVER fall back to Season 1!
-                            resolvedPoster
+                            // Use distinct season poster if found; for lumped multi-arc shows (e.g. Bleach S1-16), fall back to official 2:3 Season 1 poster
+                            resolvedPoster ?: if (hasLumpedSeason1) tmdbSeason1Poster else null
                         }
                         mergedList.add(
                             com.omnitrack.app.data.model.MediaSeason(
@@ -1055,6 +1273,16 @@ class EnrichmentRepository(
                                 posterUrl = posterUrl,
                                 airDate = eps.firstOrNull()?.airDate
                             )
+                        )
+                    } else if (isYearMismatch) {
+                        // Replace colliding TMDb sequel sub-season (e.g. 2022 TYBW stored as Season 2 on 2004 Bleach) with Cinemeta Season 2 (2005)
+                        val idx = mergedList.indexOf(existing)
+                        val resolvedPoster = seasonPosters[sNum] ?: if (hasLumpedSeason1) tmdbSeason1Poster else existing.posterUrl
+                        mergedList[idx] = existing.copy(
+                            name = "Season $sNum",
+                            episodeCount = eps.size,
+                            posterUrl = resolvedPoster,
+                            airDate = eps.firstOrNull()?.airDate
                         )
                     } else if (sNum == 1 && cinemetaSeasons.keys.any { it > 1 } && existing.episodeCount > eps.size && eps.isNotEmpty()) {
                         // TMDb lumped Season 1 and Season 2+ together (e.g. Apothecary Diaries 60 eps vs Cinemeta 24 eps)
@@ -1066,13 +1294,13 @@ class EnrichmentRepository(
                         mergedList[idx] = existing.copy(episodeCount = eps.size, posterUrl = resolvedPoster)
                     }
                 }
-                return@withTmdbPacing mergedList
+                return mergedList
                     .distinctBy { it.seasonNumber }
                     .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
             }
         }
 
-        return@withTmdbPacing tmdbSeasons
+        return tmdbSeasons
             .distinctBy { it.seasonNumber }
             .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
     }
@@ -1083,131 +1311,91 @@ class EnrichmentRepository(
         apiKey: String,
         imdbId: String? = null,
         showTitle: String? = null
-    ): List<com.omnitrack.app.data.model.MediaEpisode> = NetworkPacer.withTmdbPacing {
-        val tmdbEpisodes = try {
-            val url = "https://api.themoviedb.org/3/tv/$tmdbId/season/$seasonNumber?api_key=$apiKey"
-            val req = Request.Builder().url(url).get().build()
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) emptyList()
-                else {
-                    val body = response.body?.string() ?: return@use emptyList()
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val episodes = root["episodes"]?.jsonArray ?: return@use emptyList()
-                    episodes.mapNotNull { node ->
-                        val obj = node.jsonObject
-                        val epNumber = obj["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                        val id = obj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: (seasonNumber * 1000L + epNumber)
-                        val name = obj["name"]?.jsonPrimitive?.content ?: "Episode $epNumber"
-                        val overview = obj["overview"]?.jsonPrimitive?.content
-                        val stillPath = obj["still_path"]?.jsonPrimitive?.content
-                        val airDate = obj["air_date"]?.jsonPrimitive?.content
-                        val runtime = obj["runtime"]?.jsonPrimitive?.content?.toIntOrNull()
-                        val voteAverage = obj["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
-                        com.omnitrack.app.data.model.MediaEpisode(
-                            id = id,
-                            episodeNumber = epNumber,
-                            seasonNumber = seasonNumber,
-                            title = name,
-                            overview = overview,
-                            stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w780$it" },
-                            airDate = airDate,
-                            runtimeMinutes = runtime,
-                            voteAverage = voteAverage
-                        )
-                    }.sortedBy { it.episodeNumber }
-                }
+    ): List<com.omnitrack.app.data.model.MediaEpisode> {
+        val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
+
+        // Sub-Series Detection (e.g. "BLEACH: Thousand-Year Blood War" cours 1..4 inside TMDb Season 2)
+        val matchedSubSeason = findMatchedSubSeason(rawSeasons, showTitle)
+        if (matchedSubSeason != null && seasonNumber > 0) {
+            val rawEps = fetchTmdbRawSeasonEpisodes(tmdbId, matchedSubSeason.seasonNumber, apiKey)
+            val cours = splitEpisodesIntoCours(rawEps)
+            val targetCour = cours.getOrNull(seasonNumber - 1) ?: return emptyList()
+            return targetCour.mapIndexed { idx, ep ->
+                ep.copy(
+                    seasonNumber = seasonNumber,
+                    episodeNumber = idx + 1
+                )
             }
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            emptyList()
         }
 
-        if (tmdbEpisodes.isNotEmpty()) {
-            // If Cinemeta splits this show into Season 2+, ensure Season 1 doesn't show episodes belonging to subsequent seasons
-            if (seasonNumber == 1) {
-                val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
-                if (!effectiveImdbId.isNullOrBlank()) {
-                    val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
-                    val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
-                    val hasCinemetaS2 = cinemetaVideos.any { it.seasonNumber == 2 }
-                    if (hasCinemetaS2 && cinemetaS1Count in 1 until tmdbEpisodes.size) {
-                        return@withTmdbPacing tmdbEpisodes.filter { it.episodeNumber <= cinemetaS1Count }
-                    }
-                }
-            }
-            return@withTmdbPacing tmdbEpisodes
-        }
-
-        // If TMDb has no episodes for this season (e.g. anime split seasons or Frieren Season 2), fallback to Cinemeta!
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
-        if (!effectiveImdbId.isNullOrBlank()) {
-            val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
-            val seasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
-            if (seasonEps.isNotEmpty()) {
-                // Cross-reference with TMDb Season 1 for anime using continuous absolute numbering (e.g. Apothecary Diaries S2/S3, Attack on Titan, etc.)
-                val tmdbSeason1Eps = tmdbSeason1StillsCache[tmdbId] ?: try {
-                    val s1Url = "https://api.themoviedb.org/3/tv/$tmdbId/season/1?api_key=$apiKey"
-                    val s1Req = Request.Builder().url(s1Url).get().build()
-                    client.newCall(s1Req).execute().use { resp ->
-                        if (resp.isSuccessful) {
-                            val s1Body = resp.body?.string() ?: return@use emptyList()
-                            val s1Root = json.parseToJsonElement(s1Body).jsonObject
-                            val eps = s1Root["episodes"]?.jsonArray ?: return@use emptyList()
-                            val mapped = eps.mapNotNull { node ->
-                                val o = node.jsonObject
-                                val name = o["name"]?.jsonPrimitive?.content
-                                val still = o["still_path"]?.jsonPrimitive?.content?.let { "https://image.tmdb.org/t/p/w780$it" }
-                                val air = o["air_date"]?.jsonPrimitive?.content
-                                val overview = o["overview"]?.jsonPrimitive?.content
-                                val rating = o["vote_average"]?.jsonPrimitive?.content?.toFloatOrNull()
-                                if (name != null || air != null) {
-                                    com.omnitrack.app.data.model.MediaEpisode(
-                                        id = 0L,
-                                        episodeNumber = o["episode_number"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
-                                        seasonNumber = 1,
-                                        title = name ?: "",
-                                        overview = overview,
-                                        stillUrl = still,
-                                        airDate = air,
-                                        runtimeMinutes = null,
-                                        voteAverage = rating
-                                    )
-                                } else null
-                            }
-                            if (mapped.isNotEmpty()) {
-                                tmdbSeason1StillsCache[tmdbId] = mapped
-                            }
-                            mapped
-                        } else emptyList()
+        val cinemetaVideos = if (!effectiveImdbId.isNullOrBlank()) fetchCinemetaVideos(effectiveImdbId) else emptyList()
+        val cmSeasonEps = cinemetaVideos.filter { it.seasonNumber == seasonNumber }.sortedBy { it.episodeNumber }
+        val hasCinemetaS2 = cinemetaVideos.any { it.seasonNumber == 2 }
+
+        val tmdbRawMeta = rawSeasons.firstOrNull { it.seasonNumber == seasonNumber }
+        val metaYear = tmdbRawMeta?.airDate?.take(4)?.toIntOrNull()
+        val cmSeasonYear = cmSeasonEps.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
+        val isMetaYearMismatch = seasonNumber >= 2 && hasCinemetaS2 && cmSeasonEps.isNotEmpty() &&
+            metaYear != null && cmSeasonYear != null && kotlin.math.abs(metaYear - cmSeasonYear) > 1
+        val hasTmdbSeasonInMeta = (rawSeasons.isEmpty() || (tmdbRawMeta != null && tmdbRawMeta.episodeCount > 0)) && !isMetaYearMismatch
+
+        if (hasTmdbSeasonInMeta) {
+            val tmdbEpisodes = fetchTmdbRawSeasonEpisodes(tmdbId, seasonNumber, apiKey)
+            if (tmdbEpisodes.isNotEmpty()) {
+                if (seasonNumber == 1 && cinemetaVideos.isNotEmpty()) {
+                    val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
+                    if (hasCinemetaS2 && cinemetaS1Count in 1 until tmdbEpisodes.size) {
+                        return tmdbEpisodes.filter { it.episodeNumber <= cinemetaS1Count }
                     }
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    emptyList()
+                    return tmdbEpisodes
                 }
-
-                val enrichedEps = seasonEps.map { ep ->
-                    // 1. Cross-reference TMDb absolute numbering by exact title or air date
-                    val tmdbMatch = tmdbSeason1Eps.firstOrNull { t ->
-                        !t.title.isBlank() && t.title.trim().equals(ep.title.trim(), ignoreCase = true)
-                    } ?: tmdbSeason1Eps.firstOrNull { t ->
-                        !t.airDate.isNullOrBlank() && !ep.airDate.isNullOrBlank() && t.airDate == ep.airDate
-                    }
-
-                    val resolvedStill = tmdbMatch?.stillUrl ?: ep.stillUrl
-                    val resolvedOverview = if (ep.overview.isNullOrBlank()) tmdbMatch?.overview else ep.overview
-                    val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
-
-                    ep.copy(
-                        stillUrl = resolvedStill,
-                        overview = resolvedOverview,
-                        voteAverage = resolvedVote
-                    )
+                val epYear = tmdbEpisodes.firstOrNull()?.airDate?.take(4)?.toIntOrNull()
+                val isEpYearMismatch = seasonNumber >= 2 && hasCinemetaS2 && cmSeasonEps.isNotEmpty() &&
+                    epYear != null && cmSeasonYear != null && kotlin.math.abs(epYear - cmSeasonYear) > 1
+                if (!isEpYearMismatch) {
+                    return tmdbEpisodes
                 }
-                return@withTmdbPacing enrichedEps
             }
         }
 
-        return@withTmdbPacing emptyList()
+        // Cinemeta fallback + TMDb Season 1 cumulative & title/date enrichment (e.g. Bleach S2-16, Apothecary Diaries S2/3)
+        if (cmSeasonEps.isNotEmpty()) {
+            val tmdbSeason1Eps = tmdbSeason1StillsCache[tmdbId] ?: fetchTmdbRawSeasonEpisodes(tmdbId, 1, apiKey)
+            val cinemetaS1Count = cinemetaVideos.count { it.seasonNumber == 1 }
+            val isLumpedSeries = tmdbSeason1Eps.size > cinemetaS1Count && cinemetaS1Count > 0
+            val priorCinemetaEpsCount = if (seasonNumber > 0) {
+                cinemetaVideos.count { it.seasonNumber in 1 until seasonNumber }
+            } else 0
+
+            return cmSeasonEps.mapIndexed { idx, ep ->
+                val cumulativeEpNum = if (seasonNumber > 0) priorCinemetaEpsCount + idx + 1 else -1
+                val byCumulative = if (isLumpedSeries && cumulativeEpNum in 1..tmdbSeason1Eps.size) {
+                    tmdbSeason1Eps.firstOrNull { it.episodeNumber == cumulativeEpNum }
+                } else null
+                val byTitle = if (byCumulative == null) {
+                    tmdbSeason1Eps.firstOrNull { t ->
+                        t.title.isNotBlank() && t.title.trim().equals(ep.title.trim(), ignoreCase = true)
+                    }
+                } else null
+                val byDate = if (byCumulative == null && byTitle == null) {
+                    tmdbSeason1Eps.firstOrNull { t -> isAirDateWithinDays(t.airDate, ep.airDate, 3L) }
+                } else null
+
+                val tmdbMatch = byCumulative ?: byTitle ?: byDate
+                val resolvedStill = tmdbMatch?.stillUrl ?: ep.stillUrl
+                val resolvedOverview = if (ep.overview.isNullOrBlank()) tmdbMatch?.overview else ep.overview
+                val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
+
+                ep.copy(
+                    stillUrl = resolvedStill,
+                    overview = resolvedOverview,
+                    voteAverage = resolvedVote
+                )
+            }
+        }
+
+        return emptyList()
     }
 
     data class KitsuSeasonData(
@@ -1296,10 +1484,16 @@ class EnrichmentRepository(
     }
 
     suspend fun fetchAniListSeasonPoster(title: String, seasonNumber: Int): String? = withContext(Dispatchers.IO) {
-        val strippedTitle = title
+        val afterColon = title.substringAfter(":", "").trim()
+        val strippedBase = if (afterColon.contains("season", ignoreCase = true) || afterColon.contains("part", ignoreCase = true)) {
+            title.substringBefore(":").trim()
+        } else {
+            title
+        }
+        val strippedTitle = strippedBase
             .replace(Regex("(?i)\\s*(?:season|\\d+(?:st|nd|rd|th)\\s+season|part)\\s*\\d*.*"), "")
-            .split(":", "-", "–").firstOrNull()?.trim()
-            ?.takeIf { it.isNotBlank() } ?: title
+            .trim()
+            .takeIf { it.isNotBlank() } ?: title
         val cacheKey = "$strippedTitle:$seasonNumber"
         aniListSeasonPosterCache[cacheKey]?.let { return@withContext it }
 
@@ -1878,6 +2072,7 @@ class EnrichmentRepository(
 
                         // Extract per-season AniList ID from Level 1 relation
                         val sNum = parseSeasonNumber(relTitle)
+                        var assignedParentSeason: Int? = sNum
                         if (sNum != null && sNum > 0) {
                             if (!seasonAniListMap.containsKey(sNum)) {
                                 seasonAniListMap[sNum] = relId
@@ -1885,12 +2080,12 @@ class EnrichmentRepository(
                             if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(sNum)) {
                                 seasonMalMap[sNum] = relIdMal
                             }
-                        } else if (relFormat.equals("TV", ignoreCase = true) && relType == "SEQUEL") {
-                            if (!seasonAniListMap.containsKey(2)) {
-                                seasonAniListMap[2] = relId
-                            }
-                            if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(2)) {
-                                seasonMalMap[2] = relIdMal
+                        } else if (relFormat in listOf("TV", "TV_SHORT", "ONA") && relType == "SEQUEL") {
+                            val seqNum = if (!seasonAniListMap.containsKey(2)) 2 else ((seasonAniListMap.keys.maxOrNull() ?: 1) + 1)
+                            assignedParentSeason = seqNum
+                            seasonAniListMap[seqNum] = relId
+                            if (relIdMal != null && relIdMal > 0 && !seasonMalMap.containsKey(seqNum)) {
+                                seasonMalMap[seqNum] = relIdMal
                             }
                         } else if (relType in listOf("SIDE_STORY", "SPECIAL", "OVA")) {
                             if (!seasonAniListMap.containsKey(0)) {
@@ -1925,6 +2120,14 @@ class EnrichmentRepository(
                                         }
                                         if (cIdMal != null && cIdMal > 0 && !seasonMalMap.containsKey(cNum)) {
                                             seasonMalMap[cNum] = cIdMal
+                                        }
+                                    } else if (cRelType == "SEQUEL" && relType == "SEQUEL" && assignedParentSeason != null) {
+                                        val nextSeqSeason = assignedParentSeason + 1
+                                        if (!seasonAniListMap.containsKey(nextSeqSeason)) {
+                                            seasonAniListMap[nextSeqSeason] = cId
+                                        }
+                                        if (cIdMal != null && cIdMal > 0 && !seasonMalMap.containsKey(nextSeqSeason)) {
+                                            seasonMalMap[nextSeqSeason] = cIdMal
                                         }
                                     } else if (cRelType in listOf("ADAPTATION", "PREQUEL") && !seasonAniListMap.containsKey(1)) {
                                         val cYear = cNode["startDate"]?.jsonObject?.get("year")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
@@ -3457,6 +3660,16 @@ class EnrichmentRepository(
         try {
             val root = fetchAniZipRoot(anilistId) ?: return@withContext null
             root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    suspend fun fetchAniZipImdbId(anilistId: Long): String? = withContext(Dispatchers.IO) {
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext null
+            root["mappings"]?.jsonObject?.get("imdb_id").cleanString()
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             null

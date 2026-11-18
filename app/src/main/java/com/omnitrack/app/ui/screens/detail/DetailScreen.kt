@@ -110,6 +110,7 @@ import com.omnitrack.app.ui.components.ChapterStepper
 import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.ui.components.GameProgressCard
 import com.omnitrack.app.ui.components.featherArtwork
+import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
 import com.omnitrack.app.ui.screens.detail.components.CastMember
@@ -392,17 +393,61 @@ fun DetailScreen(
 
     var frozenPrevPreview by remember { mutableStateOf<MediaItemEntity?>(null) }
     var frozenNextPreview by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var gestureBaseItemId by remember { mutableStateOf(item?.id) }
+
+    // Pre-warm adjacent siblings' blurred backdrops, dominant colors, and images before swipe starts
+    listOfNotNull(uiState.previousItem, uiState.nextItem).forEach { sibling ->
+        val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null else (sibling.customBannerPath ?: sibling.bannerUrl)
+        val sibCover = sibling.customCoverPath ?: if (sibling.artworkRole == "BANNER_AS_COVER") (sibling.bannerUrl ?: sibling.coverUrl) else sibling.coverUrl
+        rememberArtworkBackdrop(imageUrl = sibBanner ?: sibCover, enabled = isCinematicBlur)
+        rememberCoverDominantColor(LosslessCoverMapper.toLosslessUrl(sibCover))
+        rememberCoverDominantColor(sibBanner)
+    }
+
+    LaunchedEffect(uiState.previousItem?.id, uiState.nextItem?.id, isCinematicBlur) {
+        val loader = coil3.SingletonImageLoader.get(context)
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        listOfNotNull(uiState.previousItem, uiState.nextItem).forEach { sibling ->
+            val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null else (sibling.customBannerPath ?: sibling.bannerUrl)
+            val sibCover = sibling.customCoverPath ?: if (sibling.artworkRole == "BANNER_AS_COVER") (sibling.bannerUrl ?: sibling.coverUrl) else sibling.coverUrl
+            val sibClearart = sibling.clearartUrl?.takeIf {
+                it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)
+            } ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(sibling)?.takeIf {
+                !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+            }
+            if (!sibBanner.isNullOrBlank()) {
+                loader.enqueue(ImageRequest.Builder(context).data(sibBanner).crossfade(false).build())
+            }
+            if (sibCover.isNotBlank()) {
+                val coverData: Any = sibling.customCoverPath?.let {
+                    if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it)
+                } ?: LosslessCoverMapper.toLosslessUrl(sibCover)
+                loader.enqueue(ImageRequest.Builder(context).data(coverData).crossfade(false).build())
+            }
+            if (!sibClearart.isNullOrBlank()) {
+                loader.enqueue(ImageRequest.Builder(context).data(sibClearart).crossfade(false).build())
+            }
+            if (isCinematicBlur) {
+                prefetchArtworkBackdrop(context, sibBanner ?: sibCover)
+            }
+        }
+    }
 
     LaunchedEffect(uiState.previousItem, uiState.nextItem, item?.id) {
-        if (animatableOffsetX.value == 0f) {
+        if (animatableOffsetX.value == 0f || item?.id != gestureBaseItemId) {
             frozenPrevPreview = uiState.previousItem
             frozenNextPreview = uiState.nextItem
         }
     }
 
     LaunchedEffect(item?.id) {
+        val switchedEntry = gestureBaseItemId != null && item?.id != gestureBaseItemId
+        gestureBaseItemId = item?.id
         animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
+        if (switchedEntry && scrollState.value > 0) {
+            scrollState.scrollTo(0)
+        }
         frozenPrevPreview = uiState.previousItem
         frozenNextPreview = uiState.nextItem
         if (item != null) {
@@ -417,7 +462,7 @@ fun DetailScreen(
     ) {
         val density = LocalDensity.current
         val screenWidthPx = with(density) { maxWidth.toPx() }
-        val currentOffsetX = animatableOffsetX.value
+        val currentOffsetX = if (item?.id == gestureBaseItemId) animatableOffsetX.value else 0f
         val activePrevPreview = frozenPrevPreview ?: uiState.previousItem
         val activeNextPreview = frozenNextPreview ?: uiState.nextItem
 
@@ -485,6 +530,9 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
+                                        if (scrollState.value > 0) {
+                                            scrollState.scrollTo(0)
+                                        }
                                         val navigated = viewModel.navigateToPrevious()
                                         if (!navigated) {
                                             animatableOffsetX.snapTo(0f)
@@ -501,6 +549,9 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
+                                        if (scrollState.value > 0) {
+                                            scrollState.scrollTo(0)
+                                        }
                                         val navigated = viewModel.navigateToNext()
                                         if (!navigated) {
                                             animatableOffsetX.snapTo(0f)
@@ -1257,9 +1308,27 @@ private fun SiblingDetailPreview(
     presentationSettings: PresentationSettings,
     modifier: Modifier = Modifier
 ) {
-    val effectiveCover = when (item.artworkRole) {
-        "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-        else -> item.coverUrl
+    val cachedAux = remember(item.id, item.tmdbId, item.anilistId, item.malId) {
+        DetailAuxMemoryCache.getCacheKey(item)?.let { DetailAuxMemoryCache.cache[it] }
+            ?: item.tmdbId?.takeIf { item.mediaType != MediaType.ANIME || item.anilistId == null || item.anilistId <= 0L }?.let {
+                DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", it)]
+            }
+    }
+    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+    val siblingClearLogo = cachedAux?.heroClearLogoUrl?.takeIf {
+        !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+    } ?: item.clearartUrl?.takeIf {
+        !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+    }
+
+    val effectiveCover = item.customCoverPath
+        ?: when (item.artworkRole) {
+            "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
+            else -> item.coverUrl
+        }
+    val coverImageModel = remember(effectiveCover, item.customCoverPath) {
+        item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
+            ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
     }
     val effectiveBanner = when {
         item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
@@ -1306,6 +1375,9 @@ private fun SiblingDetailPreview(
                 DetailHeroHeaderSection(
                     item = item,
                     backdropTargetUrl = backdropTargetUrl,
+                    englishTitle = cachedAux?.englishTitle,
+                    romajiTitle = cachedAux?.romajiTitle,
+                    heroClearLogoUrl = siblingClearLogo,
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -1315,8 +1387,11 @@ private fun SiblingDetailPreview(
             } else {
                 DetailClassicHeaderSection(
                     item = item,
-                    coverImageModel = LosslessCoverMapper.toLosslessUrl(effectiveCover),
+                    coverImageModel = coverImageModel,
                     backdropTargetUrl = backdropTargetUrl,
+                    englishTitle = cachedAux?.englishTitle,
+                    romajiTitle = cachedAux?.romajiTitle,
+                    heroClearLogoUrl = siblingClearLogo,
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -1328,8 +1403,9 @@ private fun SiblingDetailPreview(
             }
 
             val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
                 DetailProgressSection(
                     item = item,
                     onUpdateProgress = {},
@@ -1337,10 +1413,9 @@ private fun SiblingDetailPreview(
                     onTogglePlatform = {},
                     onUpdateStatus = {}
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(4.dp))
             } else {
-                val hasBackdrop = backdropTargetUrl != null
-                Spacer(modifier = Modifier.height(if (hasBackdrop) (-18).dp else 8.dp))
+                Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
             }
 
             if (!item.synopsis.isNullOrBlank()) {
@@ -1348,7 +1423,7 @@ private fun SiblingDetailPreview(
                     synopsis = item.synopsis,
                     dominantAccent = dominantAccent
                 )
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
             }
 
             DetailShowDetailsSection(item = item)
@@ -1634,10 +1709,11 @@ private fun DetailHeroHeaderSection(
                 .fillMaxWidth()
                 .height(350.dp)
         ) {
-            val bannerRequest = androidx.compose.ui.platform.LocalContext.current.let { ctx ->
-                ImageRequest.Builder(ctx)
+            val heroContext = LocalContext.current
+            val bannerRequest = remember(backdropTargetUrl, heroContext) {
+                ImageRequest.Builder(heroContext)
                     .data(backdropTargetUrl)
-                    .crossfade(true)
+                    .crossfade(false)
                     .build()
             }
             AsyncImage(
@@ -1794,10 +1870,11 @@ private fun DetailClassicHeaderSection(
                 .fillMaxWidth()
                 .height(350.dp)
         ) {
-            val bannerRequest = androidx.compose.ui.platform.LocalContext.current.let { ctx ->
-                ImageRequest.Builder(ctx)
+            val classicContext = LocalContext.current
+            val bannerRequest = remember(backdropTargetUrl, classicContext) {
+                ImageRequest.Builder(classicContext)
                     .data(backdropTargetUrl)
-                    .crossfade(true)
+                    .crossfade(false)
                     .build()
             }
             AsyncImage(
@@ -1988,23 +2065,18 @@ private fun DetailSynopsisSection(
             .trim()
     }
 
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        var localTts: android.speech.tts.TextToSpeech? = null
-        localTts = android.speech.tts.TextToSpeech(context) { status ->
-            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                localTts?.language = java.util.Locale.ENGLISH
-                localTts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) { isSpeaking = true }
-                    override fun onDone(utteranceId: String?) { isSpeaking = false }
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) { isSpeaking = false }
-                })
-            }
+    LaunchedEffect(cleanText) {
+        if (isSpeaking) {
+            ttsInstance?.stop()
+            isSpeaking = false
         }
-        ttsInstance = localTts
+    }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
-            localTts?.stop()
-            localTts?.shutdown()
+            ttsInstance?.stop()
+            ttsInstance?.shutdown()
+            ttsInstance = null
         }
     }
 
@@ -2040,8 +2112,29 @@ private fun DetailSynopsisSection(
                             ttsInstance?.stop()
                             isSpeaking = false
                         } else {
-                            ttsInstance?.speak(cleanText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "synopsis_tts")
-                            isSpeaking = true
+                            val existing = ttsInstance
+                            if (existing != null) {
+                                existing.speak(cleanText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "synopsis_tts")
+                                isSpeaking = true
+                            } else {
+                                isSpeaking = true
+                                var createdTts: android.speech.tts.TextToSpeech? = null
+                                createdTts = android.speech.tts.TextToSpeech(context) { status ->
+                                    if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                                        createdTts?.language = java.util.Locale.ENGLISH
+                                        createdTts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                                            override fun onStart(utteranceId: String?) { isSpeaking = true }
+                                            override fun onDone(utteranceId: String?) { isSpeaking = false }
+                                            @Deprecated("Deprecated in Java")
+                                            override fun onError(utteranceId: String?) { isSpeaking = false }
+                                        })
+                                        createdTts?.speak(cleanText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "synopsis_tts")
+                                    } else {
+                                        isSpeaking = false
+                                    }
+                                }
+                                ttsInstance = createdTts
+                            }
                         }
                     }
                     .padding(horizontal = 10.dp, vertical = 4.dp),

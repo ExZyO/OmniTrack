@@ -1,9 +1,7 @@
 package com.omnitrack.app.ui.components
 
+import android.content.Context
 import android.graphics.Bitmap
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -51,6 +49,48 @@ private val backdropScrim = Brush.verticalGradient(
 )
 
 /**
+ * Decodes, box-blurs, and caches a backdrop ImageBitmap in memory for instant zero-flash transitions.
+ */
+suspend fun prefetchArtworkBackdrop(context: Context, imageUrl: String?): ImageBitmap? {
+    val losslessUrl = imageUrl?.let { LosslessCoverMapper.toLosslessUrl(it) }?.takeIf { it.isNotBlank() }
+        ?: return null
+    synchronized(backdropCache) {
+        backdropCache[losslessUrl]?.let { return it }
+    }
+    val request = ImageRequest.Builder(context)
+        .data(losslessUrl)
+        .size(128)
+        .precision(Precision.EXACT)
+        .build()
+    val result = SingletonImageLoader.get(context).execute(request) as? SuccessResult
+        ?: return null
+    val blurred = withContext(Dispatchers.Default) {
+        runCatching {
+            val srcBitmap = result.image.toBitmap()
+            val softwareBitmap = if (srcBitmap.config == Bitmap.Config.HARDWARE || !srcBitmap.isMutable) {
+                srcBitmap.copy(Bitmap.Config.ARGB_8888, true)
+            } else {
+                srcBitmap
+            }
+            val pixels = IntArray(softwareBitmap.width * softwareBitmap.height)
+            softwareBitmap.getPixels(pixels, 0, softwareBitmap.width, 0, 0, softwareBitmap.width, softwareBitmap.height)
+            blurBackdropPixels(pixels, softwareBitmap.width, softwareBitmap.height)
+            softwareBitmap.setPixels(pixels, 0, softwareBitmap.width, 0, 0, softwareBitmap.width, softwareBitmap.height)
+            softwareBitmap.asImageBitmap()
+        }.getOrNull()
+    } ?: return null
+
+    synchronized(backdropCache) {
+        backdropCache[losslessUrl] = blurred
+        if (backdropCache.size > 12) {
+            val oldestKey = backdropCache.keys.firstOrNull()
+            if (oldestKey != null) backdropCache.remove(oldestKey)
+        }
+    }
+    return blurred
+}
+
+/**
  * Loads a micro-thumbnail of the artwork, executes a 3-pass fast box-blur across raw pixel data,
  * and caches the resulting ImageBitmap in an LRU memory cache.
  *
@@ -60,47 +100,25 @@ private val backdropScrim = Brush.verticalGradient(
 fun rememberArtworkBackdrop(imageUrl: String?, enabled: Boolean = true): ImageBitmap? {
     val context = LocalContext.current
     val losslessUrl = remember(imageUrl) { imageUrl?.let { LosslessCoverMapper.toLosslessUrl(it) } }
-    var image by remember { mutableStateOf(losslessUrl?.let { backdropCache[it] }) }
+    var image by remember(losslessUrl) {
+        mutableStateOf(
+            if (enabled && !losslessUrl.isNullOrBlank()) {
+                synchronized(backdropCache) { backdropCache[losslessUrl] }
+            } else null
+        )
+    }
 
     LaunchedEffect(losslessUrl, enabled, context) {
         if (!enabled || losslessUrl.isNullOrBlank()) {
-            if (!enabled) image = null
+            image = null
             return@LaunchedEffect
         }
-        val cached = backdropCache[losslessUrl]
+        val cached = synchronized(backdropCache) { backdropCache[losslessUrl] }
         if (cached != null) {
             image = cached
             return@LaunchedEffect
         }
-        val request = ImageRequest.Builder(context)
-            .data(losslessUrl)
-            .size(128)
-            .precision(Precision.EXACT)
-            .build()
-        val result = SingletonImageLoader.get(context).execute(request) as? SuccessResult
-            ?: return@LaunchedEffect
-        val blurred = withContext(Dispatchers.Default) {
-            runCatching {
-                val srcBitmap = result.image.toBitmap()
-                val softwareBitmap = if (srcBitmap.config == Bitmap.Config.HARDWARE || !srcBitmap.isMutable) {
-                    srcBitmap.copy(Bitmap.Config.ARGB_8888, true)
-                } else {
-                    srcBitmap
-                }
-                val pixels = IntArray(softwareBitmap.width * softwareBitmap.height)
-                softwareBitmap.getPixels(pixels, 0, softwareBitmap.width, 0, 0, softwareBitmap.width, softwareBitmap.height)
-                blurBackdropPixels(pixels, softwareBitmap.width, softwareBitmap.height)
-                softwareBitmap.setPixels(pixels, 0, softwareBitmap.width, 0, 0, softwareBitmap.width, softwareBitmap.height)
-                softwareBitmap.asImageBitmap()
-            }.getOrNull()
-        } ?: return@LaunchedEffect
-
-        backdropCache[losslessUrl] = blurred
-        if (backdropCache.size > 8) {
-            val oldestKey = backdropCache.keys.firstOrNull()
-            if (oldestKey != null) backdropCache.remove(oldestKey)
-        }
-        image = blurred
+        image = prefetchArtworkBackdrop(context, losslessUrl)
     }
 
     return image
@@ -108,7 +126,7 @@ fun rememberArtworkBackdrop(imageUrl: String?, enabled: Boolean = true): ImageBi
 
 /**
  * Full-screen backdrop canvas rendering the blurred ImageBitmap with a gentle vertical scrim.
- * Sits directly behind all content without causing boundary lines or clipping seams.
+ * Renders directly without crossfade so sibling hand-off matches SiblingDetailPreview 1:1 with zero flash.
  */
 @Composable
 fun ArtworkBackdrop(
@@ -117,20 +135,14 @@ fun ArtworkBackdrop(
     alignment: Alignment = Alignment.Center
 ) {
     Box(modifier = modifier.fillMaxSize().background(AmoledBlack)) {
-        Crossfade(
-            targetState = image,
-            animationSpec = tween(320, easing = FastOutSlowInEasing),
-            label = "artwork_backdrop"
-        ) { bitmap ->
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = null,
-                    alignment = alignment,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                alignment = alignment,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         Box(Modifier.fillMaxSize().background(backdropScrim))
     }

@@ -4,11 +4,14 @@ import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.util.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -37,8 +40,11 @@ import java.util.concurrent.TimeUnit
 class OmniSearchRepository(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.getClient()
 ) {
+    companion object {
+        private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
+    }
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
-    private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
 
     private val providerPriority = mapOf(
         "AniList" to 1,
@@ -52,11 +58,29 @@ class OmniSearchRepository(
         "Bangumi" to 10
     )
 
-    private fun prioritizeAndDedupe(rawResults: List<SearchResultItem>): List<SearchResultItem> {
-        val prioritized = rawResults.sortedWith(compareBy(
-            { providerPriority[it.sourceProvider] ?: 50 },
-            { -(it.communityScore ?: 0f) }
-        ))
+    private fun prioritizeAndDedupe(
+        rawResults: List<SearchResultItem>,
+        query: String = ""
+    ): List<SearchResultItem> {
+        val q = query.trim().lowercase()
+        val prioritized = rawResults.withIndex().sortedWith(compareBy(
+            { (_, item) ->
+                if (q.isNotEmpty() && (
+                        item.title.trim().equals(q, ignoreCase = true) ||
+                        item.nativeTitle?.trim()?.equals(q, ignoreCase = true) == true
+                    )
+                ) 0 else 1
+            },
+            { (_, item) -> providerPriority[item.sourceProvider] ?: 50 },
+            { (_, item) ->
+                if (q.isNotEmpty() && (
+                        item.title.trim().lowercase().startsWith(q) ||
+                        item.nativeTitle?.trim()?.lowercase()?.startsWith(q) == true
+                    )
+                ) 0 else 1
+            },
+            { (index, _) -> index }
+        )).map { it.value }
         val seen = mutableSetOf<String>()
         val deduped = mutableListOf<SearchResultItem>()
         for (item in prioritized) {
@@ -83,15 +107,20 @@ class OmniSearchRepository(
             val emitMutex = Mutex()
 
             fun launchProvider(block: suspend () -> List<SearchResultItem>) = async {
+                currentCoroutineContext().ensureActive()
                 val res = block()
-                if (res.isNotEmpty() && onPartialResults != null) {
+                currentCoroutineContext().ensureActive()
+                val filteredRes = if (filter == MediaType.ALL) res else res.filter { it.mediaType == filter }
+                if (filteredRes.isNotEmpty() && onPartialResults != null) {
                     val snapshot = emitMutex.withLock {
-                        accumulated.addAll(res)
-                        prioritizeAndDedupe(accumulated.toList())
+                        currentCoroutineContext().ensureActive()
+                        accumulated.addAll(filteredRes)
+                        prioritizeAndDedupe(accumulated.toList(), trimmed)
                     }
+                    currentCoroutineContext().ensureActive()
                     onPartialResults(snapshot)
                 }
-                res
+                filteredRes
             }
 
             when (filter) {
@@ -144,7 +173,8 @@ class OmniSearchRepository(
                 }
             }
 
-            prioritizeAndDedupe(deferreds.awaitAll().flatten())
+            currentCoroutineContext().ensureActive()
+            prioritizeAndDedupe(deferreds.awaitAll().flatten(), trimmed)
         }
     }
 
@@ -349,6 +379,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -412,6 +443,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -431,6 +463,7 @@ class OmniSearchRepository(
             if (preferType == null || preferType == MediaType.SHOW || preferType == MediaType.ALL) {
                 results.addAll(searchTvMaze(query))
             }
+            currentCoroutineContext().ensureActive()
             // Movies -> Cinemeta (zero-key public IMDb catalog)
             if (preferType == null || preferType == MediaType.MOVIE || preferType == MediaType.ALL) {
                 results.addAll(searchCinemetaMovies(query))
@@ -475,6 +508,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -546,6 +580,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -589,6 +624,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -628,6 +664,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -678,6 +715,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -746,6 +784,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -790,6 +829,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -831,6 +871,7 @@ class OmniSearchRepository(
                 results
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -875,6 +916,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -931,6 +973,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }
@@ -968,6 +1011,7 @@ class OmniSearchRepository(
                 }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
         }

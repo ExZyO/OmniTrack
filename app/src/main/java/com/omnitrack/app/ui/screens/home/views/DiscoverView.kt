@@ -131,6 +131,7 @@ fun DiscoverView(
     var localLastExecutedAi by remember { mutableStateOf(homeViewModel?.discoverLastExecutedAi) }
     var localLastEffectiveQuery by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveQuery) }
     var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
+    var searchGen by remember { mutableStateOf(0L) }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -146,6 +147,7 @@ fun DiscoverView(
 
     // Multi-Vertical OmniSearch Trigger
     LaunchedEffect(searchQuery, selectedFilter, useAiSearch) {
+        val myGen = ++searchGen
         val trimmed = searchQuery.trim()
         val prevQuery = homeViewModel?.discoverLastExecutedQuery ?: localLastExecutedQuery
         val prevFilter = homeViewModel?.discoverLastExecutedFilter ?: localLastExecutedFilter
@@ -157,8 +159,12 @@ fun DiscoverView(
                 // Preserved search results restored from previous navigation! Don't re-trigger.
                 return@LaunchedEffect
             }
-            if (trimmed != prevDebounceQuery) {
+            val filterChanged = prevFilter != null && selectedFilter != prevFilter
+            if (!filterChanged && trimmed != prevDebounceQuery) {
                 delay(400)
+                localLastDebounceQuery = trimmed
+                homeViewModel?.discoverLastDebounceQuery = trimmed
+            } else if (trimmed != prevDebounceQuery) {
                 localLastDebounceQuery = trimmed
                 homeViewModel?.discoverLastDebounceQuery = trimmed
             }
@@ -216,6 +222,12 @@ fun DiscoverView(
                 return@LaunchedEffect
             }
 
+            if (queryToRun != lastEffQuery) {
+                resultsFlow.value = emptyList()
+            } else if (filterToRun != MediaType.ALL) {
+                resultsFlow.value = resultsFlow.value.filter { it.mediaType == filterToRun }
+            }
+
             localLastExecutedQuery = trimmed
             localLastExecutedFilter = selectedFilter
             localLastExecutedAi = useAiSearch
@@ -234,15 +246,23 @@ fun DiscoverView(
                     filter = filterToRun,
                     tmdbApiKey = tmdbKey.ifBlank { null },
                     onPartialResults = { partial ->
-                        resultsFlow.value = partial
+                        if (myGen == searchGen && filterFlow.value == selectedFilter) {
+                            resultsFlow.value = if (filterToRun == MediaType.ALL) partial else partial.filter { it.mediaType == filterToRun }
+                        }
                     }
                 )
-                resultsFlow.value = results
+                if (myGen == searchGen && filterFlow.value == selectedFilter) {
+                    resultsFlow.value = if (filterToRun == MediaType.ALL) results else results.filter { it.mediaType == filterToRun }
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                resultsFlow.value = emptyList()
+                if (myGen == searchGen) {
+                    resultsFlow.value = emptyList()
+                }
             } finally {
-                isSearchingFlow.value = false
+                if (myGen == searchGen) {
+                    isSearchingFlow.value = false
+                }
             }
         } else {
             localLastDebounceQuery = null
@@ -438,18 +458,22 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        if (isSearching && searchResults.isEmpty()) {
+        val visibleResults = remember(searchResults, selectedFilter) {
+            if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
+        }
+
+        if (isSearching && visibleResults.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
             }
-        } else if (searchResults.isNotEmpty()) {
+        } else if (visibleResults.isNotEmpty()) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 8.dp)
             ) {
                 Text(
-                    text = "Results (${searchResults.size})",
+                    text = "Results (${visibleResults.size})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextMuted
@@ -478,7 +502,7 @@ fun DiscoverView(
                     contentPadding = PaddingValues(bottom = 110.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(searchResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
+                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.tmdbId ?: it.igdbId ?: it.vndbId}" }) { item ->
                     val existingInLibrary = allMedia.firstOrNull { summary ->
                         summary.mediaType == item.mediaType && (
                             summary.title.equals(item.title, ignoreCase = true) ||

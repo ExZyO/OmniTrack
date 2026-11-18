@@ -672,6 +672,38 @@ private fun EpisodeAvailabilityBadge(
     )
 }
 
+@Composable
+private fun EpisodeThumbnailLayer(
+    episode: MediaEpisode,
+    placeholderBg: Color = Color(0xFF141416)
+) {
+    val stillUrl = episode.stillUrl?.takeIf { it.isNotBlank() }
+    var loadFailed by remember(stillUrl) { mutableStateOf(false) }
+    if (!stillUrl.isNullOrBlank() && !loadFailed) {
+        AsyncImage(
+            model = stillUrl,
+            contentDescription = episode.title,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+            onError = { loadFailed = true }
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(placeholderBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber),
+                color = Color.White.copy(alpha = 0.28f),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EpisodeHorizontalCard(
@@ -684,7 +716,6 @@ private fun EpisodeHorizontalCard(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(12.dp)
-    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -697,17 +728,7 @@ private fun EpisodeHorizontalCard(
                 onLongClick = onLongPress
             )
     ) {
-        var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
-        if (!effectiveUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = effectiveUrl,
-                contentDescription = episode.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onError = { loadFailed = true }
-            )
-        }
+        EpisodeThumbnailLayer(episode = episode)
 
         // 1:1 Nuvio Multi-Stop Dark Bottom Gradient
         Box(
@@ -886,7 +907,6 @@ private fun EpisodeListCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(8.dp)
-    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -908,31 +928,7 @@ private fun EpisodeListCardItem(
                     .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
                     .background(Color(0xFF0D0D0D))
             ) {
-                var loadFailed by remember(imgModel) { mutableStateOf(false) }
-                val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
-                if (!effectiveUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = effectiveUrl,
-                        contentDescription = episode.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                        onError = { loadFailed = true }
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF141416)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber),
-                            color = Color.White.copy(alpha = 0.30f),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                EpisodeThumbnailLayer(episode = episode)
 
                 // 1:1 Nuvio Top-Right Watched Circle (delicate stroked ring with white checkmark)
                 NuvioAnimatedWatchedBadge(
@@ -1077,7 +1073,6 @@ private fun EpisodeVerticalCardItem(
     onLongPress: () -> Unit
 ) {
     val cardShape = RoundedCornerShape(16.dp)
-    val imgModel = episode.stillUrl.takeIf { !it.isNullOrBlank() } ?: fallbackImageUrl
 
     Box(
         modifier = Modifier
@@ -1090,17 +1085,7 @@ private fun EpisodeVerticalCardItem(
                 onLongClick = onLongPress
             )
     ) {
-        var loadFailed by remember(imgModel) { mutableStateOf(false) }
-        val effectiveUrl = if (loadFailed && !fallbackImageUrl.isNullOrBlank()) fallbackImageUrl else (imgModel ?: fallbackImageUrl)
-        if (!effectiveUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = effectiveUrl,
-                contentDescription = episode.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onError = { loadFailed = true }
-            )
-        }
+        EpisodeThumbnailLayer(episode = episode)
 
         // Multi-Stop Gradient inside image
         Box(
@@ -1267,9 +1252,15 @@ private fun SeasonPosterScrollRow(
                         )
                 ) {
                     val episodeStillFallback = seasonEps.firstOrNull { !it.stillUrl.isNullOrBlank() }?.stillUrl
-                    val posterModel = season.posterUrl ?: episodeStillFallback
+                    val posterModel = season.posterUrl?.takeIf { it.isNotBlank() }
+                        ?: fallbackImageUrl?.takeIf { it.isNotBlank() }
+                        ?: episodeStillFallback
                     var loadFailed by remember(posterModel) { mutableStateOf(false) }
-                    val effectivePoster = if (loadFailed) episodeStillFallback else posterModel
+                    val effectivePoster = if (loadFailed) {
+                        fallbackImageUrl?.takeIf { it.isNotBlank() && it != posterModel } ?: episodeStillFallback
+                    } else {
+                        posterModel
+                    }
                     if (!effectivePoster.isNullOrBlank()) {
                         AsyncImage(
                             model = effectivePoster,
