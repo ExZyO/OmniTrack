@@ -1046,6 +1046,7 @@ fun DetailScreen(
                         .graphicsLayer { alpha = headerAlpha },
                     contentAlignment = Alignment.Center
                 ) {
+                    val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                     val effectiveHeaderClearart = uiState.heroClearLogoUrl?.takeIf { it.isNotBlank() }
                         ?: item?.clearartUrl?.takeIf { it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE) }
                         ?: item?.let { com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(it) }?.takeIf {
