@@ -120,7 +120,8 @@ data class DetailUiState(
     val externalLinks: List<ExternalLinkItem> = emptyList(),
     val heroClearLogoUrl: String? = null,
     val isFillerSkipEnabled: Boolean = false,
-    val hasFillers: Boolean = false
+    val hasFillers: Boolean = false,
+    val isMangaSeasonGrouped: Boolean = false
 )
 
 private data class PreviewAndAux(
@@ -163,7 +164,8 @@ private data class PreviewAndAux(
     val endDate: String? = null,
     val externalLinks: List<ExternalLinkItem> = emptyList(),
     val heroClearLogoUrl: String? = null,
-    val isFillerSkipEnabled: Boolean = false
+    val isFillerSkipEnabled: Boolean = false,
+    val isMangaSeasonGrouped: Boolean = false
 )
 
 class DetailViewModel(
@@ -230,6 +232,7 @@ class DetailViewModel(
     private val _externalLinks = MutableStateFlow<List<ExternalLinkItem>>(emptyList())
     private val _heroClearLogoUrl = MutableStateFlow<String?>(null)
     private val _isFillerSkipEnabled = MutableStateFlow(false)
+    private val _isMangaSeasonGrouped = MutableStateFlow(false)
     private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
@@ -754,7 +757,8 @@ class DetailViewModel(
             _endDate,
             _externalLinks,
             _heroClearLogoUrl,
-            _isFillerSkipEnabled
+            _isFillerSkipEnabled,
+            _isMangaSeasonGrouped
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -798,7 +802,8 @@ class DetailViewModel(
             endDate = args[37] as? String,
             externalLinks = (args[38] as? List<ExternalLinkItem>).orEmpty(),
             heroClearLogoUrl = args[39] as? String,
-            isFillerSkipEnabled = (args[40] as? Boolean) ?: false
+            isFillerSkipEnabled = (args[40] as? Boolean) ?: false,
+            isMangaSeasonGrouped = (args[41] as? Boolean) ?: false
         )
     }.flatMapLatest { aux ->
         val hasFillers = aux.realEpisodes.any { it.isFiller } || (aux.episodesBySeason[aux.selectedSeasonNumber]?.any { it.isFiller } == true)
@@ -873,7 +878,8 @@ class DetailViewModel(
                     externalLinks = aux.externalLinks,
                     heroClearLogoUrl = aux.heroClearLogoUrl,
                     isFillerSkipEnabled = aux.isFillerSkipEnabled,
-                    hasFillers = hasFillers
+                    hasFillers = hasFillers,
+                    isMangaSeasonGrouped = aux.isMangaSeasonGrouped
                 )
             }
         } else {
@@ -973,7 +979,8 @@ class DetailViewModel(
                                 externalLinks = aux.externalLinks,
                                 heroClearLogoUrl = aux.heroClearLogoUrl,
                                 isFillerSkipEnabled = aux.isFillerSkipEnabled,
-                                hasFillers = hasFillers
+                                hasFillers = hasFillers,
+                                isMangaSeasonGrouped = aux.isMangaSeasonGrouped
                             )
                         }
                     } else {
@@ -1038,6 +1045,7 @@ class DetailViewModel(
         _externalLinks.value = emptyList()
         _fillerInfoMap.value = emptyMap()
         _heroClearLogoUrl.value = null
+        _isMangaSeasonGrouped.value = false
     }
 
     fun isPreviewActive(): Boolean =
@@ -1191,14 +1199,19 @@ class DetailViewModel(
             loadDiscussionComments(item.anilistId)
         }
         val isShowOrAnime = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
+        val isMangaSeries = item.mediaType == MediaType.MANGA
 
-        if (isShowOrAnime) {
+        if (isShowOrAnime || isMangaSeries) {
             val seriesKey = "${item.mediaType}_${item.id.takeIf { it > 0 } ?: item.anilistId ?: item.malId ?: item.tmdbId ?: item.title.lowercase().trim()}"
             val alreadyActiveOrLoaded = activeSeriesFetchKey == seriesKey &&
                 (seriesFetchJob?.isActive == true || (_realSeasons.value.isNotEmpty() && _realEpisodes.value.isNotEmpty()))
             if (!alreadyActiveOrLoaded) {
                 activeSeriesFetchKey = seriesKey
-                launchSeriesFetch(item)
+                if (isMangaSeries) {
+                    launchMangaSeriesFetch(item)
+                } else {
+                    launchSeriesFetch(item)
+                }
             }
         }
 
@@ -1632,9 +1645,9 @@ class DetailViewModel(
                 }
             }
 
-            // Anime Enrichment: Next Airing, Characters & Seiyuu, Franchise Relations, Animation Studios
+            // Anime & Manga Enrichment: Next Airing, Characters, Staff/Mangaka, Franchise Relations, Studios/Publishers
             var resolvedAniListId = item.anilistId
-            if (item.mediaType == MediaType.ANIME || item.anilistId != null) {
+            if (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.anilistId != null) {
                 try {
                     val animeDetails = enrichmentRepository.fetchAnimeDetails(
                         anilistId = item.anilistId,
@@ -1720,6 +1733,8 @@ class DetailViewModel(
                                 (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
                             val enriched = currentTop.copy(
                                 anilistId = animeDetails.anilistId ?: currentTop.anilistId,
+                                malId = animeDetails.malId ?: currentTop.malId,
+                                originCountry = animeDetails.countryOfOrigin ?: currentTop.originCountry,
                                 synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentTop.synopsis,
                                 bannerUrl = animeDetails.bannerUrl ?: currentTop.bannerUrl,
                                 coverUrl = if (currentTop.coverUrl.isBlank()) animeDetails.coverUrl ?: currentTop.coverUrl else currentTop.coverUrl,
@@ -1732,6 +1747,9 @@ class DetailViewModel(
                             _previewStack.update { stack ->
                                 if (stack.isNotEmpty()) stack.dropLast(1) + enriched else listOf(enriched)
                             }
+                            if (enriched.mediaType == MediaType.MANGA && (item.anilistId == null || _realSeasons.value.isEmpty())) {
+                                launchMangaSeriesFetch(enriched)
+                            }
                         } else if (item.id > 0) {
                             viewModelScope.launch(Dispatchers.IO) {
                                 val currentItem = repository.getMediaById(item.id).firstOrNull()
@@ -1743,10 +1761,18 @@ class DetailViewModel(
                                         (animeDetails.synopsis != null && animeDetails.synopsis.length > (currentSyn?.length ?: 0))
                                     val updated = currentItem.copy(
                                         anilistId = currentItem.anilistId ?: animeDetails.anilistId,
+                                        malId = currentItem.malId ?: animeDetails.malId,
+                                        originCountry = currentItem.originCountry ?: animeDetails.countryOfOrigin,
+                                        totalProgress = if (currentItem.totalProgress == null || currentItem.totalProgress == 0.0) {
+                                            animeDetails.totalEpisodes?.toDouble() ?: animeDetails.totalChapters?.toDouble() ?: currentItem.totalProgress
+                                        } else currentItem.totalProgress,
                                         synopsis = if (needsSynopsisRepair && !animeDetails.synopsis.isNullOrBlank()) animeDetails.synopsis else currentItem.synopsis
                                     )
                                     if (updated != currentItem) {
                                         repository.updateMedia(updated)
+                                    }
+                                    if (updated.mediaType == MediaType.MANGA && (currentItem.anilistId == null || _realSeasons.value.isEmpty())) {
+                                        launchMangaSeriesFetch(updated)
                                     }
                                 }
                             }
@@ -1942,6 +1968,70 @@ class DetailViewModel(
             }
 
             persistAuxCache()
+        }
+    }
+
+    private fun launchMangaSeriesFetch(item: MediaItemEntity) {
+        seriesFetchJob?.cancel()
+        seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val content = enrichmentRepository.fetchMangaVolumesAndChapters(
+                    title = item.title,
+                    anilistId = item.anilistId,
+                    malId = item.malId,
+                    mangadexId = item.mangadexId,
+                    knownTotalChapters = item.totalProgress?.toInt(),
+                    fallbackCoverUrl = item.coverUrl
+                )
+                val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
+                if (!isStillCurrent) return@launch
+
+                if (content.seasons.isNotEmpty()) {
+                    _isMangaSeasonGrouped.value = content.isSeasonGrouped
+                    _realSeasons.value = content.seasons
+                    _episodesBySeason.value = content.episodesBySeason
+
+                    // Pick active volume/season containing user's current chapter progress
+                    val currentCh = item.currentProgress.toInt()
+                    val targetSeason = if (currentCh > 0) {
+                        content.episodesBySeason.entries.firstOrNull { (_, eps) ->
+                            eps.any { it.episodeNumber >= currentCh }
+                        }?.key ?: content.seasons.first().seasonNumber
+                    } else {
+                        content.seasons.first().seasonNumber
+                    }
+                    _selectedSeasonNumber.value = targetSeason
+                    _realEpisodes.value = content.episodesBySeason[targetSeason].orEmpty()
+
+                    SeriesContentMemoryCache.putSeasons(item, null, content.seasons, item.anilistId)
+                    SeriesContentMemoryCache.putEpisodesBySeason(item, null, content.episodesBySeason, item.anilistId)
+                }
+
+                if (content.publishers.isNotEmpty()) {
+                    _companies.update { existing ->
+                        val pubEntries = content.publishers.map { pubName ->
+                            NetworkProductionCompany(id = null, name = pubName, logoUrl = null, kind = "publisher")
+                        }
+                        (existing + pubEntries).distinctBy { it.name.lowercase().trim() }
+                    }
+                }
+
+                if (item.id > 0L) {
+                    val latest = repository.getMediaById(item.id).firstOrNull()
+                    if (latest != null) {
+                        val nextMdId = latest.mangadexId ?: content.resolvedMangaDexId
+                        val nextTotal = if (latest.totalProgress == null || latest.totalProgress == 0.0) {
+                            content.totalChapters?.toDouble() ?: latest.totalProgress
+                        } else latest.totalProgress
+                        val updated = latest.copy(mangadexId = nextMdId, totalProgress = nextTotal)
+                        if (updated != latest) {
+                            repository.updateMedia(updated)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            }
         }
     }
 
@@ -2394,7 +2484,54 @@ class DetailViewModel(
         }
     }
 
+    fun stepChapterProgress(delta: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
+            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val currentCh = item.currentProgress.toInt().coerceAtLeast(0)
+            val maxCap = item.totalProgress?.toInt()?.takeIf { it > 0 }
+            val nextCh = (currentCh + delta).coerceAtLeast(0).let { n ->
+                if (maxCap != null) n.coerceAtMost(maxCap) else n
+            }
+
+            val allEps = _episodesBySeason.value
+            if (allEps.isNotEmpty()) {
+                val markTrue = mutableListOf<Pair<Int, Int>>()
+                val markFalse = mutableListOf<Pair<Int, Int>>()
+                for ((sNum, eps) in allEps) {
+                    for (ep in eps) {
+                        if (ep.episodeNumber <= nextCh) {
+                            markTrue.add(sNum to ep.episodeNumber)
+                        } else {
+                            markFalse.add(sNum to ep.episodeNumber)
+                        }
+                    }
+                }
+                if (markTrue.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markTrue, true)
+                if (markFalse.isNotEmpty()) repository.setMultipleEpisodesWatched(mediaId, markFalse, false)
+            }
+
+            val targetProgress = nextCh.toDouble()
+            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
+                TrackingStatus.COMPLETED
+            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
+                TrackingStatus.IN_PROGRESS
+            } else {
+                item.status
+            }
+            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
+            trackerSyncEngine?.drainQueue()
+        }
+    }
+
     private fun calculateCumulativeProgress(targetSeason: Int, targetEpisode: Int): Double {
+        val activeItem = _previewItem.value ?: latestRoomItemCache[_mediaId.value]
+        if (activeItem?.mediaType == MediaType.MANGA) {
+            return targetEpisode.coerceAtLeast(0).toDouble()
+        }
         var cumulative = 0
         val sortedSeasons = _realSeasons.value.filter { it.seasonNumber > 0 }.sortedBy { it.seasonNumber }
         for (s in sortedSeasons) {
@@ -2406,7 +2543,7 @@ class DetailViewModel(
                 break
             }
         }
-        return if (cumulative > 0) cumulative.toDouble() else targetEpisode.toDouble()
+        return if (cumulative > 0) cumulative.toDouble() else targetEpisode.coerceAtLeast(0).toDouble()
     }
 
     private fun getEpisodesToMarkWatchedUpTo(targetSeason: Int, targetEpisode: Int, skipFillers: Boolean = false): List<Pair<Int, Int>> {

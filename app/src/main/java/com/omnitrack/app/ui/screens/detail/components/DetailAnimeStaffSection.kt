@@ -46,6 +46,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 fun DetailAnimeStaffSection(
     staff: List<AnimeStaffItem>,
     modifier: Modifier = Modifier,
+    isMangaOrNovel: Boolean = false,
     onStaffClick: ((AnimeStaffItem) -> Unit)? = null
 ) {
     if (staff.isEmpty()) return
@@ -63,14 +64,14 @@ fun DetailAnimeStaffSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Staff",
+                text = if (isMangaOrNovel) "Mangaka & Staff" else "Staff",
                 color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
             Text(
-                text = "${staff.size} staff",
+                text = if (isMangaOrNovel) "${staff.size} creators" else "${staff.size} staff",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium

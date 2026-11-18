@@ -118,7 +118,11 @@ fun DetailSeriesContent(
     onLayoutModeChanged: ((EpisodeLayoutMode) -> Unit)? = null,
     isFillerSkipEnabled: Boolean = false,
     onToggleSkipFillers: (() -> Unit)? = null,
-    onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null
+    onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
+    isMangaMode: Boolean = false,
+    isMangaSeasonGrouped: Boolean = false,
+    currentTotalProgress: Int? = null,
+    onStepProgress: ((Int) -> Unit)? = null
 ) {
     if (seasons.isEmpty() && episodes.isEmpty() && episodesBySeason.isEmpty()) {
         return
@@ -169,7 +173,7 @@ fun DetailSeriesContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Seasons",
+                        text = if (isMangaMode) (if (isMangaSeasonGrouped) "Seasons" else "Volumes") else "Seasons",
                         color = TextPrimary,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
@@ -244,25 +248,83 @@ fun DetailSeriesContent(
         ) {
             Column {
                 Text(
-                    text = "Episodes",
+                    text = if (isMangaMode) "Chapters" else "Episodes",
                     color = Color.White,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.3).sp
                 )
                 Text(
-                    text = "$watchedInSeason of $totalInSeason watched",
+                    text = if (isMangaMode) "$watchedInSeason of $totalInSeason read" else "$watchedInSeason of $totalInSeason watched",
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
 
-            // Layout Mode Switcher Icon Button & Skip Fillers Chip
+            // Layout Mode Switcher Icon Button, Manga Stepper & Skip Fillers Chip
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (isMangaMode && onStepProgress != null) {
+                    val chValue = currentTotalProgress ?: watchedEpisodes.size
+                    Row(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.08f)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clickable { onStepProgress(-1) }
+                                .padding(horizontal = 9.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "−1",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = 0.88f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(16.dp)
+                                .background(Color.White.copy(alpha = 0.10f))
+                        )
+                        Text(
+                            text = "Ch. $chValue",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(16.dp)
+                                .background(Color.White.copy(alpha = 0.10f))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clickable { onStepProgress(1) }
+                                .padding(horizontal = 9.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "+1",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
                 val hasFillersInSeason = seasonEpisodes.any { it.isFiller }
                 if (hasFillersInSeason) {
                     Box(
@@ -1233,7 +1295,7 @@ private fun SeasonPosterScrollRow(
             val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
             val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
             val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
-            val label = formatSeasonLabel(season.seasonNumber)
+            val label = season.name.ifBlank { formatSeasonLabel(season.seasonNumber) }
 
             Column(
                 modifier = Modifier
@@ -1330,7 +1392,7 @@ private fun SeasonTextChipScrollRow(
             val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
             val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
             val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
-            val label = formatSeasonLabel(season.seasonNumber)
+            val label = season.name.ifBlank { formatSeasonLabel(season.seasonNumber) }
 
             Row(
                 modifier = Modifier

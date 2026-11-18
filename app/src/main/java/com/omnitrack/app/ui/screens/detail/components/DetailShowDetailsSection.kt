@@ -161,7 +161,12 @@ fun DetailGeneralInfoSection(
             else -> null
         }
         if (!airedStr.isNullOrBlank()) {
-            add("Aired" to airedStr)
+            val dateLabel = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.BOOK) {
+                "Published"
+            } else {
+                "Aired"
+            }
+            add(dateLabel to airedStr)
         }
 
         // 6. Dual Broadcast Time (JST + User Local Time)
@@ -181,9 +186,13 @@ fun DetailGeneralInfoSection(
             } catch (_: Exception) {}
         }
 
-        // 7. Total Episodes
-        if (item.totalProgress != null && item.totalProgress > 0 && isSeries) {
-            add("Total Episodes" to "${item.totalProgress.toInt()} Episodes")
+        // 7. Total Episodes / Chapters
+        if (item.totalProgress != null && item.totalProgress > 0) {
+            if (isSeries) {
+                add("Total Episodes" to "${item.totalProgress.toInt()} Episodes")
+            } else if (item.mediaType == MediaType.MANGA) {
+                add("Total Chapters" to "${item.totalProgress.toInt()} Chapters")
+            }
         }
 
         // 8. Runtime
@@ -196,14 +205,15 @@ fun DetailGeneralInfoSection(
         }
 
         // 9. Origin Country
-        val countryDisplay = when (countryOfOrigin?.uppercase()) {
+        val effectiveOrigin = countryOfOrigin?.takeIf { it.isNotBlank() } ?: item.originCountry?.takeIf { it.isNotBlank() }
+        val countryDisplay = when (effectiveOrigin?.uppercase()) {
             "JP" -> "Japan (JP)"
             "CN" -> "China (CN)"
             "KR" -> "South Korea (KR)"
             "US" -> "United States (US)"
             "GB", "UK" -> "United Kingdom (UK)"
             null -> null
-            else -> countryOfOrigin
+            else -> effectiveOrigin
         }
         if (!countryDisplay.isNullOrBlank()) {
             add("Origin Country" to countryDisplay)
@@ -225,7 +235,12 @@ fun DetailGeneralInfoSection(
             add("Platform" to item.platforms)
         }
         if (!item.studioOrNetwork.isNullOrBlank() && !isSeries) {
-            add("Production" to item.studioOrNetwork)
+            val companyLabel = if (item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
+                "Serialization"
+            } else {
+                "Production"
+            }
+            add(companyLabel to item.studioOrNetwork)
         }
     }
 

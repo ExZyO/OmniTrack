@@ -47,7 +47,13 @@ fun DetailNetworksSection(
     onCompanyClick: ((NetworkProductionCompany) -> Unit)? = null
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
-    val sectionTitle = if (item.mediaType == MediaType.ANIME) "Studios & Networks" else if (isSeries) "Networks" else "Production"
+    val isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+    val sectionTitle = when {
+        item.mediaType == MediaType.ANIME -> "Studios & Networks"
+        isMangaOrNovel -> "Magazines & Publishers"
+        isSeries -> "Networks"
+        else -> "Production"
+    }
 
     val displayItems = rememberDisplayCompanies(item, companies)
     if (displayItems.isEmpty()) return
@@ -123,12 +129,13 @@ private fun rememberDisplayCompanies(
     passedCompanies: List<NetworkProductionCompany>
 ): List<NetworkProductionCompany> {
     val isAnime = item.mediaType == MediaType.ANIME
+    val isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
     val isSeries = item.mediaType == MediaType.SHOW || isAnime
 
     if (passedCompanies.isNotEmpty()) {
-        if (isAnime) {
-            val studios = passedCompanies.filter { it.kind == "anime_studio" }
-            val others = passedCompanies.filter { it.kind != "anime_studio" }
+        if (isAnime || isMangaOrNovel) {
+            val studios = passedCompanies.filter { it.kind == "anime_studio" || it.kind == "publisher" }
+            val others = passedCompanies.filter { it.kind != "anime_studio" && it.kind != "publisher" }
             val sorted = (studios + others).distinctBy { it.name.lowercase().trim() }
             return sorted.take(8)
         }

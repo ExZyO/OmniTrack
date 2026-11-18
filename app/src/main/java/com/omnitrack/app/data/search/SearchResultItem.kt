@@ -24,6 +24,8 @@ data class SearchResultItem(
     val tmdbId: Long? = null,
     val igdbId: Long? = null,
     val vndbId: String? = null,
+    val mangadexId: String? = null,
+    val originCountry: String? = null,
     val totalProgress: Double? = null
 ) {
     fun toMediaItemEntity(status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK): MediaItemEntity {
@@ -44,6 +46,8 @@ data class SearchResultItem(
             tmdbId = tmdbId,
             igdbId = igdbId,
             vndbId = vndbId,
+            mangadexId = mangadexId,
+            originCountry = originCountry,
             releaseYear = releaseYear,
             communityScore = communityScore
         )

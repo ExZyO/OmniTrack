@@ -50,13 +50,15 @@ class OmniSearchRepository(
         "AniList" to 1,
         "TVDB" to 2,
         "TMDb" to 3,
-        "MangaDex" to 4,
-        "RanobeDB" to 5,
-        "Steam" to 6,
-        "VNDB" to 7,
-        "OpenLibrary" to 8,
-        "WLNUpdates" to 9,
-        "Bangumi" to 10
+        "MAL" to 4,
+        "Kitsu" to 5,
+        "MangaDex" to 6,
+        "RanobeDB" to 7,
+        "Steam" to 8,
+        "VNDB" to 9,
+        "OpenLibrary" to 10,
+        "WLNUpdates" to 11,
+        "Bangumi" to 12
     )
 
     private fun prioritizeAndDedupe(
@@ -96,6 +98,8 @@ class OmniSearchRepository(
                     tmdbId = existing.tmdbId ?: item.tmdbId,
                     anilistId = existing.anilistId ?: item.anilistId,
                     malId = existing.malId ?: item.malId,
+                    mangadexId = existing.mangadexId ?: item.mangadexId,
+                    originCountry = existing.originCountry ?: item.originCountry,
                     bannerUrl = existing.bannerUrl ?: item.bannerUrl,
                     coverUrl = existing.coverUrl.ifBlank { item.coverUrl },
                     synopsis = existing.synopsis ?: item.synopsis,
@@ -162,8 +166,10 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 2, defaultType = MediaType.ANIME) })
                 }
                 MediaType.MANGA -> {
-                    deferreds.add(launchProvider { searchMangaDex(trimmed) })
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false, formatNovel = false) })
+                    deferreds.add(launchProvider { searchJikanMangaMirror(trimmed) })
+                    deferreds.add(launchProvider { searchKitsuManga(trimmed) })
+                    deferreds.add(launchProvider { searchMangaDex(trimmed) })
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 1, defaultType = MediaType.MANGA) })
                 }
                 MediaType.NOVEL -> {
@@ -237,6 +243,7 @@ class OmniSearchRepository(
                                     startDate { year }
                                     episodes
                                     chapters
+                                    countryOfOrigin
                                 }
                             }
                         }
@@ -312,6 +319,7 @@ class OmniSearchRepository(
                             } else {
                                 obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                             }
+                            val originCountry = obj["countryOfOrigin"].cleanString()
 
                             SearchResultItem(
                                 title = title,
@@ -325,7 +333,8 @@ class OmniSearchRepository(
                                 sourceProvider = "AniList",
                                 anilistId = anilistId,
                                 malId = malId,
-                                totalProgress = totalProgress
+                                totalProgress = totalProgress,
+                                originCountry = originCountry
                             )
                         }
                         if (parsed.isNotEmpty()) {
@@ -371,6 +380,17 @@ class OmniSearchRepository(
 
                     val synopsis = cleanSynopsis(attrs["description"]?.jsonObject?.get("en").cleanString())
                     val year = attrs["year"].cleanString()
+                    val originalLanguage = attrs["originalLanguage"].cleanString()?.lowercase()
+                    val originCountry = when (originalLanguage) {
+                        "ko" -> "KR"
+                        "zh", "zh-hk", "zh-ro" -> "CN"
+                        "ja" -> "JP"
+                        else -> null
+                    }
+                    val linksObj = attrs["links"]?.jsonObject
+                    val alId = linksObj?.get("al").cleanString()?.toLongOrNull()
+                    val malId = linksObj?.get("mal").cleanString()?.toLongOrNull()
+                    val lastChapter = attrs["lastChapter"].cleanString()?.toDoubleOrNull()
 
                     var coverFile: String? = null
                     val relationships = obj["relationships"]?.jsonArray ?: emptyList()
@@ -392,13 +412,168 @@ class OmniSearchRepository(
                         coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
                         mediaType = MediaType.MANGA,
                         releaseYear = year,
-                        sourceProvider = "MangaDex"
+                        sourceProvider = "MangaDex",
+                        anilistId = alId,
+                        malId = malId,
+                        mangadexId = mangaId,
+                        originCountry = originCountry,
+                        totalProgress = lastChapter
                     )
                 }
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private val jikanClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(2500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .readTimeout(4000, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
+    }
+
+    private suspend fun searchJikanMangaMirror(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val request = Request.Builder()
+                .url("https://jikanfortheweebs.midnightignite.me/v4/manga?q=$encoded&limit=8")
+                .header("Accept", "application/json")
+                .header("User-Agent", "OmniTrack/1.0 (Android; Linux)")
+                .get()
+                .build()
+
+            jikanClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val data = root["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                data.mapNotNull { entry ->
+                    val obj = entry.jsonObject
+                    val typeStr = obj["type"].cleanString()?.lowercase()
+                    if (typeStr == "light novel" || typeStr == "novel") return@mapNotNull null
+
+                    val malId = obj["mal_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                    val title = obj["title_english"].cleanString()
+                        ?: obj["title"].cleanString()
+                        ?: return@mapNotNull null
+                    val nativeTitle = obj["title_japanese"].cleanString()
+
+                    val images = obj["images"]?.jsonObject
+                    val coverUrl = images?.get("webp")?.jsonObject?.get("large_image_url").cleanString()
+                        ?: images?.get("jpg")?.jsonObject?.get("large_image_url").cleanString()
+                        ?: images?.get("jpg")?.jsonObject?.get("image_url").cleanString()
+                        ?: return@mapNotNull null
+
+                    val synopsis = cleanSynopsis(obj["synopsis"].cleanString())
+                    val score = obj["score"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    val chapters = obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val year = obj["published"]?.jsonObject?.get("prop")?.jsonObject?.get("from")?.jsonObject?.get("year").cleanString()
+                    val originCountry = when (typeStr) {
+                        "manhwa" -> "KR"
+                        "manhua" -> "CN"
+                        "manga", "one-shot", "doujinshi" -> "JP"
+                        "oel" -> "US"
+                        else -> null
+                    }
+
+                    SearchResultItem(
+                        title = title,
+                        nativeTitle = nativeTitle,
+                        synopsis = synopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        mediaType = MediaType.MANGA,
+                        releaseYear = year,
+                        communityScore = score,
+                        sourceProvider = "MAL",
+                        malId = malId,
+                        totalProgress = chapters,
+                        originCountry = originCountry
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("OmniSearchRepository", "Jikan manga mirror search failed for $query: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private suspend fun searchKitsuManga(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        try {
+            val encoded = URLEncoder.encode(query, "UTF-8")
+            val request = Request.Builder()
+                .url("https://kitsu.io/api/edge/manga?filter[text]=$encoded&page[limit]=8")
+                .header("Accept", "application/vnd.api+json")
+                .header("User-Agent", "OmniTrack/1.0 (Android; Linux)")
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body).jsonObject
+                val data = root["data"]?.jsonArray ?: return@withGeneralPacing emptyList()
+
+                data.mapNotNull { entry ->
+                    val obj = entry.jsonObject
+                    val attrs = obj["attributes"]?.jsonObject ?: return@mapNotNull null
+                    val subtype = attrs["subtype"].cleanString()?.lowercase()
+                    if (subtype == "novel") return@mapNotNull null
+
+                    val titlesObj = attrs["titles"]?.jsonObject
+                    val eng = titlesObj?.get("en").cleanString() ?: titlesObj?.get("en_us").cleanString()
+                    val rom = titlesObj?.get("en_jp").cleanString() ?: attrs["canonicalTitle"].cleanString()
+                    val nat = titlesObj?.get("ja_jp").cleanString() ?: titlesObj?.get("ko_kr").cleanString()
+                    val title = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
+                    } ?: return@mapNotNull null
+
+                    val posterObj = attrs["posterImage"]?.jsonObject
+                    val coverUrl = posterObj?.get("large").cleanString()
+                        ?: posterObj?.get("original").cleanString()
+                        ?: posterObj?.get("medium").cleanString()
+                        ?: return@mapNotNull null
+                    val bannerUrl = attrs["coverImage"]?.jsonObject?.get("large").cleanString()
+                        ?: attrs["coverImage"]?.jsonObject?.get("original").cleanString()
+
+                    val synopsis = cleanSynopsis(attrs["synopsis"].cleanString() ?: attrs["description"].cleanString())
+                    val score = attrs["averageRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                    val chapters = attrs["chapterCount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val year = attrs["startDate"].cleanString()?.take(4)
+                    val originCountry = when (subtype) {
+                        "manhwa" -> "KR"
+                        "manhua" -> "CN"
+                        "manga", "oneshot", "doujin" -> "JP"
+                        "oel" -> "US"
+                        else -> null
+                    }
+
+                    SearchResultItem(
+                        title = title,
+                        nativeTitle = nat,
+                        synopsis = synopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
+                        bannerUrl = bannerUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        mediaType = MediaType.MANGA,
+                        releaseYear = year,
+                        communityScore = score,
+                        sourceProvider = "Kitsu",
+                        totalProgress = chapters,
+                        originCountry = originCountry
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("OmniSearchRepository", "Kitsu manga search failed for $query: ${e.message}")
             emptyList()
         }
     }

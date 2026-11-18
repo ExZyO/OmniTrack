@@ -147,6 +147,7 @@ fun DiscoverView(
     var localLastEffectiveQuery by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveQuery) }
     var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
     var searchGen by remember { mutableStateOf(0L) }
+    var selectedMangaSubFilter by remember { mutableStateOf("ALL") }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -467,6 +468,41 @@ fun DiscoverView(
             }
         }
 
+        if (selectedFilter == MediaType.MANGA) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (key, label) ->
+                    val isSubSelected = selectedMangaSubFilter == key
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (isSubSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                            .border(
+                                width = 1.dp,
+                                color = if (isSubSelected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .clickable { selectedMangaSubFilter = key }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSubSelected) Color.White else Color.White.copy(alpha = 0.60f)
+                        )
+                    }
+                }
+            }
+        }
+
         // AI Resolution Banner
         if (aiResolutionBanner != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -498,8 +534,13 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter) {
-            if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
+        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter) {
+            val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
+            if (selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL") {
+                base.filter {
+                    com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == selectedMangaSubFilter
+                }
+            } else base
         }
 
         if (isSearching && visibleResults.isEmpty()) {

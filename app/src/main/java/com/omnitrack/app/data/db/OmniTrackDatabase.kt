@@ -18,7 +18,7 @@ import com.omnitrack.app.data.db.entity.SyncQueueEntity
 
 @Database(
     entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -72,6 +72,13 @@ abstract class OmniTrackDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_items ADD COLUMN originCountry TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN mangadexId TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): OmniTrackDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -79,7 +86,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {

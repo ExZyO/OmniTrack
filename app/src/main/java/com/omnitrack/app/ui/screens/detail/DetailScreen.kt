@@ -735,8 +735,8 @@ fun DetailScreen(
                     )
                 }
 
-                // 1. Actions / Progress Section (Only rendered for media types with action cards)
-                val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
+                val hasProgressControls = item.mediaType in listOf(MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
                 val hasBackdrop = backdropTargetUrl != null
                 if (hasProgressControls) {
                     Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -774,7 +774,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.EPISODES -> {
-                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA) {
                                 DetailSeriesContent(
                                     seasons = uiState.realSeasons,
                                     episodes = uiState.realEpisodes,
@@ -798,7 +798,13 @@ fun DetailScreen(
                                     onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
                                     isFillerSkipEnabled = uiState.isFillerSkipEnabled,
                                     onToggleSkipFillers = { viewModel.toggleSkipFillers() },
-                                    onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) }
+                                    onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
+                                    isMangaMode = item.mediaType == MediaType.MANGA,
+                                    isMangaSeasonGrouped = uiState.isMangaSeasonGrouped,
+                                    currentTotalProgress = item.currentProgress.toInt(),
+                                    onStepProgress = if (item.mediaType == MediaType.MANGA) {
+                                        { delta -> viewModel.stepChapterProgress(delta) }
+                                    } else null
                                 )
                                 Spacer(modifier = Modifier.height(20.dp))
                             }
@@ -818,10 +824,11 @@ fun DetailScreen(
                         }
                         DetailSectionKey.CAST -> {
                             if (deferredSectionsAllowed) {
-                                if (item.mediaType == MediaType.ANIME) {
+                                if (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
                                     if (uiState.animeCharacters.isNotEmpty()) {
                                         DetailAnimeCastSection(
                                             characters = uiState.animeCharacters,
+                                            isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL,
                                             onCharacterClick = { character ->
                                                 sheetBackStack.add(DetailSheetTarget.AnimeCharacter(character))
                                             },
@@ -847,6 +854,7 @@ fun DetailScreen(
                                         }
                                         DetailAnimeStaffSection(
                                             staff = uiState.animeStaff,
+                                            isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL,
                                             onStaffClick = { staff ->
                                                 sheetBackStack.add(DetailSheetTarget.AnimeStaff(staff))
                                             }
@@ -1157,7 +1165,7 @@ fun DetailScreen(
                     IconButton(
                         onClick = {
                             val nextStatus = if (isCompleted) {
-                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) {
+                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA) {
                                     TrackingStatus.IN_PROGRESS
                                 } else {
                                     TrackingStatus.PLAN_TO_TRACK
@@ -1402,7 +1410,7 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            val hasProgressControls = item.mediaType in listOf(MediaType.MANGA, MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            val hasProgressControls = item.mediaType in listOf(MediaType.NOVEL, MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
             val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -1802,8 +1810,13 @@ private fun DetailHeroHeaderSection(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp)
                 ) {
+                    val heroTypeBadge = if (item.mediaType == MediaType.MANGA) {
+                        com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
+                    } else {
+                        item.mediaType.displayName.uppercase()
+                    }
                     Text(
-                        text = item.mediaType.displayName.uppercase(),
+                        text = heroTypeBadge,
                         color = AccentArctic,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
@@ -2011,8 +2024,13 @@ private fun DetailClassicHeaderSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val compactTypeBadge = if (item.mediaType == MediaType.MANGA) {
+                    com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
+                } else {
+                    item.mediaType.displayName.uppercase()
+                }
                 Text(
-                    text = item.mediaType.displayName.uppercase(),
+                    text = compactTypeBadge,
                     color = AccentArctic,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Black,

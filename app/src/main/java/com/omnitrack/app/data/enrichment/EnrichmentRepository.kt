@@ -320,7 +320,7 @@ class EnrichmentRepository(
                 }
                 MediaType.ANIME, MediaType.MANGA -> {
                     if (item.malId != null) {
-                        communityScore = fetchJikanScore(item.malId)
+                        communityScore = fetchJikanScore(item.malId, isManga = item.mediaType == MediaType.MANGA)
                     } else if (item.bangumiId != null) {
                         communityScore = fetchBangumiScore(item.bangumiId)
                     }
@@ -714,14 +714,11 @@ class EnrichmentRepository(
         }
     }
 
-    private suspend fun fetchJikanScore(malId: Long): Float? {
+    private suspend fun fetchJikanScore(malId: Long, isManga: Boolean = false): Float? {
         return try {
-            val host = if (System.currentTimeMillis() < jikanCircuitBreakerUntil) {
-                "https://jikanfortheweebs.midnightignite.me/v4"
-            } else {
-                "https://jikanfortheweebs.midnightignite.me/v4"
-            }
-            val url = "$host/anime/$malId"
+            val host = "https://jikanfortheweebs.midnightignite.me/v4"
+            val path = if (isManga) "manga" else "anime"
+            val url = "$host/$path/$malId"
             val req = Request.Builder().url(url).get().build()
             jikanClient.newCall(req).execute().use { response ->
                 if (!response.isSuccessful) return null
@@ -2383,6 +2380,458 @@ class EnrichmentRepository(
             null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    data class MangaUpdatesSeriesInfo(
+        val seriesId: Long,
+        val latestChapter: Int?,
+        val totalVolumes: Int?,
+        val seasons: List<Triple<Int, String, IntRange>>,
+        val publishers: List<String>
+    )
+
+    data class MangaSeriesContent(
+        val seasons: List<com.omnitrack.app.data.model.MediaSeason>,
+        val episodesBySeason: Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>,
+        val isSeasonGrouped: Boolean,
+        val resolvedMangaDexId: String? = null,
+        val totalChapters: Int? = null,
+        val publishers: List<String> = emptyList()
+    )
+
+    private val mangaSeriesContentCache = java.util.concurrent.ConcurrentHashMap<String, MangaSeriesContent>()
+
+    private suspend fun fetchMangaUpdatesInfo(title: String): MangaUpdatesSeriesInfo? = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext null
+        try {
+            val payload = buildJsonObject {
+                put("search", title.trim())
+                put("perpage", 5)
+            }.toString()
+            val req = Request.Builder()
+                .url("https://api.mangaupdates.com/v1/series/search")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .header("User-Agent", "OmniTrack/1.0")
+                .build()
+            val seriesId = client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray.orEmpty()
+                val exact = results.firstOrNull { node ->
+                    val t = node.jsonObject["record"]?.jsonObject?.get("title").cleanString()
+                    t != null && t.equals(title.trim(), ignoreCase = true)
+                } ?: results.firstOrNull()
+                exact?.jsonObject?.get("record")?.jsonObject?.get("series_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            } ?: return@withContext null
+
+            val detReq = Request.Builder()
+                .url("https://api.mangaupdates.com/v1/series/$seriesId")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(detReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val body = resp.body?.string() ?: return@withContext null
+                val root = json.parseToJsonElement(body).jsonObject
+                val latestCh = root["latest_chapter"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                val statusText = root["status"].cleanString().orEmpty()
+                val totalVols = Regex("""(\d+)\s+Volumes""", RegexOption.IGNORE_CASE)
+                    .find(statusText)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+                val seasons = mutableListOf<Triple<Int, String, IntRange>>()
+                var runningStart = 1
+                val sMatches = Regex("""S(\d+):\s*[^\n]*?(?:(\d+)\s+Chapters)?[^\n]*?(?:\((\d+)\s*-\s*(\d+)\))?""", RegexOption.IGNORE_CASE)
+                    .findAll(statusText).toList()
+                for (m in sMatches) {
+                    val sNum = m.groupValues[1].toIntOrNull() ?: continue
+                    val count = m.groupValues[2].toIntOrNull()
+                    val rStart = m.groupValues[3].toIntOrNull()
+                    val rEnd = m.groupValues[4].toIntOrNull()
+                    val range = when {
+                        rStart != null && rEnd != null && rEnd >= rStart -> {
+                            runningStart = rEnd + 1
+                            rStart..rEnd
+                        }
+                        count != null && count > 0 -> {
+                            val end = runningStart + count - 1
+                            val r = runningStart..end
+                            runningStart = end + 1
+                            r
+                        }
+                        else -> continue
+                    }
+                    seasons.add(Triple(sNum, "Season $sNum", range))
+                }
+                Regex("""Epilogue:\s*(\d+)\s+Chapters""", RegexOption.IGNORE_CASE).find(statusText)?.let { epM ->
+                    val epCount = epM.groupValues[1].toIntOrNull()
+                    if (epCount != null && epCount > 0 && seasons.isNotEmpty()) {
+                        val nextNum = (seasons.maxOfOrNull { it.first } ?: 1) + 1
+                        seasons.add(Triple(nextNum, "Epilogue", runningStart..(runningStart + epCount - 1)))
+                    }
+                }
+
+                val publishers = root["publishers"]?.jsonArray?.mapNotNull { node ->
+                    node.jsonObject["publisher_name"].cleanString()
+                }.orEmpty().distinct()
+
+                MangaUpdatesSeriesInfo(
+                    seriesId = seriesId,
+                    latestChapter = latestCh,
+                    totalVolumes = totalVols,
+                    seasons = seasons,
+                    publishers = publishers
+                )
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun resolveMangaDexManga(
+        title: String,
+        anilistId: Long?,
+        malId: Long?,
+        existingMdId: String?
+    ): Pair<String, kotlinx.serialization.json.JsonObject>? = NetworkPacer.withMangaDexPacing {
+        try {
+            if (!existingMdId.isNullOrBlank()) {
+                val req = Request.Builder()
+                    .url("https://api.mangadex.org/manga/$existingMdId?includes[]=cover_art")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string()
+                        val dataObj = body?.let { json.parseToJsonElement(it).jsonObject["data"]?.jsonObject }
+                        if (dataObj != null) return@withMangaDexPacing existingMdId to dataObj
+                    }
+                }
+            }
+
+            if (title.isBlank()) return@withMangaDexPacing null
+            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+            val req = Request.Builder()
+                .url("https://api.mangadex.org/manga?title=$encoded&limit=10&includes[]=cover_art")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withMangaDexPacing null
+                val body = resp.body?.string() ?: return@withMangaDexPacing null
+                val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray.orEmpty()
+                if (data.isEmpty()) return@withMangaDexPacing null
+
+                val alStr = anilistId?.toString()
+                val malStr = malId?.toString()
+                val matched = (if (alStr != null) {
+                    data.firstOrNull { node ->
+                        node.jsonObject["attributes"]?.jsonObject?.get("links")?.jsonObject?.get("al").cleanString() == alStr
+                    }
+                } else null) ?: (if (malStr != null) {
+                    data.firstOrNull { node ->
+                        node.jsonObject["attributes"]?.jsonObject?.get("links")?.jsonObject?.get("mal").cleanString() == malStr
+                    }
+                } else null) ?: data.firstOrNull { node ->
+                    val tObj = node.jsonObject["attributes"]?.jsonObject?.get("title")?.jsonObject
+                    val tEn = tObj?.get("en").cleanString()
+                    tEn != null && tEn.equals(title.trim(), ignoreCase = true)
+                } ?: data.firstOrNull()
+
+                val obj = matched?.jsonObject ?: return@withMangaDexPacing null
+                val id = obj["id"].cleanString() ?: return@withMangaDexPacing null
+                id to obj
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchKitsuMangaChapters(
+        title: String,
+        limit: Int = 20
+    ): Map<Int, Pair<Int?, String>> = withContext(Dispatchers.IO) {
+        if (title.isBlank()) return@withContext emptyMap()
+        try {
+            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+            val searchReq = Request.Builder()
+                .url("https://kitsu.io/api/edge/manga?filter[text]=$encoded&page[limit]=3")
+                .header("Accept", "application/vnd.api+json")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            val kitsuId = client.newCall(searchReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyMap()
+                val body = resp.body?.string() ?: return@withContext emptyMap()
+                json.parseToJsonElement(body).jsonObject["data"]?.jsonArray?.firstOrNull()
+                    ?.jsonObject?.get("id").cleanString()
+            } ?: return@withContext emptyMap()
+
+            val chapReq = Request.Builder()
+                .url("https://kitsu.io/api/edge/manga/$kitsuId/chapters?page[limit]=$limit")
+                .header("Accept", "application/vnd.api+json")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(chapReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext emptyMap()
+                val body = resp.body?.string() ?: return@withContext emptyMap()
+                val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray.orEmpty()
+                val map = mutableMapOf<Int, Pair<Int?, String>>()
+                for (node in data) {
+                    val attrs = node.jsonObject["attributes"]?.jsonObject ?: continue
+                    val chNum = attrs["number"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: continue
+                    val volNum = attrs["volumeNumber"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    val cTitle = attrs["canonicalTitle"].cleanString() ?: continue
+                    map[chNum] = volNum to cTitle
+                }
+                map
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            emptyMap()
+        }
+    }
+
+    suspend fun fetchMangaVolumesAndChapters(
+        title: String,
+        anilistId: Long? = null,
+        malId: Long? = null,
+        mangadexId: String? = null,
+        knownTotalChapters: Int? = null,
+        knownTotalVolumes: Int? = null,
+        fallbackCoverUrl: String? = null
+    ): MangaSeriesContent = withContext(Dispatchers.IO) {
+        val cacheKey = "${anilistId ?: malId ?: mangadexId ?: title.lowercase().trim()}"
+        mangaSeriesContentCache[cacheKey]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("manga_vols_chaps_$cacheKey") {
+            mangaSeriesContentCache[cacheKey]?.let { return@coalesce it }
+
+            val (mdPair, muInfo, kitsuChaps) = coroutineScope {
+                val mdDef = async { resolveMangaDexManga(title, anilistId, malId, mangadexId) }
+                val muDef = async { fetchMangaUpdatesInfo(title) }
+                val kitsuDef = async { fetchKitsuMangaChapters(title, limit = 20) }
+                Triple(mdDef.await(), muDef.await(), kitsuDef.await())
+            }
+
+            val resolvedMdId = mdPair?.first
+            val mdAttrs = mdPair?.second?.get("attributes")?.jsonObject
+            val mdLastCh = mdAttrs?.get("lastChapter")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.toInt()
+            val mdLastVol = mdAttrs?.get("lastVolume")?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+
+            val volumeCovers = mutableMapOf<Int, String>()
+            data class RawFeedChap(val volNum: Int?, val chNum: Int, val title: String?, val date: String?, val pages: Int?)
+            val feedChaps = mutableMapOf<Int, RawFeedChap>()
+
+            if (resolvedMdId != null) {
+                coroutineScope {
+                    val covDef = async {
+                        NetworkPacer.withMangaDexPacing {
+                            try {
+                                val req = Request.Builder()
+                                    .url("https://api.mangadex.org/cover?manga[]=$resolvedMdId&limit=100&order[volume]=asc")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .get()
+                                    .build()
+                                client.newCall(req).execute().use { resp ->
+                                    if (!resp.isSuccessful) return@withMangaDexPacing
+                                    val body = resp.body?.string() ?: return@withMangaDexPacing
+                                    val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray.orEmpty()
+                                    for (node in data) {
+                                        val attrs = node.jsonObject["attributes"]?.jsonObject ?: continue
+                                        val volNum = attrs["volume"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.toInt()
+                                            ?: continue
+                                        val fileName = attrs["fileName"].cleanString() ?: continue
+                                        if (volNum > 0 && !volumeCovers.containsKey(volNum)) {
+                                            volumeCovers[volNum] = "https://uploads.mangadex.org/covers/$resolvedMdId/$fileName.256.jpg"
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                            }
+                        }
+                    }
+                    val feedDef = async {
+                        NetworkPacer.withMangaDexPacing {
+                            try {
+                                val req = Request.Builder()
+                                    .url("https://api.mangadex.org/manga/$resolvedMdId/feed?translatedLanguage[]=en&limit=500&order[chapter]=asc")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .get()
+                                    .build()
+                                client.newCall(req).execute().use { resp ->
+                                    if (!resp.isSuccessful) return@withMangaDexPacing
+                                    val body = resp.body?.string() ?: return@withMangaDexPacing
+                                    val data = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray.orEmpty()
+                                    for (node in data) {
+                                        val attrs = node.jsonObject["attributes"]?.jsonObject ?: continue
+                                        val chNum = attrs["chapter"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.toInt()
+                                            ?: continue
+                                        if (chNum <= 0) continue
+                                        val volNum = attrs["volume"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.toInt()
+                                        val cTitle = attrs["title"].cleanString()
+                                        val date = attrs["publishAt"].cleanString()?.take(10)
+                                        val pages = attrs["pages"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                        val existing = feedChaps[chNum]
+                                        if (existing == null || (existing.title.isNullOrBlank() && !cTitle.isNullOrBlank())) {
+                                            feedChaps[chNum] = RawFeedChap(volNum ?: existing?.volNum, chNum, cTitle ?: existing?.title, date ?: existing?.date, pages ?: existing?.pages)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                if (e is kotlinx.coroutines.CancellationException) throw e
+                            }
+                        }
+                    }
+                    covDef.await()
+                    feedDef.await()
+                }
+            }
+
+            val totalChapters = maxOf(
+                knownTotalChapters ?: 0,
+                mdLastCh ?: 0,
+                muInfo?.latestChapter ?: 0,
+                feedChaps.keys.maxOrNull() ?: 0
+            ).coerceIn(0, 2000)
+
+            val totalVolCount = maxOf(
+                volumeCovers.keys.maxOrNull() ?: 0,
+                knownTotalVolumes ?: 0,
+                mdLastVol ?: 0,
+                muInfo?.totalVolumes ?: 0
+            )
+
+            val seasonsList = mutableListOf<com.omnitrack.app.data.model.MediaSeason>()
+            val epMap = mutableMapOf<Int, MutableList<com.omnitrack.app.data.model.MediaEpisode>>()
+            val useMuSeasons = totalVolCount < 2 && (muInfo?.seasons?.isNotEmpty() == true)
+
+            if (totalChapters > 0) {
+                if (useMuSeasons && muInfo != null) {
+                    val muSeasons = muInfo.seasons.sortedBy { it.first }
+                    for ((sNum, sLabel, range) in muSeasons) {
+                        val validRangeEnd = range.last.coerceAtMost(totalChapters)
+                        if (range.first > totalChapters) continue
+                        val sCover = volumeCovers[sNum] ?: fallbackCoverUrl
+                        seasonsList.add(
+                            com.omnitrack.app.data.model.MediaSeason(
+                                seasonNumber = sNum,
+                                name = sLabel,
+                                episodeCount = (validRangeEnd - range.first + 1).coerceAtLeast(1),
+                                posterUrl = sCover
+                            )
+                        )
+                        val list = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
+                        for (ch in range.first..validRangeEnd) {
+                            val feed = feedChaps[ch]
+                            val kitsu = kitsuChaps[ch]
+                            val chTitle = feed?.title ?: kitsu?.second ?: "Chapter $ch"
+                            list.add(
+                                com.omnitrack.app.data.model.MediaEpisode(
+                                    id = ch.toLong(),
+                                    episodeNumber = ch,
+                                    seasonNumber = sNum,
+                                    title = chTitle,
+                                    overview = feed?.pages?.let { "$it pages" },
+                                    stillUrl = sCover,
+                                    airDate = feed?.date,
+                                    runtimeMinutes = null
+                                )
+                            )
+                        }
+                        epMap[sNum] = list
+                    }
+                } else if (totalVolCount >= 2) {
+                    val approxPerVol = (totalChapters.toDouble() / totalVolCount.toDouble()).coerceAtLeast(1.0)
+                    for (vol in 1..totalVolCount) {
+                        val vCover = volumeCovers[vol] ?: fallbackCoverUrl
+                        seasonsList.add(
+                            com.omnitrack.app.data.model.MediaSeason(
+                                seasonNumber = vol,
+                                name = "Volume $vol",
+                                episodeCount = 0,
+                                posterUrl = vCover
+                            )
+                        )
+                        epMap[vol] = mutableListOf()
+                    }
+                    for (ch in 1..totalChapters) {
+                        val feed = feedChaps[ch]
+                        val kitsu = kitsuChaps[ch]
+                        val mappedVol = (feed?.volNum ?: kitsu?.first)
+                            ?.takeIf { it in 1..totalVolCount }
+                            ?: kotlin.math.ceil(ch / approxPerVol).toInt().coerceIn(1, totalVolCount)
+                        val vCover = volumeCovers[mappedVol] ?: fallbackCoverUrl
+                        val chTitle = feed?.title ?: kitsu?.second ?: "Chapter $ch"
+                        epMap[mappedVol]?.add(
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = ch.toLong(),
+                                episodeNumber = ch,
+                                seasonNumber = mappedVol,
+                                title = chTitle,
+                                overview = feed?.pages?.let { "$it pages" },
+                                stillUrl = vCover,
+                                airDate = feed?.date,
+                                runtimeMinutes = null
+                            )
+                        )
+                    }
+                    // Sync accurate chapter counts & drop empty tail volumes if any
+                    for (idx in seasonsList.indices) {
+                        val s = seasonsList[idx]
+                        val cnt = epMap[s.seasonNumber]?.size ?: 0
+                        seasonsList[idx] = s.copy(episodeCount = cnt)
+                    }
+                    seasonsList.removeAll { (epMap[it.seasonNumber]?.isEmpty()) == true }
+                } else {
+                    val sCover = volumeCovers[1] ?: fallbackCoverUrl
+                    seasonsList.add(
+                        com.omnitrack.app.data.model.MediaSeason(
+                            seasonNumber = 1,
+                            name = "Chapters",
+                            episodeCount = totalChapters,
+                            posterUrl = sCover
+                        )
+                    )
+                    val list = mutableListOf<com.omnitrack.app.data.model.MediaEpisode>()
+                    for (ch in 1..totalChapters) {
+                        val feed = feedChaps[ch]
+                        val kitsu = kitsuChaps[ch]
+                        val chTitle = feed?.title ?: kitsu?.second ?: "Chapter $ch"
+                        list.add(
+                            com.omnitrack.app.data.model.MediaEpisode(
+                                id = ch.toLong(),
+                                episodeNumber = ch,
+                                seasonNumber = 1,
+                                title = chTitle,
+                                overview = feed?.pages?.let { "$it pages" },
+                                stillUrl = sCover,
+                                airDate = feed?.date,
+                                runtimeMinutes = null
+                            )
+                        )
+                    }
+                    epMap[1] = list
+                }
+            }
+
+            val result = MangaSeriesContent(
+                seasons = seasonsList,
+                episodesBySeason = epMap,
+                isSeasonGrouped = useMuSeasons,
+                resolvedMangaDexId = resolvedMdId,
+                totalChapters = totalChapters.takeIf { it > 0 },
+                publishers = muInfo?.publishers.orEmpty()
+            )
+            if (seasonsList.isNotEmpty() || totalChapters > 0) {
+                mangaSeriesContentCache[cacheKey] = result
+            }
+            result
         }
     }
 

@@ -44,6 +44,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 fun DetailAnimeCastSection(
     characters: List<AnimeCharacterItem>,
     modifier: Modifier = Modifier,
+    isMangaOrNovel: Boolean = false,
     onCharacterClick: ((AnimeCharacterItem) -> Unit)? = null,
     onVoiceActorClick: ((AnimeCharacterItem) -> Unit)? = null
 ) {
@@ -62,14 +63,14 @@ fun DetailAnimeCastSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Characters & Voice Actors",
+                text = if (isMangaOrNovel) "Characters" else "Characters & Voice Actors",
                 color = Color.White,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.3).sp
             )
             Text(
-                text = "${characters.size} cast",
+                text = if (isMangaOrNovel) "${characters.size} characters" else "${characters.size} cast",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
@@ -140,7 +141,7 @@ fun DetailAnimeCastSection(
                         }
                     }
 
-                    // Character Name & Voice Actor Name
+                    // Character Name & Voice Actor / Role
                     Text(
                         text = item.characterName,
                         color = Color.White,
@@ -150,8 +151,16 @@ fun DetailAnimeCastSection(
                         overflow = TextOverflow.Ellipsis
                     )
 
+                    val secondaryText = when {
+                        !item.voiceActorName.isNullOrBlank() -> item.voiceActorName
+                        isMangaOrNovel -> item.characterRole
+                            .replace("_", " ")
+                            .lowercase()
+                            .replaceFirstChar { it.uppercase() }
+                        else -> "Unknown VA"
+                    }
                     Text(
-                        text = item.voiceActorName ?: "Unknown VA",
+                        text = secondaryText,
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         maxLines = 1,

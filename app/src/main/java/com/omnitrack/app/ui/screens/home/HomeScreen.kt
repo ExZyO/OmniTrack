@@ -11,7 +11,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -120,6 +123,7 @@ fun HomeScreen(
     var showUpdateSheet by remember { mutableStateOf(false) }
     var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var selectedMangaSubtype by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -358,6 +362,41 @@ fun HomeScreen(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
                         )
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.MANGA) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (key, label) ->
+                                    val isSelected = selectedMangaSubtype == key
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
+                                            .border(
+                                                width = 1.dp,
+                                                color = if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f),
+                                                shape = RoundedCornerShape(999.dp)
+                                            )
+                                            .clickable { selectedMangaSubtype = key }
+                                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.60f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -379,9 +418,10 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype) {
                                     uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
+                                        (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
@@ -550,5 +590,26 @@ fun HomeScreen(
             )
         }
     }
+    }
+}
+
+private val HANGUL_REGEX = Regex("[\\uAC00-\\uD7AF\\u1100-\\u11FF]")
+private val KANA_REGEX = Regex("[\\u3040-\\u309F\\u30A0-\\u30FF]")
+private val CJK_REGEX = Regex("[\\u4E00-\\u9FFF]")
+
+internal fun inferMangaSubtype(originCountry: String?, nativeTitle: String?): String {
+    return when (originCountry?.trim()?.uppercase()) {
+        "KR" -> "MANHWA"
+        "CN", "TW", "HK" -> "MANHUA"
+        "JP" -> "MANGA"
+        else -> {
+            val nat = nativeTitle.orEmpty()
+            when {
+                HANGUL_REGEX.containsMatchIn(nat) -> "MANHWA"
+                KANA_REGEX.containsMatchIn(nat) -> "MANGA"
+                CJK_REGEX.containsMatchIn(nat) -> "MANHUA"
+                else -> "MANGA"
+            }
+        }
     }
 }
