@@ -61,6 +61,7 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,24 +72,24 @@ fun ScoreRatingSheet(
     onScoreConfirmed: (Float?) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    // 0.0f = Unrated (no rating given)
+    // 0.9f = Unrated (< 0.95f), 1.0f..10.0f = 0.1 steps (uniform 90 discrete steps -> zero dead zone)
     var sliderValue by remember(initialScore) {
-        mutableFloatStateOf(initialScore?.coerceIn(1.0f, 10.0f) ?: 0.0f)
+        mutableFloatStateOf(initialScore?.coerceIn(1.0f, 10.0f) ?: 0.9f)
     }
     var textInput by remember(initialScore) {
-        mutableStateOf(if (initialScore != null && initialScore >= 1.0f) String.format("%.1f", initialScore) else "")
+        mutableStateOf(if (initialScore != null && initialScore >= 1.0f) String.format(Locale.US, "%.1f", initialScore) else "")
     }
 
     val isUnrated = sliderValue < 0.95f
 
     fun updateScore(newScore: Float) {
         if (newScore < 0.95f) {
-            sliderValue = 0.0f
+            sliderValue = 0.9f
             textInput = ""
         } else {
             val clamped = ((newScore.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
             sliderValue = clamped
-            textInput = String.format("%.1f", clamped)
+            textInput = String.format(Locale.US, "%.1f", clamped)
         }
     }
 
@@ -132,13 +133,13 @@ fun ScoreRatingSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Scale strictly 1.0 to 10.0 with 0.1 precision",
+                        text = "Slide Unrated or 1.0 to 10.0 with 0.1 precision",
                         fontSize = 12.sp,
-                        color = TextMuted
+                        color = Color.White.copy(alpha = 0.72f)
                     )
                 }
 
-                if (initialScore != null) {
+                if (!isUnrated || initialScore != null) {
                     Text(
                         text = "Remove Rating",
                         color = Color(0xFFEF4444),
@@ -147,6 +148,7 @@ fun ScoreRatingSheet(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
+                                updateScore(0.9f)
                                 onScoreConfirmed(null)
                                 onDismiss()
                             }
@@ -169,12 +171,12 @@ fun ScoreRatingSheet(
             ) {
                 RepeatingHoldButton(
                     onStep = {
-                        if (isUnrated) {
-                            // Already unrated
-                        } else if (sliderValue <= 1.05f) {
-                            updateScore(0.0f)
-                        } else {
-                            updateScore(sliderValue - 0.1f)
+                        if (!isUnrated) {
+                            if (sliderValue <= 1.05f) {
+                                updateScore(0.9f)
+                            } else {
+                                updateScore(sliderValue - 0.1f)
+                            }
                         }
                     },
                     modifier = Modifier
@@ -192,14 +194,14 @@ fun ScoreRatingSheet(
                     Icon(
                         imageVector = Icons.Default.Star,
                         contentDescription = null,
-                        tint = if (isUnrated) Color.White.copy(alpha = 0.25f) else AccentGold,
+                        tint = if (isUnrated) Color.White.copy(alpha = 0.35f) else AccentGold,
                         modifier = Modifier.size(28.dp)
                     )
 
                     if (isUnrated) {
                         Text(
                             text = "Unrated",
-                            color = Color.White.copy(alpha = 0.45f),
+                            color = Color.White.copy(alpha = 0.85f),
                             fontSize = 32.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center,
@@ -215,10 +217,10 @@ fun ScoreRatingSheet(
                                 textInput = input
                                 val parsed = input.toFloatOrNull()
                                 if (parsed != null) {
-                                    if (parsed < 1.0f) {
-                                        sliderValue = 0.0f
+                                    if (parsed < 0.95f) {
+                                        sliderValue = 0.9f
                                     } else {
-                                        sliderValue = parsed.coerceIn(1.0f, 10.0f)
+                                        sliderValue = ((parsed.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
                                     }
                                 }
                             },
@@ -236,7 +238,7 @@ fun ScoreRatingSheet(
 
                         Text(
                             text = "/ 10",
-                            color = Color.White.copy(alpha = 0.35f),
+                            color = Color.White.copy(alpha = 0.55f),
                             fontSize = 18.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -260,43 +262,76 @@ fun ScoreRatingSheet(
                 }
             }
 
-            // 2. Smooth Continuous Slider (0.0 = Unrated, 1.0 to 10.0 in 0.1 steps)
-            Slider(
-                value = sliderValue,
-                onValueChange = { updateScore(it) },
-                valueRange = 0.0f..10.0f,
-                steps = 99, // 0.0 to 10.0 in 0.1 increments = 100 intervals (99 steps)
-                colors = SliderDefaults.colors(
-                    thumbColor = if (isUnrated) Color.White.copy(alpha = 0.5f) else Color.White,
-                    activeTrackColor = if (isUnrated) Color.White.copy(alpha = 0.15f) else AccentGold,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.10f)
-                ),
-                modifier = Modifier.padding(horizontal = 2.dp)
-            )
+            // 2. Smooth Continuous Slider (0.9 = Unrated, 1.0 to 10.0 in uniform 0.1 steps)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { updateScore(it) },
+                    valueRange = 0.9f..10.0f,
+                    steps = 90,
+                    colors = SliderDefaults.colors(
+                        thumbColor = if (isUnrated) Color.White.copy(alpha = 0.65f) else Color.White,
+                        activeTrackColor = if (isUnrated) Color.White.copy(alpha = 0.18f) else AccentGold,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.12f)
+                    ),
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
 
-            // 3. Clean Borderless Delta Stepper Buttons + Unrated Quick Pill
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Unrated",
+                        fontSize = 11.sp,
+                        fontWeight = if (isUnrated) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isUnrated) AccentGold else Color.White.copy(alpha = 0.80f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { updateScore(0.9f) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = "1.0",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.80f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { updateScore(1.0f) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = "5.0",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.80f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { updateScore(5.0f) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = "10.0",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.80f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { updateScore(10.0f) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // 3. Clean 6 Borderless Delta Stepper Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // "—" or "Unrated" quick tap button
-                Box(
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (isUnrated) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
-                        .clickable { updateScore(0.0f) }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Unrated",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isUnrated) Color.White else Color.White.copy(alpha = 0.50f)
-                    )
-                }
-
                 val deltas = listOf(-1.0f, -0.5f, -0.1f, 0.1f, 0.5f, 1.0f)
                 deltas.forEach { delta ->
                     val isPos = delta > 0
@@ -304,19 +339,25 @@ fun ScoreRatingSheet(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isPos) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f))
+                            .background(if (isPos) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.08f))
                             .clickable {
-                                val base = if (isUnrated) (if (isPos) 1.0f else 0.0f) else sliderValue
-                                updateScore(base + delta)
+                                if (isUnrated) {
+                                    if (isPos) updateScore(1.0f + delta)
+                                } else {
+                                    val next = sliderValue + delta
+                                    if (next < 0.95f) updateScore(0.9f) else updateScore(next)
+                                }
                             }
                             .padding(vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (isPos) "+${String.format("%.1f", delta)}" else String.format("%.1f", delta),
-                            fontSize = 13.sp,
+                            text = if (isPos) "+${String.format(Locale.US, "%.1f", delta)}" else String.format(Locale.US, "%.1f", delta),
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isPos) AccentGold else Color.White.copy(alpha = 0.70f)
+                            color = if (isPos) AccentGold else Color.White.copy(alpha = 0.90f),
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }

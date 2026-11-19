@@ -2,15 +2,12 @@ package com.omnitrack.app.ui.screens.detail.components
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -26,17 +23,18 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -44,42 +42,34 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -167,6 +157,9 @@ fun VolumeChapterDetailSheet(
     var personalRating by remember(ep.seasonNumber, ep.episodeNumber) {
         mutableStateOf(currentMeta?.userRating)
     }
+    var hasEditedRating by remember(ep.seasonNumber, ep.episodeNumber) {
+        mutableStateOf(false)
+    }
     var noteDraft by remember(ep.seasonNumber, ep.episodeNumber) {
         mutableStateOf(currentMeta?.userNote.orEmpty())
     }
@@ -181,7 +174,9 @@ fun VolumeChapterDetailSheet(
     // Sync if external DB update arrives when user hasn't typed
     LaunchedEffect(currentMeta) {
         if (currentMeta != null) {
-            if (personalRating == null && currentMeta.userRating != null) personalRating = currentMeta.userRating
+            if (!hasEditedRating && personalRating == null && currentMeta.userRating != null) {
+                personalRating = currentMeta.userRating
+            }
             if (noteDraft.isEmpty() && !currentMeta.userNote.isNullOrEmpty()) noteDraft = currentMeta.userNote
             if (customLabelDraft.isEmpty() && !currentMeta.customLabel.isNullOrEmpty()) customLabelDraft = currentMeta.customLabel
             isBookmarkedState = currentMeta.isBookmarked
@@ -735,13 +730,19 @@ fun VolumeChapterDetailSheet(
 
                 // 4. Exact Matching Clean Organic Rating Control (Unrated, 1.0 – 10.0 in 0.1 steps)
                 VolumeChapterRatingSection(
+                    itemKey = ep.seasonNumber to ep.episodeNumber,
                     rating = personalRating,
-                    onRatingChanged = { newRating ->
-                        personalRating = newRating
+                    onLiveRatingChange = { live ->
+                        hasEditedRating = true
+                        personalRating = live
+                    },
+                    onRatingChanged = { committed ->
+                        hasEditedRating = true
+                        personalRating = committed
                         onSaveMetadata(
                             ep.seasonNumber,
                             ep.episodeNumber,
-                            newRating,
+                            committed,
                             noteDraft.trim().takeIf { it.isNotBlank() },
                             isBookmarkedState,
                             customLabelDraft.trim().takeIf { it.isNotBlank() }
@@ -856,32 +857,61 @@ fun VolumeChapterDetailSheet(
 
 @Composable
 private fun VolumeChapterRatingSection(
+    itemKey: Any,
     rating: Float?,
+    onLiveRatingChange: (Float?) -> Unit,
     onRatingChanged: (Float?) -> Unit
 ) {
-    var sliderValue by remember(rating) {
-        mutableFloatStateOf(rating?.coerceIn(1.0f, 10.0f) ?: 0.0f)
+    // 0.9f = Unrated (< 0.95f), 1.0f..10.0f = 0.1 steps (uniform 90 discrete steps -> zero dead zone)
+    var sliderValue by remember(itemKey) {
+        mutableFloatStateOf(rating?.coerceIn(1.0f, 10.0f) ?: 0.9f)
     }
-    var textInput by remember(rating) {
+    var textInput by remember(itemKey) {
         mutableStateOf(if (rating != null && rating >= 1.0f) String.format(Locale.US, "%.1f", rating) else "")
+    }
+    var isDraggingSlider by remember(itemKey) { mutableStateOf(false) }
+
+    LaunchedEffect(itemKey, rating) {
+        if (!isDraggingSlider) {
+            val targetVal = rating?.coerceIn(1.0f, 10.0f) ?: 0.9f
+            if (kotlin.math.abs(targetVal - sliderValue) > 0.04f) {
+                sliderValue = targetVal
+                textInput = if (rating != null && rating >= 1.0f) String.format(Locale.US, "%.1f", rating) else ""
+            }
+        }
     }
 
     val isUnrated = sliderValue < 0.95f
 
+    fun updateLocalOnly(newScore: Float) {
+        if (newScore < 0.95f) {
+            sliderValue = 0.9f
+            textInput = ""
+            onLiveRatingChange(null)
+        } else {
+            val clamped = ((newScore.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
+            sliderValue = clamped
+            textInput = String.format(Locale.US, "%.1f", clamped)
+            onLiveRatingChange(clamped)
+        }
+    }
+
     fun commitScore(newScore: Float) {
         if (newScore < 0.95f) {
-            sliderValue = 0.0f
+            sliderValue = 0.9f
             textInput = ""
+            onLiveRatingChange(null)
             onRatingChanged(null)
         } else {
             val clamped = ((newScore.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
             sliderValue = clamped
             textInput = String.format(Locale.US, "%.1f", clamped)
+            onLiveRatingChange(clamped)
             onRatingChanged(clamped)
         }
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -895,9 +925,9 @@ private fun VolumeChapterRatingSection(
                     color = Color.White
                 )
                 Text(
-                    text = if (isUnrated) "Unrated · Slide 1.0 to 10.0" else "Personal rating (${String.format(Locale.US, "%.1f", sliderValue)} / 10.0)",
+                    text = if (isUnrated) "Unrated · Slide Unrated or 1.0 to 10.0" else "Personal rating (${String.format(Locale.US, "%.1f", sliderValue)} / 10.0)",
                     fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.55f)
+                    color = Color.White.copy(alpha = 0.90f)
                 )
             }
 
@@ -909,7 +939,7 @@ private fun VolumeChapterRatingSection(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { commitScore(0.0f) }
+                        .clickable { commitScore(0.9f) }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
@@ -927,7 +957,7 @@ private fun VolumeChapterRatingSection(
                 onStep = {
                     if (!isUnrated) {
                         if (sliderValue <= 1.05f) {
-                            commitScore(0.0f)
+                            commitScore(0.9f)
                         } else {
                             commitScore(sliderValue - 0.1f)
                         }
@@ -948,14 +978,14 @@ private fun VolumeChapterRatingSection(
                 Icon(
                     imageVector = Icons.Default.Star,
                     contentDescription = null,
-                    tint = if (isUnrated) Color.White.copy(alpha = 0.25f) else AccentGold,
+                    tint = if (isUnrated) Color.White.copy(alpha = 0.45f) else AccentGold,
                     modifier = Modifier.size(26.dp)
                 )
 
                 if (isUnrated) {
                     Text(
                         text = "Unrated",
-                        color = Color.White.copy(alpha = 0.45f),
+                        color = Color.White,
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -971,10 +1001,15 @@ private fun VolumeChapterRatingSection(
                             textInput = input
                             val parsed = input.toFloatOrNull()
                             if (parsed != null) {
-                                if (parsed < 1.0f) {
-                                    commitScore(0.0f)
+                                if (parsed < 0.95f) {
+                                    sliderValue = 0.9f
+                                    onLiveRatingChange(null)
+                                    onRatingChanged(null)
                                 } else {
-                                    commitScore(parsed.coerceIn(1.0f, 10.0f))
+                                    val clamped = ((parsed.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
+                                    sliderValue = clamped
+                                    onLiveRatingChange(clamped)
+                                    onRatingChanged(clamped)
                                 }
                             }
                         },
@@ -992,7 +1027,7 @@ private fun VolumeChapterRatingSection(
 
                     Text(
                         text = "/ 10",
-                        color = Color.White.copy(alpha = 0.35f),
+                        color = Color.White.copy(alpha = 0.90f),
                         fontSize = 17.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1016,42 +1051,84 @@ private fun VolumeChapterRatingSection(
             }
         }
 
-        // 2. Smooth Continuous Slider (0.0 = Unrated, 1.0 to 10.0 in 0.1 steps)
-        Slider(
-            value = sliderValue,
-            onValueChange = { commitScore(it) },
-            valueRange = 0.0f..10.0f,
-            steps = 99,
-            colors = SliderDefaults.colors(
-                thumbColor = if (isUnrated) Color.White.copy(alpha = 0.5f) else Color.White,
-                activeTrackColor = if (isUnrated) Color.White.copy(alpha = 0.15f) else AccentGold,
-                inactiveTrackColor = Color.White.copy(alpha = 0.10f)
-            ),
-            modifier = Modifier.padding(horizontal = 2.dp)
-        )
+        // 2. Smooth Continuous Slider (0.9 = Unrated, 1.0 to 10.0 in uniform 0.1 steps)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Slider(
+                value = sliderValue,
+                onValueChange = {
+                    isDraggingSlider = true
+                    updateLocalOnly(it)
+                },
+                onValueChangeFinished = {
+                    isDraggingSlider = false
+                    commitScore(sliderValue)
+                },
+                valueRange = 0.9f..10.0f,
+                steps = 90,
+                colors = SliderDefaults.colors(
+                    thumbColor = if (isUnrated) Color.White.copy(alpha = 0.70f) else Color.White,
+                    activeTrackColor = if (isUnrated) Color.White.copy(alpha = 0.18f) else AccentGold,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.12f)
+                ),
+                modifier = Modifier.padding(horizontal = 2.dp)
+            )
 
-        // 3. Clean Borderless Delta Stepper Buttons + Unrated Quick Pill
+            // Borderless Scale Labels beneath the slider
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Unrated",
+                    fontSize = 11.sp,
+                    fontWeight = if (isUnrated) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isUnrated) AccentGold else Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { commitScore(0.9f) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+                Text(
+                    text = "1.0",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { commitScore(1.0f) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+                Text(
+                    text = "5.0",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { commitScore(5.0f) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+                Text(
+                    text = "10.0",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { commitScore(10.0f) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // 3. Clean 6 Borderless Delta Stepper Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1.1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (isUnrated) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
-                    .clickable { commitScore(0.0f) }
-                    .padding(vertical = 9.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Unrated",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isUnrated) Color.White else Color.White.copy(alpha = 0.50f)
-                )
-            }
-
             val deltas = listOf(-1.0f, -0.5f, -0.1f, 0.1f, 0.5f, 1.0f)
             deltas.forEach { delta ->
                 val isPos = delta > 0
@@ -1059,19 +1136,25 @@ private fun VolumeChapterRatingSection(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (isPos) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f))
+                        .background(if (isPos) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.08f))
                         .clickable {
-                            val base = if (isUnrated) (if (isPos) 1.0f else 0.0f) else sliderValue
-                            commitScore(base + delta)
+                            if (isUnrated) {
+                                if (isPos) commitScore(1.0f + delta)
+                            } else {
+                                val next = sliderValue + delta
+                                if (next < 0.95f) commitScore(0.9f) else commitScore(next)
+                            }
                         }
                         .padding(vertical = 9.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = if (isPos) "+${String.format(Locale.US, "%.1f", delta)}" else String.format(Locale.US, "%.1f", delta),
-                        fontSize = 12.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isPos) AccentGold else Color.White.copy(alpha = 0.70f)
+                        color = if (isPos) AccentGold else Color.White,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }

@@ -1570,9 +1570,11 @@ private fun SiblingDetailPreview(
     presentationSettings: PresentationSettings,
     modifier: Modifier = Modifier
 ) {
-    val cachedAux = remember(item.id, item.tmdbId, item.anilistId, item.malId) {
+    val cachedAux = remember(item.id, item.mediaType, item.tmdbId, item.anilistId, item.malId) {
+        val allowTmdbFallback = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE ||
+            (item.mediaType == MediaType.ANIME && (item.anilistId == null || item.anilistId <= 0L))
         DetailAuxMemoryCache.getCacheKey(item)?.let { DetailAuxMemoryCache.cache[it] }
-            ?: item.tmdbId?.takeIf { item.mediaType != MediaType.ANIME || item.anilistId == null || item.anilistId <= 0L }?.let {
+            ?: item.tmdbId?.takeIf { allowTmdbFallback }?.let {
                 DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", it)]
             }
     }
@@ -1581,6 +1583,22 @@ private fun SiblingDetailPreview(
         !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
     } ?: item.clearartUrl?.takeIf {
         !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+    } ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)?.takeIf {
+        !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
+    }
+
+    val resolvedTitle = when (pref) {
+        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> cachedAux?.englishTitle ?: item.title
+        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> cachedAux?.romajiTitle ?: item.title
+        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> item.nativeTitle ?: cachedAux?.romajiTitle ?: item.title
+    }
+    val resolvedNative = if (resolvedTitle == item.nativeTitle) {
+        cachedAux?.englishTitle ?: cachedAux?.romajiTitle ?: item.title
+    } else {
+        item.nativeTitle
+    }
+    val displayItem = remember(item, resolvedTitle, resolvedNative) {
+        item.copy(title = resolvedTitle, nativeTitle = resolvedNative)
     }
 
     val effectiveCover = item.customCoverPath
@@ -1635,7 +1653,7 @@ private fun SiblingDetailPreview(
         ) {
             if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
                 DetailHeroHeaderSection(
-                    item = item,
+                    item = displayItem,
                     backdropTargetUrl = backdropTargetUrl,
                     englishTitle = cachedAux?.englishTitle,
                     romajiTitle = cachedAux?.romajiTitle,
@@ -1649,7 +1667,7 @@ private fun SiblingDetailPreview(
                 )
             } else {
                 DetailClassicHeaderSection(
-                    item = item,
+                    item = displayItem,
                     coverImageModel = coverImageModel,
                     backdropTargetUrl = backdropTargetUrl,
                     englishTitle = cachedAux?.englishTitle,
@@ -1666,12 +1684,12 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            val hasProgressControls = displayItem.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
             val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
                 DetailProgressSection(
-                    item = item,
+                    item = displayItem,
                     onUpdateProgress = {},
                     onUpdatePlaytime = {},
                     onTogglePlatform = {},
@@ -1682,15 +1700,15 @@ private fun SiblingDetailPreview(
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
             }
 
-            if (!item.synopsis.isNullOrBlank()) {
+            if (!displayItem.synopsis.isNullOrBlank()) {
                 DetailSynopsisSection(
-                    synopsis = item.synopsis,
+                    synopsis = displayItem.synopsis,
                     dominantAccent = dominantAccent
                 )
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            DetailShowDetailsSection(item = item)
+            DetailShowDetailsSection(item = displayItem)
         }
     }
 }
