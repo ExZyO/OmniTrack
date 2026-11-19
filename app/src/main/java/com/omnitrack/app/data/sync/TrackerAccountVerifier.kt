@@ -532,4 +532,19 @@ object TrackerAccountVerifier {
             null
         }
     }
+
+    suspend fun verifyHardcover(token: String): VerificationState = withContext(Dispatchers.IO) {
+        val clean = token.trim()
+        if (clean.isBlank()) return@withContext VerificationState.Idle
+        try {
+            val handle = com.omnitrack.app.data.enrichment.HardcoverApiClient(client).verifyToken(clean)
+            if (!handle.isNullOrBlank()) {
+                VerificationState.Verified("@$handle")
+            } else {
+                VerificationState.Failed("Invalid or expired Hardcover token")
+            }
+        } catch (e: Exception) {
+            VerificationState.Failed(e.message ?: "Hardcover verification failed")
+        }
+    }
 }

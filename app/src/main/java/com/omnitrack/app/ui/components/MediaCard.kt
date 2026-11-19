@@ -90,7 +90,13 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     playtimeHours = playtimeHours,
     platforms = platforms,
     steamAppId = steamAppId,
-    gameCompletionTier = gameCompletionTier
+    gameCompletionTier = gameCompletionTier,
+    openLibraryId = openLibraryId,
+    bookAuthor = bookAuthor,
+    bookFormat = bookFormat,
+    bookTrackingMode = bookTrackingMode,
+    bookAudioMinutes = bookAudioMinutes,
+    bookTotalAudioMinutes = bookTotalAudioMinutes
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -413,6 +419,24 @@ fun MediaCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 2.dp)
                 )
+            } else if (item.mediaType == MediaType.BOOK) {
+                Text(
+                    text = com.omnitrack.app.data.model.formatBookCardBadge(
+                        currentProgress = item.currentProgress,
+                        totalProgress = item.totalProgress,
+                        trackingMode = item.bookTrackingMode,
+                        audioMinutes = item.bookAudioMinutes,
+                        totalAudioMinutes = item.bookTotalAudioMinutes,
+                        bookFormat = item.bookFormat,
+                        author = item.bookAuthor
+                    ),
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
             }
         }
     }
@@ -444,6 +468,37 @@ fun MediaCard(
 }
 
 private fun formatProgress(item: MediaCardSummary): String {
+    if (item.mediaType == MediaType.BOOK) {
+        return when (com.omnitrack.app.data.model.BookTrackingMode.fromName(item.bookTrackingMode)) {
+            com.omnitrack.app.data.model.BookTrackingMode.AUDIO_MINUTES -> {
+                val cur = com.omnitrack.app.data.model.formatBookDuration(item.bookAudioMinutes)
+                val tot = com.omnitrack.app.data.model.formatBookDuration(item.bookTotalAudioMinutes)
+                when {
+                    cur != null && tot != null -> "$cur / $tot"
+                    cur != null -> cur
+                    tot != null -> "0m / $tot"
+                    else -> ""
+                }
+            }
+            com.omnitrack.app.data.model.BookTrackingMode.PERCENT -> {
+                val pct = if (item.totalProgress != null && item.totalProgress > 0.0) {
+                    kotlin.math.round((item.currentProgress / item.totalProgress) * 100.0).toInt().coerceIn(0, 100)
+                } else {
+                    item.currentProgress.toInt().coerceIn(0, 100)
+                }
+                if (pct > 0) "$pct%" else ""
+            }
+            com.omnitrack.app.data.model.BookTrackingMode.PAGES -> {
+                val cur = item.currentProgress.toInt()
+                val tot = item.totalProgress?.toInt()
+                when {
+                    tot != null && tot > 0 -> "$cur / $tot Pages"
+                    cur > 0 -> "$cur Pages"
+                    else -> ""
+                }
+            }
+        }
+    }
     val unit = if (item.mediaType == MediaType.NOVEL && item.platform == "LIGHT_NOVEL") "Vol" else item.mediaType.unitLabel
     val effValue = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
         if (item.playtimeHours > 0.0) item.playtimeHours else item.currentProgress

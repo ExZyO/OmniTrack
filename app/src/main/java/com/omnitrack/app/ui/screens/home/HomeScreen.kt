@@ -131,6 +131,8 @@ fun HomeScreen(
     var selectedVnLengthSubtype by rememberSaveable { mutableStateOf("ALL") }
     var selectedGamePlatform by rememberSaveable { mutableStateOf("ALL") }
     var selectedGameCompletion by rememberSaveable { mutableStateOf("ALL") }
+    var selectedBookFormat by rememberSaveable { mutableStateOf("ALL") }
+    var selectedBookCategory by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -459,6 +461,16 @@ fun HomeScreen(
                             )
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.BOOK) {
+                            BookUnderlineFilterBar(
+                                selectedFormat = selectedBookFormat,
+                                selectedCategory = selectedBookCategory,
+                                onFormatSelected = { selectedBookFormat = it },
+                                onCategorySelected = { selectedBookCategory = it },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -480,7 +492,7 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory) {
                                     uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
@@ -495,10 +507,13 @@ fun HomeScreen(
                                             "BACKLOG" -> item.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
                                             else -> true
                                         }) &&
+                                        (pageMediaType != MediaType.BOOK || selectedBookFormat == "ALL" || com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormat) &&
+                                        (pageMediaType != MediaType.BOOK || selectedBookCategory == "ALL" || com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, null) == selectedBookCategory) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
-                                            item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true)
+                                            item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
+                                            item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true)
                                     }
                                 }
 
@@ -713,6 +728,44 @@ internal fun inferNovelSubtype(
         "LIGHT_NOVEL"
     } else {
         "WEB_NOVEL"
+    }
+}
+
+@Composable
+internal fun BookUnderlineFilterBar(
+    selectedFormat: String,
+    selectedCategory: String?,
+    onFormatSelected: (String) -> Unit,
+    onCategorySelected: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        UnderlineFilterGroup(
+            options = listOf(
+                "ALL" to "All Formats",
+                "PRINT" to "Print",
+                "EBOOK" to "E-book",
+                "AUDIO" to "Audiobook"
+            ),
+            selectedKey = selectedFormat,
+            onSelected = onFormatSelected
+        )
+        if (selectedCategory != null && onCategorySelected != null) {
+            UnderlineFilterGroup(
+                options = listOf(
+                    "ALL" to "All Books",
+                    "FICTION" to "Fiction",
+                    "NON_FICTION" to "Non-Fiction",
+                    "CLASSICS_POETRY" to "Classics & Poetry",
+                    "PLAYS" to "Plays"
+                ),
+                selectedKey = selectedCategory,
+                onSelected = onCategorySelected
+            )
+        }
     }
 }
 

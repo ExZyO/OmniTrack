@@ -44,11 +44,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.AnimeTagItem
+import com.omnitrack.app.data.model.BookDetailMeta
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.data.model.formatBookDuration
 import com.omnitrack.app.data.model.formatProtonDbLabel
 import com.omnitrack.app.data.model.formatSteamDeckLabel
 import com.omnitrack.app.data.model.formatVndbVoicedLabel
@@ -86,6 +88,7 @@ fun DetailGeneralInfoSection(
     nextAiringEpochSeconds: Long? = null,
     vnDetailMeta: VnDetailMeta? = null,
     gameDetailMeta: GameDetailMeta? = null,
+    bookDetailMeta: BookDetailMeta? = null,
     modifier: Modifier = Modifier
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
@@ -277,6 +280,50 @@ fun DetailGeneralInfoSection(
             gameDetailMeta?.supportedPlatforms?.takeIf { it.isNotEmpty() }?.let { plats ->
                 add("Supported Platforms" to plats.take(6).joinToString(", "))
             }
+        } else if (item.mediaType == MediaType.BOOK) {
+            (bookDetailMeta?.authorName ?: item.bookAuthor)?.takeIf { it.isNotBlank() }?.let {
+                add("Author" to it)
+            }
+            bookDetailMeta?.literaryForm?.label?.takeIf { it.isNotBlank() }?.let {
+                add("Literary Form" to it)
+            }
+            bookDetailMeta?.originalLanguage?.takeIf { it.isNotBlank() }?.let {
+                add("Original Language" to it)
+            }
+            bookDetailMeta?.seriesName?.takeIf { it.isNotBlank() }?.let { sName ->
+                val pos = bookDetailMeta.seriesPosition?.takeIf { it.isNotBlank() }?.let { " #$it" }.orEmpty()
+                val tot = bookDetailMeta.seriesTotal?.takeIf { it > 0 }?.let { " (of $it)" }.orEmpty()
+                add("Series" to "$sName$pos$tot")
+            }
+            (item.bookTranslator ?: bookDetailMeta?.translator)?.takeIf { it.isNotBlank() }?.let {
+                add("Translator" to it)
+            }
+            (item.bookEditionLabel ?: bookDetailMeta?.editionName)?.takeIf { it.isNotBlank() }?.let {
+                add("Edition" to it)
+            }
+            (bookDetailMeta?.publisher ?: item.studioOrNetwork)?.takeIf { it.isNotBlank() }?.let {
+                add("Publisher" to it)
+            }
+            val effPages = item.totalProgress?.toInt()?.takeIf { it > 0 } ?: bookDetailMeta?.pageCount
+            effPages?.takeIf { it > 0 }?.let { pg ->
+                add("Pages" to "$pg pages")
+            }
+            bookDetailMeta?.lineCount?.takeIf { it > 0 }?.let { lc ->
+                add("Verse Length" to "${String.format(Locale.US, "%,d", lc)} lines")
+            }
+            formatBookDuration(item.bookTotalAudioMinutes ?: bookDetailMeta?.audioDurationMinutes)?.let { dur ->
+                val narrator = bookDetailMeta?.audiobookNarrator?.takeIf { it.isNotBlank() }?.let { " · Narrated by $it" }.orEmpty()
+                add("Audiobook" to "$dur$narrator")
+            }
+            (item.isbn ?: bookDetailMeta?.isbn13)?.takeIf { it.isNotBlank() }?.let {
+                add("ISBN" to it)
+            }
+            bookDetailMeta?.awards?.takeIf { it.isNotEmpty() }?.let {
+                add("Awards" to it.joinToString(", "))
+            }
+            bookDetailMeta?.contentWarnings?.takeIf { it.isNotEmpty() }?.let {
+                add("Content Warnings" to it.joinToString(", "))
+            }
         } else if (effRuntime != null && effRuntime > 0) {
             val hrs = effRuntime / 60
             val mins = effRuntime % 60
@@ -314,7 +361,7 @@ fun DetailGeneralInfoSection(
         if (!item.platforms.isNullOrBlank() && (item.mediaType != MediaType.GAME || gameDetailMeta?.supportedPlatforms.isNullOrEmpty())) {
             add("Platform" to item.platforms)
         }
-        if (!item.studioOrNetwork.isNullOrBlank() && !isSeries) {
+        if (!item.studioOrNetwork.isNullOrBlank() && !isSeries && item.mediaType != MediaType.BOOK) {
             val companyLabel = when (item.mediaType) {
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Developer"
                 MediaType.MANGA, MediaType.NOVEL -> "Serialization"
@@ -346,7 +393,7 @@ fun DetailGeneralInfoSection(
                         .fillMaxWidth()
                         .padding(vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Top
                 ) {
                     Text(
                         text = label,
@@ -360,9 +407,10 @@ fun DetailGeneralInfoSection(
                             .weight(1f)
                             .padding(start = 16.dp),
                         fontSize = 14.sp,
+                        lineHeight = 19.sp,
                         color = Color.White,
                         textAlign = TextAlign.End,
-                        maxLines = 1,
+                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -524,6 +572,7 @@ fun DetailGenresTagsSection(
     vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR,
     vnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP,
     gameDetailMeta: GameDetailMeta? = null,
+    bookDetailMeta: BookDetailMeta? = null,
     onGenreOrTagClick: ((name: String, isTag: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -839,6 +888,150 @@ fun DetailGenresTagsSection(
         return
     }
 
+    if (item.mediaType == MediaType.BOOK) {
+        val combinedBookTags = remember(tags, effectiveGenres, bookDetailMeta) {
+            buildList {
+                addAll(tags)
+                effectiveGenres.forEachIndexed { idx, g ->
+                    if (none { it.name.equals(g, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 40_000L + idx, name = g, category = "genre"))
+                    }
+                }
+                bookDetailMeta?.moods.orEmpty().forEachIndexed { idx, m ->
+                    if (none { it.name.equals(m, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 50_000L + idx, name = m, category = "mood"))
+                    }
+                }
+                bookDetailMeta?.awards.orEmpty().forEachIndexed { idx, a ->
+                    if (none { it.name.equals(a, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 60_000L + idx, name = a, category = "award"))
+                    }
+                }
+            }.distinctBy { it.name.lowercase() }
+        }
+        if (combinedBookTags.isEmpty()) return
+
+        var selectedCategory by remember { mutableStateOf("ALL") }
+        var showAllTags by remember { mutableStateOf(false) }
+
+        val categories = remember(combinedBookTags) {
+            buildList {
+                add("ALL" to "All")
+                if (combinedBookTags.any { it.category.equals("genre", ignoreCase = true) }) add("genre" to "Genres")
+                if (combinedBookTags.any { it.category.equals("mood", ignoreCase = true) }) add("mood" to "Moods")
+                if (combinedBookTags.any { it.category.equals("award", ignoreCase = true) }) add("award" to "Awards")
+            }
+        }
+        val filteredBookTags = remember(combinedBookTags, selectedCategory) {
+            if (selectedCategory == "ALL") combinedBookTags
+            else combinedBookTags.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+        }
+        val visibleBookTags = if (showAllTags) filteredBookTags else filteredBookTags.take(18)
+
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Genres, Moods & Awards",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+
+            if (categories.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    categories.forEach { (key, label) ->
+                        val selected = selectedCategory == key
+                        Column(
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .clickable {
+                                    selectedCategory = key
+                                    showAllTags = false
+                                },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp)
+                                    .background(if (selected) Color.White else Color.Transparent)
+                            )
+                        }
+                    }
+                }
+            }
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                visibleBookTags.forEach { tagItem ->
+                    val isGenre = tagItem.category.equals("genre", ignoreCase = true)
+                    val isAward = tagItem.category.equals("award", ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when {
+                                    isAward -> Color(0xFFF5C518).copy(alpha = 0.12f)
+                                    isGenre -> AccentArctic.copy(alpha = 0.10f)
+                                    else -> Color.White.copy(alpha = 0.06f)
+                                }
+                            )
+                            .border(
+                                1.dp,
+                                when {
+                                    isAward -> Color(0xFFF5C518).copy(alpha = 0.28f)
+                                    isGenre -> AccentArctic.copy(alpha = 0.25f)
+                                    else -> Color.White.copy(alpha = 0.09f)
+                                },
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = tagItem.name,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (isGenre || isAward) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            if (filteredBookTags.size > 18) {
+                Text(
+                    text = if (showAllTags) "Show less" else "+${filteredBookTags.size - 18} more",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { showAllTags = !showAllTags }
+                        .padding(vertical = 2.dp)
+                )
+            }
+        }
+        return
+    }
+
     if (effectiveGenres.isEmpty() && tags.isEmpty()) return
 
     var showAllTags by remember { mutableStateOf(false) }
@@ -950,6 +1143,7 @@ fun DetailShowDetailsSection(
     durationMinutes: Int? = null,
     vnDetailMeta: VnDetailMeta? = null,
     gameDetailMeta: GameDetailMeta? = null,
+    bookDetailMeta: BookDetailMeta? = null,
     vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR,
     vnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP,
     onGenreOrTagClick: ((name: String, isTag: Boolean) -> Unit)? = null,
@@ -965,7 +1159,8 @@ fun DetailShowDetailsSection(
             favourites = favourites,
             durationMinutes = durationMinutes,
             vnDetailMeta = vnDetailMeta,
-            gameDetailMeta = gameDetailMeta
+            gameDetailMeta = gameDetailMeta,
+            bookDetailMeta = bookDetailMeta
         )
         DetailNamesSynonymsSection(
             item = item,
@@ -981,6 +1176,7 @@ fun DetailShowDetailsSection(
             vnSpoilerLevel = vnSpoilerLevel,
             vnNsfwFilterMode = vnNsfwFilterMode,
             gameDetailMeta = gameDetailMeta,
+            bookDetailMeta = bookDetailMeta,
             onGenreOrTagClick = onGenreOrTagClick
         )
     }

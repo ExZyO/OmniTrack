@@ -538,7 +538,7 @@ fun DetailGameTrackingSection(
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
 
@@ -558,7 +558,7 @@ fun DetailGameTrackingSection(
                             text = subParts.joinToString(" · "),
                             fontSize = 11.5.sp,
                             color = Color.White.copy(alpha = 0.65f),
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }

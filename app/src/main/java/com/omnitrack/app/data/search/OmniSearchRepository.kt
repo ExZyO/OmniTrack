@@ -65,9 +65,13 @@ class OmniSearchRepository(
         "Steam" to 9,
         "VNDB" to 10,
         "Bangumi" to 11,
+        "Hardcover" to 6,
+        "OpenLibrary" to 8,
+        "Apple Books" to 9,
+        "PoetryDB" to 10,
         "Syosetu" to 12,
-        "OpenLibrary" to 13,
-        "WLNUpdates" to 14
+        "WLNUpdates" to 14,
+        "Google Books" to 15
     )
 
     private fun prioritizeAndDedupe(
@@ -112,6 +116,11 @@ class OmniSearchRepository(
                     mangadexId = existing.mangadexId ?: item.mangadexId,
                     igdbId = existing.igdbId ?: item.igdbId,
                     steamAppId = existing.steamAppId ?: item.steamAppId,
+                    openLibraryId = existing.openLibraryId ?: item.openLibraryId,
+                    hardcoverId = existing.hardcoverId ?: item.hardcoverId,
+                    isbn = existing.isbn ?: item.isbn,
+                    bookAuthor = existing.bookAuthor ?: item.bookAuthor,
+                    bookFormat = existing.bookFormat ?: item.bookFormat,
                     originCountry = existing.originCountry ?: item.originCountry,
                     platform = existing.platform ?: item.platform,
                     bannerUrl = existing.bannerUrl ?: item.bannerUrl,
@@ -1102,6 +1111,130 @@ class OmniSearchRepository(
         }
     }
 
+    suspend fun fetchDiscoverBooksShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        suspend fun queryOpenLibrarySearch(q: String, subject: String? = null): List<SearchResultItem> =
+            NetworkPacer.withOpenLibraryPacing {
+                try {
+                    val subjectPart = subject?.let { "&subject=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+                    val qPart = if (q.isNotBlank()) "q=${URLEncoder.encode(q, "UTF-8")}" else "q=*"
+                    val fields = "key,title,author_name,first_publish_year,number_of_pages_median,ratings_average,cover_i,isbn"
+                    val url = "https://openlibrary.org/search.json?$qPart$subjectPart&sort=rating&limit=16&fields=$fields"
+                    val req = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withOpenLibraryPacing emptyList()
+                        val docs = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("docs") as? JsonArray ?: return@withOpenLibraryPacing emptyList()
+                        docs.mapNotNull { el ->
+                            val o = el as? JsonObject ?: return@mapNotNull null
+                            val t = o["title"].cleanString() ?: return@mapNotNull null
+                            val covId = (o["cover_i"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                                ?.takeIf { it > 0 } ?: return@mapNotNull null
+                            val workId = o["key"].cleanString()?.substringAfterLast("/")
+                            val author = (o["author_name"] as? JsonArray)?.firstOrNull()?.cleanString()
+                            val year = (o["first_publish_year"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull?.toString()
+                            val pages = (o["number_of_pages_median"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                            val r5 = (o["ratings_average"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
+                            val isbn = (o["isbn"] as? JsonArray)?.firstOrNull()?.cleanString()
+                            SearchResultItem(
+                                title = t,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl("https://covers.openlibrary.org/b/id/$covId-L.jpg"),
+                                releaseYear = year,
+                                mediaType = MediaType.BOOK,
+                                sourceProvider = "OpenLibrary",
+                                totalProgress = pages?.toDouble(),
+                                communityScore = r5?.let { it * 2f },
+                                openLibraryId = workId,
+                                isbn = isbn,
+                                bookAuthor = author,
+                                bookFormat = "HARDCOVER"
+                            )
+                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(14)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+
+        when (shelf.lowercase()) {
+            "audiobooks" -> NetworkPacer.withGeneralPacing {
+                try {
+                    val req = Request.Builder()
+                        .url("https://itunes.apple.com/search?term=bestseller+fiction&media=audiobook&limit=16")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                        val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("results") as? JsonArray ?: return@withGeneralPacing emptyList()
+                        results.mapNotNull { el ->
+                            val o = el as? JsonObject ?: return@mapNotNull null
+                            val t = o["collectionName"].cleanString() ?: o["trackName"].cleanString() ?: return@mapNotNull null
+                            val cov = (o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString())
+                                ?.replace("100x100bb", "1200x1200bb")
+                                ?.replace("60x60bb", "1200x1200bb")
+                                ?: return@mapNotNull null
+                            SearchResultItem(
+                                title = t,
+                                coverUrl = cov,
+                                releaseYear = o["releaseDate"].cleanString()?.take(4),
+                                synopsis = o["description"].cleanString()?.let { cleanSynopsis(it) },
+                                mediaType = MediaType.BOOK,
+                                sourceProvider = "Apple Books",
+                                communityScore = (o["averageUserRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f },
+                                bookAuthor = o["artistName"].cleanString(),
+                                bookFormat = "AUDIOBOOK"
+                            )
+                        }.take(14)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+            "classics_poetry" -> queryOpenLibrarySearch(q = "paradise lost divine comedy faust iliad odyssey hamlet")
+            "scifi_fantasy" -> queryOpenLibrarySearch(q = "science fiction fantasy dune", subject = "science fiction")
+            "philosophy_nonfiction" -> queryOpenLibrarySearch(q = "philosophy ethics meditations history", subject = "philosophy")
+            else -> NetworkPacer.withOpenLibraryPacing {
+                try {
+                    val req = Request.Builder()
+                        .url("https://openlibrary.org/trending/weekly.json?limit=18")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withOpenLibraryPacing emptyList()
+                        val works = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("works") as? JsonArray ?: return@withOpenLibraryPacing emptyList()
+                        works.mapNotNull { el ->
+                            val o = el as? JsonObject ?: return@mapNotNull null
+                            val t = o["title"].cleanString() ?: return@mapNotNull null
+                            val covId = (o["cover_i"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                                ?.takeIf { it > 0 } ?: return@mapNotNull null
+                            val workId = o["key"].cleanString()?.substringAfterLast("/")
+                            val author = (o["author_name"] as? JsonArray)?.firstOrNull()?.cleanString()
+                            val year = (o["first_publish_year"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull?.toString()
+                            SearchResultItem(
+                                title = t,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl("https://covers.openlibrary.org/b/id/$covId-L.jpg"),
+                                releaseYear = year,
+                                mediaType = MediaType.BOOK,
+                                sourceProvider = "OpenLibrary",
+                                openLibraryId = workId,
+                                bookAuthor = author,
+                                bookFormat = "HARDCOVER"
+                            )
+                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(14)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+        }
+    }
+
     private suspend fun searchVndb(query: String): List<SearchResultItem> = NetworkPacer.withVndbPacing {
         try {
             val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
@@ -1594,11 +1727,98 @@ class OmniSearchRepository(
     }
 
     private suspend fun searchBooks(query: String): List<SearchResultItem> = coroutineScope {
+        val hcToken = com.omnitrack.app.data.sync.TrackerTokenManager.cachedHardcoverToken
         val deferreds = listOf(
-            async { searchGoogleBooks(query) },
-            async { searchOpenLibraryBooks(query) }
+            async {
+                if (hcToken.isNotBlank()) {
+                    com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
+                        .searchBooks(hcToken, query, limit = 8)
+                } else emptyList()
+            },
+            async { searchOpenLibraryBooks(query) },
+            async { searchAppleBooks(query) },
+            async { searchPoetryDbBooks(query) },
+            async { searchGoogleBooks(query) }
         )
         deferreds.awaitAll().flatten()
+    }
+
+    private suspend fun searchAppleBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val url = "https://itunes.apple.com/search?term=$encoded&media=ebook&limit=8"
+            val request = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
+                val results = (json.parseToJsonElement(body) as? JsonObject)
+                    ?.get("results") as? JsonArray ?: return@withGeneralPacing emptyList()
+                results.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val title = o["trackName"].cleanString() ?: o["collectionName"].cleanString() ?: return@mapNotNull null
+                    val rawCov = o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString() ?: return@mapNotNull null
+                    val hiResCov = rawCov.replace("100x100bb", "1200x1200bb")
+                        .replace("60x60bb", "1200x1200bb")
+                        .replace("http://", "https://")
+                    val author = o["artistName"].cleanString()
+                    val desc = cleanSynopsis(o["description"].cleanString())
+                    val score = (o["averageUserRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f }
+                    SearchResultItem(
+                        title = title,
+                        synopsis = if (!author.isNullOrBlank()) "By $author\n\n${desc.orEmpty()}" else desc,
+                        coverUrl = hiResCov,
+                        mediaType = MediaType.BOOK,
+                        releaseYear = o["releaseDate"].cleanString()?.take(4),
+                        communityScore = score,
+                        bookAuthor = author,
+                        bookFormat = "EBOOK",
+                        sourceProvider = "Apple Books"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private suspend fun searchPoetryDbBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        try {
+            val cleanQ = query.trim()
+            if (cleanQ.length < 3 || cleanQ.length > 64) return@withGeneralPacing emptyList()
+            val encoded = URLEncoder.encode(cleanQ, "UTF-8").replace("+", "%20")
+            val request = Request.Builder()
+                .url("https://poetrydb.org/title/$encoded/title,author,linecount")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing emptyList()
+                val arr = json.parseToJsonElement(response.body?.string().orEmpty()) as? JsonArray
+                    ?: return@withGeneralPacing emptyList()
+                arr.take(4).mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val title = o["title"].cleanString() ?: return@mapNotNull null
+                    val author = o["author"].cleanString()
+                    val lineCount = o["linecount"].cleanString()
+                    SearchResultItem(
+                        title = title,
+                        synopsis = listOfNotNull(
+                            author?.let { "Poem by $it" },
+                            lineCount?.let { "$it lines (PoetryDB)" }
+                        ).joinToString(" · ").ifBlank { null },
+                        coverUrl = "",
+                        mediaType = MediaType.BOOK,
+                        bookAuthor = author,
+                        bookFormat = "PAPERBACK",
+                        sourceProvider = "PoetryDB"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
     }
 
     private suspend fun searchGoogleBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
@@ -1609,20 +1829,23 @@ class OmniSearchRepository(
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withGeneralPacing emptyList()
                 val body = response.body?.string() ?: return@withGeneralPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val items = root["items"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                val root = json.parseToJsonElement(body) as? JsonObject ?: return@withGeneralPacing emptyList()
+                val items = root["items"] as? JsonArray ?: return@withGeneralPacing emptyList()
 
                 items.mapNotNull { item ->
-                    val volumeInfo = item.jsonObject["volumeInfo"]?.jsonObject ?: return@mapNotNull null
+                    val volumeInfo = (item as? JsonObject)?.get("volumeInfo") as? JsonObject ?: return@mapNotNull null
                     val title = volumeInfo["title"].cleanString() ?: return@mapNotNull null
-                    val authors = volumeInfo["authors"]?.jsonArray?.mapNotNull { it.cleanString() }?.joinToString(", ")
+                    val authors = (volumeInfo["authors"] as? JsonArray)?.mapNotNull { it.cleanString() }?.joinToString(", ")
                     val desc = cleanSynopsis(volumeInfo["description"].cleanString())
                     val date = volumeInfo["publishedDate"].cleanString()
                     val year = date?.split("-")?.firstOrNull()?.cleanString()
-                    val pages = volumeInfo["pageCount"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    val score = volumeInfo["averageRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it * 2f }
+                    val pages = (volumeInfo["pageCount"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toDoubleOrNull()
+                    val score = (volumeInfo["averageRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toFloatOrNull()?.let { it * 2f }
+                    val isbn = (volumeInfo["industryIdentifiers"] as? JsonArray)?.firstNotNullOfOrNull { idEl ->
+                        (idEl as? JsonObject)?.get("identifier").cleanString()
+                    }
 
-                    val imageLinks = volumeInfo["imageLinks"]?.jsonObject
+                    val imageLinks = volumeInfo["imageLinks"] as? JsonObject
                     val thumb = imageLinks?.get("extraLarge").cleanString()
                         ?: imageLinks?.get("large").cleanString()
                         ?: imageLinks?.get("medium").cleanString()
@@ -1639,6 +1862,9 @@ class OmniSearchRepository(
                         releaseYear = year,
                         communityScore = score,
                         totalProgress = pages,
+                        isbn = isbn,
+                        bookAuthor = authors,
+                        bookFormat = "HARDCOVER",
                         sourceProvider = "Google Books"
                     )
                 }
@@ -1650,25 +1876,29 @@ class OmniSearchRepository(
         }
     }
 
-    private suspend fun searchOpenLibraryBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+    private suspend fun searchOpenLibraryBooks(query: String): List<SearchResultItem> = NetworkPacer.withOpenLibraryPacing {
         try {
             val encoded = URLEncoder.encode(query, "UTF-8")
-            val url = "https://openlibrary.org/search.json?q=$encoded&limit=8"
-            val request = Request.Builder().url(url).get().build()
+            val fields = "key,title,author_name,first_publish_year,number_of_pages_median,ratings_average,cover_i,isbn"
+            val url = "https://openlibrary.org/search.json?q=$encoded&limit=12&fields=$fields"
+            val request = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withGeneralPacing emptyList()
-                val body = response.body?.string() ?: return@withGeneralPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val docs = root["docs"]?.jsonArray ?: return@withGeneralPacing emptyList()
+                if (!response.isSuccessful) return@withOpenLibraryPacing emptyList()
+                val body = response.body?.string() ?: return@withOpenLibraryPacing emptyList()
+                val root = json.parseToJsonElement(body) as? JsonObject ?: return@withOpenLibraryPacing emptyList()
+                val docs = root["docs"] as? JsonArray ?: return@withOpenLibraryPacing emptyList()
 
                 docs.mapNotNull { node ->
-                    val obj = node.jsonObject
+                    val obj = node as? JsonObject ?: return@mapNotNull null
                     val title = obj["title"].cleanString() ?: return@mapNotNull null
                     val coverId = obj["cover_i"].cleanString() ?: return@mapNotNull null
                     val coverUrl = "https://covers.openlibrary.org/b/id/$coverId-L.jpg"
+                    val workId = obj["key"].cleanString()?.substringAfterLast("/")
                     val year = obj["first_publish_year"].cleanString()
-                    val author = obj["author_name"]?.jsonArray?.firstOrNull().cleanString()
-                    val pages = obj["number_of_pages_median"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val author = (obj["author_name"] as? JsonArray)?.firstOrNull()?.cleanString()
+                    val pages = (obj["number_of_pages_median"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toDoubleOrNull()
+                    val score = (obj["ratings_average"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f }
+                    val isbn = (obj["isbn"] as? JsonArray)?.firstOrNull()?.cleanString()
 
                     SearchResultItem(
                         title = title,
@@ -1676,8 +1906,13 @@ class OmniSearchRepository(
                         coverUrl = LosslessCoverMapper.toLosslessUrl(coverUrl),
                         mediaType = MediaType.BOOK,
                         releaseYear = year,
+                        communityScore = score,
                         totalProgress = pages,
-                        sourceProvider = "Open Library"
+                        openLibraryId = workId,
+                        isbn = isbn,
+                        bookAuthor = author,
+                        bookFormat = "HARDCOVER",
+                        sourceProvider = "OpenLibrary"
                     )
                 }
             }
@@ -1688,14 +1923,18 @@ class OmniSearchRepository(
         }
     }
 
-    private fun cleanSynopsis(raw: String?): String? {
-        if (raw.isNullOrBlank()) return null
-        return raw
-            .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("""<[^>]*>"""), "")
-            .replace(Regex("""\n{3,}"""), "\n\n")
-            .replace(Regex("""\s*[\(\[]\s*$"""), "")
-            .trim()
-            .ifBlank { null }
+    private fun cleanSynopsis(raw: String?): String? = Companion.cleanSynopsis(raw)
+
+    companion object {
+        fun cleanSynopsis(raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            return raw
+                .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+                .replace(Regex("""<[^>]*>"""), "")
+                .replace(Regex("""\n{3,}"""), "\n\n")
+                .replace(Regex("""\s*[\(\[]\s*$"""), "")
+                .trim()
+                .ifBlank { null }
+        }
     }
 }

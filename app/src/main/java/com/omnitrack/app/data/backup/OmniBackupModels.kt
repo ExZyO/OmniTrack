@@ -1,5 +1,7 @@
 package com.omnitrack.app.data.backup
 
+import com.omnitrack.app.data.db.entity.BookEntryEntity
+import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
@@ -26,7 +28,9 @@ data class OmniDatabaseDump(
     val categories: List<CategoryEntity> = emptyList(),
     val syncQueue: List<SyncQueueEntity> = emptyList(),
     val vnRoutes: List<VnRouteEntity> = emptyList(),
-    val gameEntries: List<GameEntryEntity> = emptyList()
+    val gameEntries: List<GameEntryEntity> = emptyList(),
+    val bookEntries: List<BookEntryEntity> = emptyList(),
+    val bookQuotes: List<BookQuoteEntity> = emptyList()
 )
 
 @Serializable

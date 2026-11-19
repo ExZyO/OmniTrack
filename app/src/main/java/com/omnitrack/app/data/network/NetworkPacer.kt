@@ -61,6 +61,14 @@ object NetworkPacer {
     @Volatile private var lastIgdbCallTime = 0L
     private const val IGDB_MIN_INTERVAL_MS = 270L
 
+    private val openLibrarySemaphore = Semaphore(3)
+    @Volatile private var lastOpenLibraryCallTime = 0L
+    private const val OPENLIBRARY_MIN_INTERVAL_MS = 220L
+
+    private val hardcoverSemaphore = Semaphore(2)
+    @Volatile private var lastHardcoverCallTime = 0L
+    private const val HARDCOVER_MIN_INTERVAL_MS = 260L
+
     private val generalSemaphore = Semaphore(2)
 
     private val coalescingMutex = Mutex()
@@ -200,6 +208,32 @@ object NetworkPacer {
         }
     }
 
+    suspend fun <T> withOpenLibraryPacing(block: suspend () -> T): T = openLibrarySemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastOpenLibraryCallTime
+        if (elapsed < OPENLIBRARY_MIN_INTERVAL_MS) {
+            delay(OPENLIBRARY_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastOpenLibraryCallTime = System.currentTimeMillis()
+        }
+    }
+
+    suspend fun <T> withHardcoverPacing(block: suspend () -> T): T = hardcoverSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastHardcoverCallTime
+        if (elapsed < HARDCOVER_MIN_INTERVAL_MS) {
+            delay(HARDCOVER_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastHardcoverCallTime = System.currentTimeMillis()
+        }
+    }
+
     suspend fun <T> withGeneralPacing(block: suspend () -> T): T = generalSemaphore.withPermit {
         block()
     }
@@ -212,6 +246,8 @@ object NetworkPacer {
             "themoviedb" in lower || "tmdb" in lower -> withTmdbPacing(block)
             "steam" in lower -> withSteamPacing(block)
             "igdb" in lower -> withIgdbPacing(block)
+            "openlibrary" in lower -> withOpenLibraryPacing(block)
+            "hardcover" in lower -> withHardcoverPacing(block)
             "bgm.tv" in lower || "bangumi" in lower -> withBangumiPacing(block)
             "vndb" in lower -> withVndbPacing(block)
             "jikan" in lower -> withJikanPacing(block)

@@ -43,6 +43,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import com.omnitrack.app.data.model.BookIllustrationAsset
 import coil3.request.crossfade
 import com.omnitrack.app.data.model.GameMediaAsset
 import com.omnitrack.app.data.model.VnNsfwFilterMode
@@ -448,6 +449,160 @@ fun DetailGameGallerySection(
                     Button(
                         onClick = {
                             onSetAsHeroBanner(visibleAssets[pagerState.currentPage].url)
+                            lightboxInitialIndex = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGold,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1.4f)
+                    ) {
+                        Text("Set as Hero Banner", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailBookGallerySection(
+    illustrations: List<BookIllustrationAsset>,
+    onSetAsHeroBanner: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (illustrations.isEmpty()) return
+    val context = LocalContext.current
+    var lightboxInitialIndex by remember { mutableStateOf<Int?>(null) }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "ARTWORK & ILLUSTRATIONS (${illustrations.size})",
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White.copy(alpha = 0.60f),
+            letterSpacing = 1.1.sp,
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            itemsIndexed(illustrations) { index, asset ->
+                Column(
+                    modifier = Modifier
+                        .width(196.dp)
+                        .clickable { lightboxInitialIndex = index },
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(asset.thumbnailUrl ?: asset.url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = asset.caption ?: "Illustration ${index + 1}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(124.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                    )
+                    asset.caption?.takeIf { it.isNotBlank() }?.let { cap ->
+                        Text(
+                            text = cap,
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 11.5.sp,
+                            maxLines = 2
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    lightboxInitialIndex?.let { startIdx ->
+        Dialog(
+            onDismissRequest = { lightboxInitialIndex = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            val pagerState = rememberPagerState(initialPage = startIdx.coerceIn(0, illustrations.lastIndex)) {
+                illustrations.size
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.96f))
+                    .navigationBarsPadding()
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    val current = illustrations[page]
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(current.url)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = current.caption ?: "Illustration ${page + 1}",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 42.dp, start = 20.dp, end = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${illustrations.size}",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    illustrations[pagerState.currentPage].caption?.takeIf { it.isNotBlank() }?.let { cap ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = cap,
+                            color = Color.White.copy(alpha = 0.62f),
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = { lightboxInitialIndex = null },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.12f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            onSetAsHeroBanner(illustrations[pagerState.currentPage].url)
                             lightboxInitialIndex = null
                         },
                         colors = ButtonDefaults.buttonColors(

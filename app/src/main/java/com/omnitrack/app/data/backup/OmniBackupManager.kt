@@ -70,13 +70,17 @@ object OmniBackupManager {
             val syncQueue = database.syncQueueDao().getPendingTasksSnapshot()
             val vnRoutes = database.vnRouteDao().getAllRoutesOnce()
             val gameEntries = database.gameEntryDao().getAllEntriesOnce()
+            val bookEntries = database.bookEntryDao().getAllEntriesOnce()
+            val bookQuotes = database.bookQuoteDao().getAllQuotesOnce()
 
             val dbDump = OmniDatabaseDump(
                 mediaItems = mediaItems,
                 categories = categories,
                 syncQueue = syncQueue,
                 vnRoutes = vnRoutes,
-                gameEntries = gameEntries
+                gameEntries = gameEntries,
+                bookEntries = bookEntries,
+                bookQuotes = bookQuotes
             )
             val dbDumpJson = json.encodeToString(dbDump)
             val checksum = sha256(dbDumpJson)
@@ -229,6 +233,8 @@ object OmniBackupManager {
                 database.syncQueueDao().clearQueue()
                 database.vnRouteDao().deleteAllRoutes()
                 database.gameEntryDao().deleteAllEntries()
+                database.bookEntryDao().deleteAllEntries()
+                database.bookQuoteDao().deleteAllQuotes()
 
                 if (dump.categories.isNotEmpty()) {
                     database.categoryDao().insertAll(dump.categories)
@@ -244,6 +250,12 @@ object OmniBackupManager {
                 }
                 if (dump.gameEntries.isNotEmpty()) {
                     database.gameEntryDao().insertEntries(dump.gameEntries)
+                }
+                if (dump.bookEntries.isNotEmpty()) {
+                    database.bookEntryDao().insertEntries(dump.bookEntries)
+                }
+                if (dump.bookQuotes.isNotEmpty()) {
+                    database.bookQuoteDao().insertQuotes(dump.bookQuotes)
                 }
             }
 

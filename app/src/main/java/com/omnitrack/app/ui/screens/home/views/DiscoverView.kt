@@ -157,6 +157,10 @@ fun DiscoverView(
     var selectedGamePlatformSubFilter by remember { mutableStateOf("ALL") }
     var gameShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
     var isLoadingGameShelves by remember { mutableStateOf(false) }
+    var selectedBookFormatSubFilter by remember { mutableStateOf("ALL") }
+    var selectedBookCategorySubFilter by remember { mutableStateOf<String?>(null) }
+    var bookShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
+    var isLoadingBookShelves by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedFilter) {
         if (selectedFilter == MediaType.GAME && gameShelves.isEmpty() && !isLoadingGameShelves) {
@@ -173,6 +177,26 @@ fun DiscoverView(
             } catch (_: Exception) {
             } finally {
                 isLoadingGameShelves = false
+            }
+        }
+        if (selectedFilter == MediaType.BOOK && bookShelves.isEmpty() && !isLoadingBookShelves) {
+            isLoadingBookShelves = true
+            try {
+                val trending = searchRepository.fetchDiscoverBooksShelves("trending")
+                val classics = searchRepository.fetchDiscoverBooksShelves("classics_poetry")
+                val scifi = searchRepository.fetchDiscoverBooksShelves("scifi_fantasy")
+                val philosophy = searchRepository.fetchDiscoverBooksShelves("philosophy_nonfiction")
+                val audiobooks = searchRepository.fetchDiscoverBooksShelves("audiobooks")
+                bookShelves = mapOf(
+                    "Trending This Week" to trending,
+                    "Classics & Epic Poetry" to classics,
+                    "Sci-Fi & Fantasy" to scifi,
+                    "Philosophy & Non-Fiction" to philosophy,
+                    "Audiobooks" to audiobooks
+                ).filterValues { it.isNotEmpty() }
+            } catch (_: Exception) {
+            } finally {
+                isLoadingBookShelves = false
             }
         }
     }
@@ -585,6 +609,16 @@ fun DiscoverView(
             )
         }
 
+        if (selectedFilter == MediaType.BOOK) {
+            com.omnitrack.app.ui.screens.home.BookUnderlineFilterBar(
+                selectedFormat = selectedBookFormatSubFilter,
+                selectedCategory = selectedBookCategorySubFilter,
+                onFormatSelected = { selectedBookFormatSubFilter = it },
+                onCategorySelected = { selectedBookCategorySubFilter = it },
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
         // AI Resolution Banner
         if (aiResolutionBanner != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -616,7 +650,7 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter, selectedGamePlatformSubFilter) {
+        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter, selectedGamePlatformSubFilter, selectedBookFormatSubFilter, selectedBookCategorySubFilter) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
             when {
                 selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> base.filter {
@@ -634,6 +668,14 @@ fun DiscoverView(
                 selectedFilter == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> base.filter {
                     val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(it.platform, null)
                     groups.isEmpty() || selectedGamePlatformSubFilter in groups
+                }
+                selectedFilter == MediaType.BOOK -> base.filter { item ->
+                    val fmtOk = selectedBookFormatSubFilter == "ALL" ||
+                        com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
+                    val catOk = selectedBookCategorySubFilter == null ||
+                        selectedBookCategorySubFilter == "ALL" ||
+                        com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
+                    fmtOk && catOk
                 }
                 else -> base
             }
@@ -679,7 +721,7 @@ fun DiscoverView(
                     contentPadding = PaddingValues(bottom = 110.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: 0L}" }) { item ->
+                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: it.openLibraryId ?: it.hardcoverId ?: 0L}" }) { item ->
                     val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
                         com.omnitrack.app.ui.screens.home.inferNovelSubtype(
                             item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
@@ -688,6 +730,7 @@ fun DiscoverView(
 
                     val existingInLibrary = allMedia.firstOrNull { summary ->
                         summary.mediaType == item.mediaType && (
+                            (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
                             summary.title.equals(item.title, ignoreCase = true) ||
                             (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
                         ) && (
@@ -715,6 +758,9 @@ fun DiscoverView(
                         originCountry = item.originCountry,
                         platform = item.platform,
                         runtimeMinutes = item.runtimeMinutes,
+                        openLibraryId = item.openLibraryId,
+                        bookAuthor = item.bookAuthor,
+                        bookFormat = item.bookFormat,
                         lastUpdated = System.currentTimeMillis()
                     )
 
@@ -837,6 +883,102 @@ fun DiscoverView(
                                     title = summary.title,
                                     coverUrl = summary.customCoverPath ?: summary.coverUrl,
                                     subtitle = com.omnitrack.app.data.model.formatGameCardBadge(summary.platforms, summary.platform, summary.playtimeHours, summary.runtimeMinutes),
+                                    rating = summary.userRating ?: summary.communityScore,
+                                    onClick = { onItemClick(summary.id) },
+                                    cardWidth = 112.dp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (selectedFilter == MediaType.BOOK) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 110.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                if (isLoadingBookShelves && bookShelves.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                    }
+                }
+                bookShelves.forEach { (shelfTitle, shelfItems) ->
+                    val filteredShelf = shelfItems.filter { item ->
+                        val fmtOk = selectedBookFormatSubFilter == "ALL" ||
+                            com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
+                        val catOk = selectedBookCategorySubFilter == null ||
+                            selectedBookCategorySubFilter == "ALL" ||
+                            com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
+                        fmtOk && catOk
+                    }
+                    if (filteredShelf.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = shelfTitle,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                lazyRowItems(
+                                    items = filteredShelf,
+                                    key = { "${shelfTitle}_${it.openLibraryId ?: it.hardcoverId ?: it.title}_${it.bookAuthor ?: ""}" }
+                                ) { book ->
+                                    val inLib = allMedia.firstOrNull { summary ->
+                                        summary.mediaType == MediaType.BOOK && (
+                                            (book.openLibraryId != null && summary.openLibraryId == book.openLibraryId) ||
+                                                summary.title.equals(book.title, ignoreCase = true)
+                                            )
+                                    }
+                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
+                                        title = book.title,
+                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: book.coverUrl,
+                                        subtitle = book.bookAuthor ?: book.releaseYear,
+                                        rating = book.communityScore,
+                                        onClick = {
+                                            if (inLib != null) {
+                                                onItemClick(inLib.id)
+                                            } else {
+                                                EphemeralPreviewHolder.previewItem = book.toMediaItemEntity()
+                                                onItemClick(-1L)
+                                            }
+                                        },
+                                        cardWidth = 112.dp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                val bookSpotlight = allMedia.filter { it.mediaType == MediaType.BOOK }.take(12)
+                if (bookSpotlight.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "In Your Books Library",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            lazyRowItems(bookSpotlight, key = { "lib_book_${it.id}" }) { summary ->
+                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
+                                    title = summary.title,
+                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
+                                    subtitle = com.omnitrack.app.data.model.formatBookCardBadge(
+                                        currentProgress = summary.currentProgress,
+                                        totalProgress = summary.totalProgress,
+                                        trackingMode = summary.bookTrackingMode,
+                                        audioMinutes = summary.bookAudioMinutes,
+                                        totalAudioMinutes = summary.bookTotalAudioMinutes,
+                                        bookFormat = summary.bookFormat,
+                                        author = summary.bookAuthor
+                                    ),
                                     rating = summary.userRating ?: summary.communityScore,
                                     onClick = { onItemClick(summary.id) },
                                     cardWidth = 112.dp

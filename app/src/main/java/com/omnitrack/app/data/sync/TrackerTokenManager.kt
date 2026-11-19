@@ -30,7 +30,8 @@ data class TrackerTokens(
     val steamId64: String? = null,
     val bangumiToken: String? = null,
     val tmdbToken: String? = null,
-    val igdbToken: String? = null
+    val igdbToken: String? = null,
+    val hardcoverToken: String? = null
 )
 
 /**
@@ -53,6 +54,7 @@ class TrackerTokenManager(private val context: Context) {
         val BANGUMI_TOKEN = stringPreferencesKey("token_bangumi")
         val TMDB_TOKEN = stringPreferencesKey("token_tmdb")
         val IGDB_TOKEN = stringPreferencesKey("token_igdb")
+        val HARDCOVER_TOKEN = stringPreferencesKey("token_hardcover")
         val COMICK_VERIFIER = stringPreferencesKey("pkce_comick_verifier")
         val MAL_VERIFIER = stringPreferencesKey("pkce_mal_verifier")
     }
@@ -71,7 +73,8 @@ class TrackerTokenManager(private val context: Context) {
                 steamId64 = prefs[Keys.STEAM_ID_64]?.let { decrypt(it) },
                 bangumiToken = prefs[Keys.BANGUMI_TOKEN]?.let { decrypt(it) },
                 tmdbToken = prefs[Keys.TMDB_TOKEN]?.let { decrypt(it) },
-                igdbToken = prefs[Keys.IGDB_TOKEN]?.let { decrypt(it) }
+                igdbToken = prefs[Keys.IGDB_TOKEN]?.let { decrypt(it) },
+                hardcoverToken = prefs[Keys.HARDCOVER_TOKEN]?.let { decrypt(it) }
             )
         }
 
@@ -86,6 +89,10 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun saveBangumiToken(token: String?) = saveToken(Keys.BANGUMI_TOKEN, token)
     suspend fun saveTmdbToken(token: String?) = saveToken(Keys.TMDB_TOKEN, token)
     suspend fun saveIgdbToken(token: String?) = saveToken(Keys.IGDB_TOKEN, token)
+    suspend fun saveHardcoverToken(token: String?) {
+        cachedHardcoverToken = token?.trim().orEmpty()
+        saveToken(Keys.HARDCOVER_TOKEN, token)
+    }
     suspend fun saveComickVerifier(verifier: String?) = saveToken(Keys.COMICK_VERIFIER, verifier)
     suspend fun getComickVerifier(): String? = context.dataStore.data.firstOrNull()?.get(Keys.COMICK_VERIFIER)?.let { decrypt(it) }
     suspend fun saveMalVerifier(verifier: String?) = saveToken(Keys.MAL_VERIFIER, verifier)
@@ -102,6 +109,9 @@ class TrackerTokenManager(private val context: Context) {
     }
 
     companion object {
+        @Volatile
+        var cachedHardcoverToken: String = ""
+
         private const val PBKDF2_ITERATIONS = 10000
         private const val KEY_LENGTH = 256
         private const val GCM_TAG_LENGTH = 128

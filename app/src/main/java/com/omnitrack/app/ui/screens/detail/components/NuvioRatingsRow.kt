@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.R
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.model.BookDetailMeta
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
@@ -55,9 +56,10 @@ fun NuvioRatingsRow(
     mangaUpdatesScore: Float? = null,
     bangumiScore: Float? = null,
     vnDetailMeta: VnDetailMeta? = null,
-    gameDetailMeta: GameDetailMeta? = null
+    gameDetailMeta: GameDetailMeta? = null,
+    bookDetailMeta: BookDetailMeta? = null
 ) {
-    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta, gameDetailMeta) {
+    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta, gameDetailMeta, bookDetailMeta) {
         val list = mutableListOf<RatingBadgeData>()
 
         // 1. IMDb (Gold Logo 30x16dp)
@@ -342,6 +344,46 @@ fun NuvioRatingsRow(
                         )
                     )
                 }
+            }
+        }
+
+        // 12. Books Ratings (Hardcover, Open Library, Apple Books on crisp 5-star scale)
+        if (item.mediaType == MediaType.BOOK) {
+            bookDetailMeta?.hardcoverRating?.takeIf { it > 0f }?.let { hc ->
+                list.add(
+                    RatingBadgeData(
+                        source = "hardcover",
+                        displayName = "Hardcover",
+                        iconRes = R.drawable.brand_hardcover,
+                        valueText = "${formatOneDecimal(hc.toDouble())}/5",
+                        valueColor = Color(0xFFA5B4FC)
+                    )
+                )
+            }
+            val effOl5 = bookDetailMeta?.openLibraryRating?.takeIf { it > 0f }
+                ?: item.communityScore?.takeIf { it > 0f && bookDetailMeta?.hardcoverRating == null && bookDetailMeta?.appleBooksRating == null }
+                    ?.let { if (it > 5f) it / 2f else it }
+            effOl5?.let { ol ->
+                list.add(
+                    RatingBadgeData(
+                        source = "openlibrary",
+                        displayName = "Open Library",
+                        iconRes = R.drawable.brand_openlibrary,
+                        valueText = "${formatOneDecimal(ol.toDouble())}/5",
+                        valueColor = Color(0xFF38BDF8)
+                    )
+                )
+            }
+            bookDetailMeta?.appleBooksRating?.takeIf { it > 0f }?.let { ab ->
+                list.add(
+                    RatingBadgeData(
+                        source = "applebooks",
+                        displayName = "Apple Books",
+                        iconRes = R.drawable.brand_apple_books,
+                        valueText = "${formatOneDecimal(ab.toDouble())}/5",
+                        valueColor = Color(0xFFFB923C)
+                    )
+                )
             }
         }
 

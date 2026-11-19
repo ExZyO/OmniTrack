@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -603,6 +605,154 @@ fun TrackerAccountsSheet(
                 }
             )
 
+            // 10. Hardcover (Books, Ratings, Moods & Two-Way Sync)
+            var isImportingHardcover by remember { mutableStateOf(false) }
+            ManualTokenTrackerCard(
+                title = "Hardcover",
+                subtitle = "Books community ratings, moods, warnings & library sync",
+                accentColor = Color(0xFF6366F1),
+                initialToken = tokens.hardcoverToken.orEmpty(),
+                tokenCreationUrl = "https://hardcover.app/account/api",
+                verifyFn = { TrackerAccountVerifier.verifyHardcover(it) },
+                onSave = { token ->
+                    scope.launch {
+                        tokenManager.saveHardcoverToken(token)
+                        Toast.makeText(context, "Hardcover token saved", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDisconnect = {
+                    scope.launch {
+                        tokenManager.saveHardcoverToken(null)
+                        Toast.makeText(context, "Hardcover disconnected", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                extraBottomContent = if (!tokens.hardcoverToken.isNullOrBlank()) {
+                    {
+                        Button(
+                            onClick = {
+                                if (!isImportingHardcover) {
+                                    scope.launch {
+                                        isImportingHardcover = true
+                                        val summary = syncEngine.importHardcoverLibrary()
+                                        isImportingHardcover = false
+                                        val msg = summary.error
+                                            ?: "Hardcover: imported ${summary.imported} new, updated ${summary.updated}"
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            },
+                            enabled = !isImportingHardcover,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF6366F1).copy(alpha = 0.16f),
+                                contentColor = Color(0xFFA5B4FC),
+                                disabledContainerColor = Color.White.copy(alpha = 0.06f),
+                                disabledContentColor = TextMuted
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isImportingHardcover) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFFA5B4FC),
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Importing Hardcover Library...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    tint = Color(0xFFA5B4FC),
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Import Hardcover Library", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } else null
+            )
+
+            // 11. Goodreads / StoryGraph CSV Import
+            var isImportingCsv by remember { mutableStateOf(false) }
+            val csvPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null && !isImportingCsv) {
+                    scope.launch {
+                        isImportingCsv = true
+                        val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+                                    stream.bufferedReader().readText()
+                                }.orEmpty()
+                                com.omnitrack.app.data.sync.BookCsvImporter.importCsv(text, app.repository)
+                            } catch (e: Exception) {
+                                com.omnitrack.app.data.sync.BookImportSummary(0, 0, e.message ?: "CSV read failed")
+                            }
+                        }
+                        isImportingCsv = false
+                        val msg = summary.error ?: "CSV Import: ${summary.imported} added, ${summary.updated} updated"
+                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Goodreads & StoryGraph CSV",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = "Import books, reading status, star ratings, pages & personal reviews from an exported CSV file.",
+                    fontSize = 11.5.sp,
+                    color = TextMuted
+                )
+                Button(
+                    onClick = {
+                        csvPicker.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*"))
+                    },
+                    enabled = !isImportingCsv,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentGold.copy(alpha = 0.16f),
+                        contentColor = AccentGold,
+                        disabledContainerColor = Color.White.copy(alpha = 0.06f),
+                        disabledContentColor = TextMuted
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isImportingCsv) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Importing CSV...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Select CSV Export File", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
@@ -1086,7 +1236,8 @@ private fun ManualTokenTrackerCard(
     tokenCreationUrl: String? = null,
     verifyFn: suspend (String) -> VerificationState,
     onSave: (String) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    extraBottomContent: (@Composable () -> Unit)? = null
 ) {
     val context = LocalContext.current
     var textValue by remember(initialToken) { mutableStateOf(initialToken) }
@@ -1338,6 +1489,7 @@ private fun ManualTokenTrackerCard(
                 )
             }
         }
+        extraBottomContent?.invoke()
     }
 }
 

@@ -3,13 +3,22 @@ package com.omnitrack.app.ui.screens.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.omnitrack.app.data.db.entity.BookEntryEntity
+import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
+import com.omnitrack.app.data.enrichment.BookEnrichmentSource
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.enrichment.GameEnrichmentSource
 import com.omnitrack.app.data.enrichment.VisualNovelEnrichmentSource
+import com.omnitrack.app.data.model.BookDetailMeta
+import com.omnitrack.app.data.model.BookEditionItem
+import com.omnitrack.app.data.model.BookEntryType
+import com.omnitrack.app.data.model.BookFormat
+import com.omnitrack.app.data.model.BookLiteraryForm
+import com.omnitrack.app.data.model.BookTrackingMode
 import com.omnitrack.app.data.model.GameCompletionTier
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.GameEntryType
@@ -149,6 +158,9 @@ data class DetailUiState(
     val vnRoutes: List<VnRouteEntity> = emptyList(),
     val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     val gameEntries: List<GameEntryEntity> = emptyList(),
+    val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
+    val bookEntries: List<BookEntryEntity> = emptyList(),
+    val bookQuotes: List<BookQuoteEntity> = emptyList(),
     val episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap()
 )
 
@@ -196,7 +208,8 @@ private data class PreviewAndAux(
     val isMangaSeasonGrouped: Boolean = false,
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
-    val gameDetailMeta: GameDetailMeta = GameDetailMeta()
+    val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    val bookDetailMeta: BookDetailMeta = BookDetailMeta()
 )
 
 class DetailViewModel(
@@ -210,6 +223,7 @@ class DetailViewModel(
 
     private val visualNovelEnrichmentSource = VisualNovelEnrichmentSource()
     private val gameEnrichmentSource = GameEnrichmentSource()
+    private val bookEnrichmentSource = BookEnrichmentSource()
     private val _mediaId = MutableStateFlow(mediaId)
     private val _previewStack = MutableStateFlow<List<MediaItemEntity>>(emptyList())
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
@@ -269,6 +283,7 @@ class DetailViewModel(
     private val _novelDetailMeta = MutableStateFlow(NovelDetailMeta())
     private val _vnDetailMeta = MutableStateFlow(VnDetailMeta())
     private val _gameDetailMeta = MutableStateFlow(GameDetailMeta())
+    private val _bookDetailMeta = MutableStateFlow(BookDetailMeta())
     private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
@@ -281,6 +296,9 @@ class DetailViewModel(
     private val vnAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private val latestGameEntriesCache = java.util.concurrent.ConcurrentHashMap<Long, List<GameEntryEntity>>()
     private val gameAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
+    private val latestBookEntriesCache = java.util.concurrent.ConcurrentHashMap<Long, List<BookEntryEntity>>()
+    private val latestBookQuotesCache = java.util.concurrent.ConcurrentHashMap<Long, List<BookQuoteEntity>>()
+    private val bookAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private val previewMetaCache = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, EpisodeProgressEntity>>()
     private val _previewEpisodeMeta = MutableStateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>>(emptyMap())
     val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
@@ -729,7 +747,7 @@ class DetailViewModel(
             hasStaleRatings
         )
         val gen = activeTransitionGen
-        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
+        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) {
             markTransitionEnrichReady(gen)
             return
         }
@@ -875,7 +893,9 @@ class DetailViewModel(
         val item: MediaItemEntity?,
         val progressList: List<EpisodeProgressEntity>,
         val vnRoutes: List<VnRouteEntity> = emptyList(),
-        val gameEntries: List<GameEntryEntity> = emptyList()
+        val gameEntries: List<GameEntryEntity> = emptyList(),
+        val bookEntries: List<BookEntryEntity> = emptyList(),
+        val bookQuotes: List<BookQuoteEntity> = emptyList()
     )
 
     private val auxFlow: Flow<PreviewAndAux> = combine(
@@ -924,7 +944,8 @@ class DetailViewModel(
             _isMangaSeasonGrouped,
             _novelDetailMeta,
             _vnDetailMeta,
-            _gameDetailMeta
+            _gameDetailMeta,
+            _bookDetailMeta
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -972,7 +993,8 @@ class DetailViewModel(
             isMangaSeasonGrouped = (args[41] as? Boolean) ?: false,
             novelDetailMeta = (args[42] as? NovelDetailMeta) ?: NovelDetailMeta(),
             vnDetailMeta = (args[43] as? VnDetailMeta) ?: VnDetailMeta(),
-            gameDetailMeta = (args[44] as? GameDetailMeta) ?: GameDetailMeta()
+            gameDetailMeta = (args[44] as? GameDetailMeta) ?: GameDetailMeta(),
+            bookDetailMeta = (args[45] as? BookDetailMeta) ?: BookDetailMeta()
         )
     }
 
@@ -991,18 +1013,28 @@ class DetailViewModel(
                         .distinctUntilChanged(),
                     repository.getGameEntries(currentId)
                         .onStart { emit(latestGameEntriesCache[currentId] ?: emptyList()) }
+                        .distinctUntilChanged(),
+                    repository.getBookEntries(currentId)
+                        .onStart { emit(latestBookEntriesCache[currentId] ?: emptyList()) }
+                        .distinctUntilChanged(),
+                    repository.getBookQuotes(currentId)
+                        .onStart { emit(latestBookQuotesCache[currentId] ?: emptyList()) }
                         .distinctUntilChanged()
-                ) { progressList, vnRoutes, gameEntries ->
+                ) { progressList, vnRoutes, gameEntries, bookEntries, bookQuotes ->
                     latestEpisodeProgressCache[currentId] = progressList
                     latestVnRoutesCache[currentId] = vnRoutes
                     latestGameEntriesCache[currentId] = gameEntries
+                    latestBookEntriesCache[currentId] = bookEntries
+                    latestBookQuotesCache[currentId] = bookQuotes
                     ActiveRoomSnapshot(
                         currentId = currentId,
                         isPreview = true,
                         item = null,
                         progressList = progressList,
                         vnRoutes = vnRoutes,
-                        gameEntries = gameEntries
+                        gameEntries = gameEntries,
+                        bookEntries = bookEntries,
+                        bookQuotes = bookQuotes
                     )
                 }
             } else {
@@ -1013,7 +1045,9 @@ class DetailViewModel(
                         item = null,
                         progressList = emptyList(),
                         vnRoutes = emptyList(),
-                        gameEntries = emptyList()
+                        gameEntries = emptyList(),
+                        bookEntries = emptyList(),
+                        bookQuotes = emptyList()
                     )
                 )
             }
@@ -1043,12 +1077,24 @@ class DetailViewModel(
                                 .onStart {
                                     emit(latestGameEntriesCache[currentItem.id] ?: emptyList())
                                 }
+                                .distinctUntilChanged(),
+                            repository.getBookEntries(currentItem.id)
+                                .onStart {
+                                    emit(latestBookEntriesCache[currentItem.id] ?: emptyList())
+                                }
+                                .distinctUntilChanged(),
+                            repository.getBookQuotes(currentItem.id)
+                                .onStart {
+                                    emit(latestBookQuotesCache[currentItem.id] ?: emptyList())
+                                }
                                 .distinctUntilChanged()
-                        ) { progressList, vnRoutes, gameEntries ->
+                        ) { progressList, vnRoutes, gameEntries, bookEntries, bookQuotes ->
                             if (currentItem.id > 0L) {
                                 latestEpisodeProgressCache[currentItem.id] = progressList
                                 latestVnRoutesCache[currentItem.id] = vnRoutes
                                 latestGameEntriesCache[currentItem.id] = gameEntries
+                                latestBookEntriesCache[currentItem.id] = bookEntries
+                                latestBookQuotesCache[currentItem.id] = bookQuotes
                             }
                             ActiveRoomSnapshot(
                                 currentId = currentItem.id,
@@ -1056,7 +1102,9 @@ class DetailViewModel(
                                 item = currentItem,
                                 progressList = progressList,
                                 vnRoutes = vnRoutes,
-                                gameEntries = gameEntries
+                                gameEntries = gameEntries,
+                                bookEntries = bookEntries,
+                                bookQuotes = bookQuotes
                             )
                         }
                     } else {
@@ -1067,7 +1115,9 @@ class DetailViewModel(
                                 item = null,
                                 progressList = emptyList(),
                                 vnRoutes = emptyList(),
-                                gameEntries = emptyList()
+                                gameEntries = emptyList(),
+                                bookEntries = emptyList(),
+                                bookQuotes = emptyList()
                             )
                         )
                     }
@@ -1109,6 +1159,20 @@ class DetailViewModel(
                 room.gameEntries
             } else if (aux.previewItem.id > 0L) {
                 latestGameEntriesCache[aux.previewItem.id] ?: emptyList()
+            } else {
+                emptyList()
+            }
+            val previewBookEntries = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
+                room.bookEntries
+            } else if (aux.previewItem.id > 0L) {
+                latestBookEntriesCache[aux.previewItem.id] ?: emptyList()
+            } else {
+                emptyList()
+            }
+            val previewBookQuotes = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
+                room.bookQuotes
+            } else if (aux.previewItem.id > 0L) {
+                latestBookQuotesCache[aux.previewItem.id] ?: emptyList()
             } else {
                 emptyList()
             }
@@ -1177,7 +1241,10 @@ class DetailViewModel(
                 vnDetailMeta = aux.vnDetailMeta,
                 vnRoutes = previewRoutes,
                 gameDetailMeta = aux.gameDetailMeta,
-                gameEntries = previewGameEntries
+                gameEntries = previewGameEntries,
+                bookDetailMeta = aux.bookDetailMeta,
+                bookEntries = previewBookEntries,
+                bookQuotes = previewBookQuotes
             )
         } else {
             val targetId = _mediaId.value
@@ -1198,6 +1265,16 @@ class DetailViewModel(
                     room.gameEntries
                 } else {
                     latestGameEntriesCache[effectiveItem.id] ?: emptyList()
+                }
+                val itemBookEntries = if (!room.isPreview && room.currentId == effectiveItem.id) {
+                    room.bookEntries
+                } else {
+                    latestBookEntriesCache[effectiveItem.id] ?: emptyList()
+                }
+                val itemBookQuotes = if (!room.isPreview && room.currentId == effectiveItem.id) {
+                    room.bookQuotes
+                } else {
+                    latestBookQuotesCache[effectiveItem.id] ?: emptyList()
                 }
                 val siblings = _stableSiblingIds.value.ifEmpty {
                     ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
@@ -1283,7 +1360,10 @@ class DetailViewModel(
                     vnDetailMeta = aux.vnDetailMeta,
                     vnRoutes = itemRoutes,
                     gameDetailMeta = aux.gameDetailMeta,
-                    gameEntries = itemGameEntries
+                    gameEntries = itemGameEntries,
+                    bookDetailMeta = aux.bookDetailMeta,
+                    bookEntries = itemBookEntries,
+                    bookQuotes = itemBookQuotes
                 )
             } else {
                 DetailUiState(isLoading = false)
@@ -1349,6 +1429,7 @@ class DetailViewModel(
         _novelDetailMeta.value = NovelDetailMeta()
         _vnDetailMeta.value = VnDetailMeta()
         _gameDetailMeta.value = GameDetailMeta()
+        _bookDetailMeta.value = BookDetailMeta()
     }
 
     fun isPreviewActive(): Boolean =
@@ -1359,8 +1440,12 @@ class DetailViewModel(
         tmdbId: Long?,
         mediaType: MediaType,
         igdbId: Long? = null,
-        steamAppId: Long? = null
+        steamAppId: Long? = null,
+        openLibraryId: String? = null
     ): Boolean {
+        if (mediaType == MediaType.BOOK && !openLibraryId.isNullOrBlank()) {
+            if (DetailAuxMemoryCache.cache.containsKey("ol_$openLibraryId")) return true
+        }
         if (mediaType == MediaType.GAME && igdbId != null && igdbId > 0L) {
             if (DetailAuxMemoryCache.cache.containsKey("igdb_$igdbId")) return true
         }
@@ -1384,9 +1469,10 @@ class DetailViewModel(
         tmdbId: Long?,
         mediaType: MediaType,
         igdbId: Long? = null,
-        steamAppId: Long? = null
+        steamAppId: Long? = null,
+        openLibraryId: String? = null
     ) {
-        if (!quickHasAuxCacheForPreview(anilistId, tmdbId, mediaType, igdbId, steamAppId)) {
+        if (!quickHasAuxCacheForPreview(anilistId, tmdbId, mediaType, igdbId, steamAppId, openLibraryId)) {
             transitionLoadingJob?.cancel()
             transitionGraceJob?.cancel()
             activeTransitionGen += 1L
@@ -1399,13 +1485,20 @@ class DetailViewModel(
     }
 
     fun openPreview(rec: RecommendationItem) {
-        preArmPreviewLoadingIfUncached(rec.anilistId, rec.tmdbId, rec.mediaType, igdbId = rec.igdbId)
+        preArmPreviewLoadingIfUncached(
+            rec.anilistId,
+            rec.tmdbId,
+            rec.mediaType,
+            igdbId = rec.igdbId,
+            openLibraryId = rec.openLibraryId
+        )
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.findExistingMedia(
                 anilistId = rec.anilistId,
                 malId = rec.malId,
                 tmdbId = rec.tmdbId,
                 igdbId = rec.igdbId,
+                openLibraryId = rec.openLibraryId,
                 title = rec.title,
                 mediaType = rec.mediaType
             )
@@ -1415,12 +1508,15 @@ class DetailViewModel(
                 coverUrl = rec.coverUrl,
                 bannerUrl = rec.bannerUrl,
                 mediaType = rec.mediaType,
+                releaseYear = rec.releaseYear,
                 synopsis = rec.synopsis,
                 communityScore = rec.rating,
                 tmdbId = rec.tmdbId,
                 anilistId = rec.anilistId,
                 malId = rec.malId,
                 igdbId = rec.igdbId,
+                openLibraryId = rec.openLibraryId,
+                bookAuthor = rec.bookAuthor,
                 status = TrackingStatus.PLAN_TO_TRACK
             )
             withContext(Dispatchers.Main.immediate) {
@@ -1437,7 +1533,8 @@ class DetailViewModel(
                 tmdbId = previewEntity.tmdbId,
                 mediaType = previewEntity.mediaType,
                 igdbId = previewEntity.igdbId,
-                steamAppId = previewEntity.steamAppId
+                steamAppId = previewEntity.steamAppId,
+                openLibraryId = previewEntity.openLibraryId
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1449,6 +1546,9 @@ class DetailViewModel(
                     vndbId = previewEntity.vndbId,
                     igdbId = previewEntity.igdbId,
                     steamAppId = previewEntity.steamAppId,
+                    openLibraryId = previewEntity.openLibraryId,
+                    hardcoverId = previewEntity.hardcoverId,
+                    isbn = previewEntity.isbn,
                     title = previewEntity.title,
                     mediaType = previewEntity.mediaType
                 ) ?: previewEntity
@@ -1464,6 +1564,7 @@ class DetailViewModel(
     fun openRelationPreview(relation: AnimeRelationItem) {
         val format = relation.format.uppercase()
         val targetType = when {
+            relation.mediaType == MediaType.BOOK || format == "BOOK" -> MediaType.BOOK
             relation.mediaType == MediaType.GAME || format == "GAME" || format == "DLC" || format == "EXPANSION" || format == "REMAKE" || format == "REMASTER" -> MediaType.GAME
             relation.mediaType == MediaType.VISUAL_NOVEL || !relation.vndbId.isNullOrBlank() || format == "VN" || format == "VISUAL_NOVEL" -> MediaType.VISUAL_NOVEL
             format == "MANGA" -> MediaType.MANGA
@@ -1996,7 +2097,8 @@ class DetailViewModel(
                 _novelDetailMeta.value = it.novelDetailMeta
                 _vnDetailMeta.value = it.vnDetailMeta
                 _gameDetailMeta.value = it.gameDetailMeta
-                if ((item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) && it.vnDiscussionComments.isNotEmpty()) {
+                _bookDetailMeta.value = it.bookDetailMeta
+                if ((item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) && it.vnDiscussionComments.isNotEmpty()) {
                     _discussionComments.value = it.vnDiscussionComments
                 }
             }
@@ -2038,7 +2140,8 @@ class DetailViewModel(
                     novelDetailMeta = _novelDetailMeta.value,
                     vnDetailMeta = _vnDetailMeta.value,
                     gameDetailMeta = _gameDetailMeta.value,
-                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) _discussionComments.value else emptyList()
+                    bookDetailMeta = _bookDetailMeta.value,
+                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) _discussionComments.value else emptyList()
                 )
                 if (!isStillCurrentItem()) return
                 if (cacheKey != null) DetailAuxMemoryCache.cache[cacheKey] = aux
@@ -2269,6 +2372,90 @@ class DetailViewModel(
                                 platforms = currentPreview.platforms?.takeIf { it.isNotBlank() } ?: gameData.platformsSummary,
                                 steamAchievementsUnlocked = gameData.gameDetailMeta.achievementsUnlocked ?: currentPreview.steamAchievementsUnlocked,
                                 steamAchievementsTotal = gameData.gameDetailMeta.achievementsTotal ?: currentPreview.steamAchievementsTotal
+                            )
+                            _previewItem.value = updatedPreview
+                            _previewStack.update { stack ->
+                                if (stack.isNotEmpty()) stack.dropLast(1) + updatedPreview else listOf(updatedPreview)
+                            }
+                        }
+                    }
+                }
+                markTransitionAuxReady(auxGen)
+                persistAuxCache()
+                return@launch
+            }
+
+            if (item.mediaType == MediaType.BOOK) {
+                val bookData = bookEnrichmentSource.fetchFullBookData(
+                    item = item,
+                    hardcoverToken = com.omnitrack.app.data.sync.TrackerTokenManager.cachedHardcoverToken
+                )
+                if (!isStillCurrentItem()) return@launch
+                if (bookData != null) {
+                    _bookDetailMeta.value = bookData.bookDetailMeta
+                    if (bookData.tags.isNotEmpty()) _tags.value = bookData.tags
+                    if (bookData.relations.isNotEmpty()) _animeRelations.value = bookData.relations
+                    if (bookData.similarBooks.isNotEmpty()) _recommendations.value = bookData.similarBooks
+                    if (bookData.externalLinks.isNotEmpty()) _externalLinks.value = bookData.externalLinks
+                    _format.value = bookData.literaryFormLabel
+                    _countryOfOrigin.value = bookData.bookDetailMeta.originalLanguage
+                    if (bookData.discussionComments.isNotEmpty() && isStillCurrentItem()) {
+                        _discussionComments.value = bookData.discussionComments
+                    }
+                    if (item.id > 0L) {
+                        val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                        val nextBanner = if (latest.customBannerPath.isNullOrBlank() && latest.bannerUrl.isNullOrBlank()) {
+                            bookData.bannerUrl
+                        } else {
+                            latest.bannerUrl
+                        }
+                        val nextCover = latest.coverUrl?.takeIf { it.isNotBlank() } ?: bookData.coverUrl
+                        val updated = latest.copy(
+                            openLibraryId = latest.openLibraryId?.takeIf { it.isNotBlank() } ?: bookData.resolvedOpenLibraryId,
+                            hardcoverId = latest.hardcoverId?.takeIf { it.isNotBlank() } ?: bookData.resolvedHardcoverId,
+                            isbn = latest.isbn?.takeIf { it.isNotBlank() } ?: bookData.resolvedIsbn,
+                            bookAuthor = latest.bookAuthor?.takeIf { it.isNotBlank() } ?: bookData.authorName,
+                            bookTranslator = latest.bookTranslator?.takeIf { it.isNotBlank() } ?: bookData.translator,
+                            bookEditionLabel = latest.bookEditionLabel?.takeIf { it.isNotBlank() } ?: bookData.editionName,
+                            studioOrNetwork = latest.studioOrNetwork?.takeIf { it.isNotBlank() } ?: bookData.publisher ?: bookData.authorName,
+                            synopsis = latest.synopsis?.takeIf { it.isNotBlank() && it.length >= (bookData.synopsis?.length ?: 0) }
+                                ?: bookData.synopsis
+                                ?: latest.synopsis,
+                            coverUrl = nextCover,
+                            bannerUrl = nextBanner,
+                            releaseYear = latest.releaseYear?.takeIf { it.isNotBlank() } ?: bookData.releaseYear,
+                            totalProgress = latest.totalProgress ?: bookData.totalPages?.toDouble(),
+                            bookTotalAudioMinutes = latest.bookTotalAudioMinutes ?: bookData.totalAudioMinutes,
+                            communityScore = bookData.communityScore ?: latest.communityScore
+                        )
+                        if (isStillCurrentItem() && updated != latest) {
+                            repository.updateMedia(updated)
+                        }
+                        if (isStillCurrentItem()) {
+                            autoSeedBookEntriesIfEmpty(
+                                mediaId = latest.id,
+                                sectionSeedTitles = bookData.sectionSeedTitles,
+                                form = bookData.bookDetailMeta.literaryForm
+                            )
+                        }
+                    } else if (isStillCurrentItem()) {
+                        val currentPreview = _previewItem.value
+                        if (currentPreview != null) {
+                            val updatedPreview = currentPreview.copy(
+                                openLibraryId = currentPreview.openLibraryId ?: bookData.resolvedOpenLibraryId,
+                                hardcoverId = currentPreview.hardcoverId ?: bookData.resolvedHardcoverId,
+                                isbn = currentPreview.isbn ?: bookData.resolvedIsbn,
+                                bookAuthor = currentPreview.bookAuthor ?: bookData.authorName,
+                                bookTranslator = currentPreview.bookTranslator ?: bookData.translator,
+                                bookEditionLabel = currentPreview.bookEditionLabel ?: bookData.editionName,
+                                studioOrNetwork = currentPreview.studioOrNetwork ?: bookData.publisher ?: bookData.authorName,
+                                synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: bookData.synopsis,
+                                coverUrl = currentPreview.coverUrl?.takeIf { it.isNotBlank() } ?: bookData.coverUrl,
+                                bannerUrl = currentPreview.bannerUrl?.takeIf { it.isNotBlank() } ?: bookData.bannerUrl,
+                                releaseYear = currentPreview.releaseYear ?: bookData.releaseYear,
+                                totalProgress = currentPreview.totalProgress ?: bookData.totalPages?.toDouble(),
+                                bookTotalAudioMinutes = currentPreview.bookTotalAudioMinutes ?: bookData.totalAudioMinutes,
+                                communityScore = bookData.communityScore ?: currentPreview.communityScore
                             )
                             _previewItem.value = updatedPreview
                             _previewStack.update { stack ->
@@ -4177,7 +4364,7 @@ class DetailViewModel(
         _activeDiscussionAniListId.value = null
         _activeDiscussionTag.value = null
         _activeDiscussionSort.value = "newest"
-        _discussionComments.value = if ((targetItem?.mediaType == MediaType.VISUAL_NOVEL || targetItem?.mediaType == MediaType.GAME) && cached != null) {
+        _discussionComments.value = if ((targetItem?.mediaType == MediaType.VISUAL_NOVEL || targetItem?.mediaType == MediaType.GAME || targetItem?.mediaType == MediaType.BOOK) && cached != null) {
             cached.vnDiscussionComments
         } else {
             emptyList()
@@ -4217,6 +4404,7 @@ class DetailViewModel(
         _novelDetailMeta.value = cached?.novelDetailMeta ?: NovelDetailMeta()
         _vnDetailMeta.value = cached?.vnDetailMeta ?: VnDetailMeta()
         _gameDetailMeta.value = cached?.gameDetailMeta ?: GameDetailMeta()
+        _bookDetailMeta.value = cached?.bookDetailMeta ?: BookDetailMeta()
 
         val resolvedTmdb = targetItem?.tmdbId ?: (if (targetId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[targetId] else null)
         val cachedSeasons = SeriesContentMemoryCache.findSeasons(targetItem, resolvedTmdb, targetId, targetItem?.anilistId)
@@ -4280,6 +4468,7 @@ class DetailViewModel(
         _novelDetailMeta.value = cached.novelDetailMeta
         _vnDetailMeta.value = cached.vnDetailMeta
         _gameDetailMeta.value = cached.gameDetailMeta
+        _bookDetailMeta.value = cached.bookDetailMeta
         if (cached.vnDiscussionComments.isNotEmpty() && _discussionComments.value.isEmpty()) {
             _discussionComments.value = cached.vnDiscussionComments
         }
@@ -4897,6 +5086,332 @@ class DetailViewModel(
     /**
      * Generate mock season/episode data from the item's progress
      */
+    private suspend fun autoSeedBookEntriesIfEmpty(
+        mediaId: Long,
+        sectionSeedTitles: List<String>,
+        form: BookLiteraryForm?
+    ) {
+        if (mediaId <= 0L) return
+        if (!bookAutoSeededMediaIds.add(mediaId)) return
+        val existing = repository.getBookEntriesOnce(mediaId)
+        if (existing.isNotEmpty()) return
+        val titles = if (sectionSeedTitles.isNotEmpty()) sectionSeedTitles else listOf("Read #1")
+        val seeded = titles.mapIndexed { idx, entryName ->
+            val type = when {
+                entryName.startsWith("Act ", ignoreCase = true) ||
+                    form == BookLiteraryForm.PLAY || form == BookLiteraryForm.VERSE_PLAY -> BookEntryType.ACT.name
+                entryName.startsWith("Canto ", ignoreCase = true) ||
+                    "Cantos" in entryName -> BookEntryType.CANTO.name
+                entryName.startsWith("Read #", ignoreCase = true) -> BookEntryType.REREAD.name
+                else -> BookEntryType.BOOK_PART.name
+            }
+            BookEntryEntity(
+                mediaId = mediaId,
+                entryName = entryName,
+                entryType = type,
+                sortOrder = idx
+            )
+        }
+        repository.insertBookEntries(seeded)
+    }
+
+    fun setBookIllustrationAsHeroBanner(url: String) {
+        updateBanner(url)
+    }
+
+    fun stepBookProgress(delta: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val mode = BookTrackingMode.fromName(latest.bookTrackingMode)
+            val updated = when (mode) {
+                BookTrackingMode.AUDIO_MINUTES -> {
+                    val cur = latest.bookAudioMinutes ?: 0
+                    val maxMins = latest.bookTotalAudioMinutes?.takeIf { it > 0 }
+                    val next = (cur + delta).let { if (maxMins != null) it.coerceIn(0, maxMins) else it.coerceAtLeast(0) }
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            maxMins != null && next >= maxMins -> TrackingStatus.COMPLETED
+                            next > 0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(bookAudioMinutes = next, status = autoStatus)
+                }
+                BookTrackingMode.PERCENT -> {
+                    val total = latest.totalProgress?.takeIf { it > 0.0 }
+                    val curPct = if (total != null) ((latest.currentProgress / total) * 100.0) else latest.currentProgress
+                    val nextPct = (curPct + delta).coerceIn(0.0, 100.0)
+                    val nextVal = if (total != null) kotlin.math.round((nextPct / 100.0) * total) else nextPct
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            nextPct >= 100.0 -> TrackingStatus.COMPLETED
+                            nextPct > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(currentProgress = nextVal, status = autoStatus)
+                }
+                BookTrackingMode.PAGES -> {
+                    val total = latest.totalProgress?.takeIf { it > 0.0 }
+                    val next = (latest.currentProgress + delta).let { if (total != null) it.coerceIn(0.0, total) else it.coerceAtLeast(0.0) }
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            total != null && next >= total -> TrackingStatus.COMPLETED
+                            next > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(currentProgress = next, status = autoStatus)
+                }
+            }
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, updated.currentProgress)
+        }
+    }
+
+    fun setBookProgressExact(value: Double, totalOverride: Double? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val mode = BookTrackingMode.fromName(latest.bookTrackingMode)
+            val updated = when (mode) {
+                BookTrackingMode.AUDIO_MINUTES -> {
+                    val maxMins = totalOverride?.toInt()?.takeIf { it > 0 } ?: latest.bookTotalAudioMinutes?.takeIf { it > 0 }
+                    val next = value.toInt().let { if (maxMins != null) it.coerceIn(0, maxMins) else it.coerceAtLeast(0) }
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            maxMins != null && next >= maxMins -> TrackingStatus.COMPLETED
+                            next > 0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(
+                        bookAudioMinutes = next,
+                        bookTotalAudioMinutes = maxMins ?: latest.bookTotalAudioMinutes,
+                        status = autoStatus
+                    )
+                }
+                BookTrackingMode.PERCENT -> {
+                    val total = totalOverride?.takeIf { it > 0.0 } ?: latest.totalProgress?.takeIf { it > 0.0 }
+                    val pct = value.coerceIn(0.0, 100.0)
+                    val nextVal = if (total != null) kotlin.math.round((pct / 100.0) * total) else pct
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            pct >= 100.0 -> TrackingStatus.COMPLETED
+                            pct > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(currentProgress = nextVal, totalProgress = total ?: latest.totalProgress, status = autoStatus)
+                }
+                BookTrackingMode.PAGES -> {
+                    val total = totalOverride?.takeIf { it > 0.0 } ?: latest.totalProgress?.takeIf { it > 0.0 }
+                    val next = value.let { if (total != null) it.coerceIn(0.0, total) else it.coerceAtLeast(0.0) }
+                    val autoStatus = if (latest.autoStatusEnabled) {
+                        when {
+                            total != null && next >= total -> TrackingStatus.COMPLETED
+                            next > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> latest.status
+                        }
+                    } else latest.status
+                    latest.copy(currentProgress = next, totalProgress = total ?: latest.totalProgress, status = autoStatus)
+                }
+            }
+            repository.updateMedia(updated)
+            trackerSyncEngine?.enqueueProgressUpdate(updated, updated.currentProgress)
+        }
+    }
+
+    fun switchBookTrackingMode(mode: BookTrackingMode) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val nextTotal = if (mode == BookTrackingMode.AUDIO_MINUTES) {
+                latest.bookTotalAudioMinutes
+            } else null
+            repository.updateMedia(
+                latest.copy(
+                    bookTrackingMode = mode.name,
+                    bookTotalAudioMinutes = nextTotal ?: latest.bookTotalAudioMinutes
+                )
+            )
+        }
+    }
+
+    fun updateBookFormat(format: BookFormat) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val nextMode = if (format == BookFormat.AUDIOBOOK) {
+                BookTrackingMode.AUDIO_MINUTES.name
+            } else {
+                latest.bookTrackingMode
+            }
+            repository.updateMedia(latest.copy(bookFormat = format.name, bookTrackingMode = nextMode))
+        }
+    }
+
+    fun updateBookAudioMinutes(currentMinutes: Int, totalMinutes: Int? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val safeTotal = totalMinutes?.takeIf { it > 0 } ?: latest.bookTotalAudioMinutes
+            val safeCur = currentMinutes.coerceAtLeast(0).let { c ->
+                if (safeTotal != null && safeTotal > 0) c.coerceAtMost(safeTotal) else c
+            }
+            val nextStatus = if (latest.autoStatusEnabled) {
+                when {
+                    safeTotal != null && safeTotal > 0 && safeCur >= safeTotal -> TrackingStatus.COMPLETED
+                    safeCur > 0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    bookAudioMinutes = safeCur,
+                    bookTotalAudioMinutes = safeTotal,
+                    bookTrackingMode = BookTrackingMode.AUDIO_MINUTES.name,
+                    status = nextStatus
+                )
+            )
+        }
+    }
+
+    fun adoptBookEdition(edition: BookEditionItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val edFormat = when {
+                edition.format?.contains("audio", true) == true -> BookFormat.AUDIOBOOK.name
+                edition.format?.contains("ebook", true) == true || edition.format?.contains("kindle", true) == true -> BookFormat.EBOOK.name
+                edition.format?.contains("paperback", true) == true -> BookFormat.PAPERBACK.name
+                else -> latest.bookFormat
+            }
+            val edCover = if (latest.customCoverPath.isNullOrBlank() && !edition.coverUrl.isNullOrBlank()) {
+                edition.coverUrl
+            } else {
+                latest.coverUrl
+            }
+            val updated = latest.copy(
+                bookTranslator = edition.translator ?: latest.bookTranslator,
+                bookEditionLabel = edition.title,
+                totalProgress = edition.pageCount?.toDouble() ?: latest.totalProgress,
+                isbn = edition.isbn13 ?: latest.isbn,
+                bookFormat = edFormat,
+                coverUrl = edCover,
+                studioOrNetwork = edition.publisher ?: latest.studioOrNetwork
+            )
+            repository.updateMedia(updated)
+            _bookDetailMeta.update { meta ->
+                meta.copy(
+                    publisher = edition.publisher ?: meta.publisher,
+                    translator = edition.translator ?: meta.translator,
+                    editionName = edition.title,
+                    pageCount = edition.pageCount ?: meta.pageCount,
+                    isbn13 = edition.isbn13 ?: meta.isbn13
+                )
+            }
+        }
+    }
+
+    fun toggleBookEntryCompleted(entry: BookEntryEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val nextDone = !entry.isCompleted
+            val updated = entry.copy(
+                isCompleted = nextDone,
+                completedAtMs = if (nextDone) (entry.completedAtMs ?: System.currentTimeMillis()) else null
+            )
+            repository.updateBookEntry(updated)
+        }
+    }
+
+    fun addCustomBookEntry(name: String, type: BookEntryType = BookEntryType.BOOK_PART) {
+        val clean = name.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val existing = repository.getBookEntriesOnce(mediaId)
+            val nextOrder = (existing.maxOfOrNull { it.sortOrder } ?: -1) + 1
+            repository.insertBookEntry(
+                BookEntryEntity(
+                    mediaId = mediaId,
+                    entryName = clean,
+                    entryType = type.name,
+                    sortOrder = nextOrder
+                )
+            )
+        }
+    }
+
+    fun saveBookEntryDetails(entry: BookEntryEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sanitized = entry.copy(
+                entryName = entry.entryName.trim().ifBlank { "Untitled Entry" },
+                translator = entry.translator?.trim()?.takeIf { it.isNotBlank() },
+                editionLabel = entry.editionLabel?.trim()?.takeIf { it.isNotBlank() },
+                userNote = entry.userNote?.trim()?.takeIf { it.isNotBlank() }
+            )
+            repository.updateBookEntry(sanitized)
+        }
+    }
+
+    fun deleteBookEntry(entryId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteBookEntryById(entryId)
+        }
+    }
+
+    fun addBookQuote(quoteText: String, locationRef: String? = null, personalNote: String? = null) {
+        val cleanQuote = quoteText.trim()
+        if (cleanQuote.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            repository.insertBookQuote(
+                BookQuoteEntity(
+                    mediaId = mediaId,
+                    quoteText = cleanQuote,
+                    locationRef = locationRef?.trim()?.takeIf { it.isNotBlank() },
+                    personalNote = personalNote?.trim()?.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }
+
+    fun saveBookQuote(quote: BookQuoteEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val clean = quote.quoteText.trim()
+            if (clean.isBlank()) return@launch
+            repository.updateBookQuote(
+                quote.copy(
+                    quoteText = clean,
+                    locationRef = quote.locationRef?.trim()?.takeIf { it.isNotBlank() },
+                    personalNote = quote.personalNote?.trim()?.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }
+
+    fun deleteBookQuote(quoteId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteBookQuoteById(quoteId)
+        }
+    }
+
+    fun toggleBookQuoteFavorite(quote: BookQuoteEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateBookQuote(quote.copy(isFavorite = !quote.isFavorite))
+        }
+    }
+
     private fun generateMockSeasons(item: MediaItemEntity): List<Season> {
         val total = item.totalProgress?.toInt() ?: return emptyList()
         val watched = item.currentProgress.toInt()
@@ -5110,7 +5625,8 @@ data class CachedDetailAux(
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     val vnDiscussionComments: List<DiscussionComment> = emptyList(),
-    val gameDetailMeta: GameDetailMeta = GameDetailMeta()
+    val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    val bookDetailMeta: BookDetailMeta = BookDetailMeta()
 )
 
 internal object DetailAuxMemoryCache {
@@ -5118,6 +5634,8 @@ internal object DetailAuxMemoryCache {
 
     fun getCacheKey(item: MediaItemEntity): String? {
         if (item.id > 0L) return "id_${item.id}"
+        if (item.mediaType == MediaType.BOOK && !item.openLibraryId.isNullOrBlank()) return "ol_${item.openLibraryId}"
+        if (item.mediaType == MediaType.BOOK && !item.hardcoverId.isNullOrBlank()) return "hc_${item.hardcoverId}"
         if (item.mediaType == MediaType.GAME && item.igdbId != null && item.igdbId > 0L) return "igdb_${item.igdbId}"
         if (item.mediaType == MediaType.GAME && item.steamAppId != null && item.steamAppId > 0L) return "steam_${item.steamAppId}"
         if (!item.vndbId.isNullOrBlank()) return "vndb_${item.vndbId}"

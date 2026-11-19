@@ -39,7 +39,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
     }
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
-    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao(), database.vnRouteDao(), database.gameEntryDao()) }
+    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao(), database.vnRouteDao(), database.gameEntryDao(), database.bookEntryDao(), database.bookQuoteDao()) }
     val coverCache by lazy { CoverCache(this) }
     val preferenceManager by lazy { PreferenceManager(this) }
     val omniSearchRepository by lazy { OmniSearchRepository() }
@@ -74,6 +74,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.steamGridDbApiKey.collect { PreferenceManager.cachedSteamGridDbApiKey = it } }
             launch { preferenceManager.igdbClientId.collect { PreferenceManager.cachedIgdbClientId = it } }
             launch { preferenceManager.igdbClientSecret.collect { PreferenceManager.cachedIgdbClientSecret = it } }
+            launch { trackerTokenManager.tokens.collect { TrackerTokenManager.cachedHardcoverToken = it.hardcoverToken.orEmpty() } }
         }
 
         AppLogger.i("Application", "OmniTrack launched successfully.")

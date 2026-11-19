@@ -130,6 +130,8 @@ fun ArtworkPickerBottomSheet(
     vndbId: String? = null,
     englishTitle: String? = null,
     steamAppId: Long? = null,
+    openLibraryId: String? = null,
+    bookAuthor: String? = null,
     initialCandidates: List<ArtworkCandidate> = emptyList(),
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
@@ -147,7 +149,7 @@ fun ArtworkPickerBottomSheet(
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId) { mutableStateOf(initialCandidates) }
+    var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId, openLibraryId, bookAuthor) { mutableStateOf(initialCandidates) }
     var isLoading by remember { mutableStateOf(false) }
     var excludedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDirectUrlInput by remember { mutableStateOf(false) }
@@ -204,6 +206,8 @@ fun ArtworkPickerBottomSheet(
                 vndbId = vndbId,
                 englishTitle = englishTitle,
                 steamAppId = steamAppId,
+                openLibraryId = openLibraryId,
+                bookAuthor = bookAuthor,
                 initialCandidates = initialCandidates,
                 onPartialResults = { partial ->
                     scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
@@ -216,7 +220,7 @@ fun ArtworkPickerBottomSheet(
         }
     }
 
-    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId) {
+    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId, openLibraryId, bookAuthor) {
         fetchCandidates(false)
     }
 
@@ -834,7 +838,7 @@ fun ArtworkPickerBottomSheet(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             var userPickedBannerFilter by remember { mutableStateOf<String?>(null) }
-                            val supportsCleanBannerFilter = mediaType == MediaType.VISUAL_NOVEL || mediaType == MediaType.GAME
+                            val supportsCleanBannerFilter = mediaType == MediaType.VISUAL_NOVEL || mediaType == MediaType.GAME || mediaType == MediaType.BOOK
                             val cleanBannerCount = remember(displayedBanners) { displayedBanners.count { !it.isScreenshot } }
                             val shotBannerCount = remember(displayedBanners) { displayedBanners.count { it.isScreenshot } }
                             val activeVnBannerFilter = userPickedBannerFilter ?: if (cleanBannerCount > 0) "CLEAN" else "ALL"
@@ -857,9 +861,9 @@ fun ArtworkPickerBottomSheet(
                                     horizontalArrangement = Arrangement.spacedBy(18.dp)
                                 ) {
                                     listOf(
-                                        "CLEAN" to "Clean Art ($cleanBannerCount)",
+                                        "CLEAN" to if (mediaType == MediaType.BOOK) "Wide Art ($cleanBannerCount)" else "Clean Art ($cleanBannerCount)",
                                         "ALL" to "All (${displayedBanners.size})",
-                                        "SHOTS" to "Screenshots ($shotBannerCount)"
+                                        "SHOTS" to if (mediaType == MediaType.BOOK) "Illustrations ($shotBannerCount)" else "Screenshots ($shotBannerCount)"
                                     ).forEach { (key, label) ->
                                         val selected = activeVnBannerFilter == key
                                         Column(

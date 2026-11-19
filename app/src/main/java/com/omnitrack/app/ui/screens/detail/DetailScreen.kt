@@ -153,14 +153,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.AnimeStaffItem
+import com.omnitrack.app.data.model.BookDetailMeta
+import com.omnitrack.app.data.model.BookFormat
+import com.omnitrack.app.data.model.BookTrackingMode
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.data.model.formatBookDuration
 import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.BookEntryDetailSheet
+import com.omnitrack.app.ui.screens.detail.components.DetailBookAuthorSection
+import com.omnitrack.app.ui.screens.detail.components.DetailBookEditionsSection
+import com.omnitrack.app.ui.screens.detail.components.DetailBookGallerySection
+import com.omnitrack.app.ui.screens.detail.components.DetailBookQuotesSection
+import com.omnitrack.app.ui.screens.detail.components.DetailBookTrackingSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGameAchievementsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGameGallerySection
 import com.omnitrack.app.ui.screens.detail.components.DetailGameTrackingSection
@@ -198,6 +208,7 @@ sealed class DetailSheetTarget {
     data class VolumeChapterDetail(val seasonNumber: Int, val episodeNumber: Int) : DetailSheetTarget()
     data class VnRoute(val routeId: Long) : DetailSheetTarget()
     data class GameEntry(val entryId: Long) : DetailSheetTarget()
+    data class BookEntry(val entryId: Long) : DetailSheetTarget()
 }
 
 private sealed class DetailNavStep {
@@ -752,8 +763,22 @@ fun DetailScreen(
             ) {
                 item(key = "detail_top_header", contentType = "top_header") {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // PRESENTATION MODE 1 or 2
-                        if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books when no wide banner)
+                        val useEditorialBookHero = item.mediaType == MediaType.BOOK &&
+                            (backdropTargetUrl.isNullOrBlank() || backdropTargetUrl == effectiveCover || backdropTargetUrl == item.coverUrl)
+                        if (useEditorialBookHero) {
+                            DetailBookEditorialHeroSection(
+                                item = item,
+                                coverImageModel = coverImageModel,
+                                bookDetailMeta = uiState.bookDetailMeta,
+                                onCoverClick = { showArtworkPicker = true },
+                                onOptionsClick = { showOptionsMenu = true },
+                                onEditProgress = { showProgressEditSheet = true },
+                                onEditStatus = { showStatusPickerSheet = true },
+                                onEditScore = { showScoreRatingSheet = true },
+                                onOpenTrackers = { showMultiTrackerSheet = true }
+                            )
+                        } else if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
                             DetailHeroHeaderSection(
                                 item = item,
                                 backdropTargetUrl = backdropTargetUrl,
@@ -763,6 +788,7 @@ fun DetailScreen(
                                 novelDetailMeta = uiState.novelDetailMeta,
                                 vnDetailMeta = uiState.vnDetailMeta,
                                 gameDetailMeta = uiState.gameDetailMeta,
+                                bookDetailMeta = uiState.bookDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = {
@@ -787,6 +813,7 @@ fun DetailScreen(
                                 novelDetailMeta = uiState.novelDetailMeta,
                                 vnDetailMeta = uiState.vnDetailMeta,
                                 gameDetailMeta = uiState.gameDetailMeta,
+                                bookDetailMeta = uiState.bookDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onCoverClick = { showArtworkPicker = true },
                                 onCoverLoaded = { url ->
@@ -934,6 +961,33 @@ fun DetailScreen(
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
                                 }
+                            } else if (item.mediaType == MediaType.BOOK) {
+                                item(key = "section_book_tracking", contentType = "book_tracking") {
+                                    Column {
+                                        DetailBookTrackingSection(
+                                            item = item,
+                                            bookDetailMeta = uiState.bookDetailMeta,
+                                            entries = uiState.bookEntries,
+                                            onStepProgress = { viewModel.stepBookProgress(it) },
+                                            onSetProgressExact = { valNum, totOpt ->
+                                                viewModel.setBookProgressExact(valNum, totOpt)
+                                            },
+                                            onSwitchMode = { viewModel.switchBookTrackingMode(it) },
+                                            onUpdateFormat = { viewModel.updateBookFormat(it) },
+                                            onUpdateAudioMinutes = { curM, totM ->
+                                                viewModel.updateBookAudioMinutes(curM, totM)
+                                            },
+                                            onToggleEntryCompleted = { viewModel.toggleBookEntryCompleted(it) },
+                                            onAddEntry = { name, type ->
+                                                viewModel.addCustomBookEntry(name, type)
+                                            },
+                                            onOpenEntryDetail = { entry ->
+                                                pushSheet(DetailSheetTarget.BookEntry(entry.id))
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             } else if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
                                 detailSeriesItems(
                                     seriesState = seriesUiState,
@@ -989,6 +1043,23 @@ fun DetailScreen(
                                 }
                             }
                         }
+                        DetailSectionKey.QUOTES -> {
+                            if (sectionsReady && item.mediaType == MediaType.BOOK) {
+                                item(key = "section_book_quotes", contentType = "book_quotes") {
+                                    Column {
+                                        DetailBookQuotesSection(
+                                            quotes = uiState.bookQuotes,
+                                            poemSampleLines = uiState.bookDetailMeta.poemSampleLines,
+                                            onAddQuote = { q, loc, note -> viewModel.addBookQuote(q, loc, note) },
+                                            onSaveQuote = { viewModel.saveBookQuote(it) },
+                                            onToggleFavorite = { viewModel.toggleBookQuoteFavorite(it) },
+                                            onDeleteQuote = { viewModel.deleteBookQuote(it) }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
                         DetailSectionKey.SCREENSHOTS -> {
                             if (sectionsReady && item.mediaType == MediaType.VISUAL_NOVEL && uiState.vnDetailMeta.screenshots.isNotEmpty()) {
                                 item(key = "section_vn_screenshots", contentType = "vn_screenshots") {
@@ -1017,6 +1088,19 @@ fun DetailScreen(
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
                                 }
+                            } else if (sectionsReady && item.mediaType == MediaType.BOOK && uiState.bookDetailMeta.illustrations.isNotEmpty()) {
+                                item(key = "section_book_gallery", contentType = "book_gallery") {
+                                    Column {
+                                        DetailBookGallerySection(
+                                            illustrations = uiState.bookDetailMeta.illustrations,
+                                            onSetAsHeroBanner = { url ->
+                                                viewModel.setBookIllustrationAsHeroBanner(url)
+                                                Toast.makeText(context, "Hero banner updated", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
                         DetailSectionKey.RELEASES -> {
@@ -1025,6 +1109,24 @@ fun DetailScreen(
                                     Column {
                                         DetailVnReleasesSection(
                                             releases = uiState.vnDetailMeta.releases
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                        DetailSectionKey.EDITIONS -> {
+                            if (sectionsReady && item.mediaType == MediaType.BOOK && uiState.bookDetailMeta.editions.isNotEmpty()) {
+                                item(key = "section_book_editions", contentType = "book_editions") {
+                                    Column {
+                                        DetailBookEditionsSection(
+                                            editions = uiState.bookDetailMeta.editions,
+                                            activeEditionLabel = item.bookEditionLabel,
+                                            activeIsbn = item.isbn,
+                                            onAdoptEdition = { ed ->
+                                                viewModel.adoptBookEdition(ed)
+                                                Toast.makeText(context, "Edition applied: ${ed.title}", Toast.LENGTH_SHORT).show()
+                                            }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1053,7 +1155,8 @@ fun DetailScreen(
                                     item.mediaType == MediaType.NOVEL ||
                                     item.mediaType == MediaType.VISUAL_NOVEL
                                 val hasAnimeCast = isAnimeLike && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())
-                                val hasStdCast = !isAnimeLike && uiState.cast.isNotEmpty()
+                                val hasStdCast = !isAnimeLike && item.mediaType != MediaType.BOOK && uiState.cast.isNotEmpty()
+                                val bookAuthorProfile = if (item.mediaType == MediaType.BOOK) uiState.bookDetailMeta.authorProfile else null
                                 if (hasAnimeCast || hasStdCast) {
                                     item(key = "section_cast", contentType = "cast") {
                                         Column {
@@ -1126,6 +1229,16 @@ fun DetailScreen(
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
+                                } else if (bookAuthorProfile != null) {
+                                    item(key = "section_book_author", contentType = "book_author") {
+                                        Column {
+                                            DetailBookAuthorSection(
+                                                authorProfile = bookAuthorProfile,
+                                                onSelectWork = { rec -> pushPreview(rec) }
+                                            )
+                                            Spacer(modifier = Modifier.height(20.dp))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1139,6 +1252,7 @@ fun DetailScreen(
                                             vnSpoilerLevel = vnSpoilerLevel,
                                             vnNsfwFilterMode = vnNsfwFilterMode,
                                             gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null,
+                                            bookDetailMeta = if (item.mediaType == MediaType.BOOK) uiState.bookDetailMeta else null,
                                             onGenreOrTagClick = { name, isTag ->
                                                 pushSheet(
                                                     DetailSheetTarget.Company(
@@ -1191,7 +1305,8 @@ fun DetailScreen(
                                             endDate = uiState.endDate,
                                             nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds,
                                             vnDetailMeta = if (item.mediaType == MediaType.VISUAL_NOVEL) uiState.vnDetailMeta else null,
-                                            gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null
+                                            gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null,
+                                            bookDetailMeta = if (item.mediaType == MediaType.BOOK) uiState.bookDetailMeta else null
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1497,7 +1612,7 @@ fun DetailScreen(
             // Cover & Banner artwork customization bottom sheet (Option A multi-tab)
             if (showArtworkPicker) {
                 val effectiveGameSteamAppId = item.steamAppId ?: uiState.gameDetailMeta.steamAppId
-                val initialArtCandidates = remember(item.id, losslessCover, item.bannerUrl, uiState.vnDetailMeta, uiState.gameDetailMeta, effectiveGameSteamAppId) {
+                val initialArtCandidates = remember(item.id, losslessCover, item.bannerUrl, uiState.vnDetailMeta, uiState.gameDetailMeta, uiState.bookDetailMeta, effectiveGameSteamAppId) {
                     buildList {
                         val effectiveInitCover = losslessCover.takeIf { it.isNotBlank() } ?: item.coverUrl
                         if (effectiveInitCover.isNotBlank()) {
@@ -1564,6 +1679,31 @@ fun DetailScreen(
                                 )
                             )
                         }
+                        if (item.mediaType == MediaType.BOOK) {
+                            uiState.bookDetailMeta.illustrations.forEachIndexed { idx, ill ->
+                                add(
+                                    com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                        url = ill.url,
+                                        sourceName = "Wikimedia Commons",
+                                        description = ill.caption ?: "Book Illustration ${idx + 1}",
+                                        isBanner = ill.isWideHero,
+                                        isScreenshot = !ill.isWideHero
+                                    )
+                                )
+                            }
+                            uiState.bookDetailMeta.editions.forEach { ed ->
+                                ed.coverUrl?.takeIf { it.isNotBlank() }?.let { cov ->
+                                    add(
+                                        com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                            url = cov,
+                                            sourceName = "Open Library",
+                                            description = ed.title,
+                                            isBanner = false
+                                        )
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 ArtworkPickerBottomSheet(
@@ -1584,6 +1724,8 @@ fun DetailScreen(
                     vndbId = item.vndbId,
                     englishTitle = uiState.englishTitle,
                     steamAppId = effectiveGameSteamAppId,
+                    openLibraryId = item.openLibraryId,
+                    bookAuthor = item.bookAuthor ?: uiState.bookDetailMeta.authorName,
                     initialCandidates = initialArtCandidates,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
@@ -1901,6 +2043,20 @@ fun DetailScreen(
                     )
                 }
             }
+            is DetailSheetTarget.BookEntry -> {
+                val activeEntry = uiState.bookEntries.firstOrNull { it.id == topSheet.entryId }
+                if (activeEntry != null) {
+                    BookEntryDetailSheet(
+                        entry = activeEntry,
+                        presentationSettings = presentationSettings,
+                        backdropBitmap = backdropBitmap,
+                        backdropTargetUrl = effectiveBanner,
+                        onSave = { updated -> viewModel.saveBookEntryDetails(updated) },
+                        onDelete = { entryId -> viewModel.deleteBookEntry(entryId) },
+                        onDismiss = { stepBackOneLevel() }
+                    )
+                }
+            }
             null -> {}
         }
 }
@@ -2008,6 +2164,7 @@ private fun SiblingDetailPreview(
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                     gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
+                    bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -2025,6 +2182,7 @@ private fun SiblingDetailPreview(
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                     gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
+                    bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -2063,7 +2221,8 @@ private fun SiblingDetailPreview(
             DetailShowDetailsSection(
                 item = displayItem,
                 vnDetailMeta = if (displayItem.mediaType == MediaType.VISUAL_NOVEL) cachedAux?.vnDetailMeta else null,
-                gameDetailMeta = if (displayItem.mediaType == MediaType.GAME) cachedAux?.gameDetailMeta else null
+                gameDetailMeta = if (displayItem.mediaType == MediaType.GAME) cachedAux?.gameDetailMeta else null,
+                bookDetailMeta = if (displayItem.mediaType == MediaType.BOOK) cachedAux?.bookDetailMeta else null
             )
         }
     }
@@ -2089,7 +2248,9 @@ private fun UnboxedStatsRow(
             item.comickId,
             item.bangumiId,
             item.igdbId,
-            item.steamAppId
+            item.steamAppId,
+            item.openLibraryId,
+            item.hardcoverId
         ).size
     }
 
@@ -2114,10 +2275,17 @@ private fun UnboxedStatsRow(
                 .padding(vertical = 4.dp, horizontal = 6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            val progressNumber = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-                String.format("%.1f hrs", item.playtimeHours)
-            } else {
-                "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
+            val progressNumber = when {
+                item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL ->
+                    String.format("%.1f hrs", item.playtimeHours)
+                item.mediaType == MediaType.BOOK && BookTrackingMode.fromName(item.bookTrackingMode) == BookTrackingMode.AUDIO_MINUTES ->
+                    formatBookDuration(item.bookAudioMinutes ?: 0) ?: "0m"
+                item.mediaType == MediaType.BOOK && BookTrackingMode.fromName(item.bookTrackingMode) == BookTrackingMode.PERCENT -> {
+                    val tot = item.totalProgress?.takeIf { it > 0.0 }
+                    val pct = if (tot != null) ((item.currentProgress / tot) * 100.0).toInt().coerceIn(0, 100) else item.currentProgress.toInt().coerceIn(0, 100)
+                    "$pct%"
+                }
+                else -> "${item.currentProgress.toInt()}${item.totalProgress?.let { " / ${it.toInt()}" } ?: ""}"
             }
             Text(
                 text = progressNumber,
@@ -2126,12 +2294,13 @@ private fun UnboxedStatsRow(
                 fontWeight = FontWeight.Black,
                 letterSpacing = (-0.2).sp
             )
-            val statsUnitLabel = if (item.mediaType == MediaType.NOVEL && com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+            val statsUnitLabel = when {
+                item.mediaType == MediaType.BOOK && BookTrackingMode.fromName(item.bookTrackingMode) == BookTrackingMode.AUDIO_MINUTES -> "AUDIOBOOK"
+                item.mediaType == MediaType.BOOK && BookTrackingMode.fromName(item.bookTrackingMode) == BookTrackingMode.PERCENT -> "READ"
+                item.mediaType == MediaType.NOVEL && com.omnitrack.app.ui.screens.home.inferNovelSubtype(
                     item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
-                ) == "LIGHT_NOVEL") {
-                "VOLUMES"
-            } else {
-                item.mediaType.unitLabel.uppercase()
+                ) == "LIGHT_NOVEL" -> "VOLUMES"
+                else -> item.mediaType.unitLabel.uppercase()
             }
             Text(
                 text = statsUnitLabel,
@@ -2345,6 +2514,7 @@ private fun DetailHeroHeaderSection(
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -2468,7 +2638,14 @@ private fun DetailHeroHeaderSection(
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
                     )
-                    val heroSubInfo = if (item.mediaType == MediaType.NOVEL) item.originCountry?.uppercase() else item.platform
+                    val heroSubInfo = when (item.mediaType) {
+                        MediaType.NOVEL -> item.originCountry?.uppercase()
+                        MediaType.BOOK -> listOfNotNull(
+                            bookDetailMeta.literaryForm?.label?.uppercase(),
+                            bookDetailMeta.authorName ?: item.bookAuthor
+                        ).joinToString(" · ").takeIf { it.isNotBlank() }
+                        else -> item.platform
+                    }
                     if (!heroSubInfo.isNullOrBlank()) {
                         Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
                         Text(text = heroSubInfo, color = Color.White, fontSize = 11.5.sp)
@@ -2500,7 +2677,145 @@ private fun DetailHeroHeaderSection(
             mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
             bangumiScore = novelDetailMeta.bangumiScore,
             vnDetailMeta = vnDetailMeta,
-            gameDetailMeta = gameDetailMeta
+            gameDetailMeta = gameDetailMeta,
+            bookDetailMeta = bookDetailMeta
+        )
+        UnboxedStatsRow(
+            item = item,
+            onEditProgress = onEditProgress,
+            onEditStatus = onEditStatus,
+            onEditScore = onEditScore,
+            onOpenTrackers = onOpenTrackers
+        )
+    }
+}
+
+@Composable
+private fun DetailBookEditorialHeroSection(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    coverImageModel: Any?,
+    bookDetailMeta: BookDetailMeta,
+    onCoverClick: () -> Unit,
+    onOptionsClick: () -> Unit,
+    onEditProgress: () -> Unit,
+    onEditStatus: () -> Unit,
+    onEditScore: () -> Unit,
+    onOpenTrackers: () -> Unit
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Spacer(modifier = Modifier.height(44.dp))
+
+        // Floating 2:3 Book Jacket with subtle left-edge spine sheen
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(158.dp)
+                    .height(238.dp)
+                    .shadow(24.dp, RoundedCornerShape(8.dp), ambientColor = Color.Black, spotColor = Color.Black)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.06f))
+                    .clickable { onCoverClick() }
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(coverImageModel)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.horizontalGradient(
+                                0.0f to Color.White.copy(alpha = 0.24f),
+                                0.04f to Color.White.copy(alpha = 0.06f),
+                                0.10f to Color.Transparent,
+                                1.0f to Color.Black.copy(alpha = 0.10f)
+                            )
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                )
+            }
+        }
+
+        // Centered Editorial Title & Options
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = item.title,
+                    color = TextPrimary,
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Black,
+                    lineHeight = 28.sp,
+                    maxLines = 3
+                )
+                val author = bookDetailMeta.authorName ?: item.bookAuthor
+                if (!author.isNullOrBlank()) {
+                    Text(
+                        text = "by $author",
+                        color = AccentGold,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2
+                    )
+                }
+                val metaParts = listOfNotNull(
+                    bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK",
+                    item.releaseYear?.takeIf { it.isNotBlank() },
+                    item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it PAGES" }
+                        ?: bookDetailMeta.pageCount?.takeIf { it > 0 }?.let { "$it PAGES" }
+                        ?: bookDetailMeta.lineCount?.takeIf { it > 0 }?.let { "$it LINES" }
+                ).joinToString(" · ")
+                Text(
+                    text = metaParts,
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                )
+            }
+
+            IconButton(
+                onClick = onOptionsClick,
+                modifier = Modifier.size(40.dp).padding(start = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        DetailNuvioMetaRow(item = item)
+        NuvioRatingsRow(
+            item = item,
+            bookDetailMeta = bookDetailMeta
         )
         UnboxedStatsRow(
             item = item,
@@ -2523,6 +2838,7 @@ private fun DetailClassicHeaderSection(
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -2724,7 +3040,8 @@ private fun DetailClassicHeaderSection(
                 mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
                 bangumiScore = novelDetailMeta.bangumiScore,
                 vnDetailMeta = vnDetailMeta,
-                gameDetailMeta = gameDetailMeta
+                gameDetailMeta = gameDetailMeta,
+                bookDetailMeta = bookDetailMeta
             )
             UnboxedStatsRow(
                 item = item,

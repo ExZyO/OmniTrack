@@ -244,7 +244,7 @@ fun DetailGameAchievementsSection(
                                 color = if (ach.isUnlocked) Color.White else Color.White.copy(alpha = 0.72f),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             val descText = ach.description?.takeIf { it.isNotBlank() }
@@ -253,7 +253,7 @@ fun DetailGameAchievementsSection(
                                     text = descText,
                                     color = Color.White.copy(alpha = 0.58f),
                                     fontSize = 11.5.sp,
-                                    maxLines = 2,
+                                    maxLines = 3,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = if (isMaskedHidden) Modifier.blur(6.dp) else Modifier
                                 )

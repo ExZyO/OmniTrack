@@ -1,5 +1,7 @@
 package com.omnitrack.app.data.repository
 
+import com.omnitrack.app.data.db.dao.BookEntryDao
+import com.omnitrack.app.data.db.dao.BookQuoteDao
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
@@ -7,6 +9,8 @@ import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
+import com.omnitrack.app.data.db.entity.BookEntryEntity
+import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
@@ -25,8 +29,49 @@ class MediaRepository(
     private val syncQueueDao: SyncQueueDao? = null,
     private val episodeProgressDao: EpisodeProgressDao? = null,
     private val vnRouteDao: VnRouteDao? = null,
-    private val gameEntryDao: GameEntryDao? = null
+    private val gameEntryDao: GameEntryDao? = null,
+    private val bookEntryDao: BookEntryDao? = null,
+    private val bookQuoteDao: BookQuoteDao? = null
 ) {
+    fun getBookEntries(mediaId: Long): Flow<List<BookEntryEntity>> =
+        (bookEntryDao?.getEntriesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getBookEntriesOnce(mediaId: Long): List<BookEntryEntity> =
+        bookEntryDao?.getEntriesForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertBookEntry(entry: BookEntryEntity): Long? = bookEntryDao?.insertEntry(entry)
+
+    suspend fun insertBookEntries(entries: List<BookEntryEntity>) {
+        if (entries.isNotEmpty()) bookEntryDao?.insertEntries(entries)
+    }
+
+    suspend fun updateBookEntry(entry: BookEntryEntity) {
+        bookEntryDao?.updateEntry(entry)
+    }
+
+    suspend fun deleteBookEntryById(entryId: Long) {
+        bookEntryDao?.deleteEntryById(entryId)
+    }
+
+    fun getBookQuotes(mediaId: Long): Flow<List<BookQuoteEntity>> =
+        (bookQuoteDao?.getQuotesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getBookQuotesOnce(mediaId: Long): List<BookQuoteEntity> =
+        bookQuoteDao?.getQuotesForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertBookQuote(quote: BookQuoteEntity): Long? = bookQuoteDao?.insertQuote(quote)
+
+    suspend fun insertBookQuotes(quotes: List<BookQuoteEntity>) {
+        if (quotes.isNotEmpty()) bookQuoteDao?.insertQuotes(quotes)
+    }
+
+    suspend fun updateBookQuote(quote: BookQuoteEntity) {
+        bookQuoteDao?.updateQuote(quote)
+    }
+
+    suspend fun deleteBookQuoteById(quoteId: Long) {
+        bookQuoteDao?.deleteQuoteById(quoteId)
+    }
     fun getGameEntries(mediaId: Long): Flow<List<GameEntryEntity>> =
         (gameEntryDao?.getEntriesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
@@ -154,12 +199,29 @@ class MediaRepository(
         vndbId: String? = null,
         igdbId: Long? = null,
         steamAppId: Long? = null,
+        openLibraryId: String? = null,
+        hardcoverId: String? = null,
+        isbn: String? = null,
         title: String? = null,
         mediaType: MediaType? = null
     ): MediaItemEntity? {
         if (!vndbId.isNullOrBlank()) {
             val found = mediaDao.findByVndbId(vndbId.trim())
             if (found != null) return found
+        }
+        if (mediaType == MediaType.BOOK) {
+            if (!hardcoverId.isNullOrBlank()) {
+                val found = mediaDao.findByHardcoverId(hardcoverId.trim(), MediaType.BOOK)
+                if (found != null) return found
+            }
+            if (!openLibraryId.isNullOrBlank()) {
+                val found = mediaDao.findByOpenLibraryId(openLibraryId.trim(), MediaType.BOOK)
+                if (found != null) return found
+            }
+            if (!isbn.isNullOrBlank()) {
+                val found = mediaDao.findByIsbn(isbn.trim(), MediaType.BOOK)
+                if (found != null) return found
+            }
         }
         if (igdbId != null && igdbId > 0 && mediaType == MediaType.GAME) {
             val found = mediaDao.findByIgdbId(igdbId, MediaType.GAME)

@@ -125,6 +125,16 @@ class TrackerSyncEngine(
                 )
             )
         }
+        if (item.mediaType == com.omnitrack.app.data.model.MediaType.BOOK && !item.hardcoverId.isNullOrBlank()) {
+            syncQueueDao.enqueue(
+                SyncQueueEntity(
+                    mediaId = item.id,
+                    trackerType = "HARDCOVER",
+                    action = "PROGRESS",
+                    progressValue = newProgress
+                )
+            )
+        }
     }
 
     suspend fun drainQueue() = withContext(Dispatchers.IO) {
@@ -148,6 +158,7 @@ class TrackerSyncEngine(
                 "BANGUMI" -> syncBangumi(task, mediaItem, tokens.bangumiToken)
                 "VNDB" -> syncVndb(task, mediaItem, tokens.vndbToken)
                 "TMDB" -> syncTmdb(task, mediaItem, tokens.tmdbToken)
+                "HARDCOVER" -> syncHardcover(task, mediaItem, tokens.hardcoverToken)
                 else -> true
             }
 
@@ -470,8 +481,96 @@ class TrackerSyncEngine(
             totalImported += steamSummary.imported + steamSummary.updated
         }
 
+        // 5. Hardcover Books Library Pull
+        if (!tokens.hardcoverToken.isNullOrBlank()) {
+            onStatus("Pulling Hardcover reading library...")
+            val hcSummary = importHardcoverLibrary(onStatus)
+            totalImported += hcSummary.imported + hcSummary.updated
+        }
+
         onStatus("Sync complete! $totalImported items imported/updated.")
         totalImported
+    }
+
+    private suspend fun syncHardcover(
+        task: SyncQueueEntity,
+        item: MediaItemEntity,
+        token: String?
+    ): Boolean {
+        val cleanToken = token?.trim().orEmpty()
+        val hcId = item.hardcoverId?.trim().orEmpty()
+        if (cleanToken.isBlank() || hcId.isBlank()) return true
+        return com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
+            .syncBookStatus(cleanToken, hcId, item.status, item.userRating)
+    }
+
+    suspend fun importHardcoverLibrary(
+        onStatus: (String) -> Unit = {}
+    ): BookImportSummary = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.hardcoverToken?.trim().orEmpty()
+        if (token.isBlank()) {
+            return@withContext BookImportSummary(0, 0, "Connect your Hardcover API token first")
+        }
+        onStatus("Fetching Hardcover library...")
+        val records = com.omnitrack.app.data.enrichment.HardcoverApiClient(client).pullUserBooks(token)
+        if (records.isEmpty()) {
+            return@withContext BookImportSummary(0, 0, "0 books returned from Hardcover")
+        }
+        var imported = 0
+        var updated = 0
+        for (rec in records) {
+            val existing = repository.findExistingMedia(
+                hardcoverId = rec.hardcoverId,
+                isbn = rec.isbn13,
+                title = rec.title,
+                mediaType = com.omnitrack.app.data.model.MediaType.BOOK
+            )
+            if (existing != null) {
+                val mergedStatus = if (existing.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK &&
+                    rec.status != com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                ) {
+                    rec.status
+                } else existing.status
+                val nextProgress = if (existing.currentProgress <= 0.0 && rec.currentPage > 0.0) {
+                    rec.currentPage
+                } else existing.currentProgress
+                val next = existing.copy(
+                    hardcoverId = existing.hardcoverId ?: rec.hardcoverId,
+                    isbn = existing.isbn ?: rec.isbn13,
+                    bookAuthor = existing.bookAuthor ?: rec.author,
+                    coverUrl = existing.coverUrl?.takeIf { it.isNotBlank() } ?: rec.coverUrl,
+                    releaseYear = existing.releaseYear ?: rec.releaseYear,
+                    totalProgress = existing.totalProgress ?: rec.pages?.toDouble(),
+                    currentProgress = nextProgress,
+                    userRating = existing.userRating ?: rec.userRating10,
+                    status = mergedStatus
+                )
+                if (next != existing) {
+                    repository.updateMedia(next)
+                    updated++
+                }
+            } else {
+                repository.insertMedia(
+                    MediaItemEntity(
+                        title = rec.title,
+                        coverUrl = rec.coverUrl,
+                        releaseYear = rec.releaseYear,
+                        mediaType = com.omnitrack.app.data.model.MediaType.BOOK,
+                        status = rec.status,
+                        currentProgress = rec.currentPage,
+                        totalProgress = rec.pages?.toDouble(),
+                        userRating = rec.userRating10,
+                        hardcoverId = rec.hardcoverId,
+                        isbn = rec.isbn13,
+                        bookAuthor = rec.author,
+                        bookFormat = "HARDCOVER"
+                    )
+                )
+                imported++
+            }
+        }
+        onStatus("Hardcover: imported $imported, updated $updated books")
+        BookImportSummary(imported = imported, updated = updated)
     }
 
     private fun JsonElement?.asSafeObj(): JsonObject? = this as? JsonObject

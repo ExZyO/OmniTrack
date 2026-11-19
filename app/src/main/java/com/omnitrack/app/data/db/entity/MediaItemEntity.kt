@@ -92,6 +92,15 @@ data class MediaItemEntity(
     val steamAchievementsTotal: Int? = null,
     val platforms: String? = null,
     val gameCompletionTier: String? = null,
+    val openLibraryId: String? = null,
+    val isbn: String? = null,
+    val bookAuthor: String? = null,
+    val bookFormat: String? = null,
+    val bookTrackingMode: String? = null,
+    val bookAudioMinutes: Int? = null,
+    val bookTotalAudioMinutes: Int? = null,
+    val bookTranslator: String? = null,
+    val bookEditionLabel: String? = null,
     val trackerProgressOverrides: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

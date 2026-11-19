@@ -7,12 +7,16 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.omnitrack.app.data.db.dao.BookEntryDao
+import com.omnitrack.app.data.db.dao.BookQuoteDao
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
+import com.omnitrack.app.data.db.entity.BookEntryEntity
+import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
@@ -21,8 +25,17 @@ import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 
 @Database(
-    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class, VnRouteEntity::class, GameEntryEntity::class],
-    version = 15,
+    entities = [
+        MediaItemEntity::class,
+        CategoryEntity::class,
+        SyncQueueEntity::class,
+        EpisodeProgressEntity::class,
+        VnRouteEntity::class,
+        GameEntryEntity::class,
+        BookEntryEntity::class,
+        BookQuoteEntity::class
+    ],
+    version = 16,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +47,8 @@ abstract class OmniTrackDatabase : RoomDatabase() {
     abstract fun episodeProgressDao(): EpisodeProgressDao
     abstract fun vnRouteDao(): VnRouteDao
     abstract fun gameEntryDao(): GameEntryDao
+    abstract fun bookEntryDao(): BookEntryDao
+    abstract fun bookQuoteDao(): BookQuoteDao
 
     companion object {
         @Volatile
@@ -147,6 +162,50 @@ abstract class OmniTrackDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_items ADD COLUMN openLibraryId TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN isbn TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookAuthor TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookFormat TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookTrackingMode TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookAudioMinutes INTEGER")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookTotalAudioMinutes INTEGER")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookTranslator TEXT")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN bookEditionLabel TEXT")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS book_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        mediaId INTEGER NOT NULL,
+                        entryName TEXT NOT NULL,
+                        entryType TEXT NOT NULL DEFAULT 'BOOK_PART',
+                        pagesOrLines INTEGER,
+                        translator TEXT,
+                        editionLabel TEXT,
+                        isCompleted INTEGER NOT NULL DEFAULT 0,
+                        completedAtMs INTEGER,
+                        userRating REAL,
+                        userNote TEXT,
+                        isBookmarked INTEGER NOT NULL DEFAULT 0,
+                        sortOrder INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_book_entries_mediaId ON book_entries(mediaId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS book_quotes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        mediaId INTEGER NOT NULL,
+                        quoteText TEXT NOT NULL,
+                        locationRef TEXT,
+                        personalNote TEXT,
+                        isFavorite INTEGER NOT NULL DEFAULT 0,
+                        createdAtMs INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_book_quotes_mediaId ON book_quotes(mediaId)")
+            }
+        }
+
         fun getDatabase(context: Context): OmniTrackDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -154,7 +213,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {

@@ -50,7 +50,9 @@ data class RecommendationItem(
     val anilistId: Long? = null,
     val malId: Long? = null,
     val igdbId: Long? = null,
-    val bannerUrl: String? = null
+    val bannerUrl: String? = null,
+    val openLibraryId: String? = null,
+    val bookAuthor: String? = null
 )
 
 /**

@@ -26,6 +26,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -107,22 +108,28 @@ class ArtworkWaterfallRepository(
         vndbId: String? = null,
         englishTitle: String? = null,
         steamAppId: Long? = null,
+        openLibraryId: String? = null,
+        bookAuthor: String? = null,
         initialCandidates: List<ArtworkCandidate> = emptyList(),
         onPartialResults: ((List<ArtworkCandidate>) -> Unit)? = null
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val clean = cleanTitle(title)
-        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}"
+        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}:${openLibraryId.orEmpty()}:${bookAuthor.orEmpty()}"
 
         fun cleanArtBannerRank(candidate: ArtworkCandidate): Int {
             if (!candidate.isBanner) return 0
             if (candidate.isScreenshot) return 10
             return when (candidate.sourceName.lowercase()) {
                 "steamgriddb" -> 0
+                "wikimedia commons" -> 0
                 "igdb artwork" -> 1
+                "hardcover" -> 1
                 "steam hero" -> 2
+                "apple books" -> 2
                 "steam background" -> 3
                 "anilist" -> 4
+                "open library" -> 4
                 "steam" -> 5
                 "default" -> 6
                 else -> 7
@@ -140,7 +147,7 @@ class ArtworkWaterfallRepository(
                         }
                     }
                 )
-                MediaType.VISUAL_NOVEL, MediaType.GAME -> list.sortedWith(
+                MediaType.VISUAL_NOVEL, MediaType.GAME, MediaType.BOOK -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
                         .thenBy { cleanArtBannerRank(it) }
                 )
@@ -336,8 +343,14 @@ class ArtworkWaterfallRepository(
                 }
 
                 MediaType.BOOK -> {
+                    launchProvider { fetchAppleBooksCovers(title, bookAuthor) }
+                    launchProvider { fetchOpenLibraryEditionCovers(title, openLibraryId) }
+                    launchProvider { fetchWikimediaBookIllustrations(title, bookAuthor) }
+                    val hcToken = com.omnitrack.app.data.sync.TrackerTokenManager.cachedHardcoverToken
+                    if (hcToken.isNotBlank()) {
+                        launchProvider { fetchHardcoverBookArt(title, bookAuthor, hcToken) }
+                    }
                     launchProvider { fetchGoogleBooksCovers(title) }
-                    launchProvider { fetchOpenLibraryCovers(title) }
                 }
 
                 MediaType.SHOW, MediaType.MOVIE -> {
@@ -1838,6 +1851,219 @@ class ArtworkWaterfallRepository(
         }
     }
 
+    private fun fetchAppleBooksCovers(title: String, bookAuthor: String?): List<ArtworkCandidate> {
+        return try {
+            val term = listOfNotNull(title.trim(), bookAuthor?.split(",")?.firstOrNull()?.trim()).joinToString(" ")
+            val encoded = URLEncoder.encode(term, "UTF-8")
+            val url = "https://itunes.apple.com/search?term=$encoded&media=ebook&limit=8"
+            val request = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return emptyList()
+                val results = (json.parseToJsonElement(response.body?.string().orEmpty()) as? JsonObject)
+                    ?.get("results") as? JsonArray ?: return emptyList()
+                results.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val rawCov = o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString() ?: return@mapNotNull null
+                    val hiRes = rawCov.replace("100x100bb", "1200x1200bb")
+                        .replace("60x60bb", "1200x1200bb")
+                        .replace("http://", "https://")
+                    val bookTitle = o["trackName"].cleanString() ?: o["collectionName"].cleanString() ?: title
+                    ArtworkCandidate(
+                        url = hiRes,
+                        sourceName = "Apple Books",
+                        description = bookTitle,
+                        isBanner = false
+                    )
+                }.distinctBy { it.url }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchOpenLibraryEditionCovers(title: String, openLibraryId: String?): List<ArtworkCandidate> {
+        val out = mutableListOf<ArtworkCandidate>()
+        val cleanWork = openLibraryId?.trim()?.substringAfterLast("/")?.takeIf { it.matches(Regex("^OL\\d+W$")) }
+        if (cleanWork != null) {
+            try {
+                val edReq = Request.Builder()
+                    .url("https://openlibrary.org/works/$cleanWork/editions.json?limit=18")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(edReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val entries = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("entries") as? JsonArray
+                        entries?.forEach { el ->
+                            val o = el as? JsonObject ?: return@forEach
+                            val covId = (o["covers"] as? JsonArray)?.firstOrNull()?.let { c ->
+                                (c as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                            }?.takeIf { it > 0 } ?: return@forEach
+                            val edTitle = o["title"].cleanString() ?: title
+                            val pub = (o["publishers"] as? JsonArray)?.firstOrNull()?.cleanString()
+                            out.add(
+                                ArtworkCandidate(
+                                    url = "https://covers.openlibrary.org/b/id/$covId-L.jpg",
+                                    sourceName = "Open Library",
+                                    description = listOfNotNull(edTitle, pub).joinToString(" · "),
+                                    isBanner = false
+                                )
+                            )
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            val encoded = URLEncoder.encode(title, "UTF-8")
+            val url = "https://openlibrary.org/search.json?title=$encoded&limit=8"
+            val request = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val root = json.parseToJsonElement(response.body?.string().orEmpty()) as? JsonObject
+                    val docs = root?.get("docs") as? JsonArray
+                    docs?.forEach { doc ->
+                        val docObj = doc as? JsonObject ?: return@forEach
+                        val bookTitle = docObj["title"].cleanString() ?: title
+                        val coverId = docObj["cover_i"].cleanString()
+                        if (!coverId.isNullOrBlank()) {
+                            out.add(
+                                ArtworkCandidate(
+                                    url = "https://covers.openlibrary.org/b/id/$coverId-L.jpg",
+                                    sourceName = "Open Library",
+                                    description = bookTitle,
+                                    isBanner = false
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return out.distinctBy { it.url }
+    }
+
+    private fun fetchWikimediaBookIllustrations(title: String, bookAuthor: String?): List<ArtworkCandidate> {
+        return try {
+            fun resolveSlug(): String? {
+                val directSlug = URLEncoder.encode(title.trim().replace(" ", "_"), "UTF-8").replace("+", "%20")
+                val sumReq = Request.Builder()
+                    .url("https://en.wikipedia.org/api/rest_v1/page/summary/$directSlug")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                client.newCall(sumReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val o = json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject
+                        val type = o?.get("type").cleanString()
+                        if (type != "disambiguation" && o?.get("title").cleanString() != null) {
+                            return o?.get("title").cleanString()
+                        }
+                    }
+                }
+                val searchQ = listOfNotNull(title.trim(), bookAuthor?.split(",")?.firstOrNull()?.trim(), "book")
+                    .joinToString(" ")
+                val enc = URLEncoder.encode(searchQ, "UTF-8")
+                val sReq = Request.Builder()
+                    .url("https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$enc&format=json&srlimit=3")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                client.newCall(sReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return null
+                    val sArr = ((json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("query") as? JsonObject)?.get("search") as? JsonArray
+                    return (sArr?.firstOrNull() as? JsonObject)?.get("title").cleanString()
+                }
+            }
+
+            val pageTitle = resolveSlug() ?: return emptyList()
+            val safeSlug = URLEncoder.encode(pageTitle.replace(" ", "_"), "UTF-8").replace("+", "%20")
+            val mediaReq = Request.Builder()
+                .url("https://en.wikipedia.org/api/rest_v1/page/media-list/$safeSlug")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val fileNames = client.newCall(mediaReq).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val items = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                    ?.get("items") as? JsonArray ?: return emptyList()
+                items.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    if (o["type"].cleanString() != "image") return@mapNotNull null
+                    val fName = o["title"].cleanString() ?: return@mapNotNull null
+                    val lower = fName.lowercase()
+                    if (lower.endsWith(".svg") || "commons-logo" in lower || "wiki" in lower ||
+                        "ambox" in lower || "symbol" in lower || "flag_of" in lower || "edit-clear" in lower
+                    ) return@mapNotNull null
+                    fName
+                }.take(10)
+            }
+            if (fileNames.isEmpty()) return emptyList()
+
+            val joined = URLEncoder.encode(fileNames.joinToString("|"), "UTF-8")
+            val infoReq = Request.Builder()
+                .url("https://en.wikipedia.org/w/api.php?action=query&titles=$joined&prop=imageinfo&iiprop=url|size&iiurlwidth=1200&format=json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
+            val candidates = mutableListOf<ArtworkCandidate>()
+            client.newCall(infoReq).execute().use { resp ->
+                if (!resp.isSuccessful) return emptyList()
+                val pages = ((json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                    ?.get("query") as? JsonObject)?.get("pages") as? JsonObject ?: return emptyList()
+                pages.values.forEach { el ->
+                    val pObj = el as? JsonObject ?: return@forEach
+                    val ii = (pObj["imageinfo"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@forEach
+                    val url = ii["url"].cleanString() ?: return@forEach
+                    if (url.endsWith(".svg", ignoreCase = true)) return@forEach
+                    val w = (ii["width"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull ?: 0
+                    val h = (ii["height"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull ?: 0
+                    if (w < 420 || h < 260) return@forEach
+                    val isWide = w > (h * 1.15f)
+                    val label = pObj["title"].cleanString()?.removePrefix("File:")?.substringBeforeLast(".")?.replace('_', ' ')
+                    candidates.add(
+                        ArtworkCandidate(
+                            url = url,
+                            sourceName = "Wikimedia Commons",
+                            description = label,
+                            isBanner = isWide,
+                            isScreenshot = !isWide
+                        )
+                    )
+                }
+            }
+            candidates.distinctBy { it.url }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun fetchHardcoverBookArt(
+        title: String,
+        bookAuthor: String?,
+        token: String
+    ): List<ArtworkCandidate> {
+        return try {
+            val details = com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
+                .fetchBookDetails(token, null, title, bookAuthor) ?: return emptyList()
+            val cov = details.coverUrl?.takeIf { it.isNotBlank() } ?: return emptyList()
+            listOf(
+                ArtworkCandidate(
+                    url = LosslessCoverMapper.toLosslessUrl(cov),
+                    sourceName = "Hardcover",
+                    description = details.title,
+                    isBanner = false
+                )
+            )
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     private fun fetchGoogleBooksCovers(title: String): List<ArtworkCandidate> {
         return try {
             val encoded = URLEncoder.encode(title, "UTF-8")
@@ -1846,13 +2072,13 @@ class ArtworkWaterfallRepository(
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return emptyList()
                 val bodyStr = response.body?.string() ?: return emptyList()
-                val root = json.parseToJsonElement(bodyStr).jsonObject
-                val items = root["items"]?.jsonArray ?: return emptyList()
+                val root = json.parseToJsonElement(bodyStr) as? JsonObject ?: return emptyList()
+                val items = root["items"] as? JsonArray ?: return emptyList()
                 val candidates = mutableListOf<ArtworkCandidate>()
                 for (item in items) {
-                    val volumeInfo = item.jsonObject["volumeInfo"]?.jsonObject ?: continue
+                    val volumeInfo = (item as? JsonObject)?.get("volumeInfo") as? JsonObject ?: continue
                     val bookTitle = volumeInfo["title"].cleanString() ?: title
-                    val imageLinks = volumeInfo["imageLinks"]?.jsonObject ?: continue
+                    val imageLinks = volumeInfo["imageLinks"] as? JsonObject ?: continue
                     val thumbnail = imageLinks["extraLarge"].cleanString()
                         ?: imageLinks["large"].cleanString()
                         ?: imageLinks["medium"].cleanString()
@@ -1864,39 +2090,6 @@ class ArtworkWaterfallRepository(
                             ArtworkCandidate(
                                 url = highRes,
                                 sourceName = "Google Books",
-                                description = bookTitle,
-                                isBanner = false
-                            )
-                        )
-                    }
-                }
-                candidates
-            }
-        } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    private fun fetchOpenLibraryCovers(title: String): List<ArtworkCandidate> {
-        return try {
-            val encoded = URLEncoder.encode(title, "UTF-8")
-            val url = "https://openlibrary.org/search.json?title=$encoded&limit=8"
-            val request = Request.Builder().url(url).get().build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val bodyStr = response.body?.string() ?: return emptyList()
-                val root = json.parseToJsonElement(bodyStr).jsonObject
-                val docs = root["docs"]?.jsonArray ?: return emptyList()
-                val candidates = mutableListOf<ArtworkCandidate>()
-                for (doc in docs) {
-                    val docObj = doc.jsonObject
-                    val bookTitle = docObj["title"].cleanString() ?: title
-                    val coverId = docObj["cover_i"].cleanString()
-                    if (!coverId.isNullOrBlank()) {
-                        candidates.add(
-                            ArtworkCandidate(
-                                url = "https://covers.openlibrary.org/b/id/$coverId-L.jpg",
-                                sourceName = "Open Library",
                                 description = bookTitle,
                                 isBanner = false
                             )

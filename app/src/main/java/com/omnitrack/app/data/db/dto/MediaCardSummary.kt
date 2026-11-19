@@ -36,5 +36,11 @@ data class MediaCardSummary(
     val playtimeHours: Double = 0.0,
     val platforms: String? = null,
     val steamAppId: Long? = null,
-    val gameCompletionTier: String? = null
+    val gameCompletionTier: String? = null,
+    val openLibraryId: String? = null,
+    val bookAuthor: String? = null,
+    val bookFormat: String? = null,
+    val bookTrackingMode: String? = null,
+    val bookAudioMinutes: Int? = null,
+    val bookTotalAudioMinutes: Int? = null
 )
