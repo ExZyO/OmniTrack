@@ -237,8 +237,8 @@ class VisualNovelEnrichmentSource(
 
                 val imgObj = vnObj["image"]?.jsonObject
                 val coverUrl = imgObj?.get("url").str()?.let { LosslessCoverMapper.toLosslessUrl(it) }
-                val coverSexual = imgObj?.get("sexual"]?.jsonPrimitive?.floatOrNull ?: 0f
-                val coverViolence = imgObj?.get("violence"]?.jsonPrimitive?.floatOrNull ?: 0f
+                val coverSexual = imgObj?.get("sexual")?.jsonPrimitive?.floatOrNull ?: 0f
+                val coverViolence = imgObj?.get("violence")?.jsonPrimitive?.floatOrNull ?: 0f
 
                 val screenshots = vnObj["screenshots"]?.jsonArray?.mapNotNull { el ->
                     val s = el.jsonObject
@@ -379,8 +379,8 @@ class VisualNovelEnrichmentSource(
                         name = cName,
                         nativeName = c["original"].str(),
                         imageUrl = cUrl,
-                        sexual = cImg?.get("sexual"]?.jsonPrimitive?.floatOrNull ?: 0f,
-                        violence = cImg?.get("violence"]?.jsonPrimitive?.floatOrNull ?: 0f,
+                        sexual = cImg?.get("sexual")?.jsonPrimitive?.floatOrNull ?: 0f,
+                        violence = cImg?.get("violence")?.jsonPrimitive?.floatOrNull ?: 0f,
                         role = rawRole,
                         description = c["description"].str(),
                         sex = (c["sex"] as? JsonArray)?.firstOrNull()?.str() ?: c["sex"].str(),
