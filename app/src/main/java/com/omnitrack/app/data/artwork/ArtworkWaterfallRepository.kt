@@ -89,6 +89,10 @@ class ArtworkWaterfallRepository(
         return str.takeIf { it.isNotBlank() && !it.equals("null", ignoreCase = true) && it != "N/A" }
     }
 
+    private fun JsonElement?.asObj(): JsonObject? = this as? JsonObject
+
+    private fun JsonElement?.asArr(): JsonArray? = this as? JsonArray
+
     suspend fun searchArtworkCandidates(
         title: String,
         mediaType: MediaType,
@@ -1295,11 +1299,12 @@ class ArtworkWaterfallRepository(
             val matchedApps: List<Pair<String, String>> = client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@coroutineScope emptyList()
                 val responseStr = response.body?.string() ?: return@coroutineScope emptyList()
-                val parsed = json.parseToJsonElement(responseStr).jsonObject
-                val items = parsed["items"]?.jsonArray ?: return@coroutineScope emptyList()
+                val parsed = json.parseToJsonElement(responseStr).asObj() ?: return@coroutineScope emptyList()
+                val items = parsed["items"].asArr() ?: return@coroutineScope emptyList()
                 items.take(3).mapNotNull { elem ->
-                    val id = elem.jsonObject["id"].cleanString() ?: return@mapNotNull null
-                    val name = elem.jsonObject["name"].cleanString() ?: title
+                    val o = elem.asObj() ?: return@mapNotNull null
+                    val id = o["id"].cleanString() ?: return@mapNotNull null
+                    val name = o["name"].cleanString() ?: title
                     id to name
                 }
             }
@@ -1321,8 +1326,8 @@ class ArtworkWaterfallRepository(
                             client.newCall(dReq).execute().use { dResp ->
                                 if (dResp.isSuccessful) {
                                     val dBody = dResp.body?.string().orEmpty()
-                                    val dParsed = json.parseToJsonElement(dBody).jsonObject
-                                    val appData = dParsed[id]?.jsonObject?.get("data")?.jsonObject
+                                    val dParsed = json.parseToJsonElement(dBody).asObj()
+                                    val appData = dParsed?.get(id).asObj()?.get("data").asObj()
                                     if (appData != null) {
                                         val bgRaw = appData["background_raw"].cleanString() ?: appData["background"].cleanString()
                                         if (!bgRaw.isNullOrBlank()) {
@@ -1332,9 +1337,9 @@ class ArtworkWaterfallRepository(
                                         if (!headerImg.isNullOrBlank()) {
                                             batch.add(ArtworkCandidate(url = headerImg, sourceName = "Steam", description = "$name (Store Header)", isBanner = true, isScreenshot = false))
                                         }
-                                        val screenshots = appData["screenshots"]?.jsonArray
+                                        val screenshots = appData["screenshots"].asArr()
                                         screenshots?.take(4)?.forEachIndexed { idx, s ->
-                                            val sUrl = s.jsonObject["path_full"].cleanString()
+                                            val sUrl = s.asObj()?.get("path_full").cleanString()
                                             if (!sUrl.isNullOrBlank()) {
                                                 batch.add(ArtworkCandidate(url = sUrl, sourceName = "Steam", description = "$name (Screenshot ${idx + 1})", isBanner = true, isScreenshot = true))
                                             }
@@ -1373,9 +1378,9 @@ class ArtworkWaterfallRepository(
                     .build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
-                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
-                            sgdbGameId = obj["data"]?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").asObj()
+                        if (obj?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"].asObj()?.get("id")?.jsonPrimitive?.longOrNull
                         }
                     }
                 }
@@ -1389,9 +1394,9 @@ class ArtworkWaterfallRepository(
                     .build()
                 client.newCall(req).execute().use { resp ->
                     if (resp.isSuccessful) {
-                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
-                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
-                            sgdbGameId = obj["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").asObj()
+                        if (obj?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"].asArr()?.firstOrNull().asObj()?.get("id")?.jsonPrimitive?.longOrNull
                         }
                     }
                 }
@@ -1407,10 +1412,10 @@ class ArtworkWaterfallRepository(
                         .build()
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) return@withTimeoutOrNull emptyList()
-                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").asObj() ?: return@withTimeoutOrNull emptyList()
                         if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return@withTimeoutOrNull emptyList()
-                        val items = obj["data"]?.jsonArray ?: return@withTimeoutOrNull emptyList()
-                        val sorted = items.map { it.jsonObject }.sortedBy { it["humor"]?.jsonPrimitive?.booleanOrNull == true }
+                        val items = obj["data"].asArr() ?: return@withTimeoutOrNull emptyList()
+                        val sorted = items.mapNotNull { it.asObj() }.sortedBy { it["humor"]?.jsonPrimitive?.booleanOrNull == true }
                         sorted.take(10).mapNotNull { o ->
                             val u = o["url"].cleanString() ?: return@mapNotNull null
                             val isNsfw = o["nsfw"]?.jsonPrimitive?.booleanOrNull == true
@@ -1436,11 +1441,11 @@ class ArtworkWaterfallRepository(
                         .build()
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) return@withTimeoutOrNull emptyList()
-                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").asObj() ?: return@withTimeoutOrNull emptyList()
                         if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return@withTimeoutOrNull emptyList()
-                        val items = obj["data"]?.jsonArray ?: return@withTimeoutOrNull emptyList()
+                        val items = obj["data"].asArr() ?: return@withTimeoutOrNull emptyList()
                         items.take(8).mapNotNull { el ->
-                            val o = el.jsonObject
+                            val o = el.asObj() ?: return@mapNotNull null
                             val u = o["url"].cleanString() ?: return@mapNotNull null
                             val isNsfw = o["nsfw"]?.jsonPrimitive?.booleanOrNull == true
                             ArtworkCandidate(
@@ -1491,8 +1496,8 @@ class ArtworkWaterfallRepository(
             val results = client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@coroutineScope null
                 val responseStr = response.body?.string() ?: return@coroutineScope null
-                val parsed = json.parseToJsonElement(responseStr).jsonObject
-                parsed["results"]?.jsonArray ?: return@coroutineScope null
+                val parsed = json.parseToJsonElement(responseStr).asObj() ?: return@coroutineScope null
+                parsed["results"].asArr() ?: return@coroutineScope null
             }
 
             val immediateCandidates = mutableListOf<ArtworkCandidate>()
@@ -1502,28 +1507,28 @@ class ArtworkWaterfallRepository(
             var resolvedIgdbSlug: String? = null
 
             results.forEachIndexed { resIdx, node ->
-                val obj = node.jsonObject
+                val obj = node.asObj() ?: return@forEachIndexed
                 val vnId = obj["id"].cleanString()
                 val vnTitle = obj["title"].cleanString() ?: title
                 val olang = obj["olang"].cleanString()
                 if (resIdx == 0) {
                     resolvedVnId = vnId
-                    val titlesArr = obj["titles"]?.jsonArray
-                    resolvedEnTitle = titlesArr?.firstOrNull {
-                        val o = it.jsonObject
+                    val titlesArr = obj["titles"].asArr()
+                    resolvedEnTitle = titlesArr?.firstOrNull { el ->
+                        val o = el.asObj() ?: return@firstOrNull false
                         val isOff = o["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
                         val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
                         o["lang"].cleanString() == "en" && (isOff || isMain)
-                    }?.jsonObject?.get("title").cleanString()
-                        ?: titlesArr?.firstOrNull { it.jsonObject["lang"].cleanString() == "en" }?.jsonObject?.get("title").cleanString()
+                    }.asObj()?.get("title").cleanString()
+                        ?: titlesArr?.firstOrNull { it.asObj()?.get("lang").cleanString() == "en" }.asObj()?.get("title").cleanString()
                     resolvedNativeTitle = obj["alttitle"].cleanString()
-                        ?: titlesArr?.firstOrNull { it.jsonObject["lang"].cleanString() == olang }?.jsonObject?.get("title").cleanString()
-                    resolvedIgdbSlug = obj["extlinks"]?.jsonArray?.firstOrNull {
-                        it.jsonObject["name"].cleanString() == "igdb_game"
-                    }?.jsonObject?.get("id").cleanString()
+                        ?: titlesArr?.firstOrNull { it.asObj()?.get("lang").cleanString() == olang }.asObj()?.get("title").cleanString()
+                    resolvedIgdbSlug = obj["extlinks"].asArr()?.firstOrNull {
+                        it.asObj()?.get("name").cleanString() == "igdb_game"
+                    }.asObj()?.get("id").cleanString()
                 }
 
-                val imageObj = obj["image"] as? JsonObject
+                val imageObj = obj["image"].asObj()
                 val coverUrl = imageObj?.get("url").cleanString()
                 val coverSex = imageObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
                 val coverViol = imageObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
@@ -1539,9 +1544,9 @@ class ArtworkWaterfallRepository(
                     )
                 }
 
-                val screenshots = obj["screenshots"] as? JsonArray
+                val screenshots = obj["screenshots"].asArr()
                 screenshots?.forEachIndexed { idx, shot ->
-                    val shotObj = shot as? JsonObject
+                    val shotObj = shot.asObj()
                     val shotUrl = shotObj?.get("url").cleanString()
                     val sSex = shotObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
                     val sViol = shotObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
@@ -1587,19 +1592,19 @@ class ArtworkWaterfallRepository(
                     client.newCall(relReq).execute().use { relResp ->
                         val relBody = relResp.body?.string()
                         if (!relResp.isSuccessful || relBody.isNullOrBlank()) return@withTimeoutOrNull null
-                        val relArr = json.parseToJsonElement(relBody).jsonObject["results"]?.jsonArray
+                        val relArr = json.parseToJsonElement(relBody).asObj()?.get("results").asArr()
                         relArr?.firstOrNull { rEl ->
-                            val rObj = rEl.jsonObject
+                            val rObj = rEl.asObj() ?: return@firstOrNull false
                             val rDate = rObj["released"].cleanString()
                             val isOfficial = rObj["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
                             val isPatch = rObj["patch"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-                            val hasSteam = rObj["extlinks"]?.jsonArray?.any { it.jsonObject["name"].cleanString() == "steam" } == true
+                            val hasSteam = rObj["extlinks"].asArr()?.any { it.asObj()?.get("name").cleanString() == "steam" } == true
                             hasSteam && isOfficial && !isPatch && !rDate.isNullOrBlank() && !rDate.equals("TBA", true) && rDate <= "2099-01-01" && !rObj["title"].cleanString().orEmpty().contains("reboot", true)
-                        }?.jsonObject?.get("extlinks")?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
+                        }.asObj()?.get("extlinks").asArr()?.firstOrNull { it.asObj()?.get("name").cleanString() == "steam" }.asObj()?.get("id").cleanString()?.toLongOrNull()
                             ?: relArr?.firstNotNullOfOrNull { rEl ->
-                                val rObj = rEl.jsonObject
+                                val rObj = rEl.asObj() ?: return@firstNotNullOfOrNull null
                                 if (rObj["title"].cleanString().orEmpty().contains("reboot", true)) null
-                                else rObj["extlinks"]?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
+                                else rObj["extlinks"].asArr()?.firstOrNull { it.asObj()?.get("name").cleanString() == "steam" }.asObj()?.get("id").cleanString()?.toLongOrNull()
                             }
                     }
                 }
@@ -1620,12 +1625,12 @@ class ArtworkWaterfallRepository(
                     client.newCall(imgReq).execute().use { resp ->
                         if (resp.isSuccessful) {
                             val body = resp.body?.string().orEmpty()
-                            val arr = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray
+                            val arr = json.parseToJsonElement(body).asObj()?.get("results").asArr()
                             arr?.forEach { relEl ->
-                                val rObj = relEl.jsonObject
+                                val rObj = relEl.asObj() ?: return@forEach
                                 val relTitle = rObj["title"].cleanString() ?: "Release Edition"
-                                rObj["images"]?.jsonArray?.forEach { imgEl ->
-                                    val io = imgEl.jsonObject
+                                rObj["images"].asArr()?.forEach { imgEl ->
+                                    val io = imgEl.asObj() ?: return@forEach
                                     val iType = io["type"].cleanString()?.lowercase()
                                     if (iType == "pkgfront" || iType == "dig") {
                                         val u = io["url"].cleanString() ?: return@forEach
@@ -1678,8 +1683,8 @@ class ArtworkWaterfallRepository(
                         val dReq = Request.Builder().url("https://store.steampowered.com/api/appdetails?appids=$steamAppId").get().build()
                         client.newCall(dReq).execute().use { dResp ->
                             if (dResp.isSuccessful) {
-                                val dParsed = json.parseToJsonElement(dResp.body?.string().orEmpty()).jsonObject
-                                val appData = dParsed[steamAppId.toString()]?.jsonObject?.get("data")?.jsonObject
+                                val dParsed = json.parseToJsonElement(dResp.body?.string().orEmpty()).asObj()
+                                val appData = dParsed?.get(steamAppId.toString()).asObj()?.get("data").asObj()
                                 val bgRaw = appData?.get("background_raw").cleanString() ?: appData?.get("background").cleanString()
                                 if (!bgRaw.isNullOrBlank()) {
                                     releaseBatch.add(

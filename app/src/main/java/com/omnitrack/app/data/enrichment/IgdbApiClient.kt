@@ -7,12 +7,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -103,9 +103,9 @@ class IgdbApiClient(
                     return null
                 }
                 val body = resp.body?.string() ?: return null
-                val obj = json.parseToJsonElement(body).jsonObject
-                val token = obj["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
-                val expiresInSec = obj["expires_in"]?.jsonPrimitive?.longOrNull ?: 3600L
+                val obj = json.parseToJsonElement(body) as? JsonObject ?: return null
+                val token = (obj["access_token"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
+                val expiresInSec = (obj["expires_in"] as? JsonPrimitive)?.longOrNull ?: 3600L
                 val safeExpiryMs = nowMs + ((expiresInSec - 120L).coerceAtLeast(60L) * 1000L)
                 tokenCache[cacheKey] = token to safeExpiryMs
                 token
@@ -117,7 +117,12 @@ class IgdbApiClient(
         }
     }
 
-    private fun queryIgdbGames(clientId: String, token: String, queryBody: String): IgdbGameArtworkResult? {
+    private fun queryIgdbGames(
+        clientId: String,
+        token: String,
+        queryBody: String,
+        preferredTitle: String? = null
+    ): IgdbGameArtworkResult? {
         val req = Request.Builder()
             .url("https://api.igdb.com/v4/games")
             .header("Client-ID", clientId.trim())
@@ -129,36 +134,50 @@ class IgdbApiClient(
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null
             val body = resp.body?.string() ?: return null
-            val arr = json.parseToJsonElement(body).jsonArray
+            val arr = json.parseToJsonElement(body) as? JsonArray ?: return null
             if (arr.isEmpty()) return null
 
-            val chosen = arr.firstOrNull { el ->
-                val o = el.jsonObject
-                val hasArt = o["artworks"]?.takeIf { it !is JsonNull }?.jsonArray?.isNotEmpty() == true
-                val hasCover = o["cover"] != null && o["cover"] !is JsonNull
-                hasArt || hasCover
-            }?.jsonObject ?: arr.first().jsonObject
+            val objects = arr.mapNotNull { it as? JsonObject }
+            if (objects.isEmpty()) return null
 
-            val igdbId = chosen["id"]?.jsonPrimitive?.longOrNull
-            val gameName = chosen["name"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull
-            val coverId = chosen["cover"]?.takeIf { it !is JsonNull }?.jsonObject
-                ?.get("image_id")?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull
+            fun JsonObject.hasVisuals(): Boolean {
+                val hasArt = (this["artworks"] as? JsonArray)?.isNotEmpty() == true
+                val hasCover = this["cover"] is JsonObject
+                return hasArt || hasCover
+            }
+
+            val targetTitle = preferredTitle?.trim()?.takeIf { it.isNotBlank() }
+            val chosen = objects.firstOrNull { o ->
+                val name = (o["name"] as? JsonPrimitive)?.contentOrNull?.trim()
+                targetTitle != null && name.equals(targetTitle, ignoreCase = true) && o.hasVisuals()
+            } ?: objects.firstOrNull { o ->
+                val name = (o["name"] as? JsonPrimitive)?.contentOrNull?.trim()
+                targetTitle != null && name.equals(targetTitle, ignoreCase = true)
+            } ?: objects.firstOrNull { it.hasVisuals() }
+                ?: objects.first()
+
+            val igdbId = (chosen["id"] as? JsonPrimitive)?.longOrNull
+            val gameName = (chosen["name"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull
+            val coverId = ((chosen["cover"] as? JsonObject)?.get("image_id") as? JsonPrimitive)
+                ?.takeIf { it !is JsonNull }?.contentOrNull
             val coverUrl = coverId?.takeIf { it.isNotBlank() }?.let {
                 "https://images.igdb.com/igdb/image/upload/t_cover_big_2x/${it}.jpg"
             }
 
-            val artworks = chosen["artworks"]?.takeIf { it !is JsonNull }?.jsonArray?.mapNotNull { el ->
-                val imgId = el.jsonObject["image_id"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull
+            val artworks = (chosen["artworks"] as? JsonArray)?.mapNotNull { el ->
+                val imgId = ((el as? JsonObject)?.get("image_id") as? JsonPrimitive)
+                    ?.takeIf { it !is JsonNull }?.contentOrNull
                 imgId?.takeIf { it.isNotBlank() }?.let { "https://images.igdb.com/igdb/image/upload/t_1080p/${it}.jpg" }
             }.orEmpty()
 
-            val screenshots = chosen["screenshots"]?.takeIf { it !is JsonNull }?.jsonArray?.mapNotNull { el ->
-                val imgId = el.jsonObject["image_id"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull
+            val screenshots = (chosen["screenshots"] as? JsonArray)?.mapNotNull { el ->
+                val imgId = ((el as? JsonObject)?.get("image_id") as? JsonPrimitive)
+                    ?.takeIf { it !is JsonNull }?.contentOrNull
                 imgId?.takeIf { it.isNotBlank() }?.let { "https://images.igdb.com/igdb/image/upload/t_1080p/${it}.jpg" }
             }.orEmpty()
 
-            val rawRating = chosen["aggregated_rating"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.floatOrNull
-                ?: chosen["rating"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.floatOrNull
+            val rawRating = (chosen["aggregated_rating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
+                ?: (chosen["rating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
             val normalizedScore = rawRating?.let { (it / 10f).coerceIn(0f, 10f) }
 
             return IgdbGameArtworkResult(
@@ -184,13 +203,13 @@ class IgdbApiClient(
             val cleanSlug = slug?.replace("\"", "")?.trim()
             if (!cleanSlug.isNullOrBlank()) {
                 val slugQuery = "fields id,name,slug,rating,aggregated_rating,cover.image_id,artworks.image_id,screenshots.image_id; where slug = \"$cleanSlug\"; limit 1;"
-                val hit = queryIgdbGames(clientId, token, slugQuery)
+                val hit = queryIgdbGames(clientId, token, slugQuery, preferredTitle = title)
                 if (hit != null) return@withContext hit
             }
             val cleanTitle = title.replace("\"", "").trim()
             if (cleanTitle.isBlank()) return@withContext null
-            val searchQuery = "fields id,name,slug,rating,aggregated_rating,cover.image_id,artworks.image_id,screenshots.image_id; search \"$cleanTitle\"; limit 3;"
-            queryIgdbGames(clientId, token, searchQuery)
+            val searchQuery = "fields id,name,slug,rating,aggregated_rating,cover.image_id,artworks.image_id,screenshots.image_id; search \"$cleanTitle\"; limit 5;"
+            queryIgdbGames(clientId, token, searchQuery, preferredTitle = cleanTitle)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("IgdbClient", "fetchGameArtwork error for $title: ${e.message}")

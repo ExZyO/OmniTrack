@@ -30,13 +30,12 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
@@ -95,6 +94,10 @@ class VisualNovelEnrichmentSource(
         return if (s.isNullOrEmpty() || s.equals("null", ignoreCase = true)) null else s
     }
 
+    private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
+
+    private fun JsonElement?.arr(): JsonArray? = this as? JsonArray
+
     private fun String.vndbNumericId(): Long =
         dropWhile { !it.isDigit() }.toLongOrNull() ?: hashCode().toLong()
 
@@ -115,8 +118,8 @@ class VisualNovelEnrichmentSource(
 
     private fun formatBirthday(arr: JsonArray?): String? {
         if (arr == null || arr.size < 2) return null
-        val month = arr[0].jsonPrimitive.intOrNull ?: return null
-        val day = arr[1].jsonPrimitive.intOrNull ?: return null
+        val month = (arr[0] as? JsonPrimitive)?.intOrNull ?: return null
+        val day = (arr[1] as? JsonPrimitive)?.intOrNull ?: return null
         if (month !in 1..12 || day !in 1..31) return null
         val names = arrayOf("", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
         return "${names[month]} $day"
@@ -133,7 +136,7 @@ class VisualNovelEnrichmentSource(
                 client.newCall(request).execute().use { resp ->
                     if (!resp.isSuccessful) return@withVndbPacing null
                     val body = resp.body?.string() ?: return@withVndbPacing null
-                    json.parseToJsonElement(body).jsonObject
+                    json.parseToJsonElement(body).obj()
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -146,14 +149,14 @@ class VisualNovelEnrichmentSource(
         val clean = title.replace("\"", "").trim()
         if (clean.isBlank()) return null
         val payload = buildJsonObject {
-            put("filters", json.parseToJsonElement("[\"search\", \"=\", ${kotlinx.serialization.json.JsonPrimitive(clean)}]"))
+            put("filters", json.parseToJsonElement("[\"search\", \"=\", ${JsonPrimitive(clean)}]"))
             put("fields", "id,title")
             put("sort", "votecount")
             put("reverse", true)
             put("results", 1)
         }.toString()
         val root = postVndb("vn", payload) ?: return null
-        return root["results"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id").str()
+        return root["results"].arr()?.firstOrNull().obj()?.get("id").str()
     }
 
     suspend fun fetchFullVisualNovelData(
@@ -210,28 +213,29 @@ class VisualNovelEnrichmentSource(
                 }
                 val (relRoot, steamRelRoot) = relPair
 
-                val vnObj = vnRoot?.get("results")?.jsonArray?.firstOrNull()?.jsonObject ?: return@withContext null
+                val vnObj = vnRoot?.get("results").arr()?.firstOrNull().obj() ?: return@withContext null
 
                 val romajiTitle = vnObj["title"].str() ?: item.title
                 val altTitle = vnObj["alttitle"].str()
-                val titlesArray = vnObj["titles"]?.jsonArray
-                val englishFromTitles = titlesArray?.firstOrNull {
-                    val o = it.jsonObject
+                val titlesArray = vnObj["titles"].arr()
+                val englishFromTitles = titlesArray?.firstOrNull { el ->
+                    val o = el.obj() ?: return@firstOrNull false
                     o["lang"].str() == "en" && (o["official"]?.jsonPrimitive?.booleanOrNull == true || o["main"]?.jsonPrimitive?.booleanOrNull == true)
-                }?.jsonObject?.get("title").str()
-                    ?: titlesArray?.firstOrNull { it.jsonObject["lang"].str() == "en" }?.jsonObject?.get("title").str()
+                }.obj()?.get("title").str()
+                    ?: titlesArray?.firstOrNull { it.obj()?.get("lang").str() == "en" }.obj()?.get("title").str()
                 val englishTitle = englishFromTitles ?: romajiTitle
-                val nativeFromTitles = titlesArray?.firstOrNull {
-                    val o = it.jsonObject
+                val nativeFromTitles = titlesArray?.firstOrNull { el ->
+                    val o = el.obj() ?: return@firstOrNull false
                     o["main"]?.jsonPrimitive?.booleanOrNull == true || o["lang"].str() == vnObj["olang"].str()
-                }?.jsonObject?.get("title").str()
+                }.obj()?.get("title").str()
                 val nativeTitle = altTitle ?: nativeFromTitles
 
                 val synonyms = buildList {
-                    vnObj["aliases"]?.jsonArray?.forEach { it.str()?.let(::add) }
+                    vnObj["aliases"].arr()?.forEach { it.str()?.let(::add) }
                     titlesArray?.forEach { el ->
-                        el.jsonObject["title"].str()?.let(::add)
-                        el.jsonObject["latin"].str()?.let(::add)
+                        val o = el.obj() ?: return@forEach
+                        o["title"].str()?.let(::add)
+                        o["latin"].str()?.let(::add)
                     }
                 }.distinct().filter {
                     !it.equals(englishTitle, ignoreCase = true) && !it.equals(romajiTitle, ignoreCase = true)
@@ -252,15 +256,15 @@ class VisualNovelEnrichmentSource(
                 val vndbVotes = vnObj["votecount"]?.jsonPrimitive?.intOrNull
                 val rawSynopsis = vnObj["description"].str()
 
-                val imgObj = vnObj["image"]?.jsonObject
+                val imgObj = vnObj["image"].obj()
                 val coverUrl = imgObj?.get("url").str()?.let { LosslessCoverMapper.toLosslessUrl(it) }
                 val coverSexual = imgObj?.get("sexual")?.jsonPrimitive?.floatOrNull ?: 0f
                 val coverViolence = imgObj?.get("violence")?.jsonPrimitive?.floatOrNull ?: 0f
 
-                val screenshots = vnObj["screenshots"]?.jsonArray?.mapNotNull { el ->
-                    val s = el.jsonObject
+                val screenshots = vnObj["screenshots"].arr()?.mapNotNull { el ->
+                    val s = el.obj() ?: return@mapNotNull null
                     val url = s["url"].str() ?: return@mapNotNull null
-                    val dims = s["dims"]?.jsonArray
+                    val dims = s["dims"].arr()
                     VnScreenshotItem(
                         url = LosslessCoverMapper.toLosslessUrl(url),
                         thumbnailUrl = s["thumbnail"].str(),
@@ -268,25 +272,25 @@ class VisualNovelEnrichmentSource(
                         height = dims?.getOrNull(1)?.jsonPrimitive?.intOrNull,
                         sexual = s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f,
                         violence = s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f,
-                        releaseTitle = s["release"]?.jsonObject?.get("title").str()
+                        releaseTitle = s["release"].obj()?.get("title").str()
                     )
                 }.orEmpty()
 
-                val combinedRelJson = relRoot?.get("results")?.jsonArray.orEmpty() +
-                    steamRelRoot?.get("results")?.jsonArray.orEmpty()
+                val combinedRelJson = relRoot?.get("results").arr().orEmpty() +
+                    steamRelRoot?.get("results").arr().orEmpty()
                 val releases = combinedRelJson.mapNotNull { el ->
-                    val r = el.jsonObject
+                    val r = el.obj() ?: return@mapNotNull null
                     val rId = r["id"].str() ?: return@mapNotNull null
                     val rTitle = r["title"].str() ?: return@mapNotNull null
-                    val langs = r["languages"]?.jsonArray?.mapNotNull { le ->
-                        le.jsonObject["lang"].str()
+                    val langs = r["languages"].arr()?.mapNotNull { le ->
+                        le.obj()?.get("lang").str()
                     }.orEmpty().distinct()
-                    val plats = r["platforms"]?.jsonArray?.mapNotNull { it.str() }.orEmpty().distinct()
-                    val prods = r["producers"]?.jsonArray?.mapNotNull { it.jsonObject["name"].str() }.orEmpty().distinct()
-                    val relExtLinks = r["extlinks"]?.jsonArray
-                    val steamExtId = relExtLinks?.firstOrNull { it.jsonObject["name"].str() == "steam" }
-                        ?.jsonObject?.get("id").str()?.toLongOrNull()
-                    val firstUrl = relExtLinks?.firstOrNull()?.jsonObject?.get("url").str()
+                    val plats = r["platforms"].arr()?.mapNotNull { it.str() }.orEmpty().distinct()
+                    val prods = r["producers"].arr()?.mapNotNull { it.obj()?.get("name").str() }.orEmpty().distinct()
+                    val relExtLinks = r["extlinks"].arr()
+                    val steamExtId = relExtLinks?.firstOrNull { it.obj()?.get("name").str() == "steam" }
+                        .obj()?.get("id").str()?.toLongOrNull()
+                    val firstUrl = relExtLinks?.firstOrNull().obj()?.get("url").str()
                     VnReleaseItem(
                         id = rId,
                         title = rTitle,
@@ -312,15 +316,15 @@ class VisualNovelEnrichmentSource(
                     ?: releases.mapNotNull { it.minAge }.firstOrNull { it >= 0 }
                 val bestEngine = releases.firstNotNullOfOrNull { it.engine?.takeIf(String::isNotBlank) }
                 val allPlatforms = (
-                    vnObj["platforms"]?.jsonArray?.mapNotNull { formatPlatformCode(it.str()) }.orEmpty() +
+                    vnObj["platforms"].arr()?.mapNotNull { formatPlatformCode(it.str()) }.orEmpty() +
                         releases.flatMap { r -> r.platforms.mapNotNull(::formatPlatformCode) }
                     ).distinct().take(6).joinToString(", ").ifBlank { null }
 
                 val contentRating = bestMinAge?.let { age -> if (age == 0) "All Ages" else "${age}+" }
 
                 // Developers -> Companies
-                val companies = vnObj["developers"]?.jsonArray?.mapNotNull { el ->
-                    val d = el.jsonObject
+                val companies = vnObj["developers"].arr()?.mapNotNull { el ->
+                    val d = el.obj() ?: return@mapNotNull null
                     val dId = d["id"].str() ?: return@mapNotNull null
                     val dName = d["name"].str() ?: return@mapNotNull null
                     NetworkProductionCompany(
@@ -334,8 +338,8 @@ class VisualNovelEnrichmentSource(
 
                 // Staff
                 val seenStaff = HashSet<String>()
-                val staff = vnObj["staff"]?.jsonArray?.mapNotNull { el ->
-                    val s = el.jsonObject
+                val staff = vnObj["staff"].arr()?.mapNotNull { el ->
+                    val s = el.obj() ?: return@mapNotNull null
                     val sId = s["id"].str() ?: return@mapNotNull null
                     if (!seenStaff.add(sId)) return@mapNotNull null
                     val sName = s["name"].str() ?: return@mapNotNull null
@@ -352,10 +356,10 @@ class VisualNovelEnrichmentSource(
 
                 // Voice Actors per character from VN va[]
                 val vaMap = HashMap<String, Pair<String, Long?>>()
-                vnObj["va"]?.jsonArray?.forEach { el ->
-                    val vo = el.jsonObject
-                    val charId = vo["character"]?.jsonObject?.get("id").str() ?: return@forEach
-                    val st = vo["staff"]?.jsonObject ?: return@forEach
+                vnObj["va"].arr()?.forEach { el ->
+                    val vo = el.obj() ?: return@forEach
+                    val charId = vo["character"].obj()?.get("id").str() ?: return@forEach
+                    val st = vo["staff"].obj() ?: return@forEach
                     val stName = st["name"].str() ?: return@forEach
                     val stId = st["id"].str()?.vndbNumericId()
                     if (!vaMap.containsKey(charId)) {
@@ -365,15 +369,15 @@ class VisualNovelEnrichmentSource(
 
                 // Characters & Deep Profiles
                 val charProfiles = LinkedHashMap<String, VnCharacterProfile>()
-                val characterItems = charRoot?.get("results")?.jsonArray?.mapNotNull { el ->
-                    val c = el.jsonObject
+                val characterItems = charRoot?.get("results").arr()?.mapNotNull { el ->
+                    val c = el.obj() ?: return@mapNotNull null
                     val cId = c["id"].str() ?: return@mapNotNull null
                     val cName = c["name"].str() ?: return@mapNotNull null
-                    val cImg = c["image"]?.jsonObject
+                    val cImg = c["image"].obj()
                     val cUrl = cImg?.get("url").str()?.let { LosslessCoverMapper.toLosslessUrl(it) }
-                    val vnRoleEntry = c["vns"]?.jsonArray?.firstOrNull {
-                        it.jsonObject["id"].str() == vndbId
-                    }?.jsonObject ?: c["vns"]?.jsonArray?.firstOrNull()?.jsonObject
+                    val vnRoleEntry = c["vns"].arr()?.firstOrNull {
+                        it.obj()?.get("id").str() == vndbId
+                    }.obj() ?: c["vns"].arr()?.firstOrNull().obj()
                     val rawRole = vnRoleEntry?.get("role").str() ?: "main"
                     val charSpoiler = vnRoleEntry?.get("spoiler")?.jsonPrimitive?.intOrNull ?: 0
                     val mappedRole = when (rawRole) {
@@ -382,8 +386,8 @@ class VisualNovelEnrichmentSource(
                         else -> "SUPPORT"
                     }
                     val vaInfo = vaMap[cId]
-                    val traits = c["traits"]?.jsonArray?.mapNotNull { te ->
-                        val t = te.jsonObject
+                    val traits = c["traits"].arr()?.mapNotNull { te ->
+                        val t = te.obj() ?: return@mapNotNull null
                         val tId = t["id"].str() ?: return@mapNotNull null
                         val tName = t["name"].str() ?: return@mapNotNull null
                         VnTraitItem(
@@ -404,9 +408,9 @@ class VisualNovelEnrichmentSource(
                         role = rawRole,
                         spoilerLevel = charSpoiler,
                         description = c["description"].str(),
-                        sex = (c["sex"] as? JsonArray)?.firstOrNull()?.str() ?: c["sex"].str(),
+                        sex = c["sex"].arr()?.firstOrNull()?.str() ?: c["sex"].str(),
                         age = c["age"]?.jsonPrimitive?.intOrNull,
-                        birthday = formatBirthday(c["birthday"] as? JsonArray),
+                        birthday = formatBirthday(c["birthday"].arr()),
                         bloodType = c["blood_type"].str()?.uppercase(),
                         heightCm = c["height"]?.jsonPrimitive?.intOrNull,
                         weightKg = c["weight"]?.jsonPrimitive?.intOrNull,
@@ -435,8 +439,8 @@ class VisualNovelEnrichmentSource(
                 }
 
                 // VNDB Relations
-                val vndbRelations = vnObj["relations"]?.jsonArray?.mapNotNull { el ->
-                    val r = el.jsonObject
+                val vndbRelations = vnObj["relations"].arr()?.mapNotNull { el ->
+                    val r = el.obj() ?: return@mapNotNull null
                     val rId = r["id"].str() ?: return@mapNotNull null
                     val rTitle = r["title"].str() ?: return@mapNotNull null
                     val rawRel = r["relation"].str() ?: "other"
@@ -455,7 +459,7 @@ class VisualNovelEnrichmentSource(
                         title = rTitle,
                         relationType = mappedRel,
                         format = "VN",
-                        coverUrl = r["image"]?.jsonObject?.get("url").str()?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        coverUrl = r["image"].obj()?.get("url").str()?.let { LosslessCoverMapper.toLosslessUrl(it) },
                         year = r["released"].str()?.take(4)?.toIntOrNull(),
                         mediaType = MediaType.VISUAL_NOVEL,
                         vndbId = rId
@@ -463,8 +467,8 @@ class VisualNovelEnrichmentSource(
                 }.orEmpty()
 
                 // Categorized VNDB Tags
-                val tags = vnObj["tags"]?.jsonArray?.mapNotNull { el ->
-                    val t = el.jsonObject
+                val tags = vnObj["tags"].arr()?.mapNotNull { el ->
+                    val t = el.obj() ?: return@mapNotNull null
                     if (t["lie"]?.jsonPrimitive?.booleanOrNull == true) return@mapNotNull null
                     val tId = t["id"].str() ?: return@mapNotNull null
                     val tName = t["name"].str() ?: return@mapNotNull null
@@ -484,8 +488,8 @@ class VisualNovelEnrichmentSource(
                 // External Links (VNDB + VN extlinks + HLTB + official store links)
                 val extLinks = buildList {
                     add(ExternalLinkItem(id = 0L, url = "https://vndb.org/$vndbId", site = "VNDB", type = "INFO"))
-                    vnObj["extlinks"]?.jsonArray?.forEachIndexed { idx, el ->
-                        val xo = el.jsonObject
+                    vnObj["extlinks"].arr()?.forEachIndexed { idx, el ->
+                        val xo = el.obj() ?: return@forEachIndexed
                         val url = xo["url"].str() ?: return@forEachIndexed
                         val label = xo["label"].str() ?: xo["name"].str() ?: return@forEachIndexed
                         add(ExternalLinkItem(id = (idx + 1).toLong(), url = url, site = label, type = "INFO"))
@@ -494,18 +498,18 @@ class VisualNovelEnrichmentSource(
 
                 // Parallel Secondary Enrichment: Steam Bridge + Bangumi + AniList Adaptations + IGDB + SteamGridDB + r/visualnovels
                 val selectedSteamAppId = selectBestReleasedSteamAppId(releases)
-                val igdbSlug = vnObj["extlinks"]?.jsonArray?.firstOrNull {
-                    it.jsonObject["name"].str() == "igdb_game"
-                }?.jsonObject?.get("id").str()
+                val igdbSlug = vnObj["extlinks"].arr()?.firstOrNull {
+                    it.obj()?.get("name").str() == "igdb_game"
+                }.obj()?.get("id").str()
 
                 coroutineScope {
                     val steamDeferred = async {
                         selectedSteamAppId?.let { fetchSteamBridge(it) }
                     }
                     val bgmDeferred = async {
-                        val directBgmId = vnObj["extlinks"]?.jsonArray?.firstOrNull {
-                            it.jsonObject["name"].str()?.contains("bangumi", ignoreCase = true) == true
-                        }?.jsonObject?.get("id").str()?.toLongOrNull()
+                        val directBgmId = vnObj["extlinks"].arr()?.firstOrNull {
+                            it.obj()?.get("name").str()?.contains("bangumi", ignoreCase = true) == true
+                        }.obj()?.get("id").str()?.toLongOrNull()
                         fetchBangumiScoreForVn(englishTitle, romajiTitle, nativeTitle, directBgmId)
                     }
                     val aniDeferred = async {
@@ -690,11 +694,11 @@ class VisualNovelEnrichmentSource(
                 if (resp.isSuccessful) {
                     val body = resp.body?.string()
                     if (!body.isNullOrBlank()) {
-                        val root = json.parseToJsonElement(body).jsonObject
-                        val appNode = root[appId.toString()]?.jsonObject
+                        val root = json.parseToJsonElement(body).obj()
+                        val appNode = root?.get(appId.toString()).obj()
                         if (appNode?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
-                            val dataObj = appNode["data"]?.jsonObject
-                            metacritic = dataObj?.get("metacritic")?.jsonObject
+                            val dataObj = appNode["data"].obj()
+                            metacritic = dataObj?.get("metacritic").obj()
                                 ?.get("score")?.jsonPrimitive?.intOrNull
                             steamBgRaw = dataObj?.get("background_raw").str()
                                 ?: dataObj?.get("background").str()
@@ -712,7 +716,7 @@ class VisualNovelEnrichmentSource(
                 if (resp.isSuccessful) {
                     val body = resp.body?.string()
                     if (!body.isNullOrBlank()) {
-                        val summary = json.parseToJsonElement(body).jsonObject["query_summary"]?.jsonObject
+                        val summary = json.parseToJsonElement(body).obj()?.get("query_summary").obj()
                         val pos = summary?.get("total_positive")?.jsonPrimitive?.intOrNull ?: 0
                         val total = summary?.get("total_reviews")?.jsonPrimitive?.intOrNull ?: 0
                         reviewDesc = summary?.get("review_score_desc").str()
@@ -760,9 +764,9 @@ class VisualNovelEnrichmentSource(
                 client.newCall(gameReq).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string() ?: ""
-                        val obj = json.parseToJsonElement(body).jsonObject
-                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
-                            sgdbGameId = obj["data"]?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        val obj = json.parseToJsonElement(body).obj()
+                        if (obj?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"].obj()?.get("id")?.jsonPrimitive?.longOrNull
                         }
                     }
                 }
@@ -777,9 +781,9 @@ class VisualNovelEnrichmentSource(
                 client.newCall(searchReq).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val body = resp.body?.string() ?: ""
-                        val obj = json.parseToJsonElement(body).jsonObject
-                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
-                            sgdbGameId = obj["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        val obj = json.parseToJsonElement(body).obj()
+                        if (obj?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"].arr()?.firstOrNull().obj()?.get("id")?.jsonPrimitive?.longOrNull
                         }
                     }
                 }
@@ -797,10 +801,10 @@ class VisualNovelEnrichmentSource(
                 client.newCall(assetReq).execute().use { resp ->
                     if (!resp.isSuccessful) return null
                     val body = resp.body?.string() ?: return null
-                    val obj = json.parseToJsonElement(body).jsonObject
+                    val obj = json.parseToJsonElement(body).obj() ?: return null
                     if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return null
-                    val list = obj["data"]?.jsonArray ?: return null
-                    val valid = list.map { it.jsonObject }.filter { item ->
+                    val list = obj["data"].arr() ?: return null
+                    val valid = list.mapNotNull { it.obj() }.filter { item ->
                         !hideNsfw || (item["nsfw"]?.jsonPrimitive?.booleanOrNull != true)
                     }
                     return valid.firstOrNull { it["humor"]?.jsonPrimitive?.booleanOrNull != true }?.get("url").str()
@@ -834,7 +838,7 @@ class VisualNovelEnrichmentSource(
                     if (resp.isSuccessful) {
                         val body = resp.body?.string()
                         if (!body.isNullOrBlank()) {
-                            val score = json.parseToJsonElement(body).jsonObject["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.floatOrNull
+                            val score = json.parseToJsonElement(body).obj()?.get("rating").obj()?.get("score")?.jsonPrimitive?.floatOrNull
                             if (score != null && score > 0f) return@withBangumiPacing score to directBangumiId
                         }
                     }
@@ -851,11 +855,11 @@ class VisualNovelEnrichmentSource(
             client.newCall(searchReq).execute().use { resp ->
                 if (!resp.isSuccessful) return@withBangumiPacing null
                 val body = resp.body?.string() ?: return@withBangumiPacing null
-                val list = json.parseToJsonElement(body).jsonObject["list"]?.jsonArray ?: return@withBangumiPacing null
+                val list = json.parseToJsonElement(body).obj()?.get("list").arr() ?: return@withBangumiPacing null
                 for (el in list) {
-                    val obj = el.jsonObject
+                    val obj = el.obj() ?: continue
                     val bId = obj["id"]?.jsonPrimitive?.longOrNull ?: continue
-                    val score = obj["rating"]?.jsonObject?.get("score")?.jsonPrimitive?.floatOrNull
+                    val score = obj["rating"].obj()?.get("score")?.jsonPrimitive?.floatOrNull
                     if (score != null && score > 0f) return@withBangumiPacing score to bId
                 }
             }
@@ -907,13 +911,13 @@ class VisualNovelEnrichmentSource(
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withAniListPacing null
                 val body = resp.body?.string() ?: return@withAniListPacing null
-                val list = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
-                    ?.get("Page")?.jsonObject?.get("media")?.jsonArray ?: return@withAniListPacing null
+                val list = json.parseToJsonElement(body).obj()?.get("data").obj()
+                    ?.get("Page").obj()?.get("media").arr() ?: return@withAniListPacing null
 
                 val targetNorm = cleanQuery.lowercase().replace(Regex("[^a-z0-9]"), "")
                 val matched = list.mapNotNull { el ->
-                    val m = el.jsonObject
-                    val tObj = m["title"]?.jsonObject
+                    val m = el.obj() ?: return@mapNotNull null
+                    val tObj = m["title"].obj()
                     val rTitle = tObj?.get("romaji").str().orEmpty()
                     val eTitle = tObj?.get("english").str().orEmpty()
                     val src = m["source"].str().orEmpty()
@@ -927,10 +931,10 @@ class VisualNovelEnrichmentSource(
 
                 val relations = matched.take(4).mapNotNull { m ->
                     val id = m["id"]?.jsonPrimitive?.longOrNull ?: return@mapNotNull null
-                    val tObj = m["title"]?.jsonObject
+                    val tObj = m["title"].obj()
                     val title = tObj?.get("english").str() ?: tObj?.get("romaji").str() ?: return@mapNotNull null
-                    val img = m["coverImage"]?.jsonObject?.get("extraLarge").str()
-                        ?: m["coverImage"]?.jsonObject?.get("large").str()
+                    val img = m["coverImage"].obj()?.get("extraLarge").str()
+                        ?: m["coverImage"].obj()?.get("large").str()
                     AnimeRelationItem(
                         id = id,
                         title = title,
@@ -944,11 +948,11 @@ class VisualNovelEnrichmentSource(
                 }
 
                 val trailers = matched.mapNotNull { m ->
-                    val tr = m["trailer"]?.jsonObject ?: return@mapNotNull null
+                    val tr = m["trailer"].obj() ?: return@mapNotNull null
                     val site = tr["site"].str() ?: return@mapNotNull null
                     val ytId = tr["id"].str() ?: return@mapNotNull null
                     if (site.equals("youtube", ignoreCase = true)) {
-                        val tObj = m["title"]?.jsonObject
+                        val tObj = m["title"].obj()
                         val name = tObj?.get("english").str() ?: tObj?.get("romaji").str() ?: cleanQuery
                         MediaTrailer(title = "$name (Anime Trailer)", youtubeKey = ytId, type = "Trailer")
                     } else null
@@ -972,10 +976,10 @@ class VisualNovelEnrichmentSource(
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val body = resp.body?.string() ?: return@withContext null
-                val images = json.parseToJsonElement(body).jsonObject["images"]?.jsonArray ?: return@withContext null
+                val images = json.parseToJsonElement(body).obj()?.get("images").arr() ?: return@withContext null
                 images.firstOrNull {
-                    it.jsonObject["coverType"].str().equals("clearlogo", ignoreCase = true)
-                }?.jsonObject?.get("url").str()
+                    it.obj()?.get("coverType").str().equals("clearlogo", ignoreCase = true)
+                }.obj()?.get("url").str()
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -999,10 +1003,10 @@ class VisualNovelEnrichmentSource(
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withGeneralPacing emptyList()
                 val body = resp.body?.string() ?: return@withGeneralPacing emptyList()
-                val children = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject
-                    ?.get("children")?.jsonArray ?: return@withGeneralPacing emptyList()
+                val children = json.parseToJsonElement(body).obj()?.get("data").obj()
+                    ?.get("children").arr() ?: return@withGeneralPacing emptyList()
                 children.mapNotNull { el ->
-                    val d = el.jsonObject["data"]?.jsonObject ?: return@mapNotNull null
+                    val d = el.obj()?.get("data").obj() ?: return@mapNotNull null
                     val id = d["id"].str() ?: return@mapNotNull null
                     val title = d["title"].str() ?: return@mapNotNull null
                     val self = d["selftext"].str()?.take(400).orEmpty()

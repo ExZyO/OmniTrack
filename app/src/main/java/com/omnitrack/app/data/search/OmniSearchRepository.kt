@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -1061,28 +1062,30 @@ class OmniSearchRepository(
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withVndbPacing emptyList()
                 val body = response.body?.string() ?: return@withVndbPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val results = root["results"]?.jsonArray ?: return@withVndbPacing emptyList()
+                val root = json.parseToJsonElement(body) as? JsonObject ?: return@withVndbPacing emptyList()
+                val results = root["results"] as? JsonArray ?: return@withVndbPacing emptyList()
 
                 results.mapNotNull { node ->
-                    val obj = node.jsonObject
+                    val obj = node as? JsonObject ?: return@mapNotNull null
                     val id = obj["id"].cleanString() ?: return@mapNotNull null
                     val romajiTitle = obj["title"].cleanString() ?: return@mapNotNull null
                     val altTitle = obj["alttitle"].cleanString()
                     val olang = obj["olang"].cleanString()
-                    val titlesArray = obj["titles"]?.jsonArray
-                    val englishTitle = titlesArray?.firstOrNull {
-                        val o = it.jsonObject
+                    val titlesArray = obj["titles"] as? JsonArray
+                    val englishTitle = (titlesArray?.firstOrNull {
+                        val o = it as? JsonObject ?: return@firstOrNull false
                         val isOfficial = o["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
                         val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
                         o["lang"].cleanString() == "en" && (isOfficial || isMain)
-                    }?.jsonObject?.get("title").cleanString()
-                        ?: titlesArray?.firstOrNull { it.jsonObject["lang"].cleanString() == "en" }?.jsonObject?.get("title").cleanString()
-                    val nativeFromTitles = titlesArray?.firstOrNull {
-                        val o = it.jsonObject
+                    } as? JsonObject)?.get("title").cleanString()
+                        ?: (titlesArray?.firstOrNull {
+                            (it as? JsonObject)?.get("lang").cleanString() == "en"
+                        } as? JsonObject)?.get("title").cleanString()
+                    val nativeFromTitles = (titlesArray?.firstOrNull {
+                        val o = it as? JsonObject ?: return@firstOrNull false
                         val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
                         isMain || o["lang"].cleanString() == olang
-                    }?.jsonObject?.get("title").cleanString()
+                    } as? JsonObject)?.get("title").cleanString()
                     val nativeTitle = altTitle ?: nativeFromTitles
                     val resolvedTitle = when (pref) {
                         com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> englishTitle ?: romajiTitle
@@ -1098,14 +1101,14 @@ class OmniSearchRepository(
                     }
                     val lengthMinutes = obj["length_minutes"]?.jsonPrimitive?.intOrNull
                     val releaseYear = obj["released"].cleanString()?.take(4)?.takeIf { y -> y.length == 4 && y.all { it.isDigit() } }
-                    val imageObj = obj["image"]?.jsonObject
+                    val imageObj = obj["image"] as? JsonObject
                     val cover = imageObj?.get("url").cleanString() ?: return@mapNotNull null
-                    val screenshots = obj["screenshots"]?.jsonArray
-                    val safeShot = screenshots?.firstOrNull {
-                        val s = it.jsonObject
+                    val screenshots = obj["screenshots"] as? JsonArray
+                    val safeShot = (screenshots?.firstOrNull {
+                        val s = it as? JsonObject ?: return@firstOrNull false
                         (s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f) < 0.5f && (s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f) < 1f
-                    }?.jsonObject?.get("url").cleanString()
-                        ?: screenshots?.firstOrNull()?.jsonObject?.get("url").cleanString()
+                    } as? JsonObject)?.get("url").cleanString()
+                        ?: (screenshots?.firstOrNull() as? JsonObject)?.get("url").cleanString()
 
                     val rating = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
                     val desc = cleanSynopsis(
