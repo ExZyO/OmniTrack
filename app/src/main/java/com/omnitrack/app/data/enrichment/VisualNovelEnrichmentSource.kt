@@ -148,13 +148,20 @@ class VisualNovelEnrichmentSource(
         val payload = buildJsonObject {
             put("filters", json.parseToJsonElement("[\"search\", \"=\", ${kotlinx.serialization.json.JsonPrimitive(clean)}]"))
             put("fields", "id,title")
+            put("sort", "votecount")
+            put("reverse", true)
             put("results", 1)
         }.toString()
         val root = postVndb("vn", payload) ?: return null
         return root["results"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id").str()
     }
 
-    suspend fun fetchFullVisualNovelData(item: MediaItemEntity): VnFullEnrichmentResult? =
+    suspend fun fetchFullVisualNovelData(
+        item: MediaItemEntity,
+        steamGridDbApiKey: String? = null,
+        igdbClientId: String? = null,
+        igdbClientSecret: String? = null
+    ): VnFullEnrichmentResult? =
         withContext(Dispatchers.IO) {
             try {
                 val vndbId = item.vndbId?.takeIf { it.isNotBlank() } ?: resolveVndbId(item.title)
@@ -162,12 +169,13 @@ class VisualNovelEnrichmentSource(
 
                 val filterJson = "[\"id\", \"=\", \"$vndbId\"]"
                 val relFilterJson = "[\"vn\", \"=\", [\"id\", \"=\", \"$vndbId\"]]"
+                val steamRelFilterJson = "[\"and\", [\"vn\", \"=\", [\"id\", \"=\", \"$vndbId\"]], [\"extlink\", \"=\", \"steam\"]]"
 
                 val vnFields = "id,title,alttitle,titles{lang,title,latin,official,main},aliases,olang,devstatus,released,languages,platforms,image{url,dims,sexual,violence},length,length_minutes,length_votes,description,average,rating,votecount,screenshots{url,thumbnail,dims,sexual,violence,release.title},relations{id,title,relation,relation_official,image.url,rating,released},tags{id,name,category,rating,spoiler,lie},developers{id,name,original},staff{eid,role,note,id,name,original},va{note,staff{id,name,original},character{id,name,original,image.url}},extlinks{url,label,name,id}"
                 val charFields = "id,name,original,description,image{url,sexual,violence},sex,blood_type,height,weight,age,birthday,vns{id,role,spoiler},traits{id,name,group_name,spoiler}"
                 val relFields = "id,title,released,languages{lang,mtl},platforms,producers{name,developer,publisher},official,patch,voiced,minage,engine,resolution,extlinks{name,id,url}"
 
-                val (vnRoot, charRoot, relRoot) = coroutineScope {
+                val (vnRoot, charRoot, relPair) = coroutineScope {
                     val vnDeferred = async {
                         postVndb("vn", buildJsonObject {
                             put("filters", json.parseToJsonElement(filterJson))
@@ -190,8 +198,17 @@ class VisualNovelEnrichmentSource(
                             put("sort", "released")
                         }.toString())
                     }
-                    Triple(vnDeferred.await(), charDeferred.await(), relDeferred.await())
+                    val steamRelDeferred = async {
+                        postVndb("release", buildJsonObject {
+                            put("filters", json.parseToJsonElement(steamRelFilterJson))
+                            put("fields", relFields)
+                            put("results", 15)
+                            put("sort", "released")
+                        }.toString())
+                    }
+                    Triple(vnDeferred.await(), charDeferred.await(), relDeferred.await() to steamRelDeferred.await())
                 }
+                val (relRoot, steamRelRoot) = relPair
 
                 val vnObj = vnRoot?.get("results")?.jsonArray?.firstOrNull()?.jsonObject ?: return@withContext null
 
@@ -255,7 +272,9 @@ class VisualNovelEnrichmentSource(
                     )
                 }.orEmpty()
 
-                val releases = relRoot?.get("results")?.jsonArray?.mapNotNull { el ->
+                val combinedRelJson = relRoot?.get("results")?.jsonArray.orEmpty() +
+                    steamRelRoot?.get("results")?.jsonArray.orEmpty()
+                val releases = combinedRelJson.mapNotNull { el ->
                     val r = el.jsonObject
                     val rId = r["id"].str() ?: return@mapNotNull null
                     val rTitle = r["title"].str() ?: return@mapNotNull null
@@ -284,7 +303,7 @@ class VisualNovelEnrichmentSource(
                         primaryUrl = firstUrl,
                         steamAppId = steamExtId
                     )
-                }.orEmpty()
+                }.distinctBy { it.id }
 
                 // Summarize release metadata (voiced level, minAge, engine, platforms)
                 val canonicalVoiced = releases.filter { it.isOfficial && !it.isPatch }.mapNotNull { it.voicedLevel }.maxOrNull()
@@ -356,6 +375,7 @@ class VisualNovelEnrichmentSource(
                         it.jsonObject["id"].str() == vndbId
                     }?.jsonObject ?: c["vns"]?.jsonArray?.firstOrNull()?.jsonObject
                     val rawRole = vnRoleEntry?.get("role").str() ?: "main"
+                    val charSpoiler = vnRoleEntry?.get("spoiler")?.jsonPrimitive?.intOrNull ?: 0
                     val mappedRole = when (rawRole) {
                         "main" -> "PROTAGONIST"
                         "primary" -> "MAIN"
@@ -382,6 +402,7 @@ class VisualNovelEnrichmentSource(
                         sexual = cImg?.get("sexual")?.jsonPrimitive?.floatOrNull ?: 0f,
                         violence = cImg?.get("violence")?.jsonPrimitive?.floatOrNull ?: 0f,
                         role = rawRole,
+                        spoilerLevel = charSpoiler,
                         description = c["description"].str(),
                         sex = (c["sex"] as? JsonArray)?.firstOrNull()?.str() ?: c["sex"].str(),
                         age = c["age"]?.jsonPrimitive?.intOrNull,
@@ -402,7 +423,8 @@ class VisualNovelEnrichmentSource(
                         voiceActorId = vaInfo?.second,
                         voiceActorName = vaInfo?.first,
                         voiceActorLanguage = if (olang == "en") "EN" else "JP",
-                        vndbCharacterId = cId
+                        vndbCharacterId = cId,
+                        spoilerLevel = charSpoiler
                     )
                 }.orEmpty().sortedBy {
                     when (it.characterRole) {
@@ -470,8 +492,12 @@ class VisualNovelEnrichmentSource(
                     }
                 }.distinctBy { it.url }.take(14)
 
-                // Parallel Secondary Enrichment: Steam Bridge + Bangumi + AniList Adaptations + r/visualnovels
+                // Parallel Secondary Enrichment: Steam Bridge + Bangumi + AniList Adaptations + IGDB + SteamGridDB + r/visualnovels
                 val selectedSteamAppId = selectBestReleasedSteamAppId(releases)
+                val igdbSlug = vnObj["extlinks"]?.jsonArray?.firstOrNull {
+                    it.jsonObject["name"].str() == "igdb_game"
+                }?.jsonObject?.get("id").str()
+
                 coroutineScope {
                     val steamDeferred = async {
                         selectedSteamAppId?.let { fetchSteamBridge(it) }
@@ -485,6 +511,11 @@ class VisualNovelEnrichmentSource(
                     val aniDeferred = async {
                         fetchAniListAdaptationBridge(romajiTitle, englishTitle)
                     }
+                    val igdbDeferred = async {
+                        if (!igdbClientId.isNullOrBlank() && !igdbClientSecret.isNullOrBlank()) {
+                            IgdbApiClient(client).fetchGameArtwork(igdbClientId, igdbClientSecret, englishTitle, igdbSlug)
+                        } else null
+                    }
                     val redditDeferred = async {
                         fetchVisualNovelRedditDiscussions(englishTitle, romajiTitle)
                     }
@@ -492,17 +523,32 @@ class VisualNovelEnrichmentSource(
                     val steamData = steamDeferred.await()
                     val bgmData = bgmDeferred.await()
                     val aniData = aniDeferred.await()
+                    val igdbData = igdbDeferred.await()
                     val redditComments = redditDeferred.await()
 
-                    val aniZipLogo = if (steamData?.logoUrl == null && aniData?.aniListId != null) {
+                    val needsSgdbHero = steamData?.libraryHeroUrl == null && igdbData?.artworks.isNullOrEmpty()
+                    val needsSgdbLogo = steamData?.logoUrl == null
+                    val sgdbPair = if (!steamGridDbApiKey.isNullOrBlank() && (needsSgdbHero || needsSgdbLogo)) {
+                        fetchSteamGridDbHeroAndLogo(selectedSteamAppId, englishTitle, steamGridDbApiKey)
+                    } else null
+
+                    val aniZipLogo = if (steamData?.logoUrl == null && sgdbPair?.second == null && aniData?.aniListId != null) {
                         fetchAniZipLogoUrl(aniData.aniListId)
                     } else null
 
                     val safeFallbackBanner = screenshots.firstOrNull { !it.isSensitive }?.url
                         ?: screenshots.firstOrNull()?.url
 
-                    val finalBanner = steamData?.libraryHeroUrl ?: item.bannerUrl?.takeIf { it.isNotBlank() } ?: safeFallbackBanner
-                    val finalClearLogo = steamData?.logoUrl ?: aniZipLogo
+                    val existingNonShotBanner = item.bannerUrl?.takeIf {
+                        it.isNotBlank() && !it.contains("t.vndb.org/sf/")
+                    }
+                    val finalBanner = steamData?.libraryHeroUrl
+                        ?: sgdbPair?.first
+                        ?: igdbData?.artworks?.firstOrNull()
+                        ?: existingNonShotBanner
+                        ?: safeFallbackBanner
+                        ?: item.bannerUrl?.takeIf { it.isNotBlank() }
+                    val finalClearLogo = steamData?.logoUrl ?: sgdbPair?.second ?: aniZipLogo
                     val combinedRelations = (vndbRelations + aniData?.relations.orEmpty())
                         .distinctBy { it.vndbId ?: "${it.mediaType}_${it.title.lowercase()}" }
 
@@ -630,6 +676,7 @@ class VisualNovelEnrichmentSource(
             var metacritic: Int? = null
             var positivePct: Int? = null
             var reviewDesc: String? = null
+            var steamBgRaw: String? = null
 
             val logoOk = checkUrlOk(logoCandidate)
             val heroOk = checkUrlOk(heroCandidate)
@@ -646,9 +693,11 @@ class VisualNovelEnrichmentSource(
                         val root = json.parseToJsonElement(body).jsonObject
                         val appNode = root[appId.toString()]?.jsonObject
                         if (appNode?.get("success")?.jsonPrimitive?.booleanOrNull == true) {
-                            metacritic = appNode["data"]?.jsonObject
-                                ?.get("metacritic")?.jsonObject
+                            val dataObj = appNode["data"]?.jsonObject
+                            metacritic = dataObj?.get("metacritic")?.jsonObject
                                 ?.get("score")?.jsonPrimitive?.intOrNull
+                            steamBgRaw = dataObj?.get("background_raw").str()
+                                ?: dataObj?.get("background").str()
                         }
                     }
                 }
@@ -678,6 +727,7 @@ class VisualNovelEnrichmentSource(
                 logoUrl = if (logoOk) logoCandidate else null,
                 libraryHeroUrl = when {
                     heroOk -> heroCandidate
+                    !steamBgRaw.isNullOrBlank() -> steamBgRaw
                     headerOk -> headerFallback
                     else -> null
                 },
@@ -685,6 +735,82 @@ class VisualNovelEnrichmentSource(
                 positivePct = positivePct,
                 reviewDesc = reviewDesc
             )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchSteamGridDbHeroAndLogo(
+        steamAppId: Long?,
+        englishTitle: String,
+        apiKey: String
+    ): Pair<String?, String?>? = withContext(Dispatchers.IO) {
+        try {
+            val cleanKey = apiKey.trim()
+            if (cleanKey.isBlank()) return@withContext null
+
+            var sgdbGameId: Long? = null
+            if (steamAppId != null && steamAppId > 0L) {
+                val gameReq = Request.Builder()
+                    .url("https://www.steamgriddb.com/api/v2/games/steam/$steamAppId")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .get()
+                    .build()
+                client.newCall(gameReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: ""
+                        val obj = json.parseToJsonElement(body).jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"]?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        }
+                    }
+                }
+            }
+            if (sgdbGameId == null && englishTitle.isNotBlank()) {
+                val encoded = URLEncoder.encode(englishTitle.trim(), "UTF-8")
+                val searchReq = Request.Builder()
+                    .url("https://www.steamgriddb.com/api/v2/search/autocomplete/$encoded")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .get()
+                    .build()
+                client.newCall(searchReq).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: ""
+                        val obj = json.parseToJsonElement(body).jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        }
+                    }
+                }
+            }
+            val targetId = sgdbGameId ?: return@withContext null
+            val hideNsfw = com.omnitrack.app.data.preferences.PreferenceManager.cachedVnNsfwFilterMode ==
+                com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
+
+            fun fetchBestAsset(endpoint: String): String? {
+                val assetReq = Request.Builder()
+                    .url("https://www.steamgriddb.com/api/v2/$endpoint/game/$targetId")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .get()
+                    .build()
+                client.newCall(assetReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return null
+                    val body = resp.body?.string() ?: return null
+                    val obj = json.parseToJsonElement(body).jsonObject
+                    if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return null
+                    val list = obj["data"]?.jsonArray ?: return null
+                    val valid = list.map { it.jsonObject }.filter { item ->
+                        !hideNsfw || (item["nsfw"]?.jsonPrimitive?.booleanOrNull != true)
+                    }
+                    return valid.firstOrNull { it["humor"]?.jsonPrimitive?.booleanOrNull != true }?.get("url").str()
+                        ?: valid.firstOrNull()?.get("url").str()
+                }
+            }
+
+            val heroUrl = fetchBestAsset("heroes")
+            val logoUrl = fetchBestAsset("logos")
+            heroUrl to logoUrl
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             null

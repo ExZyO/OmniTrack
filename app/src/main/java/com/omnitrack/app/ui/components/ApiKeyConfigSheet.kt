@@ -85,6 +85,9 @@ fun ApiKeyConfigSheet(
     val currentOpenRouter by preferenceManager.openRouterApiKey.collectAsState(initial = "")
     val currentTmdb by preferenceManager.tmdbApiKey.collectAsState(initial = "")
     val currentFanart by preferenceManager.fanartApiKey.collectAsState(initial = "")
+    val currentSteamGridDb by preferenceManager.steamGridDbApiKey.collectAsState(initial = "")
+    val currentIgdbId by preferenceManager.igdbClientId.collectAsState(initial = "")
+    val currentIgdbSecret by preferenceManager.igdbClientSecret.collectAsState(initial = "")
     val currentMdblist by preferenceManager.mdblistApiKey.collectAsState(initial = "")
     val aiSearchEnabled by preferenceManager.aiSemanticSearchEnabled.collectAsState(initial = false)
 
@@ -98,6 +101,9 @@ fun ApiKeyConfigSheet(
     var openRouterKey by remember(currentOpenRouter) { mutableStateOf(currentOpenRouter) }
     var tmdbKey by remember(currentTmdb) { mutableStateOf(currentTmdb) }
     var fanartKey by remember(currentFanart) { mutableStateOf(currentFanart) }
+    var steamGridDbKey by remember(currentSteamGridDb) { mutableStateOf(currentSteamGridDb) }
+    var igdbClientId by remember(currentIgdbId) { mutableStateOf(currentIgdbId) }
+    var igdbClientSecret by remember(currentIgdbSecret) { mutableStateOf(currentIgdbSecret) }
     var mdblistKey by remember(currentMdblist) { mutableStateOf(currentMdblist) }
 
     var traktClientId by remember(currentTraktClientId) { mutableStateOf(currentTraktClientId) }
@@ -250,6 +256,33 @@ fun ApiKeyConfigSheet(
                 accentColor = AccentJade
             )
 
+            // SteamGridDB API Key
+            ApiKeyField(
+                label = "SteamGridDB API Key",
+                placeholder = "Clean textless heroes, covers & logos for VNs & Games",
+                value = steamGridDbKey,
+                onValueChange = { steamGridDbKey = it },
+                accentColor = Color(0xFF66C0F4)
+            )
+
+            // IGDB / Twitch Client ID
+            ApiKeyField(
+                label = "IGDB / Twitch Client ID",
+                placeholder = "Free Twitch Developer App Client ID for IGDB",
+                value = igdbClientId,
+                onValueChange = { igdbClientId = it },
+                accentColor = Color(0xFF9147FF)
+            )
+
+            // IGDB / Twitch Client Secret
+            ApiKeyField(
+                label = "IGDB / Twitch Client Secret",
+                placeholder = "Twitch Developer App Client Secret for IGDB",
+                value = igdbClientSecret,
+                onValueChange = { igdbClientSecret = it },
+                accentColor = Color(0xFF9147FF)
+            )
+
             // MdbList API Key
             ApiKeyField(
                 label = "MdbList API Key",
@@ -342,6 +375,8 @@ fun ApiKeyConfigSheet(
                         preferenceManager.updateOpenRouterApiKey(openRouterKey.trim())
                         preferenceManager.updateTmdbApiKey(tmdbKey.trim())
                         preferenceManager.updateFanartApiKey(fanartKey.trim())
+                        preferenceManager.updateSteamGridDbApiKey(steamGridDbKey.trim())
+                        preferenceManager.updateIgdbCredentials(igdbClientId.trim(), igdbClientSecret.trim())
                         preferenceManager.updateMdblistApiKey(mdblistKey.trim())
 
                         preferenceManager.updateCustomTrackerCredentials(

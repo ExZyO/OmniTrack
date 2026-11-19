@@ -1,15 +1,20 @@
 package com.omnitrack.app.data.artwork
 
+import com.omnitrack.app.data.enrichment.IgdbApiClient
+import com.omnitrack.app.data.enrichment.toArtworkCandidates
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -17,11 +22,14 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
@@ -91,28 +99,135 @@ class ArtworkWaterfallRepository(
         romajiTitle: String? = null,
         originCountry: String? = null,
         defaultCoverUrl: String? = null,
-        forceRefresh: Boolean = false
+        forceRefresh: Boolean = false,
+        vndbId: String? = null,
+        englishTitle: String? = null,
+        initialCandidates: List<ArtworkCandidate> = emptyList(),
+        onPartialResults: ((List<ArtworkCandidate>) -> Unit)? = null
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val clean = cleanTitle(title)
-        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}"
-        if (!forceRefresh) {
-            candidateCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}"
+
+        fun vnBannerRank(candidate: ArtworkCandidate): Int {
+            if (!candidate.isBanner) return 0
+            if (candidate.isScreenshot) return 10
+            return when (candidate.sourceName.lowercase()) {
+                "steamgriddb" -> 0
+                "igdb artwork" -> 1
+                "steam hero" -> 2
+                "steam background" -> 3
+                "anilist" -> 4
+                "steam" -> 5
+                "default" -> 6
+                else -> 7
+            }
         }
 
-        val results: List<ArtworkCandidate> = coroutineScope {
+        fun sortForType(list: List<ArtworkCandidate>): List<ArtworkCandidate> {
+            return when (mediaType) {
+                MediaType.MANGA, MediaType.NOVEL -> list.sortedWith(
+                    compareBy { candidate ->
+                        if (candidate.isBanner) {
+                            MANGA_BANNER_PRIORITY[candidate.sourceName] ?: 99
+                        } else {
+                            MANGA_COVER_PRIORITY[candidate.sourceName] ?: 99
+                        }
+                    }
+                )
+                MediaType.VISUAL_NOVEL -> list.sortedWith(
+                    compareBy<ArtworkCandidate> { it.isBanner }
+                        .thenBy { vnBannerRank(it) }
+                )
+                else -> list
+            }
+        }
+
+        val lock = Any()
+        val accumulated = LinkedHashMap<String, ArtworkCandidate>()
+
+        fun mergeAndEmit(batch: List<ArtworkCandidate>): List<ArtworkCandidate> {
+            val cleaned = batch
+                .map { it.copy(url = LosslessCoverMapper.toLosslessUrl(it.url)) }
+                .filter { it.url.isNotBlank() }
+            if (cleaned.isEmpty()) return synchronized(lock) { sortForType(accumulated.values.toList()) }
+            val snapshot = synchronized(lock) {
+                for (cand in cleaned) {
+                    val prev = accumulated[cand.url]
+                    if (prev == null || (cand.sourceName != "Default" && prev.sourceName == "Default")) {
+                        accumulated[cand.url] = cand
+                    }
+                }
+                sortForType(accumulated.values.toList())
+            }
+            onPartialResults?.invoke(snapshot)
+            return snapshot
+        }
+
+        if (initialCandidates.isNotEmpty()) {
+            mergeAndEmit(initialCandidates)
+        }
+
+        if (!forceRefresh) {
+            candidateCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { cached ->
+                return@withContext mergeAndEmit(cached)
+            }
+        }
+
+        if (!defaultCoverUrl.isNullOrBlank()) {
+            mergeAndEmit(
+                listOf(
+                    ArtworkCandidate(
+                        url = defaultCoverUrl,
+                        sourceName = "Default",
+                        description = "Source Cover",
+                        isBanner = false
+                    )
+                )
+            )
+        }
+
+        val sgdbKey = preferenceManager?.steamGridDbApiKey?.firstOrNull()?.ifBlank { null }
+        val igdbId = preferenceManager?.igdbClientId?.firstOrNull()?.ifBlank { null }
+        val igdbSecret = preferenceManager?.igdbClientSecret?.firstOrNull()?.ifBlank { null }
+
+        fun CoroutineScope.launchProvider(
+            timeoutMs: Long = 4500L,
+            block: suspend () -> List<ArtworkCandidate>
+        ) = launch {
+            val batch = withTimeoutOrNull(timeoutMs) {
+                try {
+                    block()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }.orEmpty()
+            if (batch.isNotEmpty()) {
+                mergeAndEmit(batch)
+            }
+        }
+
+        coroutineScope {
             when (mediaType) {
                 MediaType.MANGA, MediaType.NOVEL -> {
-                    val bridge = fetchAniListRosettaBridge(
-                        rawTitle = clean,
-                        isAnime = false,
-                        anilistId = anilistId,
-                        malId = malId
-                    )
+                    val bridge = withTimeoutOrNull(3500L) {
+                        fetchAniListRosettaBridge(
+                            rawTitle = clean,
+                            isAnime = false,
+                            anilistId = anilistId,
+                            malId = malId
+                        )
+                    } ?: AniListBridgeData()
+                    if (bridge.candidates.isNotEmpty()) {
+                        mergeAndEmit(bridge.candidates)
+                    }
+
                     val effAnilistId = anilistId ?: bridge.anilistId
                     val effMalId = malId ?: bridge.malId
                     val wdNative = if (mediaType == MediaType.NOVEL && bridge.nativeTitle == null && nativeTitle.isNullOrBlank()) {
-                        fetchWikidataNativeTitlesForArt(clean)
+                        withTimeoutOrNull(2000L) { fetchWikidataNativeTitlesForArt(clean) }
                     } else null
                     val effOrigin = (originCountry ?: bridge.countryOfOrigin)?.uppercase()
                     val effNative = bridge.nativeTitle ?: nativeTitle?.takeIf { it.isNotBlank() } ?: wdNative?.firstOrNull()
@@ -152,14 +267,13 @@ class ArtworkWaterfallRepository(
                         nativeTitle
                     ).firstOrNull { it.isNotBlank() && !it.equals(clean, ignoreCase = true) }
 
-                    val deferreds = mutableListOf<Deferred<List<ArtworkCandidate>>>()
                     if (mediaType == MediaType.NOVEL) {
-                        deferreds.add(async { fetchRanobeDbCovers(clean, effNative) })
+                        launchProvider { fetchRanobeDbCovers(clean, effNative) }
                         if (bridge.candidates.none { it.isBanner }) {
-                            deferreds.add(async { fetchAniListAdaptationBanners(clean, effNative ?: wdNative?.firstOrNull()) })
+                            launchProvider { fetchAniListAdaptationBanners(clean, effNative ?: wdNative?.firstOrNull()) }
                         }
                     }
-                    deferreds.add(async {
+                    launchProvider {
                         fetchMangaDexCovers(
                             rawTitle = clean,
                             altTitle = altMangaDexTitle,
@@ -167,63 +281,44 @@ class ArtworkWaterfallRepository(
                             malId = effMalId,
                             mangadexId = mangadexId
                         )
-                    })
-                    if (japaneseQuery != null && !containsHangul(japaneseQuery) && effOrigin != "KR" && effOrigin != "CN") {
-                        deferreds.add(async { fetchBookWalkerCovers(japaneseQuery) })
                     }
-                    deferreds.add(async { fetchBangumiCovers(japaneseQuery ?: chineseQuery ?: koreanQuery ?: clean, type = 1) })
+                    if (japaneseQuery != null && !containsHangul(japaneseQuery) && effOrigin != "KR" && effOrigin != "CN") {
+                        launchProvider { fetchBookWalkerCovers(japaneseQuery) }
+                    }
+                    launchProvider { fetchBangumiCovers(japaneseQuery ?: chineseQuery ?: koreanQuery ?: clean, type = 1) }
                     if (koreanQuery != null) {
                         val globalQuery = listOfNotNull(
                             bridge.englishTitle,
                             effRomaji,
                             clean
                         ).firstOrNull { !containsHangul(it) }
-                        deferreds.add(async { fetchNaverWebtoonCovers(koreanQuery, globalQuery) })
+                        launchProvider { fetchNaverWebtoonCovers(koreanQuery, globalQuery) }
                     }
                     if (chineseQuery != null) {
-                        deferreds.add(async { fetchKuaikanCovers(chineseQuery) })
+                        launchProvider { fetchKuaikanCovers(chineseQuery) }
                     }
-                    deferreds.add(async { fetchKitsuCovers(clean, isAnime = false) })
-                    deferreds.add(async { fetchComickCovers(clean) })
+                    launchProvider { fetchKitsuCovers(clean, isAnime = false) }
+                    launchProvider { fetchComickCovers(clean) }
                     if (effMalId != null && effMalId > 0) {
-                        deferreds.add(async { fetchJikanMangaPictures(effMalId) })
+                        launchProvider { fetchJikanMangaPictures(effMalId) }
                     }
-
-                    val combined = mutableListOf<ArtworkCandidate>()
-                    combined.addAll(bridge.candidates)
-                    combined.addAll(deferreds.awaitAll().flatten())
-                    if (!defaultCoverUrl.isNullOrBlank()) {
-                        combined.add(
-                            ArtworkCandidate(
-                                url = defaultCoverUrl,
-                                sourceName = "Default",
-                                description = "Source Cover",
-                                isBanner = false
-                            )
-                        )
-                    }
-                    combined.sortedWith(
-                        compareBy { candidate ->
-                            if (candidate.isBanner) {
-                                MANGA_BANNER_PRIORITY[candidate.sourceName] ?: 99
-                            } else {
-                                MANGA_COVER_PRIORITY[candidate.sourceName] ?: 99
-                            }
-                        }
-                    )
                 }
 
                 MediaType.ANIME -> {
-                    val bridge = fetchAniListRosettaBridge(
-                        rawTitle = clean,
-                        isAnime = true,
-                        anilistId = anilistId,
-                        malId = malId
-                    )
-                    val deferreds = mutableListOf<Deferred<List<ArtworkCandidate>>>()
-                    deferreds.add(async { fetchBangumiCovers(bridge.nativeTitle ?: bridge.romajiTitle ?: clean, type = 2) })
-                    deferreds.add(async { fetchKitsuCovers(clean, isAnime = true) })
-                    deferreds.add(async {
+                    val bridge = withTimeoutOrNull(3500L) {
+                        fetchAniListRosettaBridge(
+                            rawTitle = clean,
+                            isAnime = true,
+                            anilistId = anilistId,
+                            malId = malId
+                        )
+                    } ?: AniListBridgeData()
+                    if (bridge.candidates.isNotEmpty()) {
+                        mergeAndEmit(bridge.candidates)
+                    }
+                    launchProvider { fetchBangumiCovers(bridge.nativeTitle ?: bridge.romajiTitle ?: clean, type = 2) }
+                    launchProvider { fetchKitsuCovers(clean, isAnime = true) }
+                    launchProvider {
                         fetchMangaDexCovers(
                             rawTitle = clean,
                             altTitle = bridge.romajiTitle ?: romajiTitle,
@@ -231,65 +326,70 @@ class ArtworkWaterfallRepository(
                             malId = malId ?: bridge.malId,
                             mangadexId = mangadexId
                         )
-                    })
-                    deferreds.add(async { fetchTmdbArtwork(clean, isMovie = false) })
-                    val combined = mutableListOf<ArtworkCandidate>()
-                    combined.addAll(bridge.candidates)
-                    combined.addAll(deferreds.awaitAll().flatten())
-                    if (!defaultCoverUrl.isNullOrBlank()) {
-                        combined.add(ArtworkCandidate(url = defaultCoverUrl, sourceName = "Default", description = "Source Cover"))
                     }
-                    combined
+                    launchProvider { fetchTmdbArtwork(clean, isMovie = false) }
                 }
 
                 MediaType.BOOK -> {
-                    val deferreds = listOf(
-                        async { fetchGoogleBooksCovers(title) },
-                        async { fetchOpenLibraryCovers(title) }
-                    )
-                    deferreds.awaitAll().flatten()
+                    launchProvider { fetchGoogleBooksCovers(title) }
+                    launchProvider { fetchOpenLibraryCovers(title) }
                 }
 
                 MediaType.SHOW, MediaType.MOVIE -> {
-                    val deferreds = listOf(
-                        async { fetchTvMazeCovers(title) },
-                        async { fetchBangumiCovers(title, type = 2) },
-                        async { fetchTmdbArtwork(title, isMovie = (mediaType == MediaType.MOVIE)) }
-                    )
-                    deferreds.awaitAll().flatten()
+                    launchProvider { fetchTvMazeCovers(title) }
+                    launchProvider { fetchBangumiCovers(title, type = 2) }
+                    launchProvider { fetchTmdbArtwork(title, isMovie = (mediaType == MediaType.MOVIE)) }
                 }
 
                 MediaType.GAME -> {
-                    fetchSteamCovers(title)
+                    launchProvider { fetchSteamCovers(title) }
+                    if (!sgdbKey.isNullOrBlank()) {
+                        launchProvider { fetchSteamGridDbArtwork(title, null, sgdbKey) }
+                    }
+                    if (!igdbId.isNullOrBlank() && !igdbSecret.isNullOrBlank()) {
+                        launchProvider {
+                            IgdbApiClient(client).fetchGameArtwork(igdbId, igdbSecret, title, null)
+                                ?.toArtworkCandidates().orEmpty()
+                        }
+                    }
                 }
 
                 MediaType.VISUAL_NOVEL -> {
-                    val deferreds = listOf(
-                        async { fetchVndbCovers(title) },
-                        async { fetchSteamCovers(title) },
-                        async { fetchBangumiCovers(title, type = 4) }
-                    )
-                    deferreds.awaitAll().flatten()
+                    val vndbBundle = withTimeoutOrNull(4500L) {
+                        fetchVndbArtwork(clean, vndbId, englishTitle) { partial ->
+                            mergeAndEmit(partial)
+                        }
+                    }
+                    val bestEnTitle = englishTitle?.takeIf { it.isNotBlank() }
+                        ?: vndbBundle?.englishTitle?.takeIf { it.isNotBlank() }
+                        ?: clean
+                    val bestNative = nativeTitle?.takeIf { it.isNotBlank() } ?: vndbBundle?.nativeTitle
+
+                    launchProvider { fetchSteamCovers(bestEnTitle) }
+                    launchProvider { fetchAniListAdaptationBanners(bestEnTitle, bestNative) }
+                    launchProvider { fetchBangumiCovers(bestNative ?: romajiTitle ?: clean, type = 4) }
+                    if (!sgdbKey.isNullOrBlank()) {
+                        launchProvider { fetchSteamGridDbArtwork(bestEnTitle, vndbBundle?.steamAppId, sgdbKey) }
+                    }
+                    if (!igdbId.isNullOrBlank() && !igdbSecret.isNullOrBlank()) {
+                        launchProvider {
+                            IgdbApiClient(client).fetchGameArtwork(igdbId, igdbSecret, bestEnTitle, vndbBundle?.igdbSlug)
+                                ?.toArtworkCandidates().orEmpty()
+                        }
+                    }
                 }
 
                 MediaType.ALL -> {
-                    val deferreds = listOf(
-                        async { fetchAniListCovers(title, isAnime = true) },
-                        async { fetchTvMazeCovers(title) },
-                        async { fetchSteamCovers(title) },
-                        async { fetchBangumiCovers(title, type = 1) },
-                        async { fetchTmdbArtwork(title, isMovie = true) }
-                    )
-                    deferreds.awaitAll().flatten()
+                    launchProvider { fetchAniListCovers(title, isAnime = true) }
+                    launchProvider { fetchTvMazeCovers(title) }
+                    launchProvider { fetchSteamCovers(title) }
+                    launchProvider { fetchBangumiCovers(title, type = 1) }
+                    launchProvider { fetchTmdbArtwork(title, isMovie = true) }
                 }
             }
         }
 
-        val normalized = results
-            .map { it.copy(url = LosslessCoverMapper.toLosslessUrl(it.url)) }
-            .filter { it.url.isNotBlank() }
-            .distinctBy { it.url }
-
+        val normalized = synchronized(lock) { sortForType(accumulated.values.toList()) }
         if (normalized.isNotEmpty()) {
             candidateCache[cacheKey] = normalized
         }
@@ -1176,71 +1276,211 @@ class ArtworkWaterfallRepository(
         }
     }
 
-    private fun fetchSteamCovers(title: String): List<ArtworkCandidate> {
-        return try {
+    private data class VndbArtworkBundle(
+        val candidates: List<ArtworkCandidate>,
+        val steamAppId: Long? = null,
+        val englishTitle: String? = null,
+        val nativeTitle: String? = null,
+        val igdbSlug: String? = null
+    )
+
+    private suspend fun fetchSteamCovers(title: String): List<ArtworkCandidate> = coroutineScope {
+        try {
             val encoded = URLEncoder.encode(title, "UTF-8")
             val request = Request.Builder()
                 .url("https://store.steampowered.com/api/storesearch/?term=$encoded&l=english&cc=US")
                 .get()
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val responseStr = response.body?.string() ?: return emptyList()
+            val matchedApps: List<Pair<String, String>> = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@coroutineScope emptyList()
+                val responseStr = response.body?.string() ?: return@coroutineScope emptyList()
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
-                val items = parsed["items"]?.jsonArray ?: return emptyList()
-
-                val candidates = mutableListOf<ArtworkCandidate>()
-                for (elem in items.take(4)) {
-                    val id = elem.jsonObject["id"].cleanString() ?: continue
+                val items = parsed["items"]?.jsonArray ?: return@coroutineScope emptyList()
+                items.take(3).mapNotNull { elem ->
+                    val id = elem.jsonObject["id"].cleanString() ?: return@mapNotNull null
                     val name = elem.jsonObject["name"].cleanString() ?: title
+                    id to name
+                }
+            }
 
-                    val akamai2x = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg"
-                    val akamai1x = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg"
-                    val heroBanner = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg"
-                    val headerBanner = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg"
+            val candidates = mutableListOf<ArtworkCandidate>()
+            for ((id, name) in matchedApps) {
+                candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg", sourceName = "Steam", description = "$name (Library 2x)", isBanner = false))
+                candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg", sourceName = "Steam", description = name, isBanner = false))
+                candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg", sourceName = "Steam Hero", description = "$name (Hero Banner)", isBanner = true, isScreenshot = false))
+                candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg", sourceName = "Steam", description = "$name (Header)", isBanner = true, isScreenshot = false))
+            }
 
-                    candidates.add(ArtworkCandidate(url = akamai2x, sourceName = "Steam", description = "$name (Library 2x)", isBanner = false))
-                    candidates.add(ArtworkCandidate(url = akamai1x, sourceName = "Steam", description = name, isBanner = false))
-                    candidates.add(ArtworkCandidate(url = heroBanner, sourceName = "Steam", description = "$name (Hero Banner)", isBanner = true))
-                    candidates.add(ArtworkCandidate(url = headerBanner, sourceName = "Steam", description = "$name (Header)", isBanner = true))
-
-                    try {
-                        val dReq = Request.Builder().url("https://store.steampowered.com/api/appdetails?appids=$id").get().build()
-                        client.newCall(dReq).execute().use { dResp ->
-                            if (dResp.isSuccessful) {
-                                val dBody = dResp.body?.string().orEmpty()
-                                val dParsed = json.parseToJsonElement(dBody).jsonObject
-                                val appData = dParsed[id]?.jsonObject?.get("data")?.jsonObject
-                                if (appData != null) {
-                                    val headerImg = appData["header_image"].cleanString()
-                                    if (!headerImg.isNullOrBlank()) {
-                                        candidates.add(ArtworkCandidate(url = headerImg, sourceName = "Steam", description = "$name (Store Header)", isBanner = true))
-                                    }
-                                    val screenshots = appData["screenshots"]?.jsonArray
-                                    screenshots?.take(3)?.forEachIndexed { idx, s ->
-                                        val sUrl = s.jsonObject["path_full"].cleanString()
-                                        if (!sUrl.isNullOrBlank()) {
-                                            candidates.add(ArtworkCandidate(url = sUrl, sourceName = "Steam", description = "$name (Screenshot ${idx + 1})", isBanner = true))
+            val detailBatches = matchedApps.take(2).map { (id, name) ->
+                async {
+                    withTimeoutOrNull(2500L) {
+                        val batch = mutableListOf<ArtworkCandidate>()
+                        try {
+                            val dReq = Request.Builder().url("https://store.steampowered.com/api/appdetails?appids=$id").get().build()
+                            client.newCall(dReq).execute().use { dResp ->
+                                if (dResp.isSuccessful) {
+                                    val dBody = dResp.body?.string().orEmpty()
+                                    val dParsed = json.parseToJsonElement(dBody).jsonObject
+                                    val appData = dParsed[id]?.jsonObject?.get("data")?.jsonObject
+                                    if (appData != null) {
+                                        val bgRaw = appData["background_raw"].cleanString() ?: appData["background"].cleanString()
+                                        if (!bgRaw.isNullOrBlank()) {
+                                            batch.add(ArtworkCandidate(url = bgRaw, sourceName = "Steam Background", description = "$name (Key Backdrop)", isBanner = true, isScreenshot = false))
+                                        }
+                                        val headerImg = appData["header_image"].cleanString()
+                                        if (!headerImg.isNullOrBlank()) {
+                                            batch.add(ArtworkCandidate(url = headerImg, sourceName = "Steam", description = "$name (Store Header)", isBanner = true, isScreenshot = false))
+                                        }
+                                        val screenshots = appData["screenshots"]?.jsonArray
+                                        screenshots?.take(4)?.forEachIndexed { idx, s ->
+                                            val sUrl = s.jsonObject["path_full"].cleanString()
+                                            if (!sUrl.isNullOrBlank()) {
+                                                batch.add(ArtworkCandidate(url = sUrl, sourceName = "Steam", description = "$name (Screenshot ${idx + 1})", isBanner = true, isScreenshot = true))
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                    } catch (_: Exception) {}
+                        } catch (_: Exception) {}
+                        batch
+                    }.orEmpty()
                 }
-                candidates
-            }
-        } catch (_: Exception) {
+            }.awaitAll().flatten()
+
+            candidates.addAll(detailBatches)
+            candidates
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             emptyList()
         }
     }
 
-    private fun fetchVndbCovers(title: String): List<ArtworkCandidate> {
-        return try {
+    private suspend fun fetchSteamGridDbArtwork(
+        title: String,
+        steamAppId: Long?,
+        apiKey: String
+    ): List<ArtworkCandidate> = coroutineScope {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) return@coroutineScope emptyList()
+        try {
+            var sgdbGameId: Long? = null
+            if (steamAppId != null && steamAppId > 0L) {
+                val req = Request.Builder()
+                    .url("https://www.steamgriddb.com/api/v2/games/steam/$steamAppId")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"]?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        }
+                    }
+                }
+            }
+            if (sgdbGameId == null && title.isNotBlank()) {
+                val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+                val req = Request.Builder()
+                    .url("https://www.steamgriddb.com/api/v2/search/autocomplete/$encoded")
+                    .header("Authorization", "Bearer $cleanKey")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull == true) {
+                            sgdbGameId = obj["data"]?.jsonArray?.firstOrNull()?.jsonObject?.get("id")?.jsonPrimitive?.longOrNull
+                        }
+                    }
+                }
+            }
+            val targetId = sgdbGameId ?: return@coroutineScope emptyList()
+
+            val heroesDeferred = async {
+                withTimeoutOrNull(2500L) {
+                    val req = Request.Builder()
+                        .url("https://www.steamgriddb.com/api/v2/heroes/game/$targetId")
+                        .header("Authorization", "Bearer $cleanKey")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withTimeoutOrNull emptyList()
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return@withTimeoutOrNull emptyList()
+                        val items = obj["data"]?.jsonArray ?: return@withTimeoutOrNull emptyList()
+                        val sorted = items.map { it.jsonObject }.sortedBy { it["humor"]?.jsonPrimitive?.booleanOrNull == true }
+                        sorted.take(10).mapNotNull { o ->
+                            val u = o["url"].cleanString() ?: return@mapNotNull null
+                            val isNsfw = o["nsfw"]?.jsonPrimitive?.booleanOrNull == true
+                            ArtworkCandidate(
+                                url = u,
+                                sourceName = "SteamGridDB",
+                                description = "Textless Hero Artwork",
+                                isBanner = true,
+                                isNsfw = isNsfw,
+                                isScreenshot = false
+                            )
+                        }
+                    }
+                }.orEmpty()
+            }
+
+            val gridsDeferred = async {
+                withTimeoutOrNull(2500L) {
+                    val req = Request.Builder()
+                        .url("https://www.steamgriddb.com/api/v2/grids/game/$targetId?dimensions=600x900")
+                        .header("Authorization", "Bearer $cleanKey")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withTimeoutOrNull emptyList()
+                        val obj = json.parseToJsonElement(resp.body?.string() ?: "{}").jsonObject
+                        if (obj["success"]?.jsonPrimitive?.booleanOrNull != true) return@withTimeoutOrNull emptyList()
+                        val items = obj["data"]?.jsonArray ?: return@withTimeoutOrNull emptyList()
+                        items.take(8).mapNotNull { el ->
+                            val o = el.jsonObject
+                            val u = o["url"].cleanString() ?: return@mapNotNull null
+                            val isNsfw = o["nsfw"]?.jsonPrimitive?.booleanOrNull == true
+                            ArtworkCandidate(
+                                url = u,
+                                sourceName = "SteamGridDB",
+                                description = "600x900 Grid Cover",
+                                isBanner = false,
+                                isNsfw = isNsfw
+                            )
+                        }
+                    }
+                }.orEmpty()
+            }
+
+            heroesDeferred.await() + gridsDeferred.await()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
+    }
+
+    private suspend fun fetchVndbArtwork(
+        title: String,
+        vndbId: String?,
+        englishTitleHint: String?,
+        onBatch: ((List<ArtworkCandidate>) -> Unit)? = null
+    ): VndbArtworkBundle? = coroutineScope {
+        try {
             val payload = buildJsonObject {
-                put("filters", json.parseToJsonElement("[\"search\", \"=\", ${JsonPrimitive(title)}]"))
-                put("fields", "id, title, image{url,sexual,violence}, screenshots{url,sexual,violence}, extlinks{name,id}")
+                if (!vndbId.isNullOrBlank()) {
+                    put("filters", json.parseToJsonElement("[\"id\", \"=\", ${JsonPrimitive(vndbId)}]"))
+                    put("results", 1)
+                } else {
+                    val q = englishTitleHint?.takeIf { it.isNotBlank() } ?: title
+                    put("filters", json.parseToJsonElement("[\"search\", \"=\", ${JsonPrimitive(q)}]"))
+                    put("sort", "votecount")
+                    put("reverse", true)
+                    put("results", 3)
+                }
+                put("fields", "id, title, alttitle, titles{lang,title,official,main}, olang, image{url,sexual,violence}, screenshots{url,sexual,violence}, extlinks{name,id}")
             }
 
             val request = Request.Builder()
@@ -1248,104 +1488,242 @@ class ArtworkWaterfallRepository(
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val responseStr = response.body?.string() ?: return emptyList()
+            val results = client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@coroutineScope null
+                val responseStr = response.body?.string() ?: return@coroutineScope null
                 val parsed = json.parseToJsonElement(responseStr).jsonObject
-                val results = parsed["results"]?.jsonArray ?: return emptyList()
+                parsed["results"]?.jsonArray ?: return@coroutineScope null
+            }
 
-                val candidates = mutableListOf<ArtworkCandidate>()
-                results.forEachIndexed { resIdx, item ->
-                    val obj = item.jsonObject
-                    val vnId = obj["id"].cleanString()
-                    val vnTitle = obj["title"].cleanString() ?: title
-                    val imageObj = obj["image"] as? JsonObject
-                    val coverUrl = imageObj?.get("url").cleanString()
-                    val coverSex = imageObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
-                    val coverViol = imageObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
-                    if (!coverUrl.isNullOrBlank()) {
-                        candidates.add(
+            val immediateCandidates = mutableListOf<ArtworkCandidate>()
+            var resolvedVnId: String? = null
+            var resolvedEnTitle: String? = null
+            var resolvedNativeTitle: String? = null
+            var resolvedIgdbSlug: String? = null
+
+            results.forEachIndexed { resIdx, node ->
+                val obj = node.jsonObject
+                val vnId = obj["id"].cleanString()
+                val vnTitle = obj["title"].cleanString() ?: title
+                val olang = obj["olang"].cleanString()
+                if (resIdx == 0) {
+                    resolvedVnId = vnId
+                    val titlesArr = obj["titles"]?.jsonArray
+                    resolvedEnTitle = titlesArr?.firstOrNull {
+                        val o = it.jsonObject
+                        val isOff = o["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                        val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                        o["lang"].cleanString() == "en" && (isOff || isMain)
+                    }?.jsonObject?.get("title").cleanString()
+                        ?: titlesArr?.firstOrNull { it.jsonObject["lang"].cleanString() == "en" }?.jsonObject?.get("title").cleanString()
+                    resolvedNativeTitle = obj["alttitle"].cleanString()
+                        ?: titlesArr?.firstOrNull { it.jsonObject["lang"].cleanString() == olang }?.jsonObject?.get("title").cleanString()
+                    resolvedIgdbSlug = obj["extlinks"]?.jsonArray?.firstOrNull {
+                        it.jsonObject["name"].cleanString() == "igdb_game"
+                    }?.jsonObject?.get("id").cleanString()
+                }
+
+                val imageObj = obj["image"] as? JsonObject
+                val coverUrl = imageObj?.get("url").cleanString()
+                val coverSex = imageObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                val coverViol = imageObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                if (!coverUrl.isNullOrBlank()) {
+                    immediateCandidates.add(
+                        ArtworkCandidate(
+                            url = coverUrl,
+                            sourceName = "VNDB",
+                            description = vnTitle,
+                            isBanner = false,
+                            isNsfw = coverSex > 0.45f || coverViol > 0.9f
+                        )
+                    )
+                }
+
+                val screenshots = obj["screenshots"] as? JsonArray
+                screenshots?.forEachIndexed { idx, shot ->
+                    val shotObj = shot as? JsonObject
+                    val shotUrl = shotObj?.get("url").cleanString()
+                    val sSex = shotObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                    val sViol = shotObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                    if (!shotUrl.isNullOrBlank()) {
+                        immediateCandidates.add(
                             ArtworkCandidate(
-                                url = coverUrl,
-                                sourceName = "VNDB",
-                                description = vnTitle,
-                                isBanner = false,
-                                isNsfw = coverSex > 0.45f || coverViol > 0.9f
+                                url = shotUrl,
+                                sourceName = "VNDB Screenshot",
+                                description = "$vnTitle (Screenshot ${idx + 1})",
+                                isBanner = true,
+                                isNsfw = sSex > 0.45f || sViol > 0.9f,
+                                isScreenshot = true
                             )
                         )
                     }
+                }
+            }
 
-                    val screenshots = obj["screenshots"] as? JsonArray
-                    screenshots?.forEachIndexed { idx, shot ->
-                        val shotObj = shot as? JsonObject
-                        val shotUrl = shotObj?.get("url").cleanString()
-                        val sSex = shotObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
-                        val sViol = shotObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
-                        if (!shotUrl.isNullOrBlank()) {
-                            candidates.add(
-                                ArtworkCandidate(
-                                    url = shotUrl,
-                                    sourceName = "VNDB Screenshot",
-                                    description = "$vnTitle (Visual Novel Screenshot ${idx + 1})",
-                                    isBanner = true,
-                                    isNsfw = sSex > 0.45f || sViol > 0.9f
-                                )
-                            )
-                        }
+            if (immediateCandidates.isNotEmpty()) {
+                onBatch?.invoke(immediateCandidates)
+            }
+
+            val topId = resolvedVnId ?: return@coroutineScope VndbArtworkBundle(
+                candidates = immediateCandidates,
+                englishTitle = resolvedEnTitle,
+                nativeTitle = resolvedNativeTitle,
+                igdbSlug = resolvedIgdbSlug
+            )
+
+            // Parallel VNDB /release queries: (1) Steam AppID lookup via extlink="steam", (2) Official package edition covers
+            val steamDeferred = async {
+                withTimeoutOrNull(2500L) {
+                    val relPayload = buildJsonObject {
+                        put("filters", json.parseToJsonElement("[\"and\",[\"vn\",\"=\",[\"id\",\"=\",\"$topId\"]],[\"extlink\",\"=\",\"steam\"]]"))
+                        put("fields", "title,released,official,patch,extlinks{name,id}")
+                        put("results", 15)
+                        put("sort", "released")
+                    }.toString()
+                    val relReq = Request.Builder()
+                        .url("https://api.vndb.org/kana/release")
+                        .post(relPayload.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    client.newCall(relReq).execute().use { relResp ->
+                        val relBody = relResp.body?.string()
+                        if (!relResp.isSuccessful || relBody.isNullOrBlank()) return@withTimeoutOrNull null
+                        val relArr = json.parseToJsonElement(relBody).jsonObject["results"]?.jsonArray
+                        relArr?.firstOrNull { rEl ->
+                            val rObj = rEl.jsonObject
+                            val rDate = rObj["released"].cleanString()
+                            val isOfficial = rObj["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+                            val isPatch = rObj["patch"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                            val hasSteam = rObj["extlinks"]?.jsonArray?.any { it.jsonObject["name"].cleanString() == "steam" } == true
+                            hasSteam && isOfficial && !isPatch && !rDate.isNullOrBlank() && !rDate.equals("TBA", true) && rDate <= "2099-01-01" && !rObj["title"].cleanString().orEmpty().contains("reboot", true)
+                        }?.jsonObject?.get("extlinks")?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
+                            ?: relArr?.firstNotNullOfOrNull { rEl ->
+                                val rObj = rEl.jsonObject
+                                if (rObj["title"].cleanString().orEmpty().contains("reboot", true)) null
+                                else rObj["extlinks"]?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
+                            }
                     }
+                }
+            }
 
-                    // For top match, check VNDB /release for canonical released Steam AppID artwork
-                    if (resIdx == 0 && !vnId.isNullOrBlank()) {
-                        val relPayload = buildJsonObject {
-                            put("filters", json.parseToJsonElement("[\"and\",[\"vn\",\"=\",[\"id\",\"=\",\"$vnId\"]],[\"platform\",\"=\",\"win\"]]"))
-                            put("fields", "title,released,official,patch,extlinks{name,id}")
-                            put("results", 15)
-                            put("sort", "released")
-                        }.toString()
-                        val relReq = Request.Builder()
-                            .url("https://api.vndb.org/kana/release")
-                            .post(relPayload.toRequestBody("application/json".toMediaType()))
-                            .build()
-                        try {
-                            client.newCall(relReq).execute().use { relResp ->
-                                val relBody = relResp.body?.string()
-                                if (relResp.isSuccessful && !relBody.isNullOrBlank()) {
-                                    val relArr = json.parseToJsonElement(relBody).jsonObject["results"]?.jsonArray
-                                    val steamId = relArr?.firstOrNull { rEl ->
-                                        val rObj = rEl.jsonObject
-                                        val rDate = rObj["released"].cleanString()
-                                        val isOfficial = rObj["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
-                                        val isPatch = rObj["patch"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
-                                        val hasSteam = rObj["extlinks"]?.jsonArray?.any { it.jsonObject["name"].cleanString() == "steam" } == true
-                                        hasSteam && isOfficial && !isPatch && !rDate.isNullOrBlank() && !rDate.equals("TBA", true) && rDate <= "2099-01-01" && !rObj["title"].cleanString().orEmpty().contains("reboot", true)
-                                    }?.jsonObject?.get("extlinks")?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
-                                    if (steamId != null) {
-                                        candidates.add(
+            val editionsDeferred = async {
+                withTimeoutOrNull(2500L) {
+                    val imgPayload = buildJsonObject {
+                        put("filters", json.parseToJsonElement("[\"vn\",\"=\",[\"id\",\"=\",\"$topId\"]]"))
+                        put("fields", "title,images{url,type,sexual,violence}")
+                        put("results", 20)
+                    }.toString()
+                    val imgReq = Request.Builder()
+                        .url("https://api.vndb.org/kana/release")
+                        .post(imgPayload.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    val edList = mutableListOf<ArtworkCandidate>()
+                    client.newCall(imgReq).execute().use { resp ->
+                        if (resp.isSuccessful) {
+                            val body = resp.body?.string().orEmpty()
+                            val arr = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray
+                            arr?.forEach { relEl ->
+                                val rObj = relEl.jsonObject
+                                val relTitle = rObj["title"].cleanString() ?: "Release Edition"
+                                rObj["images"]?.jsonArray?.forEach { imgEl ->
+                                    val io = imgEl.jsonObject
+                                    val iType = io["type"].cleanString()?.lowercase()
+                                    if (iType == "pkgfront" || iType == "dig") {
+                                        val u = io["url"].cleanString() ?: return@forEach
+                                        val iSex = io["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f
+                                        val iViol = io["violence"]?.jsonPrimitive?.floatOrNull ?: 0f
+                                        edList.add(
                                             ArtworkCandidate(
-                                                url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamId/library_600x900_2x.jpg",
-                                                sourceName = "Steam",
-                                                description = "$vnTitle (Steam 600x900 Capsule)",
-                                                isBanner = false
-                                            )
-                                        )
-                                        candidates.add(
-                                            ArtworkCandidate(
-                                                url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamId/library_hero.jpg",
-                                                sourceName = "Steam Hero",
-                                                description = "$vnTitle (Steam Hero Banner)",
-                                                isBanner = true
+                                                url = u,
+                                                sourceName = "VNDB Edition",
+                                                description = relTitle,
+                                                isBanner = false,
+                                                isNsfw = iSex > 0.45f || iViol > 0.9f
                                             )
                                         )
                                     }
                                 }
                             }
-                        } catch (_: Exception) {}
+                        }
                     }
-                }
-                candidates
+                    edList.distinctBy { it.url }.take(10)
+                }.orEmpty()
             }
-        } catch (_: Exception) {
-            emptyList()
+
+            val steamAppId = steamDeferred.await()
+            val editionCovers = editionsDeferred.await()
+            val releaseBatch = mutableListOf<ArtworkCandidate>()
+            releaseBatch.addAll(editionCovers)
+
+            if (steamAppId != null) {
+                val labelTitle = resolvedEnTitle ?: title
+                releaseBatch.add(
+                    ArtworkCandidate(
+                        url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamAppId/library_600x900_2x.jpg",
+                        sourceName = "Steam",
+                        description = "$labelTitle (Steam 600x900 Capsule)",
+                        isBanner = false
+                    )
+                )
+                releaseBatch.add(
+                    ArtworkCandidate(
+                        url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamAppId/library_hero.jpg",
+                        sourceName = "Steam Hero",
+                        description = "$labelTitle (Steam Hero Banner)",
+                        isBanner = true,
+                        isScreenshot = false
+                    )
+                )
+                withTimeoutOrNull(2000L) {
+                    try {
+                        val dReq = Request.Builder().url("https://store.steampowered.com/api/appdetails?appids=$steamAppId").get().build()
+                        client.newCall(dReq).execute().use { dResp ->
+                            if (dResp.isSuccessful) {
+                                val dParsed = json.parseToJsonElement(dResp.body?.string().orEmpty()).jsonObject
+                                val appData = dParsed[steamAppId.toString()]?.jsonObject?.get("data")?.jsonObject
+                                val bgRaw = appData?.get("background_raw").cleanString() ?: appData?.get("background").cleanString()
+                                if (!bgRaw.isNullOrBlank()) {
+                                    releaseBatch.add(
+                                        ArtworkCandidate(
+                                            url = bgRaw,
+                                            sourceName = "Steam Background",
+                                            description = "$labelTitle (Key Backdrop)",
+                                            isBanner = true,
+                                            isScreenshot = false
+                                        )
+                                    )
+                                }
+                                val hdr = appData?.get("header_image").cleanString()
+                                if (!hdr.isNullOrBlank()) {
+                                    releaseBatch.add(
+                                        ArtworkCandidate(
+                                            url = hdr,
+                                            sourceName = "Steam",
+                                            description = "$labelTitle (Store Header)",
+                                            isBanner = true,
+                                            isScreenshot = false
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (releaseBatch.isNotEmpty()) {
+                onBatch?.invoke(releaseBatch)
+            }
+
+            VndbArtworkBundle(
+                candidates = immediateCandidates + releaseBatch,
+                steamAppId = steamAppId,
+                englishTitle = resolvedEnTitle,
+                nativeTitle = resolvedNativeTitle,
+                igdbSlug = resolvedIgdbSlug
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            null
         }
     }
 

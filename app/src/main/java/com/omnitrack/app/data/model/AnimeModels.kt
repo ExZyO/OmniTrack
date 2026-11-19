@@ -9,7 +9,8 @@ data class AnimeCharacterItem(
     val voiceActorName: String? = null,
     val voiceActorImageUrl: String? = null,
     val voiceActorLanguage: String = "JP",
-    val vndbCharacterId: String? = null
+    val vndbCharacterId: String? = null,
+    val spoilerLevel: Int = 0
 )
 
 data class AnimeRelationItem(

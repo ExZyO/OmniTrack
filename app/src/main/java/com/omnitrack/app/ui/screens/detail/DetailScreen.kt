@@ -968,6 +968,7 @@ fun DetailScreen(
                                                     DetailAnimeCastSection(
                                                         characters = uiState.animeCharacters,
                                                         isMangaOrNovel = isReadingType,
+                                                        spoilerThreshold = if (item.mediaType == MediaType.VISUAL_NOVEL) vnSpoilerLevel.level else Int.MAX_VALUE,
                                                         onCharacterClick = { character ->
                                                             pushSheet(DetailSheetTarget.AnimeCharacter(character))
                                                         },
@@ -1399,6 +1400,63 @@ fun DetailScreen(
 
             // Cover & Banner artwork customization bottom sheet (Option A multi-tab)
             if (showArtworkPicker) {
+                val initialArtCandidates = remember(item.id, losslessCover, item.bannerUrl, uiState.vnDetailMeta) {
+                    buildList {
+                        val effectiveInitCover = losslessCover.takeIf { it.isNotBlank() } ?: item.coverUrl
+                        if (effectiveInitCover.isNotBlank()) {
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = effectiveInitCover,
+                                    sourceName = "Default",
+                                    description = "Current Cover",
+                                    isBanner = false
+                                )
+                            )
+                        }
+                        item.bannerUrl?.takeIf { it.isNotBlank() }?.let { b ->
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = b,
+                                    sourceName = "Default",
+                                    description = "Current Banner",
+                                    isBanner = true,
+                                    isScreenshot = b.contains("t.vndb.org/sf/")
+                                )
+                            )
+                        }
+                        uiState.vnDetailMeta.steamAppId?.let { appId ->
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg",
+                                    sourceName = "Steam",
+                                    description = "Steam 600x900 Capsule",
+                                    isBanner = false
+                                )
+                            )
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_hero.jpg",
+                                    sourceName = "Steam Hero",
+                                    description = "Steam Hero Banner",
+                                    isBanner = true,
+                                    isScreenshot = false
+                                )
+                            )
+                        }
+                        uiState.vnDetailMeta.screenshots.forEachIndexed { idx, shot ->
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = shot.url,
+                                    sourceName = "VNDB Screenshot",
+                                    description = shot.releaseTitle ?: "VNDB CG ${idx + 1}",
+                                    isBanner = true,
+                                    isNsfw = shot.isSensitive,
+                                    isScreenshot = true
+                                )
+                            )
+                        }
+                    }
+                }
                 ArtworkPickerBottomSheet(
                     title = item.title,
                     mediaType = item.mediaType,
@@ -1414,6 +1472,9 @@ fun DetailScreen(
                     romajiTitle = uiState.romajiTitle,
                     originCountry = item.originCountry ?: uiState.countryOfOrigin,
                     defaultCoverUrl = item.coverUrl,
+                    vndbId = item.vndbId,
+                    englishTitle = uiState.englishTitle,
+                    initialCandidates = initialArtCandidates,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
                         if (newUrl.startsWith("/") || newUrl.startsWith("file:") || newUrl.startsWith("content:")) {

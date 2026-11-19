@@ -1044,9 +1044,13 @@ class OmniSearchRepository(
 
     private suspend fun searchVndb(query: String): List<SearchResultItem> = NetworkPacer.withVndbPacing {
         try {
+            val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
             val payload = buildJsonObject {
-                put("filters", json.parseToJsonElement("[\"search\", \"=\", \"$query\"]"))
-                put("fields", "id, title, alttitle, olang, length, length_minutes, released, rating, description, image{url,sexual,violence}, screenshots{url,sexual,violence}")
+                put("filters", json.parseToJsonElement("[\"search\", \"=\", ${JsonPrimitive(query)}]"))
+                put("fields", "id, title, alttitle, titles{lang,title,latin,official,main}, olang, length, length_minutes, released, rating, votecount, description, image{url,sexual,violence}, screenshots{url,sexual,violence}")
+                put("sort", "votecount")
+                put("reverse", true)
+                put("results", 20)
             }
 
             val request = Request.Builder()
@@ -1063,9 +1067,28 @@ class OmniSearchRepository(
                 results.mapNotNull { node ->
                     val obj = node.jsonObject
                     val id = obj["id"].cleanString() ?: return@mapNotNull null
-                    val title = obj["title"].cleanString() ?: return@mapNotNull null
+                    val romajiTitle = obj["title"].cleanString() ?: return@mapNotNull null
                     val altTitle = obj["alttitle"].cleanString()
                     val olang = obj["olang"].cleanString()
+                    val titlesArray = obj["titles"]?.jsonArray
+                    val englishTitle = titlesArray?.firstOrNull {
+                        val o = it.jsonObject
+                        val isOfficial = o["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                        val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                        o["lang"].cleanString() == "en" && (isOfficial || isMain)
+                    }?.jsonObject?.get("title").cleanString()
+                        ?: titlesArray?.firstOrNull { it.jsonObject["lang"].cleanString() == "en" }?.jsonObject?.get("title").cleanString()
+                    val nativeFromTitles = titlesArray?.firstOrNull {
+                        val o = it.jsonObject
+                        val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                        isMain || o["lang"].cleanString() == olang
+                    }?.jsonObject?.get("title").cleanString()
+                    val nativeTitle = altTitle ?: nativeFromTitles
+                    val resolvedTitle = when (pref) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> englishTitle ?: romajiTitle
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> romajiTitle
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nativeTitle ?: romajiTitle
+                    }
                     val origin = when (olang?.lowercase()) {
                         "ja" -> "JP"
                         "en" -> "EN"
@@ -1092,8 +1115,8 @@ class OmniSearchRepository(
                     )
 
                     SearchResultItem(
-                        title = title,
-                        nativeTitle = altTitle,
+                        title = resolvedTitle,
+                        nativeTitle = nativeTitle,
                         synopsis = desc,
                         coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
                         bannerUrl = safeShot?.let { LosslessCoverMapper.toLosslessUrl(it) },

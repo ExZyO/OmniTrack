@@ -1970,7 +1970,15 @@ class DetailViewModel(
             }
 
             if (item.mediaType == MediaType.VISUAL_NOVEL) {
-                val vnData = visualNovelEnrichmentSource.fetchFullVisualNovelData(item)
+                val sgdbKey = preferenceManager?.steamGridDbApiKey?.firstOrNull()?.ifBlank { null }
+                val igdbClientId = preferenceManager?.igdbClientId?.firstOrNull()?.ifBlank { null }
+                val igdbClientSecret = preferenceManager?.igdbClientSecret?.firstOrNull()?.ifBlank { null }
+                val vnData = visualNovelEnrichmentSource.fetchFullVisualNovelData(
+                    item = item,
+                    steamGridDbApiKey = sgdbKey,
+                    igdbClientId = igdbClientId,
+                    igdbClientSecret = igdbClientSecret
+                )
                 if (!isStillCurrentItem()) return@launch
                 if (vnData != null) {
                     _vnDetailMeta.value = vnData.vnDetailMeta
@@ -1999,9 +2007,31 @@ class DetailViewModel(
                         _heroClearLogoUrl.value = vnData.clearLogoUrl
                     }
 
+                    val prefLang = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+                    val preferredTitle = when (prefLang) {
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH ->
+                            vnData.englishTitle ?: vnData.romajiTitle ?: vnData.nativeTitle
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI ->
+                            vnData.romajiTitle ?: vnData.englishTitle ?: vnData.nativeTitle
+                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE ->
+                            vnData.nativeTitle ?: vnData.romajiTitle ?: vnData.englishTitle
+                    }
+                    val knownTitles = listOfNotNull(vnData.englishTitle, vnData.romajiTitle, vnData.nativeTitle)
+                    fun resolveUpdatedTitle(currentTitle: String): String {
+                        val trimmed = currentTitle.trim()
+                        return if (preferredTitle != null && knownTitles.any { it.equals(trimmed, ignoreCase = true) }) {
+                            preferredTitle
+                        } else currentTitle
+                    }
+
                     if (item.id > 0L) {
                         val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                        val shouldUpgradeBanner = latest.customBannerPath.isNullOrBlank() && (
+                            latest.bannerUrl.isNullOrBlank() ||
+                                (latest.bannerUrl.contains("t.vndb.org/sf/") && !vnData.bannerUrl.isNullOrBlank() && !vnData.bannerUrl.contains("t.vndb.org/sf/"))
+                            )
                         val updated = latest.copy(
+                            title = resolveUpdatedTitle(latest.title),
                             vndbId = vnData.resolvedVndbId ?: latest.vndbId,
                             bangumiId = vnData.resolvedBangumiId ?: latest.bangumiId,
                             nativeTitle = latest.nativeTitle ?: vnData.nativeTitle,
@@ -2016,9 +2046,7 @@ class DetailViewModel(
                             communityScore = vnData.communityScore ?: latest.communityScore,
                             metacriticScore = vnData.metacriticScore ?: latest.metacriticScore,
                             synopsis = latest.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
-                            bannerUrl = if (latest.bannerUrl.isNullOrBlank() && latest.customBannerPath.isNullOrBlank()) {
-                                vnData.bannerUrl
-                            } else latest.bannerUrl
+                            bannerUrl = if (shouldUpgradeBanner) (vnData.bannerUrl ?: latest.bannerUrl) else latest.bannerUrl
                         )
                         if (isStillCurrentItem() && updated != latest) {
                             repository.updateMedia(updated)
@@ -2029,7 +2057,10 @@ class DetailViewModel(
                     } else if (isStillCurrentItem()) {
                         val currentPreview = _previewItem.value
                         if (currentPreview != null) {
+                            val shouldUpgradePreviewBanner = currentPreview.bannerUrl.isNullOrBlank() ||
+                                (currentPreview.bannerUrl.contains("t.vndb.org/sf/") && !vnData.bannerUrl.isNullOrBlank() && !vnData.bannerUrl.contains("t.vndb.org/sf/"))
                             val updatedPreview = currentPreview.copy(
+                                title = resolveUpdatedTitle(currentPreview.title),
                                 vndbId = vnData.resolvedVndbId ?: currentPreview.vndbId,
                                 bangumiId = vnData.resolvedBangumiId ?: currentPreview.bangumiId,
                                 nativeTitle = currentPreview.nativeTitle ?: vnData.nativeTitle,
@@ -2044,7 +2075,7 @@ class DetailViewModel(
                                 communityScore = vnData.communityScore ?: currentPreview.communityScore,
                                 metacriticScore = vnData.metacriticScore ?: currentPreview.metacriticScore,
                                 synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
-                                bannerUrl = currentPreview.bannerUrl?.takeIf { it.isNotBlank() } ?: vnData.bannerUrl
+                                bannerUrl = if (shouldUpgradePreviewBanner) (vnData.bannerUrl ?: currentPreview.bannerUrl) else currentPreview.bannerUrl
                             )
                             _previewItem.value = updatedPreview
                             _previewStack.update { stack ->
@@ -4348,6 +4379,7 @@ class DetailViewModel(
                     routeType = "HEROINE",
                     characterId = heroine.vndbCharacterId,
                     characterImageUrl = heroine.characterImageUrl,
+                    isSpoiler = heroine.spoilerLevel > 0,
                     sortOrder = order++
                 )
             )

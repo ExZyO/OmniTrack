@@ -133,6 +133,9 @@ class PreferenceManager(private val context: Context) {
         val OPENROUTER_API_KEY = stringPreferencesKey("openrouter_api_key")
         val TMDB_API_KEY = stringPreferencesKey("tmdb_api_key")
         val FANART_API_KEY = stringPreferencesKey("fanart_api_key")
+        val STEAMGRIDDB_API_KEY = stringPreferencesKey("steamgriddb_api_key")
+        val IGDB_CLIENT_ID = stringPreferencesKey("igdb_client_id")
+        val IGDB_CLIENT_SECRET = stringPreferencesKey("igdb_client_secret")
         val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
         val AI_SEMANTIC_SEARCH_ENABLED = booleanPreferencesKey("ai_semantic_search_enabled")
 
@@ -281,6 +284,29 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun updateFanartApiKey(key: String) {
         context.dataStore.edit { it[PreferencesKeys.FANART_API_KEY] = key }
+    }
+
+    val steamGridDbApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.STEAMGRIDDB_API_KEY] ?: "" }
+
+    suspend fun updateSteamGridDbApiKey(key: String) {
+        context.dataStore.edit { it[PreferencesKeys.STEAMGRIDDB_API_KEY] = key }
+    }
+
+    val igdbClientId: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.IGDB_CLIENT_ID] ?: "" }
+
+    val igdbClientSecret: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.IGDB_CLIENT_SECRET] ?: "" }
+
+    suspend fun updateIgdbCredentials(clientId: String, clientSecret: String) {
+        context.dataStore.edit {
+            it[PreferencesKeys.IGDB_CLIENT_ID] = clientId
+            it[PreferencesKeys.IGDB_CLIENT_SECRET] = clientSecret
+        }
     }
 
     val mdblistApiKey: Flow<String> = context.dataStore.data

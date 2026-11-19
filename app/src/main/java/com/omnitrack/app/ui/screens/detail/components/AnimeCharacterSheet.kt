@@ -195,8 +195,8 @@ fun AnimeCharacterSheet(
                 val headerNativeName = vnProfile?.nativeName ?: detail?.nativeName
                 val headerRoleLabel = if (vnProfile != null) {
                     when (vnProfile.role.lowercase()) {
-                        "main" -> "MAIN HEROINE"
-                        "primary" -> "PROTAGONIST"
+                        "main" -> "PROTAGONIST"
+                        "primary" -> "MAIN HEROINE"
                         "side" -> "SIDE CHARACTER"
                         else -> "SUPPORTING CHARACTER"
                     }

@@ -330,23 +330,37 @@ fun DetailVnRoutesSection(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (!route.characterImageUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(route.characterImageUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = route.routeName,
-                            contentScale = ContentScale.Crop,
+                        Box(
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
-                        )
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(route.characterImageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = route.routeName,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .let { if (isSpoilerHidden) it.blur(12.dp) else it }
+                            )
+                            if (isSpoilerHidden) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color.Black.copy(alpha = 0.35f))
+                                )
+                            }
+                        }
                     } else {
                         Box(
                             modifier = Modifier
                                 .size(34.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f)),
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .let { if (isSpoilerHidden) it.blur(6.dp) else it },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -366,7 +380,7 @@ fun DetailVnRoutesSection(
                             color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = if (isSpoilerHidden) Modifier.blur(6.dp) else Modifier
+                            modifier = if (isSpoilerHidden) Modifier.blur(7.dp) else Modifier
                         )
 
                         val subParts = buildList {
@@ -380,7 +394,8 @@ fun DetailVnRoutesSection(
                             fontSize = 11.5.sp,
                             color = Color.White.copy(alpha = 0.65f),
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (isSpoilerHidden) Modifier.blur(6.dp) else Modifier
                         )
                     }
 

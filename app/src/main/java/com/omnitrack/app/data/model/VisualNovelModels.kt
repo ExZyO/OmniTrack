@@ -82,6 +82,7 @@ data class VnCharacterProfile(
     val sexual: Float = 0f,
     val violence: Float = 0f,
     val role: String = "main",
+    val spoilerLevel: Int = 0,
     val description: String? = null,
     val sex: String? = null,
     val age: Int? = null,

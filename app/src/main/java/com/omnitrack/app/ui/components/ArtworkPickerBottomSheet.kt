@@ -15,6 +15,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -54,6 +55,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -125,6 +127,9 @@ fun ArtworkPickerBottomSheet(
     romajiTitle: String? = null,
     originCountry: String? = null,
     defaultCoverUrl: String? = null,
+    vndbId: String? = null,
+    englishTitle: String? = null,
+    initialCandidates: List<ArtworkCandidate> = emptyList(),
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
     onBannerSelected: (String) -> Unit = {},
@@ -141,7 +146,7 @@ fun ArtworkPickerBottomSheet(
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var allCandidates by remember { mutableStateOf<List<ArtworkCandidate>>(emptyList()) }
+    var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId) { mutableStateOf(initialCandidates) }
     var isLoading by remember { mutableStateOf(false) }
     var excludedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDirectUrlInput by remember { mutableStateOf(false) }
@@ -184,7 +189,7 @@ fun ArtworkPickerBottomSheet(
     val fetchCandidates: (Boolean) -> Unit = { forceRefresh ->
         scope.launch {
             isLoading = true
-            allCandidates = effectiveRepository.searchArtworkCandidates(
+            val finalResults = effectiveRepository.searchArtworkCandidates(
                 title = title,
                 mediaType = mediaType,
                 anilistId = anilistId,
@@ -194,13 +199,22 @@ fun ArtworkPickerBottomSheet(
                 romajiTitle = romajiTitle,
                 originCountry = originCountry,
                 defaultCoverUrl = defaultCoverUrl,
-                forceRefresh = forceRefresh
+                forceRefresh = forceRefresh,
+                vndbId = vndbId,
+                englishTitle = englishTitle,
+                initialCandidates = initialCandidates,
+                onPartialResults = { partial ->
+                    scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                        allCandidates = partial
+                    }
+                }
             )
+            allCandidates = finalResults
             isLoading = false
         }
     }
 
-    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId) {
+    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId, vndbId) {
         fetchCandidates(false)
     }
 
@@ -354,7 +368,19 @@ fun ArtworkPickerBottomSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (isLoading) {
+            if (isLoading && allCandidates.isNotEmpty()) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .padding(bottom = 0.dp),
+                    color = AccentArctic,
+                    trackColor = Color.Transparent
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (isLoading && allCandidates.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -375,8 +401,8 @@ fun ArtworkPickerBottomSheet(
                             MediaType.MANGA -> "Querying AniList, MangaDex, BookWalker, Naver, Kuaikan, Bangumi & Kitsu..."
                             MediaType.ANIME -> "Querying AniList, TMDb, Bangumi, Kitsu & MangaDex..."
                             MediaType.SHOW, MediaType.MOVIE -> "Querying TMDb, TVMaze & Bangumi..."
-                            MediaType.GAME -> "Querying Steam Artwork..."
-                            MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam & Bangumi..."
+                            MediaType.GAME -> "Querying Steam, IGDB & SteamGridDB..."
+                            MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam, AniList, IGDB, SteamGridDB & Bangumi..."
                             else -> "Querying artwork providers..."
                         }
                         Text(
@@ -805,7 +831,59 @@ fun ArtworkPickerBottomSheet(
 
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            if (displayedBanners.isEmpty()) {
+                            var userPickedBannerFilter by remember { mutableStateOf<String?>(null) }
+                            val cleanBannerCount = remember(displayedBanners) { displayedBanners.count { !it.isScreenshot } }
+                            val shotBannerCount = remember(displayedBanners) { displayedBanners.count { it.isScreenshot } }
+                            val activeVnBannerFilter = userPickedBannerFilter ?: if (cleanBannerCount > 0) "CLEAN" else "ALL"
+                            val visibleBanners = remember(displayedBanners, mediaType, activeVnBannerFilter) {
+                                if (mediaType != MediaType.VISUAL_NOVEL) {
+                                    displayedBanners
+                                } else when (activeVnBannerFilter) {
+                                    "CLEAN" -> displayedBanners.filter { !it.isScreenshot }
+                                    "SHOTS" -> displayedBanners.filter { it.isScreenshot }
+                                    else -> displayedBanners
+                                }
+                            }
+
+                            if (mediaType == MediaType.VISUAL_NOVEL && displayedBanners.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
+                                        .padding(bottom = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                                ) {
+                                    listOf(
+                                        "CLEAN" to "Clean Art ($cleanBannerCount)",
+                                        "ALL" to "All (${displayedBanners.size})",
+                                        "SHOTS" to "Screenshots ($shotBannerCount)"
+                                    ).forEach { (key, label) ->
+                                        val selected = activeVnBannerFilter == key
+                                        Column(
+                                            modifier = Modifier
+                                                .width(IntrinsicSize.Max)
+                                                .clickable { userPickedBannerFilter = key },
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                                fontSize = 12.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(2.dp)
+                                                    .background(if (selected) Color.White else Color.Transparent)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (visibleBanners.isEmpty()) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -817,7 +895,11 @@ fun ArtworkPickerBottomSheet(
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Text(
-                                            text = "No dedicated widescreen banners found online.",
+                                            text = if (mediaType == MediaType.VISUAL_NOVEL && displayedBanners.isNotEmpty()) {
+                                                "No clean widescreen art found — try the Screenshots tab."
+                                            } else {
+                                                "No dedicated widescreen banners found online."
+                                            },
                                             color = TextMuted,
                                             fontSize = 13.sp,
                                             textAlign = TextAlign.Center
@@ -836,7 +918,7 @@ fun ArtworkPickerBottomSheet(
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    items(displayedBanners, key = { it.url }) { candidate ->
+                                    items(visibleBanners, key = { it.url }) { candidate ->
                                         val isCurrent = candidate.url == currentBannerUrl
 
                                         Box(
@@ -934,7 +1016,8 @@ fun ArtworkPickerBottomSheet(
                             val standard = listOf(
                                 "RanobeDB", "AniList", "MangaDex", "BookWalker", "Naver", "Kuaikan",
                                 "Bangumi", "Kitsu", "MyAnimeList", "Comick", "TMDb",
-                                "Steam", "TVMaze", "VNDB"
+                                "Steam", "Steam Hero", "Steam Background", "SteamGridDB",
+                                "IGDB", "IGDB Artwork", "TVMaze", "VNDB", "VNDB Edition", "VNDB Screenshot"
                             )
                             val discovered = allCandidates
                                 .map { it.sourceName }

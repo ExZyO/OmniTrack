@@ -19,8 +19,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -45,11 +50,13 @@ fun DetailAnimeCastSection(
     characters: List<AnimeCharacterItem>,
     modifier: Modifier = Modifier,
     isMangaOrNovel: Boolean = false,
+    spoilerThreshold: Int = Int.MAX_VALUE,
     onCharacterClick: ((AnimeCharacterItem) -> Unit)? = null,
     onVoiceActorClick: ((AnimeCharacterItem) -> Unit)? = null
 ) {
     if (characters.isEmpty()) return
     val context = LocalContext.current
+    var revealedCharIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -83,10 +90,19 @@ fun DetailAnimeCastSection(
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             itemsIndexed(characters, key = { index, item -> "${item.characterId}_$index" }) { _, item ->
+                val isSpoilerMasked = item.spoilerLevel > spoilerThreshold && item.characterId !in revealedCharIds
                 Column(
                     modifier = Modifier
                         .width(104.dp)
-                        .then(if (onCharacterClick != null) Modifier.clickable { onCharacterClick(item) } else Modifier),
+                        .then(
+                            if (isSpoilerMasked) {
+                                Modifier.clickable { revealedCharIds = revealedCharIds + item.characterId }
+                            } else if (onCharacterClick != null) {
+                                Modifier.clickable { onCharacterClick(item) }
+                            } else {
+                                Modifier
+                            }
+                        ),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Portrait Box with PiP Seiyuu badge
@@ -112,8 +128,25 @@ fun DetailAnimeCastSection(
                                         .build(),
                                     contentDescription = item.characterName,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.matchParentSize()
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .let { if (isSpoilerMasked) it.blur(12.dp) else it }
                                 )
+                            }
+                            if (isSpoilerMasked) {
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color.Black.copy(alpha = 0.38f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Spoiler",
+                                        color = Color.White.copy(alpha = 0.80f),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 
@@ -126,7 +159,13 @@ fun DetailAnimeCastSection(
                                     .clip(CircleShape)
                                     .background(Color(0xFF000000))
                                     .border(2.dp, Color(0xFF000000), CircleShape)
-                                    .then(if (onVoiceActorClick != null && item.voiceActorId != null) Modifier.clickable { onVoiceActorClick(item) } else Modifier)
+                                    .then(
+                                        if (!isSpoilerMasked && onVoiceActorClick != null && item.voiceActorId != null) {
+                                            Modifier.clickable { onVoiceActorClick(item) }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                             ) {
                                 AsyncImage(
                                     model = ImageRequest.Builder(context)
@@ -135,7 +174,9 @@ fun DetailAnimeCastSection(
                                         .build(),
                                     contentDescription = item.voiceActorName,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.matchParentSize()
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .let { if (isSpoilerMasked) it.blur(10.dp) else it }
                                 )
                             }
                         }
@@ -148,15 +189,20 @@ fun DetailAnimeCastSection(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (isSpoilerMasked) Modifier.blur(6.dp) else Modifier
                     )
 
                     val secondaryText = when {
                         !item.voiceActorName.isNullOrBlank() -> item.voiceActorName
-                        isMangaOrNovel -> item.characterRole
-                            .replace("_", " ")
-                            .lowercase()
-                            .replaceFirstChar { it.uppercase() }
+                        isMangaOrNovel || item.vndbCharacterId != null -> when (item.characterRole.uppercase()) {
+                            "PROTAGONIST" -> "Protagonist"
+                            "MAIN" -> "Main Heroine"
+                            else -> item.characterRole
+                                .replace("_", " ")
+                                .lowercase()
+                                .replaceFirstChar { it.uppercase() }
+                        }
                         else -> "Unknown VA"
                     }
                     Text(
@@ -164,7 +210,8 @@ fun DetailAnimeCastSection(
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 10.sp,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (isSpoilerMasked) Modifier.blur(6.dp) else Modifier
                     )
                 }
             }
