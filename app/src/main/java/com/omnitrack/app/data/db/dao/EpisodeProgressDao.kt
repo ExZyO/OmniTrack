@@ -12,6 +12,12 @@ interface EpisodeProgressDao {
     @Query("SELECT * FROM episode_progress WHERE mediaId = :mediaId")
     fun getProgressForMedia(mediaId: Long): Flow<List<EpisodeProgressEntity>>
 
+    @Query("SELECT * FROM episode_progress WHERE mediaId = :mediaId AND seasonNumber = :seasonNumber AND episodeNumber = :episodeNumber LIMIT 1")
+    suspend fun getEpisodeProgressOnce(mediaId: Long, seasonNumber: Int, episodeNumber: Int): EpisodeProgressEntity?
+
+    @Query("SELECT * FROM episode_progress WHERE mediaId = :mediaId")
+    suspend fun getAllProgressForMediaOnce(mediaId: Long): List<EpisodeProgressEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(progress: EpisodeProgressEntity)
 

@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.detail.components
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
@@ -199,6 +200,17 @@ fun DetailCommentsSection(
     var isSpoilerMode by remember { mutableStateOf(false) }
     var showGifPicker by remember { mutableStateOf(false) }
     var tagPickerExpanded by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = showGifPicker || replyingToComment != null || editingComment != null) {
+        when {
+            showGifPicker -> showGifPicker = false
+            editingComment != null -> {
+                editingComment = null
+                newCommentText = ""
+            }
+            replyingToComment != null -> replyingToComment = null
+        }
+    }
 
     // Filter comments by selected tag and sort
     val filteredComments = remember(localCommentsList, selectedTag, sortOrder) {

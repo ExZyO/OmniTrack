@@ -2425,7 +2425,30 @@ class EnrichmentRepository(
         val label: String? = null,
         val titleOrig: String? = null,
         val romajiOrig: String? = null,
-        val bookType: String? = null
+        val bookType: String? = null,
+        val bookId: Long? = null
+    )
+
+    data class RanobeDbBookLink(
+        val label: String,
+        val url: String
+    )
+
+    data class RanobeDbBookDetail(
+        val bookId: Long,
+        val title: String,
+        val titleOrig: String?,
+        val synopsis: String?,
+        val ratingScore: Float?,
+        val ratingCount: Int?,
+        val jpReleaseDate: String?,
+        val enReleaseDate: String?,
+        val printPages: Int?,
+        val digitalPages: Int?,
+        val isbn13: String?,
+        val publishers: List<String>,
+        val staff: List<AnimeStaffItem>,
+        val links: List<RanobeDbBookLink>
     )
 
     data class RanobeDbSeriesDetails(
@@ -2473,6 +2496,7 @@ class EnrichmentRepository(
     private val novelSeriesContentCache = java.util.concurrent.ConcurrentHashMap<String, NovelSeriesContent>()
     private val wikidataNativeCache = java.util.concurrent.ConcurrentHashMap<String, WikidataNativeTitles>()
     private val ranobeDbSeriesCache = java.util.concurrent.ConcurrentHashMap<String, RanobeDbSeriesDetails>()
+    private val ranobeDbBookCache = java.util.concurrent.ConcurrentHashMap<Long, RanobeDbBookDetail>()
     private val kitsuNovelDetailsCache = java.util.concurrent.ConcurrentHashMap<String, KitsuNovelDetails>()
 
     private fun stripNovelEditionSuffix(title: String): String {
@@ -3135,6 +3159,7 @@ class EnrichmentRepository(
                         val olang = series["olang"].cleanString()?.uppercase()
 
                         data class RawRanobeBook(
+                            val bookId: Long?,
                             val uniqueKey: String,
                             val sortOrder: Int,
                             val origIdx: Int,
@@ -3172,6 +3197,7 @@ class EnrichmentRepository(
                             val label = volMatch?.groupValues?.getOrNull(1)?.let { "Vol. $it" }
 
                             RawRanobeBook(
+                                bookId = bookId,
                                 uniqueKey = bookId?.toString() ?: "$sortOrder:$bTitle",
                                 sortOrder = sortOrder,
                                 origIdx = idx,
@@ -3205,7 +3231,8 @@ class EnrichmentRepository(
                                 label = rb.label ?: "Vol. ${idx + 1}",
                                 titleOrig = rb.titleOrig,
                                 romajiOrig = rb.romajiOrig,
-                                bookType = rb.bookType
+                                bookType = rb.bookType,
+                                bookId = rb.bookId
                             )
                         }
 
@@ -3253,6 +3280,150 @@ class EnrichmentRepository(
                         )
                         ranobeDbSeriesCache[cacheKey] = res
                         res
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    null
+                }
+            }
+        }
+    }
+
+    fun getCachedRanobeBookDetail(bookId: Long): RanobeDbBookDetail? = ranobeDbBookCache[bookId]
+
+    suspend fun fetchRanobeDbBookDetails(bookId: Long): RanobeDbBookDetail? = withContext(Dispatchers.IO) {
+        if (bookId <= 0L) return@withContext null
+        ranobeDbBookCache[bookId]?.let { return@withContext it }
+
+        NetworkPacer.coalesce("ranobedb_book_$bookId") {
+            ranobeDbBookCache[bookId]?.let { return@coalesce it }
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val req = Request.Builder()
+                        .url("https://ranobedb.org/api/v0/book/$bookId")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing null
+                        val body = resp.body?.string() ?: return@withGeneralPacing null
+                        val root = json.parseToJsonElement(body) as? JsonObject ?: return@withGeneralPacing null
+                        val book = root["book"] as? JsonObject ?: return@withGeneralPacing null
+
+                        val title = book["title"].cleanString()
+                            ?: book["romaji_orig"].cleanString()
+                            ?: book["title_orig"].cleanString()
+                            ?: return@withGeneralPacing null
+                        val titleOrig = book["title_orig"].cleanString()
+                        val synopsis = book["description"].cleanString()
+                            ?: book["description_ja"].cleanString()
+
+                        val ratingObj = book["rating"] as? JsonObject
+                        val ratingScore = (ratingObj?.get("score") as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
+                            ?: (book["rating"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
+                        val ratingCount = (ratingObj?.get("count") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+
+                        fun formatYyyymmdd(raw: String?): String? {
+                            val trimmed = raw?.trim() ?: return null
+                            if (trimmed.length == 8 && trimmed.all { it.isDigit() }) {
+                                return "${trimmed.substring(0, 4)}-${trimmed.substring(4, 6)}-${trimmed.substring(6, 8)}"
+                            }
+                            return trimmed.takeIf { it.isNotBlank() }
+                        }
+
+                        val cReleaseDates = book["c_release_dates"] as? JsonObject
+                        val jpDate = formatYyyymmdd((cReleaseDates?.get("ja") as? JsonPrimitive)?.contentOrNull)
+                            ?: formatYyyymmdd((book["c_release_date"] as? JsonPrimitive)?.contentOrNull)
+                        val enDate = formatYyyymmdd((cReleaseDates?.get("en") as? JsonPrimitive)?.contentOrNull)
+
+                        var printPages: Int? = null
+                        var digitalPages: Int? = null
+                        var enIsbn: String? = null
+                        var jaIsbn: String? = null
+                        val links = mutableListOf<RanobeDbBookLink>()
+                        val seenLinkUrls = mutableSetOf<String>()
+
+                        fun addLink(label: String, rawUrl: String?) {
+                            val u = rawUrl.cleanString() ?: return
+                            if (u.startsWith("http") && seenLinkUrls.add(u)) {
+                                links.add(RanobeDbBookLink(label = label, url = u))
+                            }
+                        }
+
+                        (book["releases"] as? JsonArray).orEmpty().forEach { elem ->
+                            val rel = elem as? JsonObject ?: return@forEach
+                            val fmt = rel["format"].cleanString()?.lowercase()
+                            val lang = rel["lang"].cleanString()?.lowercase()
+                            val pages = (rel["pages"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()?.takeIf { it > 0 }
+                            if (pages != null) {
+                                when (fmt) {
+                                    "print" -> if (printPages == null || lang == "en" || lang == "ja") printPages = pages
+                                    "digital" -> if (digitalPages == null || lang == "en" || lang == "ja") digitalPages = pages
+                                }
+                            }
+                            val isbn = rel["isbn13"].cleanString()
+                            if (isbn != null) {
+                                if (lang == "en" && enIsbn == null) enIsbn = isbn
+                                else if (lang == "ja" && jaIsbn == null) jaIsbn = isbn
+                                else if (jaIsbn == null) jaIsbn = isbn
+                            }
+                            addLink("BookWalker", rel["bookwalker"].cleanString())
+                            addLink("Official", rel["website"].cleanString())
+                            addLink("Amazon", rel["amazon"].cleanString())
+                        }
+
+                        val publishers = (book["publishers"] as? JsonArray).orEmpty().mapNotNull { elem ->
+                            val p = elem as? JsonObject ?: return@mapNotNull null
+                            p["romaji"].cleanString() ?: p["name"].cleanString()
+                        }.distinct()
+
+                        val staffSeen = mutableSetOf<String>()
+                        val staffList = mutableListOf<AnimeStaffItem>()
+                        (book["editions"] as? JsonArray).orEmpty().forEach { edElem ->
+                            val ed = edElem as? JsonObject ?: return@forEach
+                            (ed["staff"] as? JsonArray).orEmpty().forEach { stElem ->
+                                val st = stElem as? JsonObject ?: return@forEach
+                                val roleType = st["role_type"].cleanString()?.lowercase() ?: "staff"
+                                val roleLabel = when (roleType) {
+                                    "author" -> "Author"
+                                    "artist" -> "Illustrator"
+                                    "translator" -> "Translator"
+                                    "narrator" -> "Narrator"
+                                    else -> st["note"].cleanString() ?: "Staff"
+                                }
+                                val sName = st["romaji"].cleanString() ?: st["name"].cleanString() ?: return@forEach
+                                if (!staffSeen.add("${sName.lowercase()}:$roleLabel")) return@forEach
+                                val stId = (st["staff_id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+                                staffList.add(
+                                    AnimeStaffItem(
+                                        staffId = stId,
+                                        name = sName,
+                                        nativeName = st["name"].cleanString(),
+                                        role = roleLabel,
+                                        imageUrl = null
+                                    )
+                                )
+                            }
+                        }
+
+                        val detail = RanobeDbBookDetail(
+                            bookId = bookId,
+                            title = title,
+                            titleOrig = titleOrig,
+                            synopsis = synopsis,
+                            ratingScore = ratingScore,
+                            ratingCount = ratingCount,
+                            jpReleaseDate = jpDate,
+                            enReleaseDate = enDate,
+                            printPages = printPages,
+                            digitalPages = digitalPages,
+                            isbn13 = enIsbn ?: jaIsbn,
+                            publishers = publishers,
+                            staff = staffList,
+                            links = links.take(5)
+                        )
+                        ranobeDbBookCache[bookId] = detail
+                        detail
                     }
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -3684,7 +3855,8 @@ class EnrichmentRepository(
                             title = v.title,
                             overview = v.synopsis,
                             stillUrl = v.coverUrl,
-                            airDate = v.releaseDate
+                            airDate = v.releaseDate,
+                            ranobeBookId = v.bookId
                         )
                     }.toMutableList()
                     seasonsList.add(

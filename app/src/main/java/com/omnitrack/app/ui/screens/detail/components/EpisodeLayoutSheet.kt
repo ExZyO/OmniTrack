@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.ViewStream
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -124,7 +125,8 @@ fun EpisodeLayoutSheet(
                 listOf(
                     Triple(EpisodeLayoutMode.HORIZONTAL, "Horizontal Carousel", Icons.Default.ViewStream),
                     Triple(EpisodeLayoutMode.LIST, "Vertical Compact List", Icons.Default.ViewAgenda),
-                    Triple(EpisodeLayoutMode.VERTICAL_CARD, "Vertical Hero Cards", Icons.Default.GridView)
+                    Triple(EpisodeLayoutMode.VERTICAL_CARD, "Vertical Hero Cards", Icons.Default.ViewCarousel),
+                    Triple(EpisodeLayoutMode.POSTER_GRID, "Poster Grid (Light Novels)", Icons.Default.GridView)
                 ).forEach { (mode, title, icon) ->
                     val isSelected = currentMode == mode
                     Row(

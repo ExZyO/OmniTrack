@@ -7,9 +7,11 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -62,6 +64,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +76,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -80,6 +84,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -132,6 +137,7 @@ import com.omnitrack.app.ui.screens.detail.components.rememberDetailSeriesState
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
 import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
+import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
 import com.omnitrack.app.ui.screens.detail.components.UnifiedDiscussionSection
@@ -139,11 +145,14 @@ import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
 import com.omnitrack.app.ui.screens.detail.components.statusColor
 import com.omnitrack.app.data.model.AnimeCharacterItem
+import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.UserMediaListOverlay
 import com.omnitrack.app.ui.screens.detail.components.UserProfileSheet
+import com.omnitrack.app.ui.screens.detail.components.VolumeChapterDetailSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeStaffSection
@@ -162,13 +171,20 @@ import kotlinx.coroutines.launch
 
 sealed class DetailSheetTarget {
     data class UserProfile(val username: String?, val userId: Int?) : DetailSheetTarget()
+    data class UserMediaList(val userId: Int, val username: String, val isAnime: Boolean) : DetailSheetTarget()
     data class AnimeCharacter(val character: AnimeCharacterItem) : DetailSheetTarget()
     data class AnimeStaff(val staff: AnimeStaffItem) : DetailSheetTarget()
     data class Person(val person: CastMember) : DetailSheetTarget()
     data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
+    data class VolumeChapterDetail(val seasonNumber: Int, val episodeNumber: Int) : DetailSheetTarget()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private sealed class DetailNavStep {
+    data class Sheet(val target: DetailSheetTarget) : DetailNavStep()
+    data class Preview(val token: Long) : DetailNavStep()
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun DetailScreen(
     viewModel: DetailViewModel,
@@ -176,16 +192,63 @@ fun DetailScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val prefManager = remember { PreferenceManager(context) }
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
     val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
     val seasonViewMode by prefManager.seasonViewMode.collectAsState(initial = "Posters")
+    val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
 
     val uiState by viewModel.uiState.collectAsState()
     val isCommentsLoading by viewModel.isCommentsLoading.collectAsState()
+    val previewEpisodeMeta by viewModel.previewEpisodeMeta.collectAsState()
+    val ranobeBookDetails by viewModel.ranobeBookDetails.collectAsState()
+    val isTransitionLoading by viewModel.isTransitionLoading.collectAsState()
+    val mergedEpisodeMeta = remember(uiState.episodeMetaMap, previewEpisodeMeta) {
+        uiState.episodeMetaMap + previewEpisodeMeta
+    }
+
     val item = uiState.item
-    val effectiveBanner = item?.customBannerPath ?: item?.bannerUrl
+    val customCoverUrl = remember(item, customPosterPattern) {
+        if (item != null && customPosterPattern.isNotBlank()) {
+            com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = false)
+        } else null
+    }
+    var customCoverFailed by remember(customCoverUrl) { mutableStateOf(false) }
+
+    val customBannerUrl = remember(item, customPosterPattern) {
+        if (item != null && customPosterPattern.isNotBlank() && "{shape}" in customPosterPattern) {
+            com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = true)
+        } else null
+    }
+    var customBannerFailed by remember(customBannerUrl) { mutableStateOf(false) }
+
+    // Dynamic Artwork Role Resolution (Manual user artwork selection strictly overrides templates)
+    val effectiveCover = remember(item?.customCoverPath, item?.artworkRole, item?.coverUrl, item?.bannerUrl, customCoverUrl, customCoverFailed) {
+        if (item == null) "" else {
+            item.customCoverPath
+                ?: when (item.artworkRole) {
+                    "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
+                    else -> if (item.coverUrl.isNotBlank()) item.coverUrl else (if (!customCoverFailed) customCoverUrl ?: "" else "")
+                }
+        }
+    }
+    val effectiveBanner = remember(item?.customBannerPath, item?.artworkRole, item?.coverUrl, item?.bannerUrl, customBannerUrl, customBannerFailed) {
+        when {
+            item == null -> null
+            item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
+            item.customBannerPath != null -> item.customBannerPath
+            !customBannerFailed && customBannerUrl != null -> customBannerUrl
+            item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
+            item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
+            else -> item.bannerUrl
+        }
+    }
+    val isReadingType = item?.mediaType == MediaType.MANGA || item?.mediaType == MediaType.NOVEL
+    val isLightNovelVolumeMode = item?.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
+    val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item?.coverUrl
+
     val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
     val backdropBitmap = rememberArtworkBackdrop(
         imageUrl = effectiveBanner ?: item?.coverUrl,
@@ -200,7 +263,7 @@ fun DetailScreen(
     var showStatusPickerSheet by remember { mutableStateOf(false) }
     var showScoreRatingSheet by remember { mutableStateOf(false) }
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
-    val sheetBackStack = remember { mutableStateListOf<DetailSheetTarget>() }
+    val navHistory = remember { mutableStateListOf<DetailNavStep>() }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 200ms until navigation entrance transition finishes, eliminating frame drops & stutter.
@@ -214,18 +277,52 @@ fun DetailScreen(
     val isAtTopOfList = {
         lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0
     }
+    val latestOnBack by rememberUpdatedState(onBack)
 
-    BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode || viewModel.isPreviewActive()) {
-        if (sheetBackStack.isNotEmpty()) {
-            sheetBackStack.removeAt(sheetBackStack.lastIndex)
-            val restoredOffset = viewModel.popScrollOffset()
-            if (restoredOffset != null) {
-                coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
+    val pushSheet: (DetailSheetTarget) -> Unit = { target ->
+        viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+        navHistory.add(DetailNavStep.Sheet(target))
+    }
+
+    val pushPreview: (RecommendationItem) -> Unit = { recItem ->
+        viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+        navHistory.add(DetailNavStep.Preview(System.nanoTime()))
+        viewModel.openPreview(recItem)
+        coroutineScope.launch { lazyListState.scrollToItem(0) }
+    }
+
+    val pushRelationPreview: (AnimeRelationItem) -> Unit = { relation ->
+        viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+        navHistory.add(DetailNavStep.Preview(System.nanoTime()))
+        viewModel.openRelationPreview(relation)
+        coroutineScope.launch { lazyListState.scrollToItem(0) }
+    }
+
+    val stepBackOneLevel: () -> Unit = {
+        if (navHistory.isNotEmpty()) {
+            when (navHistory.removeAt(navHistory.lastIndex)) {
+                is DetailNavStep.Sheet -> {
+                    val restoredOffset = viewModel.popScrollOffset()
+                    if (restoredOffset != null) {
+                        coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
+                    }
+                }
+                is DetailNavStep.Preview -> {
+                    val handled = viewModel.closePreview()
+                    if (!handled) {
+                        latestOnBack()
+                    } else {
+                        val restoredOffset = viewModel.popScrollOffset()
+                        if (restoredOffset != null) {
+                            coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
+                        }
+                    }
+                }
             }
         } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
             val handled = viewModel.closePreview()
             if (!handled) {
-                onBack()
+                latestOnBack()
             } else {
                 val restoredOffset = viewModel.popScrollOffset()
                 if (restoredOffset != null) {
@@ -233,105 +330,21 @@ fun DetailScreen(
                 }
             }
         } else {
-            onBack()
+            latestOnBack()
         }
     }
 
-    val currentSheet = sheetBackStack.lastOrNull()
-    when (currentSheet) {
-        is DetailSheetTarget.UserProfile -> {
-            UserProfileSheet(
-                username = currentSheet.username,
-                anilistUserId = currentSheet.userId,
-                userAuthToken = uiState.anilistAuthToken,
-                currentUsername = uiState.currentUsername,
-                presentationSettings = presentationSettings,
-                backdropBitmap = backdropBitmap,
-                backdropTargetUrl = effectiveBanner,
-                onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                    viewModel.openPreview(recItem)
-                    coroutineScope.launch { lazyListState.scrollToItem(0) }
-                },
-                onOpenCharacter = { charItem ->
-                    sheetBackStack.add(DetailSheetTarget.AnimeCharacter(charItem))
-                },
-                onOpenStaff = { staffItem ->
-                    sheetBackStack.add(DetailSheetTarget.AnimeStaff(staffItem))
-                },
-                onDismiss = {
-                    sheetBackStack.removeLastOrNull()
-                }
-            )
-        }
-        is DetailSheetTarget.AnimeCharacter -> {
-            AnimeCharacterSheet(
-                character = currentSheet.character,
-                presentationSettings = presentationSettings,
-                backdropBitmap = backdropBitmap,
-                backdropTargetUrl = effectiveBanner,
-                onDismissRequest = { sheetBackStack.removeLastOrNull() },
-                onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                    viewModel.openPreview(recItem)
-                    coroutineScope.launch { lazyListState.scrollToItem(0) }
-                }
-            )
-        }
-        is DetailSheetTarget.AnimeStaff -> {
-            AnimeStaffSheet(
-                staff = currentSheet.staff,
-                presentationSettings = presentationSettings,
-                backdropBitmap = backdropBitmap,
-                backdropTargetUrl = effectiveBanner,
-                onDismissRequest = { sheetBackStack.removeLastOrNull() },
-                onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                    viewModel.openPreview(recItem)
-                    coroutineScope.launch { lazyListState.scrollToItem(0) }
-                }
-            )
-        }
-        is DetailSheetTarget.Person -> {
-            if (currentSheet.person.tmdbPersonId != null) {
-                val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
-                PersonDetailScreen(
-                    personId = currentSheet.person.tmdbPersonId!!,
-                    personName = currentSheet.person.name,
-                    initialAvatarUrl = currentSheet.person.avatarUrl,
-                    apiKey = tmdbKey,
-                    presentationSettings = presentationSettings,
-                    backdropBitmap = backdropBitmap,
-                    backdropTargetUrl = effectiveBanner,
-                    onBack = { sheetBackStack.removeLastOrNull() },
-                    onOpenMediaPreview = { recItem ->
-                        viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                        viewModel.openPreview(recItem)
-                    }
-                )
-                return
-            }
-        }
-        is DetailSheetTarget.Company -> {
-            val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
-            TmdbEntityBrowseScreen(
-                entityId = currentSheet.company.id,
-                entityName = currentSheet.company.name,
-                entityKind = currentSheet.company.kind,
-                apiKey = tmdbKey,
-                presentationSettings = presentationSettings,
-                backdropBitmap = backdropBitmap,
-                backdropTargetUrl = effectiveBanner,
-                onBack = { sheetBackStack.removeLastOrNull() },
-                onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                    viewModel.openPreview(recItem)
-                    coroutineScope.launch { lazyListState.scrollToItem(0) }
-                }
-            )
-            return
-        }
-        null -> {}
+    val exitAllToRoot: () -> Unit = {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        navHistory.clear()
+        viewModel.clearAllPreviews()
+        latestOnBack()
+    }
+
+    val latestStepBack by rememberUpdatedState(stepBackOneLevel)
+
+    BackHandler(enabled = navHistory.isNotEmpty() || uiState.isPreviewMode || viewModel.isPreviewActive()) {
+        stepBackOneLevel()
     }
 
     // Kinematic horizontal & vertical swipe physics (bilateral entry switching & Poweramp pull-down to dismiss)
@@ -390,7 +403,7 @@ fun DetailScreen(
                 dragOffsetY = 0f
                 scrollConsumedInGesture = 0f
                 if (shouldDismiss) {
-                    onBack()
+                    latestStepBack()
                 }
                 return androidx.compose.ui.unit.Velocity.Zero
             }
@@ -564,7 +577,7 @@ fun DetailScreen(
                                         }
                                     }
                                 }
-                                // Swiping right past threshold when at start of single-entry list: return to library
+                                // Swiping right past threshold when at start of single-entry list: step back one level
                                 currentX > 180f && !uiState.hasPreviousEntry -> {
                                     coroutineScope.launch {
                                         animatableOffsetX.animateTo(
@@ -574,7 +587,8 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        onBack()
+                                        latestStepBack()
+                                        animatableOffsetX.snapTo(0f)
                                     }
                                 }
                                 else -> {
@@ -610,46 +624,33 @@ fun DetailScreen(
                     )
                 }
         ) {
-            if (uiState.isLoading && item == null) {
-                Box(Modifier.fillMaxSize().background(AmoledBlack), contentAlignment = Alignment.Center) {
-                    com.omnitrack.app.ui.components.NuvioLoadingIndicator(size = 44.dp)
+            if ((uiState.isLoading && item == null) || isTransitionLoading) {
+                Box(Modifier.fillMaxSize().background(AmoledBlack)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        com.omnitrack.app.ui.components.NuvioLoadingIndicator(size = 44.dp)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .statusBarsPadding()
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .combinedClickable(
+                                onClick = { stepBackOneLevel() },
+                                onLongClick = { exitAllToRoot() }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             } else if (item != null) {
-            val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
-
-            val customCoverUrl = remember(item, customPosterPattern) {
-                if (customPosterPattern.isNotBlank()) {
-                    com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = false)
-                } else null
-            }
-            var customCoverFailed by remember(customCoverUrl) { mutableStateOf(false) }
-
-            val customBannerUrl = remember(item, customPosterPattern) {
-                if (customPosterPattern.isNotBlank() && "{shape}" in customPosterPattern) {
-                    com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = true)
-                } else null
-            }
-            var customBannerFailed by remember(customBannerUrl) { mutableStateOf(false) }
-
-            // Dynamic Artwork Role Resolution (Manual user artwork selection strictly overrides templates)
-            val effectiveCover = remember(item.customCoverPath, item.artworkRole, item.coverUrl, item.bannerUrl, customCoverUrl, customCoverFailed) {
-                item.customCoverPath
-                    ?: when (item.artworkRole) {
-                        "BANNER_AS_COVER" -> item.bannerUrl ?: item.coverUrl
-                        else -> if (item.coverUrl.isNotBlank()) item.coverUrl else (if (!customCoverFailed) customCoverUrl ?: "" else "")
-                    }
-            }
-            val effectiveBanner = remember(item.customBannerPath, item.artworkRole, item.coverUrl, item.bannerUrl, customBannerUrl, customBannerFailed) {
-                when {
-                    item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
-                    item.customBannerPath != null -> item.customBannerPath
-                    !customBannerFailed && customBannerUrl != null -> customBannerUrl
-                    item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-                    item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
-                    else -> item.bannerUrl
-                }
-            }
-
             val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
             val coverImageModel = remember(effectiveCover, item.customCoverPath) {
                 item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
@@ -659,12 +660,6 @@ fun DetailScreen(
             val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
             val dominantAccent = rememberCoverDominantColor(losslessCover)
             val backdropTargetUrl = effectiveBanner
-
-            val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
-            val backdropBitmap = rememberArtworkBackdrop(
-                imageUrl = backdropTargetUrl ?: item.coverUrl,
-                enabled = isCinematicBlur
-            )
 
             val currentClearart = item.clearartUrl?.takeIf { it.isNotBlank() }
                 ?: com.omnitrack.app.data.enrichment.EnrichmentRepository.getCachedClearart(item)
@@ -680,11 +675,13 @@ fun DetailScreen(
                 initialSeasonViewMode = seasonViewMode,
                 layoutMode = episodeLayoutMode
             )
-            val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
-            val isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
-            val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item.coverUrl
 
-            Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
+            Box(
+                Modifier.fillMaxSize().detailsContentReveal(
+                    enabled = true,
+                    revealKey = "${item.id}_${item.anilistId}_${item.tmdbId}_${item.title}"
+                )
+            ) {
             // Background presentation layer
             when (presentationSettings.fallbackBackgroundStyle) {
                 FallbackBackgroundStyle.CINEMATIC_BLUR -> {
@@ -817,6 +814,10 @@ fun DetailScreen(
                                     onSelectSeason = { viewModel.selectSeason(it) },
                                     onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                                     onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
+                                    onOpenEpisodeDetail = { ep ->
+                                        pushSheet(DetailSheetTarget.VolumeChapterDetail(ep.seasonNumber, ep.episodeNumber))
+                                    },
+                                    episodeMetaMap = mergedEpisodeMeta,
                                     isFillerSkipEnabled = uiState.isFillerSkipEnabled,
                                     onToggleSkipFillers = { viewModel.toggleSkipFillers() },
                                     isMangaMode = isReadingType,
@@ -839,9 +840,7 @@ fun DetailScreen(
                                         DetailFranchiseSection(
                                             relations = uiState.animeRelations,
                                             onRelationClick = { relation ->
-                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                                                viewModel.openRelationPreview(relation)
-                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                                pushRelationPreview(relation)
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
@@ -863,11 +862,11 @@ fun DetailScreen(
                                                         characters = uiState.animeCharacters,
                                                         isMangaOrNovel = isReadingType,
                                                         onCharacterClick = { character ->
-                                                            sheetBackStack.add(DetailSheetTarget.AnimeCharacter(character))
+                                                            pushSheet(DetailSheetTarget.AnimeCharacter(character))
                                                         },
                                                         onVoiceActorClick = { char ->
                                                             if (char.voiceActorId != null) {
-                                                                sheetBackStack.add(
+                                                                pushSheet(
                                                                     DetailSheetTarget.AnimeStaff(
                                                                         AnimeStaffItem(
                                                                             staffId = char.voiceActorId,
@@ -889,7 +888,7 @@ fun DetailScreen(
                                                         staff = uiState.animeStaff,
                                                         isMangaOrNovel = isReadingType,
                                                         onStaffClick = { staff ->
-                                                            sheetBackStack.add(DetailSheetTarget.AnimeStaff(staff))
+                                                            pushSheet(DetailSheetTarget.AnimeStaff(staff))
                                                         }
                                                     )
                                                 }
@@ -898,7 +897,9 @@ fun DetailScreen(
                                                 DetailCastSection(
                                                     cast = uiState.cast,
                                                     onCastMemberClick = { member ->
-                                                        sheetBackStack.add(DetailSheetTarget.Person(member))
+                                                        if (member.tmdbPersonId != null) {
+                                                            pushSheet(DetailSheetTarget.Person(member))
+                                                        }
                                                     }
                                                 )
                                                 Spacer(modifier = Modifier.height(20.dp))
@@ -916,7 +917,7 @@ fun DetailScreen(
                                             item = item,
                                             companies = uiState.companies,
                                             onCompanyClick = { company ->
-                                                sheetBackStack.add(DetailSheetTarget.Company(company))
+                                                pushSheet(DetailSheetTarget.Company(company))
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
@@ -932,7 +933,7 @@ fun DetailScreen(
                                             item = item,
                                             tags = uiState.tags,
                                             onGenreOrTagClick = { name, isTag ->
-                                                sheetBackStack.add(
+                                                pushSheet(
                                                     DetailSheetTarget.Company(
                                                         NetworkProductionCompany(
                                                             id = null,
@@ -1043,7 +1044,7 @@ fun DetailScreen(
                                                 viewModel.voteDiscussionComment(commentId, voteType)
                                             },
                                             onUserClick = { username, anilistUserId ->
-                                                sheetBackStack.add(DetailSheetTarget.UserProfile(username, anilistUserId))
+                                                pushSheet(DetailSheetTarget.UserProfile(username, anilistUserId))
                                             },
                                             onSortChange = { sort ->
                                                 viewModel.changeDiscussionSort(sort)
@@ -1065,9 +1066,7 @@ fun DetailScreen(
                                             collectionName = uiState.collectionName ?: "Collection",
                                             items = uiState.collectionItems,
                                             onSelectItem = {
-                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                                                viewModel.openPreview(it)
-                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                                pushPreview(it)
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
@@ -1082,9 +1081,7 @@ fun DetailScreen(
                                         RecommendationsSection(
                                             recommendations = uiState.recommendations,
                                             onSelectRecommendation = {
-                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
-                                                viewModel.openPreview(it)
-                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                                pushPreview(it)
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
@@ -1104,7 +1101,10 @@ fun DetailScreen(
                                 .padding(horizontal = 20.dp, vertical = 8.dp)
                         ) {
                             Button(
-                                onClick = { viewModel.addToLibrary(item) },
+                                onClick = {
+                                    navHistory.clear()
+                                    viewModel.addToLibrary(item)
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(52.dp),
@@ -1159,29 +1159,15 @@ fun DetailScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = {
-                        if (sheetBackStack.isNotEmpty()) {
-                            sheetBackStack.removeAt(sheetBackStack.lastIndex)
-                            val restoredOffset = viewModel.popScrollOffset()
-                            if (restoredOffset != null) {
-                                coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
-                            }
-                        } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
-                            val handled = viewModel.closePreview()
-                            if (!handled) {
-                                onBack()
-                            } else {
-                                val restoredOffset = viewModel.popScrollOffset()
-                                if (restoredOffset != null) {
-                                    coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
-                                }
-                            }
-                        } else {
-                            onBack()
-                        }
-                    },
-                    modifier = Modifier.size(44.dp)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            onClick = { stepBackOneLevel() },
+                            onLongClick = { exitAllToRoot() }
+                        ),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -1409,6 +1395,143 @@ fun DetailScreen(
             )
         }
     }
+
+        // 4. UNIFIED IN-WINDOW SHEETS & DRILL-DOWN OVERLAYS (Render above DetailScreen preserving scroll)
+        val topSheet = (navHistory.lastOrNull() as? DetailNavStep.Sheet)?.target
+        BackHandler(enabled = topSheet != null) {
+            stepBackOneLevel()
+        }
+        when (topSheet) {
+            is DetailSheetTarget.UserProfile -> {
+                UserProfileSheet(
+                    username = topSheet.username,
+                    anilistUserId = topSheet.userId,
+                    userAuthToken = uiState.anilistAuthToken,
+                    currentUsername = uiState.currentUsername,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onOpenMediaPreview = { recItem -> pushPreview(recItem) },
+                    onOpenCharacter = { charItem -> pushSheet(DetailSheetTarget.AnimeCharacter(charItem)) },
+                    onOpenStaff = { staffItem -> pushSheet(DetailSheetTarget.AnimeStaff(staffItem)) },
+                    onOpenMediaList = { uid, uname, isAnime ->
+                        pushSheet(DetailSheetTarget.UserMediaList(uid, uname, isAnime))
+                    },
+                    onDismiss = { stepBackOneLevel() }
+                )
+            }
+            is DetailSheetTarget.UserMediaList -> {
+                UserMediaListOverlay(
+                    userId = topSheet.userId,
+                    username = topSheet.username,
+                    isAnime = topSheet.isAnime,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onBack = { stepBackOneLevel() },
+                    onOpenMediaPreview = { recItem -> pushPreview(recItem) }
+                )
+            }
+            is DetailSheetTarget.AnimeCharacter -> {
+                AnimeCharacterSheet(
+                    character = topSheet.character,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onDismissRequest = { stepBackOneLevel() },
+                    onOpenMediaPreview = { recItem -> pushPreview(recItem) },
+                    onOpenStaff = { staffItem -> pushSheet(DetailSheetTarget.AnimeStaff(staffItem)) }
+                )
+            }
+            is DetailSheetTarget.AnimeStaff -> {
+                AnimeStaffSheet(
+                    staff = topSheet.staff,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onDismissRequest = { stepBackOneLevel() },
+                    onOpenMediaPreview = { recItem -> pushPreview(recItem) }
+                )
+            }
+            is DetailSheetTarget.Person -> {
+                val personId = topSheet.person.tmdbPersonId
+                if (personId != null) {
+                    val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+                    PersonDetailScreen(
+                        personId = personId,
+                        personName = topSheet.person.name,
+                        initialAvatarUrl = topSheet.person.avatarUrl,
+                        apiKey = tmdbKey,
+                        presentationSettings = presentationSettings,
+                        backdropBitmap = backdropBitmap,
+                        backdropTargetUrl = effectiveBanner,
+                        onBack = { stepBackOneLevel() },
+                        onOpenMediaPreview = { recItem -> pushPreview(recItem) }
+                    )
+                }
+            }
+            is DetailSheetTarget.Company -> {
+                val tmdbKey = "844dba0bfd8f3a4f3799f6130ef9e335"
+                TmdbEntityBrowseScreen(
+                    entityId = topSheet.company.id,
+                    entityName = topSheet.company.name,
+                    entityKind = topSheet.company.kind,
+                    apiKey = tmdbKey,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onBack = { stepBackOneLevel() },
+                    onOpenMediaPreview = { recItem -> pushPreview(recItem) }
+                )
+            }
+            is DetailSheetTarget.VolumeChapterDetail -> {
+                if (item != null) {
+                    val seasonEpisodesForSheet = uiState.episodesBySeason[topSheet.seasonNumber]
+                        ?: uiState.realEpisodes.filter { it.seasonNumber == topSheet.seasonNumber }
+                            .ifEmpty { uiState.realEpisodes }
+                    val totalItemsAcrossSeasons = uiState.episodesBySeason.values
+                        .sumOf { it.size }
+                        .takeIf { it > 0 } ?: uiState.realEpisodes.size
+                    val useProgressAsWatchedTruth = isReadingType && (
+                        totalItemsAcrossSeasons > 200 ||
+                            (uiState.watchedEpisodes.isEmpty() && item.currentProgress.toInt() > 0)
+                        )
+                    val seasonLabel = uiState.realSeasons
+                        .firstOrNull { it.seasonNumber == topSheet.seasonNumber }
+                        ?.name
+                        ?: if (isLightNovelVolumeMode) {
+                            "Volumes"
+                        } else if (isReadingType) {
+                            if (uiState.isMangaSeasonGrouped) "Volume ${topSheet.seasonNumber}" else "Chapters"
+                        } else {
+                            "Season ${topSheet.seasonNumber}"
+                        }
+                    VolumeChapterDetailSheet(
+                        episodes = seasonEpisodesForSheet,
+                        initialSeasonNumber = topSheet.seasonNumber,
+                        initialEpisodeNumber = topSheet.episodeNumber,
+                        seasonLabel = seasonLabel,
+                        fallbackCoverUrl = fallbackSeriesCover,
+                        isMangaMode = isReadingType,
+                        isLightNovelVolumeMode = isLightNovelVolumeMode,
+                        watchedEpisodes = uiState.watchedEpisodes,
+                        useProgressAsWatchedTruth = useProgressAsWatchedTruth,
+                        currentTotalProgress = item.currentProgress.toInt(),
+                        episodeMetaMap = mergedEpisodeMeta,
+                        ranobeBookDetails = ranobeBookDetails,
+                        onRequestRanobeBook = { bookId, adj -> viewModel.loadRanobeBookDetail(bookId, adj) },
+                        onToggleWatched = { ep -> viewModel.toggleEpisodeWatched(ep) },
+                        onMarkPreviousWatched = { ep -> viewModel.markPreviousEpisodesWatched(ep) },
+                        onToggleSeasonWatched = { seasonNum -> viewModel.toggleSeasonWatched(seasonNum) },
+                        onSaveMetadata = { sNum, eNum, rating, note, bookmarked, label ->
+                            viewModel.updateEpisodeMetadata(sNum, eNum, rating, note, bookmarked, label)
+                        },
+                        onDismiss = { stepBackOneLevel() }
+                    )
+                }
+            }
+            null -> {}
+        }
 }
 }
 

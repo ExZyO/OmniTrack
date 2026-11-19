@@ -48,9 +48,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.ViewAgenda
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.ViewStream
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -82,9 +85,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.R
+import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.model.MediaEpisode
 import com.omnitrack.app.data.model.MediaSeason
 import com.omnitrack.app.data.preferences.EpisodeLayoutMode
+import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -116,7 +121,7 @@ class DetailSeriesUiState(
     var activeActionSheetEpisode by mutableStateOf<MediaEpisode?>(null)
     var fillerPromptEpisode by mutableStateOf<MediaEpisode?>(null)
     var showJumpDialog by mutableStateOf(false)
-    var lnShowPosterGrid by mutableStateOf(false)
+    var activeFilter by mutableStateOf("ALL")
     var currentSeasonViewMode by mutableStateOf(initialSeasonViewMode)
     var currentLayoutMode by mutableStateOf(initialLayoutMode)
 }
@@ -152,6 +157,8 @@ fun LazyListScope.detailSeriesItems(
     onSelectSeason: (Int) -> Unit,
     onToggleEpisodeWatched: (MediaEpisode) -> Unit,
     onToggleSeasonWatched: (Int) -> Unit,
+    onOpenEpisodeDetail: (MediaEpisode) -> Unit,
+    episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap(),
     episodesBySeason: Map<Int, List<MediaEpisode>> = emptyMap(),
     layoutScale: Float = 1.0f,
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
@@ -190,6 +197,25 @@ fun LazyListScope.detailSeriesItems(
 
     val seasonEpisodes = episodesBySeason[selectedSeasonNumber]
         ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
+
+    val starredCount = seasonEpisodes.count { episodeMetaMap[it.seasonNumber to it.episodeNumber]?.isBookmarked == true }
+    val notedCount = seasonEpisodes.count {
+        val m = episodeMetaMap[it.seasonNumber to it.episodeNumber]
+        !m?.userNote.isNullOrBlank() || m?.userRating != null || !m?.customLabel.isNullOrBlank()
+    }
+    val effectiveFilter = when {
+        seriesState.activeFilter == "STARRED" && starredCount > 0 -> "STARRED"
+        seriesState.activeFilter == "NOTED" && notedCount > 0 -> "NOTED"
+        else -> "ALL"
+    }
+    val filteredSeasonEpisodes = when (effectiveFilter) {
+        "STARRED" -> seasonEpisodes.filter { episodeMetaMap[it.seasonNumber to it.episodeNumber]?.isBookmarked == true }
+        "NOTED" -> seasonEpisodes.filter {
+            val m = episodeMetaMap[it.seasonNumber to it.episodeNumber]
+            !m?.userNote.isNullOrBlank() || m?.userRating != null || !m?.customLabel.isNullOrBlank()
+        }
+        else -> seasonEpisodes
+    }
 
     val handleEpisodeClick: (MediaEpisode) -> Unit = { ep ->
         val isWatched = isEpWatched(ep)
@@ -294,7 +320,7 @@ fun LazyListScope.detailSeriesItems(
         }
     }
 
-    // 2. Episodes / Chapters / Volumes Header + Controls Bar
+    // 2. Episodes / Chapters / Volumes Header + Controls Bar + Dynamic Filter Pills
     item(key = "series_controls_header", contentType = "series_controls") {
         val currentSeason = seasons.firstOrNull { it.seasonNumber == selectedSeasonNumber }
         val totalInSeason = currentSeason?.episodeCount ?: seasonEpisodes.size
@@ -304,193 +330,236 @@ fun LazyListScope.detailSeriesItems(
             seasonEpisodes.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
         }
 
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column {
-                Text(
-                    text = if (isLightNovelVolumeMode) "Volumes" else if (isMangaMode) "Chapters" else "Episodes",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.3).sp
-                )
-                Text(
-                    text = if (isMangaMode) "$watchedInSeason of $totalInSeason read" else "$watchedInSeason of $totalInSeason watched",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = if (isLightNovelVolumeMode) "Volumes" else if (isMangaMode) "Chapters" else "Episodes",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        text = if (isMangaMode) "$watchedInSeason of $totalInSeason read" else "$watchedInSeason of $totalInSeason watched",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (isMangaMode && onStepProgress != null) {
+                        val chValue = currentTotalProgress ?: watchedEpisodes.size
+                        val unitPrefix = if (isLightNovelVolumeMode) "Vol." else "Ch."
+                        Row(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.08f)),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .clickable { onStepProgress(-1) }
+                                    .padding(horizontal = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "−1",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(alpha = 0.88f)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(16.dp)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .then(
+                                        if (onJumpToProgress != null) Modifier.clickable { seriesState.showJumpDialog = true }
+                                        else Modifier
+                                    )
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "$unitPrefix $chValue",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                if (onJumpToProgress != null) {
+                                    Icon(
+                                        imageVector = Icons.Default.Keyboard,
+                                        contentDescription = "Jump",
+                                        tint = Color.White.copy(alpha = 0.65f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .width(1.dp)
+                                    .height(16.dp)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .height(28.dp)
+                                    .clickable { onStepProgress(1) }
+                                    .padding(horizontal = 9.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "+1",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+
+                    val hasFillersInSeason = seasonEpisodes.any { it.isFiller }
+                    if (hasFillersInSeason) {
+                        Box(
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+                                .clickable { onToggleSkipFillers?.invoke() }
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isFillerSkipEnabled) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = AccentJade,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "Skip fillers",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isFillerSkipEnabled) AccentJade else Color.White.copy(alpha = 0.85f)
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val nextMode = if (isLightNovelVolumeMode) {
+                                when (seriesState.currentLayoutMode) {
+                                    EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
+                                    EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
+                                    EpisodeLayoutMode.VERTICAL_CARD -> EpisodeLayoutMode.POSTER_GRID
+                                    EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.HORIZONTAL
+                                }
+                            } else {
+                                when (seriesState.currentLayoutMode) {
+                                    EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
+                                    EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
+                                    EpisodeLayoutMode.VERTICAL_CARD, EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.HORIZONTAL
+                                }
+                            }
+                            seriesState.currentLayoutMode = nextMode
+                            onLayoutModeChanged?.invoke(nextMode)
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        val displayMode = if (!isLightNovelVolumeMode && seriesState.currentLayoutMode == EpisodeLayoutMode.POSTER_GRID) {
+                            EpisodeLayoutMode.LIST
+                        } else {
+                            seriesState.currentLayoutMode
+                        }
+                        val iconVector = when (displayMode) {
+                            EpisodeLayoutMode.HORIZONTAL -> Icons.Default.ViewStream
+                            EpisodeLayoutMode.LIST -> Icons.Default.ViewAgenda
+                            EpisodeLayoutMode.VERTICAL_CARD -> Icons.Default.ViewCarousel
+                            EpisodeLayoutMode.POSTER_GRID -> Icons.Default.GridView
+                        }
+                        Icon(
+                            imageVector = iconVector,
+                            contentDescription = "Switch Layout",
+                            tint = AccentJade,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (isMangaMode && onStepProgress != null) {
-                    val chValue = currentTotalProgress ?: watchedEpisodes.size
-                    val unitPrefix = if (isLightNovelVolumeMode) "Vol." else "Ch."
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.08f)),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clickable { onStepProgress(-1) }
-                                .padding(horizontal = 9.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "−1",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White.copy(alpha = 0.88f)
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(16.dp)
-                                .background(Color.White.copy(alpha = 0.10f))
-                        )
-                        Row(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .then(
-                                    if (onJumpToProgress != null) Modifier.clickable { seriesState.showJumpDialog = true }
-                                    else Modifier
-                                )
-                                .padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "$unitPrefix $chValue",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            if (onJumpToProgress != null) {
-                                Icon(
-                                    imageVector = Icons.Default.Keyboard,
-                                    contentDescription = "Jump",
-                                    tint = Color.White.copy(alpha = 0.65f),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .width(1.dp)
-                                .height(16.dp)
-                                .background(Color.White.copy(alpha = 0.10f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clickable { onStepProgress(1) }
-                                .padding(horizontal = 9.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "+1",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
-                if (isLightNovelVolumeMode) {
-                    Box(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .clickable { seriesState.lnShowPosterGrid = !seriesState.lnShowPosterGrid }
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (seriesState.lnShowPosterGrid) "Posters" else "Cards",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color.White
-                        )
-                    }
-                }
-                val hasFillersInSeason = seasonEpisodes.any { it.isFiller }
-                if (hasFillersInSeason) {
-                    Box(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isFillerSkipEnabled) AccentJade.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
-                            .clickable { onToggleSkipFillers?.invoke() }
-                            .padding(horizontal = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            if (isFillerSkipEnabled) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = AccentJade,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                            Text(
-                                text = "Skip fillers",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isFillerSkipEnabled) AccentJade else Color.White.copy(alpha = 0.85f)
-                            )
-                        }
-                    }
-                }
-
-                IconButton(
-                    onClick = {
-                        if (seriesState.lnShowPosterGrid) seriesState.lnShowPosterGrid = false
-                        val nextMode = when (seriesState.currentLayoutMode) {
-                            EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
-                            EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
-                            EpisodeLayoutMode.VERTICAL_CARD -> EpisodeLayoutMode.HORIZONTAL
-                        }
-                        seriesState.currentLayoutMode = nextMode
-                        onLayoutModeChanged?.invoke(nextMode)
-                    },
-                    modifier = Modifier.size(32.dp)
+            if (starredCount > 0 || notedCount > 0) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val iconVector = when (seriesState.currentLayoutMode) {
-                        EpisodeLayoutMode.HORIZONTAL -> Icons.Default.ViewStream
-                        EpisodeLayoutMode.LIST -> Icons.Default.ViewAgenda
-                        EpisodeLayoutMode.VERTICAL_CARD -> Icons.Default.GridView
+                    @Composable
+                    fun FilterChipPill(key: String, label: String, activeColor: Color) {
+                        val isSelected = effectiveFilter == key
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (isSelected) activeColor.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
+                                .clickable { seriesState.activeFilter = key }
+                                .padding(horizontal = 11.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isSelected) activeColor else Color.White.copy(alpha = 0.72f)
+                            )
+                        }
                     }
-                    Icon(
-                        imageVector = iconVector,
-                        contentDescription = "Switch Layout",
-                        tint = AccentJade,
-                        modifier = Modifier.size(19.dp)
-                    )
+
+                    FilterChipPill("ALL", "All (${seasonEpisodes.size})", Color.White)
+                    if (starredCount > 0) {
+                        FilterChipPill("STARRED", "★ Starred ($starredCount)", AccentGold)
+                    }
+                    if (notedCount > 0) {
+                        FilterChipPill("NOTED", "Notes & Ratings ($notedCount)", AccentArctic)
+                    }
                 }
             }
         }
     }
 
     // 3. Virtualized Episode / Volume / Chapter Items (Zero "Show More" / "Show Earlier" Buttons)
-    if (seasonEpisodes.isEmpty()) {
+    val effectiveRenderMode = if (!isLightNovelVolumeMode && seriesState.currentLayoutMode == EpisodeLayoutMode.POSTER_GRID) {
+        EpisodeLayoutMode.LIST
+    } else {
+        seriesState.currentLayoutMode
+    }
+
+    if (filteredSeasonEpisodes.isEmpty()) {
         item(key = "series_empty_$selectedSeasonNumber", contentType = "series_empty") {
             Box(
                 modifier = Modifier
@@ -499,40 +568,44 @@ fun LazyListScope.detailSeriesItems(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isMangaMode) "No entries listed yet" else "Season in production • Episodes will appear as broadcast dates are announced",
+                    text = if (effectiveFilter != "ALL") "No matching starred or noted entries" else if (isMangaMode) "No entries listed yet" else "Season in production • Episodes will appear as broadcast dates are announced",
                     color = TextMuted,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center
                 )
             }
         }
-    } else if (isLightNovelVolumeMode && seriesState.lnShowPosterGrid) {
-        val rows = seasonEpisodes.chunked(3)
+    } else if (isLightNovelVolumeMode && effectiveRenderMode == EpisodeLayoutMode.POSTER_GRID) {
+        val rows = filteredSeasonEpisodes.chunked(3)
         itemsIndexed(
             items = rows,
-            key = { rowIdx, row -> "ln_grid_${selectedSeasonNumber}_${rowIdx}_${row.firstOrNull()?.episodeNumber}" },
+            key = { rowIdx, row -> "ln_grid_${selectedSeasonNumber}_${effectiveFilter}_${rowIdx}_${row.firstOrNull()?.episodeNumber}" },
             contentType = { _, _ -> "ln_grid_row" }
         ) { _, rowItems ->
             LightNovelVolumePosterRow(
                 rowItems = rowItems,
                 isEpWatched = ::isEpWatched,
                 fallbackCoverUrl = fallbackCoverUrl,
+                episodeMetaMap = episodeMetaMap,
                 onToggleWatched = handleEpisodeClick,
+                onOpenDetail = onOpenEpisodeDetail,
                 onLongPress = { seriesState.activeActionSheetEpisode = it },
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
             )
         }
     } else {
-        when (seriesState.currentLayoutMode) {
+        when (effectiveRenderMode) {
             EpisodeLayoutMode.HORIZONTAL -> {
-                item(key = "series_horiz_$selectedSeasonNumber", contentType = "series_horiz") {
+                item(key = "series_horiz_${selectedSeasonNumber}_$effectiveFilter", contentType = "series_horiz") {
                     EpisodeHorizontalRow(
-                        episodes = seasonEpisodes,
+                        episodes = filteredSeasonEpisodes,
                         watchedEpisodes = watchedEpisodes,
                         fallbackImageUrl = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl,
                         scale = layoutScale,
                         onToggleWatched = handleEpisodeClick,
+                        onOpenDetail = onOpenEpisodeDetail,
                         onLongPress = { seriesState.activeActionSheetEpisode = it },
+                        episodeMetaMap = episodeMetaMap,
                         useProgressAsWatchedTruth = useProgressAsWatchedTruth,
                         currentTotalProgress = currentTotalProgress,
                         isMangaMode = isMangaMode,
@@ -546,7 +619,7 @@ fun LazyListScope.detailSeriesItems(
                 val listImageWidth = if (isLightNovelVolumeMode) (78.dp * layoutScale).coerceAtLeast(66.dp) else (120.dp * layoutScale).coerceAtLeast(96.dp)
                 val effectiveFallback = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl
                 itemsIndexed(
-                    items = seasonEpisodes,
+                    items = filteredSeasonEpisodes,
                     key = { idx, ep -> "ep_list_${ep.seasonNumber}_${ep.episodeNumber}_${ep.id}_$idx" },
                     contentType = { _, _ -> "ep_list_card" }
                 ) { _, episode ->
@@ -562,7 +635,9 @@ fun LazyListScope.detailSeriesItems(
                             cardHeight = listCardHeight,
                             imageWidth = listImageWidth,
                             onToggleWatched = { handleEpisodeClick(episode) },
+                            onOpenDetail = { onOpenEpisodeDetail(episode) },
                             onLongPress = { seriesState.activeActionSheetEpisode = episode },
+                            meta = episodeMetaMap[episode.seasonNumber to episode.episodeNumber],
                             isMangaMode = isMangaMode,
                             isLightNovelVolumeMode = isLightNovelVolumeMode
                         )
@@ -570,10 +645,10 @@ fun LazyListScope.detailSeriesItems(
                 }
             }
 
-            EpisodeLayoutMode.VERTICAL_CARD -> {
+            EpisodeLayoutMode.VERTICAL_CARD, EpisodeLayoutMode.POSTER_GRID -> {
                 val effectiveFallback = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl
                 itemsIndexed(
-                    items = seasonEpisodes,
+                    items = filteredSeasonEpisodes,
                     key = { idx, ep -> "ep_vcard_${ep.seasonNumber}_${ep.episodeNumber}_${ep.id}_$idx" },
                     contentType = { _, _ -> "ep_vcard" }
                 ) { _, episode ->
@@ -588,7 +663,9 @@ fun LazyListScope.detailSeriesItems(
                             fallbackImageUrl = effectiveFallback,
                             scale = layoutScale,
                             onToggleWatched = { handleEpisodeClick(episode) },
+                            onOpenDetail = { onOpenEpisodeDetail(episode) },
                             onLongPress = { seriesState.activeActionSheetEpisode = episode },
+                            meta = episodeMetaMap[episode.seasonNumber to episode.episodeNumber],
                             isMangaMode = isMangaMode,
                             isLightNovelVolumeMode = isLightNovelVolumeMode
                         )
@@ -970,7 +1047,9 @@ private fun EpisodeHorizontalRow(
     fallbackImageUrl: String?,
     scale: Float,
     onToggleWatched: (MediaEpisode) -> Unit,
+    onOpenDetail: (MediaEpisode) -> Unit,
     onLongPress: (MediaEpisode) -> Unit,
+    episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap(),
     useProgressAsWatchedTruth: Boolean = false,
     currentTotalProgress: Int? = null,
     isMangaMode: Boolean = false,
@@ -1001,7 +1080,7 @@ private fun EpisodeHorizontalRow(
         contentPadding = PaddingValues(horizontal = 20.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        items(episodes, key = { "${it.seasonNumber}_${it.episodeNumber}_${it.id}" }) { episode ->
+        itemsIndexed(episodes, key = { idx, it -> "${it.seasonNumber}_${it.episodeNumber}_${it.id}_$idx" }) { _, episode ->
             val isWatched = if (useProgressAsWatchedTruth) {
                 episode.episodeNumber <= (currentTotalProgress ?: 0)
             } else {
@@ -1014,7 +1093,9 @@ private fun EpisodeHorizontalRow(
                 cardWidth = cardWidth,
                 cardHeight = cardHeight,
                 onToggleWatched = { onToggleWatched(episode) },
+                onOpenDetail = { onOpenDetail(episode) },
                 onLongPress = { onLongPress(episode) },
+                meta = episodeMetaMap[episode.seasonNumber to episode.episodeNumber],
                 isMangaMode = isMangaMode,
                 isLightNovelVolumeMode = isLightNovelVolumeMode
             )
@@ -1028,7 +1109,9 @@ private fun LightNovelVolumePosterRow(
     rowItems: List<MediaEpisode>,
     isEpWatched: (MediaEpisode) -> Boolean,
     fallbackCoverUrl: String?,
+    episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity>,
     onToggleWatched: (MediaEpisode) -> Unit,
+    onOpenDetail: (MediaEpisode) -> Unit,
     onLongPress: (MediaEpisode) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1038,6 +1121,7 @@ private fun LightNovelVolumePosterRow(
     ) {
         rowItems.forEach { vol ->
             val isRead = isEpWatched(vol)
+            val meta = episodeMetaMap[vol.seasonNumber to vol.episodeNumber]
             val primaryUrl = vol.stillUrl?.takeIf { it.isNotBlank() }
             val fallbackUrl = fallbackCoverUrl?.takeIf { it.isNotBlank() && it != primaryUrl }
             var primaryFailed by remember(primaryUrl) { mutableStateOf(false) }
@@ -1055,7 +1139,7 @@ private fun LightNovelVolumePosterRow(
                 modifier = Modifier
                     .weight(1f)
                     .combinedClickable(
-                        onClick = { onToggleWatched(vol) },
+                        onClick = { onOpenDetail(vol) },
                         onLongClick = { onLongPress(vol) }
                     ),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
@@ -1093,6 +1177,32 @@ private fun LightNovelVolumePosterRow(
                                 )
                             )
                     )
+                    if (meta?.isBookmarked == true || !meta?.userNote.isNullOrBlank() || meta?.userRating != null) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (meta?.isBookmarked == true) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = "Starred",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                            if (!meta?.userNote.isNullOrBlank()) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Has Note",
+                                    tint = AccentArctic,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
                     NuvioAnimatedWatchedBadge(
                         isWatched = isRead,
                         onClick = { onToggleWatched(vol) },
@@ -1100,20 +1210,35 @@ private fun LightNovelVolumePosterRow(
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
                     )
-                    Text(
-                        text = volBadge,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1,
+                    Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(horizontal = 7.dp, vertical = 6.dp)
-                    )
+                            .fillMaxWidth()
+                            .padding(horizontal = 7.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = volBadge,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                        val scoreToShow = meta?.userRating ?: vol.voteAverage
+                        if (scoreToShow != null && scoreToShow > 0f) {
+                            Text(
+                                text = "★${String.format(java.util.Locale.US, "%.1f", scoreToShow)}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (meta?.userRating != null) AccentJade else AccentGold
+                            )
+                        }
+                    }
                 }
                 val formattedDate = remember(vol.airDate) { formatEpisodeAirDate(vol.airDate) }
                 Text(
-                    text = formattedDate ?: vol.title,
+                    text = meta?.customLabel?.takeIf { it.isNotBlank() } ?: formattedDate ?: vol.title,
                     fontSize = 10.5.sp,
                     color = Color.White.copy(alpha = 0.65f),
                     maxLines = 1,
@@ -1212,7 +1337,9 @@ private fun EpisodeHorizontalCard(
     cardWidth: Dp,
     cardHeight: Dp,
     onToggleWatched: () -> Unit,
+    onOpenDetail: () -> Unit,
     onLongPress: () -> Unit,
+    meta: EpisodeProgressEntity? = null,
     isMangaMode: Boolean = false,
     isLightNovelVolumeMode: Boolean = false
 ) {
@@ -1225,7 +1352,7 @@ private fun EpisodeHorizontalCard(
             .clip(cardShape)
             .background(DarkSurfaceElevated)
             .combinedClickable(
-                onClick = onToggleWatched,
+                onClick = onOpenDetail,
                 onLongClick = onLongPress
             )
     ) {
@@ -1261,23 +1388,37 @@ private fun EpisodeHorizontalCard(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
-        // Solid White FILLER / RECAP Badge at Top Start
-        if (episode.isFiller || episode.isRecap) {
-            Box(
+        // Bookmark / Note / Filler Top-Start Indicators
+        if (episode.isFiller || episode.isRecap || meta?.isBookmarked == true || !meta?.userNote.isNullOrBlank()) {
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.White)
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (episode.isRecap) "RECAP" else "FILLER",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.Black,
-                    letterSpacing = 0.5.sp
-                )
+                if (episode.isFiller || episode.isRecap) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (episode.isRecap) "RECAP" else "FILLER",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+                if (meta?.isBookmarked == true) {
+                    Icon(Icons.Default.Star, contentDescription = "Starred", tint = AccentGold, modifier = Modifier.size(13.dp))
+                }
+                if (!meta?.userNote.isNullOrBlank()) {
+                    Icon(Icons.Default.Edit, contentDescription = "Has Note", tint = AccentArctic, modifier = Modifier.size(12.dp))
+                }
             }
         }
 
@@ -1309,7 +1450,8 @@ private fun EpisodeHorizontalCard(
                 )
             }
 
-            val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
+            val titleText = meta?.customLabel?.takeIf { it.isNotBlank() }
+                ?: episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
             Text(
                 text = titleText,
                 fontSize = 14.sp,
@@ -1331,10 +1473,10 @@ private fun EpisodeHorizontalCard(
                 )
             }
 
-            // Bottom Metadata Line: Runtime, IMDb Rating, Air Date
+            // Bottom Metadata Line: Runtime, IMDb/Community Rating, User Rating, Air Date
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (episode.runtimeMinutes != null && episode.runtimeMinutes > 0) {
@@ -1344,19 +1486,35 @@ private fun EpisodeHorizontalCard(
                         color = Color.White.copy(alpha = 0.78f)
                     )
                 }
-                if (episode.voteAverage != null && episode.voteAverage > 0) {
-                    ImdbEpisodeRatingBadge(
-                        rating = episode.voteAverage,
-                        logoWidth = 22.dp,
-                        logoHeight = 11.dp,
-                        textSize = 10.sp
+                if (meta?.userRating != null) {
+                    Text(
+                        text = "★ ${String.format(java.util.Locale.US, "%.1f", meta.userRating)}",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentJade
                     )
+                } else if (episode.voteAverage != null && episode.voteAverage > 0) {
+                    if (isMangaMode) {
+                        Text(
+                            text = "★ ${String.format(java.util.Locale.US, "%.1f", episode.voteAverage)}",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold
+                        )
+                    } else {
+                        ImdbEpisodeRatingBadge(
+                            rating = episode.voteAverage,
+                            logoWidth = 22.dp,
+                            logoHeight = 11.dp,
+                            textSize = 10.sp
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-                if (!formattedDate.isNullOrBlank()) {
+                val bottomDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+                if (!bottomDate.isNullOrBlank()) {
                     Text(
-                        text = formattedDate,
+                        text = bottomDate,
                         fontSize = 10.sp,
                         color = Color.White.copy(alpha = 0.78f)
                     )
@@ -1376,7 +1534,9 @@ private fun EpisodeListCardItem(
     cardHeight: Dp,
     imageWidth: Dp,
     onToggleWatched: () -> Unit,
+    onOpenDetail: () -> Unit,
     onLongPress: () -> Unit,
+    meta: EpisodeProgressEntity? = null,
     isMangaMode: Boolean = false,
     isLightNovelVolumeMode: Boolean = false
 ) {
@@ -1389,7 +1549,7 @@ private fun EpisodeListCardItem(
             .clip(cardShape)
             .background(Color(0xFF222224).copy(alpha = 0.45f))
             .combinedClickable(
-                onClick = onToggleWatched,
+                onClick = onOpenDetail,
                 onLongClick = onLongPress
             )
     ) {
@@ -1455,17 +1615,56 @@ private fun EpisodeListCardItem(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
-                Text(
-                    text = titleText,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    lineHeight = 18.sp,
-                    letterSpacing = 0.sp,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                val displayTitle = meta?.customLabel?.takeIf { it.isNotBlank() }
+                    ?: episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = displayTitle,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        lineHeight = 18.sp,
+                        letterSpacing = 0.sp,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (meta?.isBookmarked == true) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Starred",
+                            tint = AccentGold,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    if (!meta?.userNote.isNullOrBlank()) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Has Note",
+                            tint = AccentArctic,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                    if (meta?.userRating != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentJade.copy(alpha = 0.16f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = String.format(java.util.Locale.US, "%.1f", meta.userRating),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentJade
+                            )
+                        }
+                    }
+                }
 
                 val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
                 if (!formattedDate.isNullOrBlank() || (episode.voteAverage != null && episode.voteAverage > 0)) {
@@ -1484,22 +1683,32 @@ private fun EpisodeListCardItem(
                             )
                         }
                         if (episode.voteAverage != null && episode.voteAverage > 0) {
-                            ImdbEpisodeRatingBadge(
-                                rating = episode.voteAverage,
-                                logoWidth = 24.dp,
-                                logoHeight = 12.dp,
-                                textSize = 12.sp
-                            )
+                            if (isMangaMode) {
+                                Text(
+                                    text = "★ ${String.format(java.util.Locale.US, "%.1f", episode.voteAverage)}",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = AccentGold
+                                )
+                            } else {
+                                ImdbEpisodeRatingBadge(
+                                    rating = episode.voteAverage,
+                                    logoWidth = 24.dp,
+                                    logoHeight = 12.dp,
+                                    textSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }
 
-                if (!episode.overview.isNullOrBlank()) {
+                val notePreview = meta?.userNote?.takeIf { it.isNotBlank() } ?: episode.overview
+                if (!notePreview.isNullOrBlank()) {
                     Text(
-                        text = episode.overview,
+                        text = notePreview,
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
-                        color = Color.White.copy(alpha = 0.60f),
+                        color = if (!meta?.userNote.isNullOrBlank()) AccentArctic.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.60f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1518,7 +1727,9 @@ private fun EpisodeVerticalCardItem(
     fallbackImageUrl: String?,
     scale: Float,
     onToggleWatched: () -> Unit,
+    onOpenDetail: () -> Unit,
     onLongPress: () -> Unit,
+    meta: EpisodeProgressEntity? = null,
     isMangaMode: Boolean = false,
     isLightNovelVolumeMode: Boolean = false
 ) {
@@ -1531,7 +1742,7 @@ private fun EpisodeVerticalCardItem(
             .clip(cardShape)
             .background(DarkSurfaceElevated)
             .combinedClickable(
-                onClick = onToggleWatched,
+                onClick = onOpenDetail,
                 onLongClick = onLongPress
             )
     ) {
@@ -1567,23 +1778,37 @@ private fun EpisodeVerticalCardItem(
                 .padding(top = 8.dp, end = 8.dp)
         )
 
-        // Solid White FILLER / RECAP Badge at Top Start
-        if (episode.isFiller || episode.isRecap) {
-            Box(
+        // Bookmark / Note / Filler Top-Start Indicators
+        if (episode.isFiller || episode.isRecap || meta?.isBookmarked == true || !meta?.userNote.isNullOrBlank()) {
+            Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.White)
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = if (episode.isRecap) "RECAP" else "FILLER",
-                    fontSize = 9.5.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.Black,
-                    letterSpacing = 0.5.sp
-                )
+                if (episode.isFiller || episode.isRecap) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = if (episode.isRecap) "RECAP" else "FILLER",
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Black,
+                            color = Color.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+                if (meta?.isBookmarked == true) {
+                    Icon(Icons.Default.Star, contentDescription = "Starred", tint = AccentGold, modifier = Modifier.size(14.dp))
+                }
+                if (!meta?.userNote.isNullOrBlank()) {
+                    Icon(Icons.Default.Edit, contentDescription = "Has Note", tint = AccentArctic, modifier = Modifier.size(13.dp))
+                }
             }
         }
 
@@ -1615,7 +1840,8 @@ private fun EpisodeVerticalCardItem(
                 )
             }
 
-            val titleText = episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
+            val titleText = meta?.customLabel?.takeIf { it.isNotBlank() }
+                ?: episode.title.ifBlank { "Episode ${episode.episodeNumber}" }
             Text(
                 text = titleText,
                 fontSize = 15.sp,
@@ -1625,11 +1851,12 @@ private fun EpisodeVerticalCardItem(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (!episode.overview.isNullOrBlank()) {
+            val overviewOrNote = meta?.userNote?.takeIf { it.isNotBlank() } ?: episode.overview
+            if (!overviewOrNote.isNullOrBlank()) {
                 Text(
-                    text = episode.overview,
+                    text = overviewOrNote,
                     fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.86f),
+                    color = if (!meta?.userNote.isNullOrBlank()) AccentArctic.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.86f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     lineHeight = 16.sp
@@ -1644,13 +1871,29 @@ private fun EpisodeVerticalCardItem(
                 if (episode.runtimeMinutes != null && episode.runtimeMinutes > 0) {
                     Text(text = "${episode.runtimeMinutes}m", fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
                 }
-                if (episode.voteAverage != null && episode.voteAverage > 0) {
-                    ImdbEpisodeRatingBadge(rating = episode.voteAverage)
+                if (meta?.userRating != null) {
+                    Text(
+                        text = "You: ★ ${String.format(java.util.Locale.US, "%.1f", meta.userRating)}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentJade
+                    )
+                } else if (episode.voteAverage != null && episode.voteAverage > 0) {
+                    if (isMangaMode) {
+                        Text(
+                            text = "★ ${String.format(java.util.Locale.US, "%.1f", episode.voteAverage)}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AccentGold
+                        )
+                    } else {
+                        ImdbEpisodeRatingBadge(rating = episode.voteAverage)
+                    }
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-                if (!formattedDate.isNullOrBlank()) {
-                    Text(text = formattedDate, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
+                val bottomDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+                if (!bottomDate.isNullOrBlank()) {
+                    Text(text = bottomDate, fontSize = 11.sp, color = Color.White.copy(alpha = 0.75f))
                 }
             }
         }

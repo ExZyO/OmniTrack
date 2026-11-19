@@ -88,7 +88,8 @@ fun AnimeCharacterSheet(
     backdropBitmap: ImageBitmap? = null,
     backdropTargetUrl: String? = null,
     onDismissRequest: () -> Unit,
-    onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null
+    onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
+    onOpenStaff: ((AnimeStaffItem) -> Unit)? = null
 ) {
     if (character == null) return
     val context = LocalContext.current
@@ -98,10 +99,8 @@ fun AnimeCharacterSheet(
     var selectedStaffId by remember { mutableStateOf<Long?>(null) }
     var selectedStaffFallbackName by remember { mutableStateOf<String?>(null) }
     var selectedStaffFallbackImage by remember { mutableStateOf<String?>(null) }
-
-    BackHandler(enabled = showingVoiceActor) {
-        showingVoiceActor = false
-    }
+    val charScrollState = rememberScrollState()
+    val staffScrollState = rememberScrollState()
 
     var isLoading by remember { mutableStateOf(true) }
     var detail by remember { mutableStateOf<AnimeCharacterDetail?>(null) }
@@ -113,19 +112,23 @@ fun AnimeCharacterSheet(
         isLoading = false
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = Color.Transparent,
-        dragHandle = null,
-        modifier = Modifier.navigationBarsPadding()
+    InWindowBottomSheet(
+        onDismiss = {
+            if (showingVoiceActor) {
+                showingVoiceActor = false
+            } else {
+                onDismissRequest()
+            }
+        },
+        isAtTop = { if (showingVoiceActor) staffScrollState.value == 0 else charScrollState.value == 0 },
+        wrapHeightMax = 680.dp,
+        showDragHandle = false
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight()
                 .heightIn(max = 680.dp)
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
         ) {
             // Background presentation matching detail page
             when (presentationSettings?.fallbackBackgroundStyle) {
@@ -154,9 +157,9 @@ fun AnimeCharacterSheet(
                         staffId = selectedStaffId ?: character.voiceActorId ?: 0L,
                         fallbackName = selectedStaffFallbackName ?: character.voiceActorName ?: "Voice Actor",
                         fallbackImageUrl = selectedStaffFallbackImage ?: character.voiceActorImageUrl,
+                        scrollState = staffScrollState,
                         onBack = { showingVoiceActor = false },
                         onOpenMedia = { item ->
-                            onDismissRequest()
                             onOpenMediaPreview?.invoke(item)
                         }
                     )
@@ -164,7 +167,7 @@ fun AnimeCharacterSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(charScrollState)
                             .padding(vertical = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
@@ -283,10 +286,21 @@ fun AnimeCharacterSheet(
                                 Row(
                                     modifier = Modifier
                                         .clickable {
-                                            selectedStaffId = va.staffId
-                                            selectedStaffFallbackName = va.name
-                                            selectedStaffFallbackImage = va.imageUrl
-                                            showingVoiceActor = true
+                                            if (onOpenStaff != null) {
+                                                onOpenStaff(
+                                                    AnimeStaffItem(
+                                                        staffId = va.staffId,
+                                                        name = va.name,
+                                                        role = "Voice Actor (${va.language})",
+                                                        imageUrl = va.imageUrl
+                                                    )
+                                                )
+                                            } else {
+                                                selectedStaffId = va.staffId
+                                                selectedStaffFallbackName = va.name
+                                                selectedStaffFallbackImage = va.imageUrl
+                                                showingVoiceActor = true
+                                            }
                                         }
                                         .padding(vertical = 4.dp),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -336,10 +350,21 @@ fun AnimeCharacterSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable(enabled = vaId != null) {
-                                selectedStaffId = vaId
-                                selectedStaffFallbackName = vaName
-                                selectedStaffFallbackImage = vaImage
-                                showingVoiceActor = true
+                                if (onOpenStaff != null && vaId != null) {
+                                    onOpenStaff(
+                                        AnimeStaffItem(
+                                            staffId = vaId,
+                                            name = vaName,
+                                            role = vaLang?.let { "Voice Actor ($it)" } ?: "Voice Actor",
+                                            imageUrl = vaImage
+                                        )
+                                    )
+                                } else {
+                                    selectedStaffId = vaId
+                                    selectedStaffFallbackName = vaName
+                                    selectedStaffFallbackImage = vaImage
+                                    showingVoiceActor = true
+                                }
                             }
                             .padding(horizontal = 20.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -450,7 +475,6 @@ fun AnimeCharacterSheet(
                                     modifier = Modifier
                                         .width(96.dp)
                                         .clickable {
-                                            onDismissRequest()
                                             onOpenMediaPreview?.invoke(
                                                 RecommendationItem(
                                                     title = appItem.title,
@@ -529,20 +553,19 @@ fun AnimeStaffSheet(
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null
 ) {
     if (staff == null) return
+    val staffScrollState = rememberScrollState()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
-        containerColor = Color.Transparent,
-        dragHandle = null,
-        modifier = Modifier.navigationBarsPadding()
+    InWindowBottomSheet(
+        onDismiss = onDismissRequest,
+        isAtTop = { staffScrollState.value == 0 },
+        wrapHeightMax = 680.dp,
+        showDragHandle = false
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .wrapContentHeight()
                 .heightIn(max = 680.dp)
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
         ) {
             // Background presentation matching detail page
             when (presentationSettings?.fallbackBackgroundStyle) {
@@ -570,9 +593,9 @@ fun AnimeStaffSheet(
                     staffId = staff.staffId,
                     fallbackName = staff.name,
                     fallbackImageUrl = staff.imageUrl,
+                    scrollState = staffScrollState,
                     onBack = null,
                     onOpenMedia = { item ->
-                        onDismissRequest()
                         onOpenMediaPreview?.invoke(item)
                     }
                 )
@@ -589,6 +612,7 @@ private fun StaffDetailContent(
     staffId: Long,
     fallbackName: String,
     fallbackImageUrl: String?,
+    scrollState: androidx.compose.foundation.ScrollState = rememberScrollState(),
     onBack: (() -> Unit)? = null,
     onOpenMedia: (RecommendationItem) -> Unit
 ) {
@@ -606,7 +630,7 @@ private fun StaffDetailContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {

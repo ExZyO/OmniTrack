@@ -17,10 +17,11 @@ import androidx.compose.ui.graphics.graphicsLayer
  * with a 350ms cubic-bezier transition, eliminating navigation entrance stutter.
  */
 @Composable
-fun Modifier.detailsContentReveal(enabled: Boolean = true): Modifier {
+fun Modifier.detailsContentReveal(enabled: Boolean = true, revealKey: Any = Unit): Modifier {
     if (!enabled) return this
-    val opacity = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
+    val opacity = remember(revealKey) { Animatable(0f) }
+    LaunchedEffect(revealKey) {
+        opacity.snapTo(0f)
         withFrameNanos { }
         opacity.animateTo(1f, tween(350, easing = CubicBezierEasing(0.5f, 0f, 0.14f, 1f)))
     }

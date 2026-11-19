@@ -11,5 +11,9 @@ data class EpisodeProgressEntity(
     val seasonNumber: Int,
     val episodeNumber: Int,
     val isWatched: Boolean = false,
-    val watchedAtMs: Long? = null
+    val watchedAtMs: Long? = null,
+    val userRating: Float? = null,
+    val userNote: String? = null,
+    val isBookmarked: Boolean = false,
+    val customLabel: String? = null
 )

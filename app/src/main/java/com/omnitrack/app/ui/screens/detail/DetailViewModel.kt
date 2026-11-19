@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.screens.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.MediaEpisode
@@ -132,7 +133,8 @@ data class DetailUiState(
     val hasFillers: Boolean = false,
     val isMangaSeasonGrouped: Boolean = false,
     val isLightNovelMode: Boolean = false,
-    val novelDetailMeta: NovelDetailMeta = NovelDetailMeta()
+    val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
+    val episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap()
 )
 
 private data class PreviewAndAux(
@@ -253,7 +255,15 @@ class DetailViewModel(
     private var enrichmentFetchJob: kotlinx.coroutines.Job? = null
     private var activeSeriesFetchKey: String? = null
     private val latestRoomItemCache = java.util.concurrent.ConcurrentHashMap<Long, MediaItemEntity>()
-    private val latestEpisodeProgressCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.db.entity.EpisodeProgressEntity>>()
+    private val latestEpisodeProgressCache = java.util.concurrent.ConcurrentHashMap<Long, List<EpisodeProgressEntity>>()
+    private val previewMetaCache = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, EpisodeProgressEntity>>()
+    private val _previewEpisodeMeta = MutableStateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>>(emptyMap())
+    val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
+    private val _ranobeBookDetails = MutableStateFlow<Map<Long, EnrichmentRepository.RanobeDbBookDetail>>(emptyMap())
+    val ranobeBookDetails: StateFlow<Map<Long, EnrichmentRepository.RanobeDbBookDetail>> = _ranobeBookDetails.asStateFlow()
+    private val _isTransitionLoading = MutableStateFlow(false)
+    val isTransitionLoading: StateFlow<Boolean> = _isTransitionLoading.asStateFlow()
+    private var transitionLoadingJob: kotlinx.coroutines.Job? = null
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
     private val scrollOffsetStack = mutableListOf<Pair<Int, Int>>()
 
@@ -565,8 +575,10 @@ class DetailViewModel(
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
+                beginTransitionLoadingIfUncached(ephemeral)
                 _previewStack.value = listOf(ephemeral)
                 _previewItem.value = ephemeral
+                syncPreviewEpisodeMeta(ephemeral)
                 loadRecommendationsAndReviews(ephemeral)
                 maybeEnrich(ephemeral)
             }
@@ -845,6 +857,7 @@ class DetailViewModel(
             progressFlow.map { progressList ->
                 val watchedSet = progressList.filter { it.isWatched }
                     .map { it.seasonNumber to it.episodeNumber }.toSet()
+                val metaMap = progressList.associateBy { it.seasonNumber to it.episodeNumber }
                 DetailUiState(
                     item = displayPreviewItem,
                     previousItem = null,
@@ -855,6 +868,7 @@ class DetailViewModel(
                     selectedSeasonNumber = aux.selectedSeasonNumber,
                     episodesBySeason = aux.episodesBySeason,
                     watchedEpisodes = watchedSet,
+                    episodeMetaMap = metaMap,
                     recommendations = aux.recommendations,
                     reviews = aux.reviews,
                     cast = aux.cast,
@@ -944,6 +958,7 @@ class DetailViewModel(
                             val currentIndex = siblings.indexOf(effectiveItem.id)
                             val watchedSet = progressList.filter { it.isWatched }
                                 .map { it.seasonNumber to it.episodeNumber }.toSet()
+                            val metaMap = progressList.associateBy { it.seasonNumber to it.episodeNumber }
                             val resolvedTitle = when (pref) {
                                 PreferredTitleLanguage.ENGLISH -> aux.englishTitle ?: effectiveItem.title
                                 PreferredTitleLanguage.ROMAJI -> aux.romajiTitle ?: effectiveItem.title
@@ -965,6 +980,7 @@ class DetailViewModel(
                                 selectedSeasonNumber = aux.selectedSeasonNumber,
                                 episodesBySeason = aux.episodesBySeason,
                                 watchedEpisodes = watchedSet,
+                                episodeMetaMap = metaMap,
                                 recommendations = aux.recommendations,
                                 reviews = aux.reviews,
                                 cast = aux.cast,
@@ -1166,8 +1182,143 @@ class DetailViewModel(
         }
     }
 
+    private fun previewMetaKey(item: MediaItemEntity): String =
+        "${item.mediaType}_${item.anilistId ?: item.malId ?: item.tmdbId ?: item.title.lowercase().trim()}"
+
+    private fun syncPreviewEpisodeMeta(item: MediaItemEntity?) {
+        _previewEpisodeMeta.value = if (item == null || item.id > 0L) {
+            emptyMap()
+        } else {
+            previewMetaCache[previewMetaKey(item)].orEmpty()
+        }
+    }
+
+    private fun beginTransitionLoadingIfUncached(entity: MediaItemEntity) {
+        val hasAux = resolveAuxCache(entity.id, entity) != null
+        val hasRoom = entity.id > 0L && latestRoomItemCache.containsKey(entity.id)
+        val hasSeries = SeriesContentMemoryCache.findSeasons(entity, entity.tmdbId, entity.id)?.isNotEmpty() == true
+        val alreadyPopulated = hasAux || hasRoom ||
+            (!entity.synopsis.isNullOrBlank() && !entity.bannerUrl.isNullOrBlank() && (hasSeries || entity.mediaType == MediaType.MOVIE || entity.mediaType == MediaType.GAME || entity.mediaType == MediaType.VISUAL_NOVEL))
+        transitionLoadingJob?.cancel()
+        if (alreadyPopulated) {
+            _isTransitionLoading.value = false
+            return
+        }
+        _isTransitionLoading.value = true
+        transitionLoadingJob = viewModelScope.launch {
+            delay(850L)
+            _isTransitionLoading.value = false
+        }
+    }
+
+    private fun finishTransitionLoading() {
+        transitionLoadingJob?.cancel()
+        transitionLoadingJob = null
+        if (_isTransitionLoading.value) {
+            _isTransitionLoading.value = false
+        }
+    }
+
+    fun updateEpisodeMetadata(
+        seasonNumber: Int,
+        episodeNumber: Int,
+        userRating: Float?,
+        userNote: String?,
+        isBookmarked: Boolean,
+        customLabel: String?
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val activePreview = _previewItem.value
+            val targetMediaId = when {
+                activePreview != null && activePreview.id > 0L -> activePreview.id
+                activePreview != null -> -1L
+                else -> _mediaId.value
+            }
+            if (targetMediaId > 0L) {
+                repository.updateEpisodeMetadata(
+                    mediaId = targetMediaId,
+                    seasonNumber = seasonNumber,
+                    episodeNumber = episodeNumber,
+                    userRating = userRating,
+                    userNote = userNote,
+                    isBookmarked = isBookmarked,
+                    customLabel = customLabel
+                )
+            } else if (activePreview != null) {
+                val key = previewMetaKey(activePreview)
+                val existing = previewMetaCache[key].orEmpty().toMutableMap()
+                val prev = existing[seasonNumber to episodeNumber]
+                existing[seasonNumber to episodeNumber] = EpisodeProgressEntity(
+                    mediaId = -1L,
+                    seasonNumber = seasonNumber,
+                    episodeNumber = episodeNumber,
+                    isWatched = prev?.isWatched ?: false,
+                    watchedAtMs = prev?.watchedAtMs,
+                    userRating = userRating,
+                    userNote = userNote?.trim()?.takeIf { it.isNotBlank() },
+                    isBookmarked = isBookmarked,
+                    customLabel = customLabel?.trim()?.takeIf { it.isNotBlank() }
+                )
+                previewMetaCache[key] = existing
+                _previewEpisodeMeta.value = existing
+            }
+        }
+    }
+
+    fun loadRanobeBookDetail(bookId: Long, adjacentBookIds: List<Long> = emptyList()) {
+        if (bookId <= 0L) return
+        enrichmentRepository.getCachedRanobeBookDetail(bookId)?.let { cached ->
+            _ranobeBookDetails.update { it + (bookId to cached) }
+            applyRanobeBookRatingToEpisodes(bookId, cached.ratingScore)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val detail = enrichmentRepository.fetchRanobeDbBookDetails(bookId)
+            if (detail != null) {
+                _ranobeBookDetails.update { it + (bookId to detail) }
+                applyRanobeBookRatingToEpisodes(bookId, detail.ratingScore)
+            }
+            adjacentBookIds.filter { it > 0L && it != bookId }.distinct().take(2).forEach { adjId ->
+                if (enrichmentRepository.getCachedRanobeBookDetail(adjId) == null) {
+                    val adjDetail = enrichmentRepository.fetchRanobeDbBookDetails(adjId)
+                    if (adjDetail != null) {
+                        _ranobeBookDetails.update { it + (adjId to adjDetail) }
+                        applyRanobeBookRatingToEpisodes(adjId, adjDetail.ratingScore)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyRanobeBookRatingToEpisodes(bookId: Long, score: Float?) {
+        if (score == null || score <= 0f) return
+        _realEpisodes.update { list ->
+            var changed = false
+            val updated = list.map { ep ->
+                if (ep.ranobeBookId == bookId && ep.voteAverage != score) {
+                    changed = true
+                    ep.copy(voteAverage = score)
+                } else ep
+            }
+            if (changed) updated else list
+        }
+        _episodesBySeason.update { map ->
+            var changed = false
+            val updated = map.mapValues { (_, eps) ->
+                eps.map { ep ->
+                    if (ep.ranobeBookId == bookId && ep.voteAverage != score) {
+                        changed = true
+                        ep.copy(voteAverage = score)
+                    } else ep
+                }
+            }
+            if (changed) updated else map
+        }
+    }
+
     private fun openPreviewInternal(previewEntity: MediaItemEntity) {
+        beginTransitionLoadingIfUncached(previewEntity)
         resetAuxFields()
+        syncPreviewEpisodeMeta(previewEntity)
         restoreSeriesFromMemoryCache(previewEntity, previewEntity.id)
         _previewStack.update { it + previewEntity }
         _previewItem.value = previewEntity
@@ -1176,6 +1327,7 @@ class DetailViewModel(
     }
 
     fun closePreview(): Boolean {
+        finishTransitionLoading()
         if (_previewStack.value.isEmpty() && _previewItem.value == null && EphemeralPreviewHolder.previewItem == null) {
             return false
         }
@@ -1184,6 +1336,7 @@ class DetailViewModel(
             val newTop = _previewStack.value.last()
             _previewItem.value = newTop
             resetAuxFields()
+            syncPreviewEpisodeMeta(newTop)
             restoreSeriesFromMemoryCache(newTop, newTop.id)
             loadRecommendationsAndReviews(newTop)
             maybeEnrich(newTop)
@@ -1194,7 +1347,9 @@ class DetailViewModel(
             _previewStack.value = emptyList()
             _previewItem.value = null
             EphemeralPreviewHolder.previewItem = null
+            syncPreviewEpisodeMeta(null)
             resetAuxFields()
+            latestRoomItemCache[currentId]?.let { restoreSeriesFromMemoryCache(it, currentId) }
             viewModelScope.launch(Dispatchers.IO) {
                 val item = repository.getMediaById(currentId).firstOrNull()
                 if (item != null) {
@@ -1207,6 +1362,21 @@ class DetailViewModel(
         EphemeralPreviewHolder.previewItem = null
         _previewStack.value = emptyList()
         return false
+    }
+
+    fun clearAllPreviews() {
+        finishTransitionLoading()
+        recommendationFetchJob?.cancel()
+        seriesFetchJob?.cancel()
+        discussionFetchJob?.cancel()
+        enrichmentFetchJob?.cancel()
+        scrollOffsetStack.clear()
+        EphemeralPreviewHolder.previewItem = null
+        _previewStack.value = emptyList()
+        if (_mediaId.value > 0L) {
+            _previewItem.value = null
+        }
+        syncPreviewEpisodeMeta(null)
     }
 
     override fun onCleared() {
@@ -1292,7 +1462,9 @@ class DetailViewModel(
 
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
-            delay(250) // Let navigation entrance transition finish smoothly at locked 120 FPS
+            if (!_isTransitionLoading.value) {
+                delay(250) // Let navigation entrance transition finish smoothly at locked 120 FPS
+            }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val recs = mutableListOf<RecommendationItem>()
             val revs = mutableListOf<CommunityReview>()
@@ -1831,6 +2003,7 @@ class DetailViewModel(
                         }
                         persistAuxCache()
                     }
+                    finishTransitionLoading()
 
                     // Web Novel Adaptation Bridge: When CN/KR/EN Web Novels lack a direct AniList NOVEL entry or banner/characters,
                     // harvest 16:9 hero banner, character portraits, original author, and Donghua/Manhwa adaptation relations!
@@ -2042,6 +2215,7 @@ class DetailViewModel(
             }
             _collectionName.value = fetchedCollName
             _collectionItems.value = fetchedCollParts
+            finishTransitionLoading()
 
             if (resolvedAniListId != null) {
                 val currentSeason = _selectedSeasonNumber.value
@@ -3260,6 +3434,7 @@ class DetailViewModel(
 
         val cachedAux = resolveAuxCache(targetId, immediate)
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        finishTransitionLoading()
         val immediateLogo = immediate?.clearartUrl?.takeIf {
             !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
         }

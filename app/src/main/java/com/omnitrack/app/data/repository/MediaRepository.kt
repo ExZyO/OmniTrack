@@ -26,12 +26,17 @@ class MediaRepository(
 
     suspend fun setEpisodeWatched(mediaId: Long, seasonNumber: Int, episodeNumber: Int, isWatched: Boolean) {
         if (episodeProgressDao == null) return
+        val existing = episodeProgressDao.getEpisodeProgressOnce(mediaId, seasonNumber, episodeNumber)
         val entity = EpisodeProgressEntity(
             mediaId = mediaId,
             seasonNumber = seasonNumber,
             episodeNumber = episodeNumber,
             isWatched = isWatched,
-            watchedAtMs = if (isWatched) System.currentTimeMillis() else null
+            watchedAtMs = if (isWatched) (existing?.watchedAtMs ?: System.currentTimeMillis()) else null,
+            userRating = existing?.userRating,
+            userNote = existing?.userNote,
+            isBookmarked = existing?.isBookmarked ?: false,
+            customLabel = existing?.customLabel
         )
         episodeProgressDao.insertOrUpdate(entity)
     }
@@ -39,16 +44,48 @@ class MediaRepository(
     suspend fun setMultipleEpisodesWatched(mediaId: Long, episodes: List<Pair<Int, Int>>, isWatched: Boolean) {
         if (episodeProgressDao == null) return
         val now = System.currentTimeMillis()
+        val existingMap = episodeProgressDao.getAllProgressForMediaOnce(mediaId)
+            .associateBy { it.seasonNumber to it.episodeNumber }
         val list = episodes.map { (s, e) ->
+            val existing = existingMap[s to e]
             EpisodeProgressEntity(
                 mediaId = mediaId,
                 seasonNumber = s,
                 episodeNumber = e,
                 isWatched = isWatched,
-                watchedAtMs = if (isWatched) now else null
+                watchedAtMs = if (isWatched) (existing?.watchedAtMs ?: now) else null,
+                userRating = existing?.userRating,
+                userNote = existing?.userNote,
+                isBookmarked = existing?.isBookmarked ?: false,
+                customLabel = existing?.customLabel
             )
         }
         episodeProgressDao.insertOrUpdateAll(list)
+    }
+
+    suspend fun updateEpisodeMetadata(
+        mediaId: Long,
+        seasonNumber: Int,
+        episodeNumber: Int,
+        userRating: Float?,
+        userNote: String?,
+        isBookmarked: Boolean,
+        customLabel: String?
+    ) {
+        if (episodeProgressDao == null || mediaId <= 0L) return
+        val existing = episodeProgressDao.getEpisodeProgressOnce(mediaId, seasonNumber, episodeNumber)
+        val entity = EpisodeProgressEntity(
+            mediaId = mediaId,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+            isWatched = existing?.isWatched ?: false,
+            watchedAtMs = existing?.watchedAtMs,
+            userRating = userRating,
+            userNote = userNote?.trim()?.takeIf { it.isNotBlank() },
+            isBookmarked = isBookmarked,
+            customLabel = customLabel?.trim()?.takeIf { it.isNotBlank() }
+        )
+        episodeProgressDao.insertOrUpdate(entity)
     }
     fun getAllMedia(): Flow<List<MediaItemEntity>> = mediaDao.getAllMedia().distinctUntilChanged()
 

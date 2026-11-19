@@ -163,6 +163,7 @@ fun UserProfileSheet(
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
     onOpenCharacter: ((AnimeCharacterItem) -> Unit)? = null,
     onOpenStaff: ((AnimeStaffItem) -> Unit)? = null,
+    onOpenMediaList: ((userId: Int, username: String, isAnime: Boolean) -> Unit)? = null,
     enrichmentRepository: EnrichmentRepository = remember { EnrichmentRepository() },
     onDismiss: () -> Unit,
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -183,8 +184,12 @@ fun UserProfileSheet(
     var isSendingMessage by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
 
-    // User Media List sheet state (Anime / Manga list browsing)
-    var browsingMediaListType by rememberSaveable { mutableStateOf<Boolean?>(null) } // true: anime, false: manga, null: closed
+    // Fallback inline state if onOpenMediaList is not provided
+    var browsingMediaListType by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val profileScrollState = rememberScrollState()
+    val mediaListState = rememberSaveable(browsingMediaListType, saver = LazyListState.Saver) {
+        LazyListState()
+    }
 
     // Feed Filter State: "ALL", "ANIME", "MANGA", "TEXT"
     var feedFilter by remember { mutableStateOf("ALL") }
@@ -198,14 +203,6 @@ fun UserProfileSheet(
         val target = profile?.username ?: username
         !target.isNullOrBlank() && !currentUsername.isNullOrBlank() &&
             target.equals(currentUsername, ignoreCase = true)
-    }
-
-    BackHandler(enabled = true) {
-        if (browsingMediaListType != null) {
-            browsingMediaListType = null
-        } else {
-            onDismiss()
-        }
     }
 
     LaunchedEffect(username, anilistUserId) {
@@ -222,24 +219,26 @@ fun UserProfileSheet(
         isLoading = false
     }
 
-    ModalBottomSheet(
-        onDismissRequest = {
+    InWindowBottomSheet(
+        onDismiss = {
             if (browsingMediaListType != null) {
                 browsingMediaListType = null
             } else {
                 onDismiss()
             }
         },
-        sheetState = sheetState,
-        containerColor = Color.Transparent,
-        dragHandle = null,
-        modifier = Modifier.navigationBarsPadding()
+        isAtTop = {
+            if (browsingMediaListType != null) {
+                mediaListState.firstVisibleItemIndex == 0 && mediaListState.firstVisibleItemScrollOffset == 0
+            } else {
+                profileScrollState.value == 0
+            }
+        },
+        showDragHandle = false,
+        maxHeightFraction = 0.92f
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+            modifier = Modifier.fillMaxSize()
         ) {
             // Background presentation matching detail page
             when (presentationSettings?.fallbackBackgroundStyle) {
@@ -304,12 +303,13 @@ fun UserProfileSheet(
                 }
             }
         } else if (browsingMediaListType != null) {
-            // Full Browsable User Media List Sheet
+            // Fallback inline browsable list if no stack callback was provided
             UserMediaListSheetView(
                 userId = p.userId,
                 username = p.username,
                 isAnime = browsingMediaListType == true,
                 enrichmentRepository = enrichmentRepository,
+                listState = mediaListState,
                 onBack = { browsingMediaListType = null },
                 onOpenMediaPreview = onOpenMediaPreview
             )
@@ -317,7 +317,7 @@ fun UserProfileSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(profileScrollState)
             ) {
                 // Header Banner
                 Box(
@@ -844,7 +844,13 @@ fun UserProfileSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            StatCell(title = "Anime", value = "${p.animeCount}") { browsingMediaListType = true }
+                            StatCell(title = "Anime", value = "${p.animeCount}") {
+                                if (onOpenMediaList != null) {
+                                    onOpenMediaList(p.userId, p.username, true)
+                                } else {
+                                    browsingMediaListType = true
+                                }
+                            }
                             StatCell(title = "Episodes", value = "${p.episodesWatched}")
                             StatCell(title = "Days", value = String.format("%.1f", p.animeDaysWatched))
                             StatCell(title = "Mean Score", value = if (p.animeMeanScore > 0) "${p.animeMeanScore.toInt()}%" else "—")
@@ -854,7 +860,13 @@ fun UserProfileSheet(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            StatCell(title = "Manga", value = "${p.mangaCount}") { browsingMediaListType = false }
+                            StatCell(title = "Manga", value = "${p.mangaCount}") {
+                                if (onOpenMediaList != null) {
+                                    onOpenMediaList(p.userId, p.username, false)
+                                } else {
+                                    browsingMediaListType = false
+                                }
+                            }
                             StatCell(title = "Chapters", value = "${p.chaptersRead}")
                             StatCell(title = "Mean Score", value = if (p.mangaMeanScore > 0) "${p.mangaMeanScore.toInt()}%" else "—")
                             StatCell(title = "Follower", value = if (p.isFollower) "Yes" else "No")
@@ -1956,13 +1968,70 @@ private fun AnalyticsCategoryBars(
  * Full Browsable User Media List Sheet (Anime & Manga List Parity)
  */
 @Composable
+fun UserMediaListOverlay(
+    userId: Int,
+    username: String,
+    isAnime: Boolean,
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
+    enrichmentRepository: EnrichmentRepository = remember { EnrichmentRepository() },
+    onBack: () -> Unit,
+    onOpenMediaPreview: ((RecommendationItem) -> Unit)?
+) {
+    val listState = rememberSaveable(isAnime, userId, saver = LazyListState.Saver) {
+        LazyListState()
+    }
+    InWindowBottomSheet(
+        onDismiss = onBack,
+        isAtTop = { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 },
+        showDragHandle = false,
+        maxHeightFraction = 0.92f
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            when (presentationSettings?.fallbackBackgroundStyle) {
+                FallbackBackgroundStyle.CINEMATIC_BLUR -> {
+                    ArtworkBackdrop(
+                        image = backdropBitmap,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                FallbackBackgroundStyle.DOMINANT_COLOR -> {
+                    CoverGlowBox(
+                        imageUrl = backdropTargetUrl,
+                        modifier = Modifier.fillMaxSize()
+                    ) {}
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)))
+                }
+                else -> {
+                    Box(modifier = Modifier.fillMaxSize().background(AmoledBlack))
+                }
+            }
+            UserMediaListSheetView(
+                userId = userId,
+                username = username,
+                isAnime = isAnime,
+                enrichmentRepository = enrichmentRepository,
+                listState = listState,
+                onBack = onBack,
+                onOpenMediaPreview = onOpenMediaPreview
+            )
+        }
+    }
+}
+
+@Composable
 private fun UserMediaListSheetView(
     userId: Int,
     username: String,
     isAnime: Boolean,
     enrichmentRepository: EnrichmentRepository,
     onBack: () -> Unit,
-    onOpenMediaPreview: ((RecommendationItem) -> Unit)?
+    onOpenMediaPreview: ((RecommendationItem) -> Unit)?,
+    listState: LazyListState = rememberSaveable(isAnime, userId, saver = LazyListState.Saver) {
+        LazyListState()
+    }
 ) {
     val context = LocalContext.current
     var mediaList by remember { mutableStateOf<List<UserMediaListItem>?>(null) }
@@ -1971,9 +2040,6 @@ private fun UserMediaListSheetView(
     var selectedStatusFilter by rememberSaveable { mutableStateOf("ALL") }
     var sortOrder by rememberSaveable { mutableStateOf("SCORE") } // SCORE, TITLE, PROGRESS
     var isReverseSort by rememberSaveable { mutableStateOf(false) }
-    val listState = rememberSaveable(isAnime, userId, saver = LazyListState.Saver) {
-        LazyListState()
-    }
 
     LaunchedEffect(userId, isAnime) {
         isLoading = true

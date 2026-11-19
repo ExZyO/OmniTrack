@@ -89,12 +89,14 @@ enum class FallbackBackgroundStyle(val displayName: String, val description: Str
 enum class EpisodeLayoutMode(val displayName: String, val description: String) {
     HORIZONTAL("Horizontal Carousel", "16:9 widescreen scrolling cards with in-image metadata"),
     LIST("Vertical Compact List", "Classic Nuvio side-by-side list with thumbnail on left"),
-    VERTICAL_CARD("Vertical Hero Cards", "Full-width 16:9 vertical cards with in-image metadata");
+    VERTICAL_CARD("Vertical Hero Cards", "Full-width 16:9 vertical cards with in-image metadata"),
+    POSTER_GRID("Poster Grid", "3-column cover art poster grid for Light Novels & Volumes");
 
     companion object {
         fun fromName(name: String?): EpisodeLayoutMode = when (name?.uppercase()) {
             "HORIZONTAL" -> HORIZONTAL
             "VERTICAL_CARD" -> VERTICAL_CARD
+            "POSTER_GRID" -> POSTER_GRID
             else -> LIST
         }
     }

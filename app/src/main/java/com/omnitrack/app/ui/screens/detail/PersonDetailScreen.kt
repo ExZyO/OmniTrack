@@ -111,6 +111,7 @@ fun PersonDetailScreen(
     var isLoading by remember { mutableStateOf(true) }
     var personData by remember { mutableStateOf<PersonDetailData?>(null) }
     var bioExpanded by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(personId) {
         isLoading = true
@@ -191,7 +192,12 @@ fun PersonDetailScreen(
     }
 
     Box(
-        modifier = modifier.fillMaxSize()
+        modifier = modifier
+            .fillMaxSize()
+            .com.omnitrack.app.ui.screens.detail.components.powerampPullDownToBack(
+                isAtTop = { scrollState.value == 0 },
+                onBack = onBack
+            )
     ) {
         // Background presentation matching detail page
         when (presentationSettings?.fallbackBackgroundStyle) {
@@ -216,7 +222,7 @@ fun PersonDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .statusBarsPadding()
                 .padding(bottom = 40.dp)
         ) {

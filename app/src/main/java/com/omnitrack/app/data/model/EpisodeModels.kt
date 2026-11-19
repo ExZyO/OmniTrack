@@ -20,7 +20,8 @@ data class MediaEpisode(
     val voteAverage: Float? = null,
     val isWatched: Boolean = false,
     val isFiller: Boolean = false,
-    val isRecap: Boolean = false
+    val isRecap: Boolean = false,
+    val ranobeBookId: Long? = null
 )
 
 data class NextAiringEpisode(

@@ -335,9 +335,15 @@ fun TmdbEntityBrowseScreen(
     }
 
     val backgroundUrl = entityData?.rails?.firstOrNull()?.items?.firstOrNull()?.coverUrl
+    val scrollState = rememberScrollState()
 
     Box(
-        modifier = modifier.fillMaxSize()
+        modifier = modifier
+            .fillMaxSize()
+            .com.omnitrack.app.ui.screens.detail.components.powerampPullDownToBack(
+                isAtTop = { scrollState.value == 0 },
+                onBack = onBack
+            )
     ) {
         // Background presentation matching detail page
         when (presentationSettings?.fallbackBackgroundStyle) {
@@ -397,7 +403,7 @@ fun TmdbEntityBrowseScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                         .statusBarsPadding()
                         .padding(top = 56.dp, bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(24.dp)
