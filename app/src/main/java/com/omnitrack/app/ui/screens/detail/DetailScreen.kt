@@ -675,6 +675,15 @@ fun DetailScreen(
                 }
             }
 
+            val seriesUiState = rememberDetailSeriesState(
+                itemKey = item.id.takeIf { it > 0 } ?: item.title,
+                initialSeasonViewMode = seasonViewMode,
+                layoutMode = episodeLayoutMode
+            )
+            val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+            val isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
+            val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item.coverUrl
+
             Box(Modifier.fillMaxSize().detailsContentReveal(true)) {
             // Background presentation layer
             when (presentationSettings.fallbackBackgroundStyle) {
@@ -694,15 +703,6 @@ fun DetailScreen(
                     // Pure AMOLED black canvas
                 }
             }
-
-            val seriesUiState = rememberDetailSeriesState(
-                itemKey = item.id.takeIf { it > 0 } ?: item.title,
-                initialSeasonViewMode = seasonViewMode,
-                layoutMode = episodeLayoutMode
-            )
-            val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
-            val isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
-            val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item.coverUrl
 
             LazyColumn(
                 state = lazyListState,
