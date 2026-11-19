@@ -637,6 +637,8 @@ class DetailViewModel(
             _isMangaSeasonGrouped.value = cachedAux.isMangaSeasonGrouped
             _novelDetailMeta.value = cachedAux.novelDetailMeta
             _vnDetailMeta.value = cachedAux.vnDetailMeta
+            _gameDetailMeta.value = cachedAux.gameDetailMeta
+            _bookDetailMeta.value = cachedAux.bookDetailMeta
             if (cachedAux.vnDiscussionComments.isNotEmpty() && _discussionComments.value.isEmpty()) {
                 _discussionComments.value = cachedAux.vnDiscussionComments
             }

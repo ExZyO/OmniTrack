@@ -1213,6 +1213,16 @@ fun DetailScreen(
                                             }
                                         }
                                     }
+                                } else if (bookAuthorProfile != null) {
+                                    item(key = "section_book_author", contentType = "book_author") {
+                                        Column {
+                                            DetailBookAuthorSection(
+                                                authorProfile = bookAuthorProfile,
+                                                onSelectWork = { rec -> pushPreview(rec) }
+                                            )
+                                            Spacer(modifier = Modifier.height(20.dp))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1228,16 +1238,6 @@ fun DetailScreen(
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
-                                    }
-                                } else if (bookAuthorProfile != null) {
-                                    item(key = "section_book_author", contentType = "book_author") {
-                                        Column {
-                                            DetailBookAuthorSection(
-                                                authorProfile = bookAuthorProfile,
-                                                onSelectWork = { rec -> pushPreview(rec) }
-                                            )
-                                            Spacer(modifier = Modifier.height(20.dp))
-                                        }
                                     }
                                 }
                             }
