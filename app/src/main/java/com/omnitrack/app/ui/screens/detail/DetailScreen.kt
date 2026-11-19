@@ -205,6 +205,7 @@ fun DetailScreen(
     val previewEpisodeMeta by viewModel.previewEpisodeMeta.collectAsState()
     val ranobeBookDetails by viewModel.ranobeBookDetails.collectAsState()
     val isTransitionLoading by viewModel.isTransitionLoading.collectAsState()
+    val revealGeneration by viewModel.revealGeneration.collectAsState()
     val mergedEpisodeMeta = remember(uiState.episodeMetaMap, previewEpisodeMeta) {
         uiState.episodeMetaMap + previewEpisodeMeta
     }
@@ -267,11 +268,13 @@ fun DetailScreen(
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
     // by 200ms until navigation entrance transition finishes, eliminating frame drops & stutter.
+    // Once Nuvio transition loading completes, reveal all sections together in a single cohesive fade-in.
     var deferredSectionsAllowed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(200)
         deferredSectionsAllowed = true
     }
+    val sectionsReady = deferredSectionsAllowed || revealGeneration > 0
 
     val lazyListState = rememberLazyListState()
     val isAtTopOfList = {
@@ -471,6 +474,24 @@ fun DetailScreen(
         frozenNextPreview = uiState.nextItem
         if (item != null) {
             AppLogger.i("DetailScreen", "Viewing detail for: ${item.title} [id=${item.id}, type=${item.mediaType.displayName}]")
+        }
+    }
+
+    // Chimanew optimization: pre-decode active cover & banner immediately (including while Nuvio spinner runs)
+    LaunchedEffect(item?.id, effectiveCover, effectiveBanner) {
+        if (item == null) return@LaunchedEffect
+        val loader = coil3.SingletonImageLoader.get(context)
+        if (!effectiveBanner.isNullOrBlank()) {
+            val bannerData: Any = if (effectiveBanner.startsWith("/") || effectiveBanner.startsWith("content:") || effectiveBanner.startsWith("file:")) {
+                if (effectiveBanner.startsWith("/")) java.io.File(effectiveBanner) else effectiveBanner
+            } else effectiveBanner
+            loader.enqueue(ImageRequest.Builder(context).data(bannerData).crossfade(false).build())
+        }
+        if (effectiveCover.isNotBlank()) {
+            val coverData: Any = item.customCoverPath?.let {
+                if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it)
+            } ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
+            loader.enqueue(ImageRequest.Builder(context).data(coverData).crossfade(false).build())
         }
     }
 
@@ -678,8 +699,8 @@ fun DetailScreen(
 
             Box(
                 Modifier.fillMaxSize().detailsContentReveal(
-                    enabled = true,
-                    revealKey = "${item.id}_${item.anilistId}_${item.tmdbId}_${item.title}"
+                    enabled = revealGeneration > 0,
+                    revealKey = revealGeneration
                 )
             ) {
             // Background presentation layer
@@ -834,7 +855,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.FRANCHISE -> {
-                            if (deferredSectionsAllowed && uiState.animeRelations.isNotEmpty()) {
+                            if (sectionsReady && uiState.animeRelations.isNotEmpty()) {
                                 item(key = "section_franchise", contentType = "franchise") {
                                     Column {
                                         DetailFranchiseSection(
@@ -849,7 +870,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.CAST -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 val isAnimeLike = item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
                                 val hasAnimeCast = isAnimeLike && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())
                                 val hasStdCast = !isAnimeLike && uiState.cast.isNotEmpty()
@@ -910,7 +931,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.NETWORKS -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 item(key = "section_networks", contentType = "networks") {
                                     Column {
                                         DetailNetworksSection(
@@ -926,7 +947,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.GENRES_TAGS -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 item(key = "section_genres_tags", contentType = "genres_tags") {
                                     Column {
                                         DetailGenresTagsSection(
@@ -951,7 +972,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.NAMES_SYNONYMS -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 item(key = "section_names_synonyms", contentType = "names_synonyms") {
                                     Column {
                                         DetailNamesSynonymsSection(
@@ -967,7 +988,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.DETAILS_INFO -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 item(key = "section_details_info", contentType = "details_info") {
                                     Column {
                                         DetailGeneralInfoSection(
@@ -990,7 +1011,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.EXTERNAL_LINKS -> {
-                            if (deferredSectionsAllowed && uiState.externalLinks.isNotEmpty()) {
+                            if (sectionsReady && uiState.externalLinks.isNotEmpty()) {
                                 item(key = "section_external_links", contentType = "external_links") {
                                     Column {
                                         DetailExternalLinksSection(
@@ -1002,7 +1023,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.TRAILERS -> {
-                            if (deferredSectionsAllowed && uiState.trailers.isNotEmpty()) {
+                            if (sectionsReady && uiState.trailers.isNotEmpty()) {
                                 item(key = "section_trailers", contentType = "trailers") {
                                     Column {
                                         DetailTrailersSection(
@@ -1015,7 +1036,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.REVIEWS -> {
-                            if (deferredSectionsAllowed) {
+                            if (sectionsReady) {
                                 item(key = "section_reviews", contentType = "reviews") {
                                     Column {
                                         UnifiedDiscussionSection(
@@ -1059,7 +1080,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.COLLECTION -> {
-                            if (deferredSectionsAllowed && item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
+                            if (sectionsReady && item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
                                 item(key = "section_collection", contentType = "collection") {
                                     Column {
                                         DetailCollectionSection(
@@ -1075,7 +1096,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.RECOMMENDATIONS -> {
-                            if (deferredSectionsAllowed && uiState.recommendations.isNotEmpty()) {
+                            if (sectionsReady && uiState.recommendations.isNotEmpty()) {
                                 item(key = "section_recommendations", contentType = "recommendations") {
                                     Column {
                                         RecommendationsSection(
@@ -1526,7 +1547,10 @@ fun DetailScreen(
                         onSaveMetadata = { sNum, eNum, rating, note, bookmarked, label ->
                             viewModel.updateEpisodeMetadata(sNum, eNum, rating, note, bookmarked, label)
                         },
-                        onDismiss = { stepBackOneLevel() }
+                        onDismiss = { stepBackOneLevel() },
+                        presentationSettings = presentationSettings,
+                        backdropBitmap = backdropBitmap,
+                        backdropTargetUrl = effectiveBanner
                     )
                 }
             }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -141,6 +142,7 @@ fun InWindowBottomSheet(
     wrapHeightMax: Dp? = null,
     showDragHandle: Boolean = true,
     containerColor: Color = AmoledBlack,
+    backgroundContent: (@Composable BoxScope.() -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -187,58 +189,69 @@ fun InWindowBottomSheet(
                     .fillMaxHeight(maxHeightFraction)
             }
 
-            Column(
-                modifier = sizeModifier
-                    .graphicsLayer { translationY = animatedHandleDragY.coerceAtLeast(0f) }
-                    .powerampPullDownToBack(isAtTop = isAtTop, onBack = onDismiss)
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    .background(containerColor)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {} // absorb clicks so scrim behind doesn't trigger
-                    )
-                    .navigationBarsPadding()
-            ) {
-                if (showDragHandle) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .pointerInput(Unit) {
-                                detectVerticalDragGestures(
-                                    onDragEnd = {
-                                        if (handleDragY > 140f) {
-                                            handleDragY = 0f
-                                            onDismiss()
-                                        } else {
-                                            handleDragY = 0f
-                                        }
-                                    },
-                                    onDragCancel = { handleDragY = 0f },
-                                    onVerticalDrag = { _, dragAmount ->
-                                        handleDragY = (handleDragY + dragAmount * 0.7f).coerceAtLeast(0f)
-                                    }
-                                )
-                            }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+            val containerModifier = sizeModifier
+                .graphicsLayer { translationY = animatedHandleDragY.coerceAtLeast(0f) }
+                .powerampPullDownToBack(isAtTop = isAtTop, onBack = onDismiss)
+                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                .background(containerColor)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {} // absorb clicks so scrim behind doesn't trigger
+                )
+
+            Box(modifier = containerModifier) {
+                backgroundContent?.invoke(this)
+                val columnModifier = if (wrapHeightMax != null) {
+                    Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                } else {
+                    Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding()
+                }
+                Column(modifier = columnModifier) {
+                    if (showDragHandle) {
                         Box(
                             modifier = Modifier
-                                .size(width = 38.dp, height = 4.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.24f))
-                        )
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures(
+                                        onDragEnd = {
+                                            if (handleDragY > 140f) {
+                                                handleDragY = 0f
+                                                onDismiss()
+                                            } else {
+                                                handleDragY = 0f
+                                            }
+                                        },
+                                        onDragCancel = { handleDragY = 0f },
+                                        onVerticalDrag = { _, dragAmount ->
+                                            handleDragY = (handleDragY + dragAmount * 0.7f).coerceAtLeast(0f)
+                                        }
+                                    )
+                                }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 38.dp, height = 4.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.24f))
+                            )
+                        }
                     }
-                }
-                Box(
-                    modifier = if (wrapHeightMax != null) {
-                        Modifier.fillMaxWidth()
-                    } else {
-                        Modifier.weight(1f).fillMaxWidth()
+                    Box(
+                        modifier = if (wrapHeightMax != null) {
+                            Modifier.fillMaxWidth()
+                        } else {
+                            Modifier.weight(1f).fillMaxWidth()
+                        }
+                    ) {
+                        content()
                     }
-                ) {
-                    content()
                 }
             }
         }

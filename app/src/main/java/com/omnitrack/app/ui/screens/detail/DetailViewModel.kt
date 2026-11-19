@@ -263,7 +263,16 @@ class DetailViewModel(
     val ranobeBookDetails: StateFlow<Map<Long, EnrichmentRepository.RanobeDbBookDetail>> = _ranobeBookDetails.asStateFlow()
     private val _isTransitionLoading = MutableStateFlow(false)
     val isTransitionLoading: StateFlow<Boolean> = _isTransitionLoading.asStateFlow()
+    private val _revealGeneration = MutableStateFlow(0)
+    val revealGeneration: StateFlow<Int> = _revealGeneration.asStateFlow()
     private var transitionLoadingJob: kotlinx.coroutines.Job? = null
+    private var transitionGraceJob: kotlinx.coroutines.Job? = null
+    @Volatile private var activeTransitionGen: Long = 0L
+    @Volatile private var initialPreArmGen: Long = 0L
+    @Volatile private var skipTransitionArmForId: Long = -1L
+    @Volatile private var transitionAuxReady: Boolean = false
+    @Volatile private var transitionSeriesReady: Boolean = false
+    @Volatile private var transitionEnrichReady: Boolean = false
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
     private val scrollOffsetStack = mutableListOf<Pair<Int, Int>>()
 
@@ -583,12 +592,48 @@ class DetailViewModel(
                 maybeEnrich(ephemeral)
             }
         } else if (mediaId > 0L) {
+            val preCachedAux = DetailAuxMemoryCache.getCacheKey(mediaId)?.let { DetailAuxMemoryCache.cache[it] }
+            if (preCachedAux == null) {
+                activeTransitionGen += 1L
+                initialPreArmGen = activeTransitionGen
+                transitionAuxReady = false
+                transitionSeriesReady = false
+                transitionEnrichReady = false
+                _isTransitionLoading.value = true
+                launchTransitionSafetyTimeout(activeTransitionGen)
+            }
             viewModelScope.launch(Dispatchers.IO) {
                 val item = repository.getMediaById(mediaId).firstOrNull()
-                if (item != null) {
-                    loadRecommendationsAndReviews(item)
+                withContext(Dispatchers.Main.immediate) {
+                    if (item != null) {
+                        onLibraryItemReady(item)
+                    } else {
+                        finishTransitionLoading(triggerReveal = false)
+                    }
                 }
             }
+        }
+    }
+
+    private fun onLibraryItemReady(item: MediaItemEntity) {
+        if (item.id <= 0L || _previewItem.value != null || _mediaId.value != item.id) return
+        latestRoomItemCache[item.id] = item
+        val auxKey = "${item.id}_${item.anilistId}_${item.tmdbId}_${item.title}"
+        if (loadedAuxKeys.add(auxKey)) {
+            val isSiblingNav = skipTransitionArmForId == item.id
+            if (isSiblingNav) {
+                skipTransitionArmForId = -1L
+            } else if (_isTransitionLoading.value && activeTransitionGen == initialPreArmGen && initialPreArmGen > 0L) {
+                initialPreArmGen = 0L
+                syncTransitionFlagsForItem(item)
+            } else if (!_isTransitionLoading.value) {
+                beginTransitionLoadingIfUncached(item)
+            }
+            if (hasCachedSeries(item)) {
+                restoreSeriesFromMemoryCache(item, item.id)
+            }
+            maybeEnrich(item)
+            loadRecommendationsAndReviews(item)
         }
     }
 
@@ -617,10 +662,15 @@ class DetailViewModel(
             (isVideoMedia && item.traktScore == null) ||
             hasStaleRatings
         )
-        if (!needsEnrichment) return
+        val gen = activeTransitionGen
+        if (!needsEnrichment) {
+            markTransitionEnrichReady(gen)
+            return
+        }
 
         enrichmentFetchJob?.cancel()
         enrichmentFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val mdbKey = preferenceManager?.mdblistApiKey?.firstOrNull()?.ifBlank { null }
@@ -658,6 +708,7 @@ class DetailViewModel(
                             }
                         }
                     }
+                    markTransitionEnrichReady(gen)
                 }
             )
 
@@ -690,37 +741,39 @@ class DetailViewModel(
                 if (updated != latest) {
                     repository.updateMedia(updated)
                 }
-                if (_recommendations.value.isEmpty()) {
+                if (_recommendations.value.isEmpty() && enrichment.resolvedTmdbId != null && latest.tmdbId == null) {
                     loadRecommendationsAndReviews(updated)
                 }
             } else {
                 val currentPreview = _previewItem.value
                 val matchesPreview = currentPreview != null && (currentPreview.id == item.id || currentPreview.title == item.title || (currentPreview.anilistId != null && currentPreview.anilistId == item.anilistId))
-                if (!matchesPreview) return@launch
+                if (!matchesPreview || currentPreview == null) return@launch
 
-                val updated = item.copy(
-                    tmdbId = enrichment.resolvedTmdbId ?: item.tmdbId,
-                    imdbId = enrichment.resolvedImdbId ?: item.imdbId,
-                    clearartUrl = enrichment.clearartUrl ?: item.clearartUrl,
-                    communityScore = enrichment.communityScore ?: item.communityScore,
-                    imdbScore = enrichment.imdbScore ?: item.imdbScore,
-                    rtScore = enrichment.rtScore ?: item.rtScore,
-                    metacriticScore = enrichment.metacriticScore ?: item.metacriticScore,
-                    traktScore = enrichment.traktScore ?: item.traktScore,
-                    audienceScore = enrichment.audienceScore ?: item.audienceScore,
-                    releaseYear = enrichment.releaseYear ?: item.releaseYear,
-                    trailerYoutubeKey = enrichment.trailerYoutubeKey ?: item.trailerYoutubeKey,
-                    studioOrNetwork = enrichment.studioOrNetwork ?: item.studioOrNetwork,
-                    runtimeMinutes = enrichment.runtimeMinutes ?: item.runtimeMinutes,
-                    contentRating = enrichment.contentRating ?: item.contentRating,
-                    airStatus = enrichment.airStatus ?: item.airStatus,
-                    totalProgress = if (item.totalProgress == null || item.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: item.totalProgress else item.totalProgress
+                val updated = currentPreview.copy(
+                    tmdbId = enrichment.resolvedTmdbId ?: currentPreview.tmdbId,
+                    imdbId = enrichment.resolvedImdbId ?: currentPreview.imdbId,
+                    clearartUrl = enrichment.clearartUrl ?: currentPreview.clearartUrl,
+                    communityScore = enrichment.communityScore ?: currentPreview.communityScore,
+                    imdbScore = enrichment.imdbScore ?: currentPreview.imdbScore,
+                    rtScore = enrichment.rtScore ?: currentPreview.rtScore,
+                    metacriticScore = enrichment.metacriticScore ?: currentPreview.metacriticScore,
+                    traktScore = enrichment.traktScore ?: currentPreview.traktScore,
+                    audienceScore = enrichment.audienceScore ?: currentPreview.audienceScore,
+                    releaseYear = enrichment.releaseYear ?: currentPreview.releaseYear,
+                    trailerYoutubeKey = enrichment.trailerYoutubeKey ?: currentPreview.trailerYoutubeKey,
+                    studioOrNetwork = enrichment.studioOrNetwork ?: currentPreview.studioOrNetwork,
+                    runtimeMinutes = enrichment.runtimeMinutes ?: currentPreview.runtimeMinutes,
+                    contentRating = enrichment.contentRating ?: currentPreview.contentRating,
+                    airStatus = enrichment.airStatus ?: currentPreview.airStatus,
+                    totalProgress = if (currentPreview.totalProgress == null || currentPreview.totalProgress == 0.0) enrichment.totalEpisodes?.toDouble() ?: currentPreview.totalProgress else currentPreview.totalProgress
                 )
                 _previewItem.value = updated
                 _previewStack.update { stack ->
                     if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
                 }
-                loadRecommendationsAndReviews(updated)
+                if (_recommendations.value.isEmpty() && enrichment.resolvedTmdbId != null && currentPreview.tmdbId == null) {
+                    loadRecommendationsAndReviews(updated)
+                }
             }
             if (enrichment.videos.isNotEmpty()) {
                 val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
@@ -735,6 +788,9 @@ class DetailViewModel(
                     _collectionName.value = collData.name
                     _collectionItems.value = collData.parts
                 }
+            }
+            } finally {
+                markTransitionEnrichReady(gen)
             }
         }
     }
@@ -934,14 +990,7 @@ class DetailViewModel(
                     .flatMapLatest { currentItem ->
                         val effectiveItem = currentItem ?: aux.previewItem?.takeIf { it.id == currentId }
                         if (effectiveItem != null) {
-                            if (effectiveItem.id > 0L) {
-                                latestRoomItemCache[effectiveItem.id] = effectiveItem
-                            }
-                            maybeEnrich(effectiveItem)
-                            val auxKey = "${effectiveItem.id}_${effectiveItem.anilistId}_${effectiveItem.tmdbId}_${effectiveItem.title}"
-                            if (loadedAuxKeys.add(auxKey)) {
-                                loadRecommendationsAndReviews(effectiveItem)
-                            }
+                            onLibraryItemReady(effectiveItem)
                             updateSiblings(effectiveItem.id)
                             repository.getEpisodeProgress(effectiveItem.id)
                                 .onStart {
@@ -1105,7 +1154,40 @@ class DetailViewModel(
     fun isPreviewActive(): Boolean =
         _previewStack.value.isNotEmpty() || _previewItem.value != null || EphemeralPreviewHolder.previewItem != null
 
+    private fun quickHasAuxCacheForPreview(
+        anilistId: Long?,
+        tmdbId: Long?,
+        mediaType: MediaType
+    ): Boolean {
+        if (mediaType == MediaType.ANIME && anilistId != null && anilistId > 0L) {
+            if (DetailAuxMemoryCache.cache.containsKey("anilist_$anilistId")) return true
+        }
+        val allowTmdbKey = mediaType != MediaType.ANIME || anilistId == null || anilistId <= 0L
+        if (allowTmdbKey && tmdbId != null && tmdbId > 0L) {
+            val tmdbKey = DetailAuxMemoryCache.getTmdbCacheKey(if (mediaType == MediaType.MOVIE) "movie" else "tv", tmdbId)
+            if (DetailAuxMemoryCache.cache.containsKey(tmdbKey)) return true
+        }
+        if (anilistId != null && anilistId > 0L && DetailAuxMemoryCache.cache.containsKey("anilist_$anilistId")) {
+            return true
+        }
+        return false
+    }
+
+    private fun preArmPreviewLoadingIfUncached(anilistId: Long?, tmdbId: Long?, mediaType: MediaType) {
+        if (!quickHasAuxCacheForPreview(anilistId, tmdbId, mediaType)) {
+            transitionLoadingJob?.cancel()
+            transitionGraceJob?.cancel()
+            activeTransitionGen += 1L
+            transitionAuxReady = false
+            transitionSeriesReady = !isSeriesMediaType(mediaType)
+            transitionEnrichReady = mediaType !in listOf(MediaType.SHOW, MediaType.MOVIE, MediaType.ANIME)
+            _isTransitionLoading.value = true
+            launchTransitionSafetyTimeout(activeTransitionGen)
+        }
+    }
+
     fun openPreview(rec: RecommendationItem) {
+        preArmPreviewLoadingIfUncached(rec.anilistId, rec.tmdbId, rec.mediaType)
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.findExistingMedia(
                 anilistId = rec.anilistId,
@@ -1127,13 +1209,17 @@ class DetailViewModel(
                 malId = rec.malId,
                 status = TrackingStatus.PLAN_TO_TRACK
             )
-            withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main.immediate) {
                 openPreviewInternal(entityToOpen)
             }
         }
     }
 
     fun openPreview(previewEntity: MediaItemEntity) {
+        val hasDirectIdCache = previewEntity.id > 0L && DetailAuxMemoryCache.getCacheKey(previewEntity.id)?.let { DetailAuxMemoryCache.cache.containsKey(it) } == true
+        if (!hasDirectIdCache) {
+            preArmPreviewLoadingIfUncached(previewEntity.anilistId, previewEntity.tmdbId, previewEntity.mediaType)
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val target = if (previewEntity.id <= 0L) {
                 repository.findExistingMedia(
@@ -1146,21 +1232,22 @@ class DetailViewModel(
             } else {
                 previewEntity
             }
-            withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main.immediate) {
                 openPreviewInternal(target)
             }
         }
     }
 
     fun openRelationPreview(relation: AnimeRelationItem) {
+        val format = relation.format.uppercase()
+        val targetType = when {
+            format == "MANGA" -> MediaType.MANGA
+            format == "NOVEL" -> MediaType.NOVEL
+            format == "MOVIE" -> MediaType.MOVIE
+            else -> MediaType.ANIME
+        }
+        preArmPreviewLoadingIfUncached(relation.id, null, targetType)
         viewModelScope.launch(Dispatchers.IO) {
-            val format = relation.format.uppercase()
-            val targetType = when {
-                format == "MANGA" -> MediaType.MANGA
-                format == "NOVEL" -> MediaType.NOVEL
-                format == "MOVIE" -> MediaType.MOVIE
-                else -> MediaType.ANIME
-            }
             val existing = repository.findExistingMedia(
                 anilistId = relation.id,
                 title = relation.title,
@@ -1176,7 +1263,7 @@ class DetailViewModel(
                 releaseYear = relation.year?.toString(),
                 status = TrackingStatus.PLAN_TO_TRACK
             )
-            withContext(Dispatchers.Main) {
+            withContext(Dispatchers.Main.immediate) {
                 openPreviewInternal(entityToOpen)
             }
         }
@@ -1193,28 +1280,121 @@ class DetailViewModel(
         }
     }
 
-    private fun beginTransitionLoadingIfUncached(entity: MediaItemEntity) {
-        val hasAux = resolveAuxCache(entity.id, entity) != null
-        val hasRoom = entity.id > 0L && latestRoomItemCache.containsKey(entity.id)
-        val hasSeries = SeriesContentMemoryCache.findSeasons(entity, entity.tmdbId, entity.id)?.isNotEmpty() == true
-        val alreadyPopulated = hasAux || hasRoom ||
-            (!entity.synopsis.isNullOrBlank() && !entity.bannerUrl.isNullOrBlank() && (hasSeries || entity.mediaType == MediaType.MOVIE || entity.mediaType == MediaType.GAME || entity.mediaType == MediaType.VISUAL_NOVEL))
-        transitionLoadingJob?.cancel()
-        if (alreadyPopulated) {
-            _isTransitionLoading.value = false
-            return
+    private fun isSeriesMediaType(type: MediaType): Boolean =
+        type == MediaType.SHOW || type == MediaType.ANIME || type == MediaType.MANGA || type == MediaType.NOVEL
+
+    private fun hasCachedSeries(entity: MediaItemEntity): Boolean {
+        if (!isSeriesMediaType(entity.mediaType)) return true
+        return SeriesContentMemoryCache.findSeasons(entity, entity.tmdbId, entity.id, entity.anilistId)?.isNotEmpty() == true
+    }
+
+    private fun isVideoLogoNeeded(entity: MediaItemEntity): Boolean {
+        val isVideoMedia = entity.mediaType == MediaType.SHOW || entity.mediaType == MediaType.MOVIE || entity.mediaType == MediaType.ANIME
+        if (!isVideoMedia) return false
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val existingLogo = entity.clearartUrl?.takeIf {
+            it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)
+        } ?: EnrichmentRepository.getCachedClearart(entity)?.takeIf {
+            !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
         }
-        _isTransitionLoading.value = true
+        return existingLogo.isNullOrBlank()
+    }
+
+    private fun launchTransitionSafetyTimeout(gen: Long) {
+        transitionLoadingJob?.cancel()
         transitionLoadingJob = viewModelScope.launch {
-            delay(850L)
-            _isTransitionLoading.value = false
+            delay(2400L)
+            if (gen == activeTransitionGen && _isTransitionLoading.value) {
+                finishTransitionLoading(triggerReveal = true)
+            }
         }
     }
 
-    private fun finishTransitionLoading() {
+    private fun syncTransitionFlagsForItem(entity: MediaItemEntity) {
+        val hasAux = resolveAuxCache(entity.id, entity) != null
+        val hasSeries = hasCachedSeries(entity)
+        if (hasAux && hasSeries) {
+            finishTransitionLoading(triggerReveal = false)
+            return
+        }
+        transitionAuxReady = hasAux
+        transitionSeriesReady = hasSeries
+        transitionEnrichReady = !isVideoLogoNeeded(entity)
+        evaluateTransitionBarrier(activeTransitionGen)
+    }
+
+    private fun beginTransitionLoadingIfUncached(entity: MediaItemEntity) {
+        val hasAux = resolveAuxCache(entity.id, entity) != null
+        val hasSeries = hasCachedSeries(entity)
+        if (hasAux && hasSeries) {
+            finishTransitionLoading(triggerReveal = false)
+            return
+        }
+        transitionLoadingJob?.cancel()
+        transitionGraceJob?.cancel()
+        activeTransitionGen += 1L
+        val gen = activeTransitionGen
+        transitionAuxReady = hasAux
+        transitionSeriesReady = hasSeries
+        transitionEnrichReady = !isVideoLogoNeeded(entity)
+        _isTransitionLoading.value = true
+        launchTransitionSafetyTimeout(gen)
+        evaluateTransitionBarrier(gen)
+    }
+
+    private fun markTransitionAuxReady(gen: Long) {
+        if (gen != activeTransitionGen || transitionAuxReady) return
+        transitionAuxReady = true
+        if (_isTransitionLoading.value) {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                evaluateTransitionBarrier(gen)
+            }
+        }
+    }
+
+    private fun markTransitionSeriesReady(gen: Long) {
+        if (gen != activeTransitionGen || transitionSeriesReady) return
+        transitionSeriesReady = true
+        if (_isTransitionLoading.value) {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                evaluateTransitionBarrier(gen)
+            }
+        }
+    }
+
+    private fun markTransitionEnrichReady(gen: Long) {
+        if (gen != activeTransitionGen || transitionEnrichReady) return
+        transitionEnrichReady = true
+        if (_isTransitionLoading.value) {
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                evaluateTransitionBarrier(gen)
+            }
+        }
+    }
+
+    private fun evaluateTransitionBarrier(gen: Long) {
+        if (gen != activeTransitionGen || !_isTransitionLoading.value) return
+        if (transitionAuxReady && transitionSeriesReady && transitionEnrichReady) {
+            finishTransitionLoading(triggerReveal = true)
+        } else if (transitionAuxReady && transitionSeriesReady && !transitionEnrichReady && transitionGraceJob?.isActive != true) {
+            transitionGraceJob = viewModelScope.launch {
+                delay(350L)
+                if (gen == activeTransitionGen && _isTransitionLoading.value) {
+                    finishTransitionLoading(triggerReveal = true)
+                }
+            }
+        }
+    }
+
+    private fun finishTransitionLoading(triggerReveal: Boolean = false) {
         transitionLoadingJob?.cancel()
         transitionLoadingJob = null
+        transitionGraceJob?.cancel()
+        transitionGraceJob = null
         if (_isTransitionLoading.value) {
+            if (triggerReveal) {
+                _revealGeneration.update { it + 1 }
+            }
             _isTransitionLoading.value = false
         }
     }
@@ -1327,7 +1507,8 @@ class DetailViewModel(
     }
 
     fun closePreview(): Boolean {
-        finishTransitionLoading()
+        activeTransitionGen += 1L
+        finishTransitionLoading(triggerReveal = false)
         if (_previewStack.value.isEmpty() && _previewItem.value == null && EphemeralPreviewHolder.previewItem == null) {
             return false
         }
@@ -1365,7 +1546,8 @@ class DetailViewModel(
     }
 
     fun clearAllPreviews() {
-        finishTransitionLoading()
+        activeTransitionGen += 1L
+        finishTransitionLoading(triggerReveal = false)
         recommendationFetchJob?.cancel()
         seriesFetchJob?.cancel()
         discussionFetchJob?.cancel()
@@ -1460,8 +1642,10 @@ class DetailViewModel(
             if (existingCached.seasonAniListIds.isNotEmpty()) _seasonAniListIds.value = existingCached.seasonAniListIds
         }
 
+        val auxGen = activeTransitionGen
         recommendationFetchJob?.cancel()
         recommendationFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
             if (!_isTransitionLoading.value) {
                 delay(250) // Let navigation entrance transition finish smoothly at locked 120 FPS
             }
@@ -2003,7 +2187,6 @@ class DetailViewModel(
                         }
                         persistAuxCache()
                     }
-                    finishTransitionLoading()
 
                     // Web Novel Adaptation Bridge: When CN/KR/EN Web Novels lack a direct AniList NOVEL entry or banner/characters,
                     // harvest 16:9 hero banner, character portraits, original author, and Donghua/Manhwa adaptation relations!
@@ -2215,7 +2398,7 @@ class DetailViewModel(
             }
             _collectionName.value = fetchedCollName
             _collectionItems.value = fetchedCollParts
-            finishTransitionLoading()
+            markTransitionAuxReady(auxGen)
 
             if (resolvedAniListId != null) {
                 val currentSeason = _selectedSeasonNumber.value
@@ -2233,10 +2416,14 @@ class DetailViewModel(
             }
 
             persistAuxCache()
+            } finally {
+                markTransitionAuxReady(auxGen)
+            }
         }
     }
 
     private fun launchMangaSeriesFetch(item: MediaItemEntity) {
+        val seriesGen = activeTransitionGen
         seriesFetchJob?.cancel()
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -2296,11 +2483,14 @@ class DetailViewModel(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+            } finally {
+                markTransitionSeriesReady(seriesGen)
             }
         }
     }
 
     private fun launchNovelSeriesFetch(item: MediaItemEntity) {
+        val seriesGen = activeTransitionGen
         seriesFetchJob?.cancel()
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -2412,6 +2602,7 @@ class DetailViewModel(
                     _previewItem.value = updatedPrev
                     _previewStack.update { s -> if (s.isNotEmpty()) s.dropLast(1) + updatedPrev else listOf(updatedPrev) }
                 }
+                markTransitionSeriesReady(seriesGen)
 
                 // Fetch MAL/Jikan LN reviews or Kitsu Web Novel reactions if reviews list is still empty
                 if (_reviews.value.isEmpty()) {
@@ -2453,13 +2644,17 @@ class DetailViewModel(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
+            } finally {
+                markTransitionSeriesReady(seriesGen)
             }
         }
     }
 
     private fun launchSeriesFetch(item: MediaItemEntity) {
+        val seriesGen = activeTransitionGen
         seriesFetchJob?.cancel()
         seriesFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             var resolvedTmdbId = item.tmdbId
             var resolvedImdbId = item.imdbId ?: (if (item.id > 0L) SeriesContentMemoryCache.resolvedImdbIdCache[item.id] else null)
@@ -2531,6 +2726,7 @@ class DetailViewModel(
                             _selectedSeasonNumber.value = target
                             _realEpisodes.value = cachedGrouped[target].orEmpty()
                             refreshNextAiringEpisode(item)
+                            markTransitionSeriesReady(seriesGen)
                             return@launch
                         }
                     }
@@ -2596,6 +2792,7 @@ class DetailViewModel(
                             _realEpisodes.value = selectedEps
                             refreshNextAiringEpisode(item)
                         }
+                        markTransitionSeriesReady(seriesGen)
 
                         // 2. BACKGROUND PATH: Progressively load remaining seasons without blocking UI!
                         launch(Dispatchers.IO) {
@@ -2698,6 +2895,9 @@ class DetailViewModel(
                     _selectedSeasonNumber.value = 1
                     _realEpisodes.value = synEps
                 }
+            }
+            } finally {
+                markTransitionSeriesReady(seriesGen)
             }
         }
     }
@@ -3392,8 +3592,8 @@ class DetailViewModel(
 
     private fun restoreSeriesFromMemoryCache(targetItem: MediaItemEntity?, targetId: Long) {
         val resolvedTmdb = targetItem?.tmdbId ?: (if (targetId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[targetId] else null)
-        val cachedSeasons = SeriesContentMemoryCache.findSeasons(targetItem, resolvedTmdb, targetId)
-        val cachedGrouped = SeriesContentMemoryCache.findEpisodesBySeason(targetItem, resolvedTmdb, targetId)
+        val cachedSeasons = SeriesContentMemoryCache.findSeasons(targetItem, resolvedTmdb, targetId, targetItem?.anilistId)
+        val cachedGrouped = SeriesContentMemoryCache.findEpisodesBySeason(targetItem, resolvedTmdb, targetId, targetItem?.anilistId)
         if (!cachedSeasons.isNullOrEmpty()) {
             val valid = cachedSeasons.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
             if (valid.isNotEmpty()) {
@@ -3425,6 +3625,11 @@ class DetailViewModel(
         discussionFetchJob?.cancel()
         enrichmentFetchJob?.cancel()
 
+        skipTransitionArmForId = targetId
+        activeTransitionGen += 1L
+        initialPreArmGen = 0L
+        finishTransitionLoading(triggerReveal = false)
+
         if (immediate != null) {
             latestRoomItemCache[targetId] = immediate
         }
@@ -3434,7 +3639,6 @@ class DetailViewModel(
 
         val cachedAux = resolveAuxCache(targetId, immediate)
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
-        finishTransitionLoading()
         val immediateLogo = immediate?.clearartUrl?.takeIf {
             !it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
         }
