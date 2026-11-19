@@ -1537,28 +1537,72 @@ class ArtworkWaterfallRepository(
 
     private fun fetchRanobeDbCovers(title: String, nativeTitle: String?): List<ArtworkCandidate> {
         return try {
-            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
-            val req = Request.Builder()
-                .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=5")
-                .header("User-Agent", "OmniTrack/1.0 (Android)")
-                .get()
-                .build()
-            val seriesId = client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return emptyList()
-                val body = resp.body?.string() ?: return emptyList()
-                val arr = (json.parseToJsonElement(body) as? JsonObject)?.get("series")?.let { it as? JsonArray }
-                    ?: return emptyList()
-                val matched = arr.firstOrNull { node ->
-                    val o = node.jsonObject
-                    val candNames = listOfNotNull(
-                        o["title"].cleanString(),
-                        o["romaji_orig"].cleanString(),
-                        o["title_orig"].cleanString()
-                    )
-                    isTitleMatch(title, candNames) || (nativeTitle != null && candNames.any { it.equals(nativeTitle, ignoreCase = true) })
+            val cleanQuery = title.trim()
+            if (cleanQuery.isBlank()) return emptyList()
+            val subSeriesRegex = Regex(
+                """\s*[:\-–—]\s*(?:Year|Part|Act)\s*\d+.*$|\s*[:\-–—]\s*\d+-nensei.*$""",
+                RegexOption.IGNORE_CASE
+            )
+            val baseQuery = cleanQuery.replace(subSeriesRegex, "").trim()
+                .takeIf { it.isNotBlank() && it != cleanQuery }
+
+            fun querySeriesList(q: String): List<JsonObject> {
+                val encoded = URLEncoder.encode(q, "UTF-8")
+                val req = Request.Builder()
+                    .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=8")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                return client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return emptyList()
+                    val body = resp.body?.string() ?: return emptyList()
+                    val arr = (json.parseToJsonElement(body) as? JsonObject)?.get("series") as? JsonArray
+                        ?: return emptyList()
+                    arr.mapNotNull { it as? JsonObject }
                 }
-                matched?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-            } ?: return emptyList()
+            }
+
+            fun scoreNode(o: JsonObject): Int? {
+                val candNames = listOfNotNull(
+                    o["title"].cleanString(),
+                    o["romaji"].cleanString(),
+                    o["romaji_orig"].cleanString(),
+                    o["title_orig"].cleanString()
+                )
+                if (candNames.isEmpty()) return null
+                val queries = listOfNotNull(cleanQuery, baseQuery, nativeTitle).distinct()
+                val matches = queries.any { q ->
+                    isTitleMatch(q, candNames) || candNames.any { it.equals(q, ignoreCase = true) }
+                }
+                if (!matches) return null
+
+                fun normSimple(s: String): String = s.lowercase().replace(Regex("""[^\p{L}\p{N}]"""), "")
+                val qNorms = queries.map(::normSimple).filter { it.isNotBlank() }
+                var score = if (candNames.any { normSimple(it) in qNorms }) 1000 else 0
+                val qLower = cleanQuery.lowercase()
+                val candJoinedLower = candNames.joinToString(" ").lowercase()
+                val spinoffTerms = listOf(
+                    "guidebook", "character book", "special book", "recollection",
+                    "short story", "artbook", "fanbook", "anthology", "side stor"
+                )
+                if (spinoffTerms.any { it in candJoinedLower && it !in qLower }) {
+                    score -= 600
+                }
+                val cNumBooks = (o["c_num_books"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+                    ?: (o["volumes"] as? JsonObject)?.get("count")?.let { it as? JsonPrimitive }?.contentOrNull?.toIntOrNull()
+                    ?: 0
+                score += minOf(cNumBooks, 50) * 6
+                return score
+            }
+
+            var list = querySeriesList(cleanQuery)
+            var bestNode = list.mapNotNull { o -> scoreNode(o)?.let { it to o } }.maxByOrNull { it.first }?.second
+            if (bestNode == null && baseQuery != null) {
+                list = querySeriesList(baseQuery)
+                bestNode = list.mapNotNull { o -> scoreNode(o)?.let { it to o } }.maxByOrNull { it.first }?.second
+            }
+            val seriesId = (bestNode?.get("id") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                ?: return emptyList()
 
             val detailReq = Request.Builder()
                 .url("https://ranobedb.org/api/v0/series/$seriesId")
@@ -1569,7 +1613,7 @@ class ArtworkWaterfallRepository(
                 if (!resp.isSuccessful) return emptyList()
                 val body = resp.body?.string() ?: return emptyList()
                 val seriesObj = (json.parseToJsonElement(body) as? JsonObject)
-                    ?.get("series")?.let { it as? JsonObject } ?: return emptyList()
+                    ?.get("series") as? JsonObject ?: return emptyList()
                 val books = seriesObj["books"] as? JsonArray ?: return emptyList()
                 val candidates = mutableListOf<ArtworkCandidate>()
                 val seenUrls = mutableSetOf<String>()
@@ -1579,8 +1623,11 @@ class ArtworkWaterfallRepository(
                     val coverUrl = "https://images.ranobedb.org/$filename"
                     if (!seenUrls.add(coverUrl)) return@forEachIndexed
                     val bTitle = b["title"].cleanString()
+                    val romajiOrig = b["romaji_orig"].cleanString()
                     val volNum = bTitle?.let {
-                        Regex("""(?:Vol\.?|Volume)\s*(\d+)""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.getOrNull(1)
+                        Regex("""(?:Vol\.?|Volume)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.getOrNull(1)
+                    } ?: romajiOrig?.let {
+                        Regex("""(?:Vol\.?|Volume)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(it)?.groupValues?.getOrNull(1)
                     } ?: (books.size - revIdx).toString()
                     candidates.add(
                         ArtworkCandidate(

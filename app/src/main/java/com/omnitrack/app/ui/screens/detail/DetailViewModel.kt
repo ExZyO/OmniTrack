@@ -255,13 +255,13 @@ class DetailViewModel(
     private val latestRoomItemCache = java.util.concurrent.ConcurrentHashMap<Long, MediaItemEntity>()
     private val latestEpisodeProgressCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.db.entity.EpisodeProgressEntity>>()
     private val discussionCache = java.util.concurrent.ConcurrentHashMap<String, List<DiscussionComment>>()
-    private val scrollOffsetStack = mutableListOf<Int>()
+    private val scrollOffsetStack = mutableListOf<Pair<Int, Int>>()
 
-    fun saveScrollOffset(offset: Int) {
-        scrollOffsetStack.add(offset)
+    fun saveScrollOffset(index: Int, offset: Int) {
+        scrollOffsetStack.add(index to offset)
     }
 
-    fun popScrollOffset(): Int? {
+    fun popScrollOffset(): Pair<Int, Int>? {
         return if (scrollOffsetStack.isNotEmpty()) scrollOffsetStack.removeAt(scrollOffsetStack.lastIndex) else null
     }
 

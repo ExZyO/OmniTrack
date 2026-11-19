@@ -18,6 +18,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -1449,18 +1451,18 @@ class OmniSearchRepository(
                 val series = root["series"]?.jsonArray ?: return@withGeneralPacing emptyList()
 
                 series.mapNotNull { node ->
-                    val obj = node.jsonObject
+                    val obj = node as? JsonObject ?: return@mapNotNull null
                     val title = obj["title"]?.cleanString()
                         ?: obj["title_orig"]?.cleanString()
                         ?: return@mapNotNull null
                     val nativeTitle = obj["title_orig"]?.cleanString()
-                    val book = obj["book"]?.jsonObject
-                    val filename = book?.get("image")?.jsonObject?.get("filename")?.cleanString()
+                    val book = obj["book"] as? JsonObject
+                    val filename = (book?.get("image") as? JsonObject)?.get("filename")?.cleanString()
                     val cover = if (filename != null) "https://images.ranobedb.org/$filename" else return@mapNotNull null
-                    val volCount = obj["volumes"]?.jsonObject?.get("count")?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                        ?: obj["c_num_books"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    val volCount = (obj["volumes"] as? JsonObject)?.get("count")?.let { it as? JsonPrimitive }?.contentOrNull?.toDoubleOrNull()
+                        ?: (obj["c_num_books"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
                     val origin = obj["olang"]?.cleanString()?.uppercase() ?: "JP"
-                    val startDateInt = obj["c_start_date"]?.jsonPrimitive?.contentOrNull
+                    val startDateInt = (obj["c_start_date"] as? JsonPrimitive)?.contentOrNull
                     val year = startDateInt?.take(4)?.takeIf { it.length == 4 }
 
                     SearchResultItem(

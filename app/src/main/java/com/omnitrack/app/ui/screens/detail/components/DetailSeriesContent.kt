@@ -37,8 +37,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,20 +95,54 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
-/**
- * 1:1 Nuvio Reference Parity: Seasons & Episode Tracking Grid.
- *
- * Supports:
- * 1. Mode 1: Horizontal Carousel (16:9 cards, metadata inside image).
- * 2. Mode 2: Compact List (Thumbnail on left, metadata on right).
- * 3. Mode 3: Vertical Hero Cards (Full-width vertical stack of 16:9 cards with in-image metadata).
- * 4. 1:1 Nuvio Animated Watched Badge (compact 20dp circle with jade gradient, hidden when unwatched).
- * 5. Official IMDb Rating Badges (with official logo asset).
- * 6. 1:1 Season Posters Rail vs Text Chips selector with "Posters" / "Text" button.
- * 7. Scalable episode card dimensions based on user setting.
- */
+private fun toCoilImageModel(raw: String?): Any? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return if (trimmed.startsWith("/")) java.io.File(trimmed) else trimmed
+}
+
+private fun extractVolumeBadgeLabel(title: String, fallbackNum: Int): String {
+    val enMatch = Regex("""(?:Vol\.?|Volume)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(title)
+    if (enMatch != null) return "Vol. ${enMatch.groupValues[1]}"
+    val jpMatch = Regex("""(?:年生編|第)\s*(\d+(?:\.\d+)?)""").find(title)
+    if (jpMatch != null) return "Vol. ${jpMatch.groupValues[1]}"
+    return "Vol. $fallbackNum"
+}
+
+@Stable
+class DetailSeriesUiState(
+    initialSeasonViewMode: String,
+    initialLayoutMode: EpisodeLayoutMode
+) {
+    var activeActionSheetEpisode by mutableStateOf<MediaEpisode?>(null)
+    var fillerPromptEpisode by mutableStateOf<MediaEpisode?>(null)
+    var showJumpDialog by mutableStateOf(false)
+    var lnShowPosterGrid by mutableStateOf(false)
+    var currentSeasonViewMode by mutableStateOf(initialSeasonViewMode)
+    var currentLayoutMode by mutableStateOf(initialLayoutMode)
+}
+
 @Composable
-fun DetailSeriesContent(
+fun rememberDetailSeriesState(
+    itemKey: Any?,
+    initialSeasonViewMode: String,
+    layoutMode: EpisodeLayoutMode
+): DetailSeriesUiState {
+    val state = remember(itemKey) { DetailSeriesUiState(initialSeasonViewMode, layoutMode) }
+    LaunchedEffect(initialSeasonViewMode) {
+        state.currentSeasonViewMode = initialSeasonViewMode
+    }
+    LaunchedEffect(layoutMode) {
+        state.currentLayoutMode = layoutMode
+    }
+    return state
+}
+
+/**
+ * 1:1 Nuvio Reference Parity: Seasons & Episode Tracking Items emitted directly into the parent
+ * LazyColumn so 1,000+ chapters/volumes scroll at locked 120Hz with zero "Show More" slicing.
+ */
+fun LazyListScope.detailSeriesItems(
+    seriesState: DetailSeriesUiState,
     seasons: List<MediaSeason>,
     episodes: List<MediaEpisode>,
     watchedEpisodes: Set<Pair<Int, Int>>, // Set of (seasonNumber, episodeNumber)
@@ -114,22 +151,16 @@ fun DetailSeriesContent(
     fallbackCoverUrl: String? = null,
     onSelectSeason: (Int) -> Unit,
     onToggleEpisodeWatched: (MediaEpisode) -> Unit,
-    onMarkPreviousWatched: (MediaEpisode) -> Unit,
     onToggleSeasonWatched: (Int) -> Unit,
-    modifier: Modifier = Modifier,
     episodesBySeason: Map<Int, List<MediaEpisode>> = emptyMap(),
-    layoutMode: EpisodeLayoutMode = EpisodeLayoutMode.LIST,
     layoutScale: Float = 1.0f,
-    initialSeasonViewMode: String = "Posters",
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
     onLayoutModeChanged: ((EpisodeLayoutMode) -> Unit)? = null,
     isFillerSkipEnabled: Boolean = false,
     onToggleSkipFillers: (() -> Unit)? = null,
-    onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
     isMangaMode: Boolean = false,
     isMangaSeasonGrouped: Boolean = false,
     isLightNovelVolumeMode: Boolean = false,
-    maxTotalProgress: Int? = null,
     currentTotalProgress: Int? = null,
     onStepProgress: ((Int) -> Unit)? = null,
     onJumpToProgress: ((Int) -> Unit)? = null
@@ -138,24 +169,13 @@ fun DetailSeriesContent(
         return
     }
 
-    var activeActionSheetEpisode by remember { mutableStateOf<MediaEpisode?>(null) }
-    var fillerPromptEpisode by remember { mutableStateOf<MediaEpisode?>(null) }
-    var showJumpDialog by remember { mutableStateOf(false) }
-    var lnShowPosterGrid by remember { mutableStateOf(false) }
-    var currentSeasonViewMode by remember(initialSeasonViewMode) { mutableStateOf(initialSeasonViewMode) }
-    var currentLayoutMode by remember(layoutMode) { mutableStateOf(layoutMode) }
-    val hasSeasonPosters = remember(seasons) { seasons.any { !it.posterUrl.isNullOrBlank() } }
-    val hasDistinctBookPosters = remember(seasons, fallbackCoverUrl, isMangaMode, isMangaSeasonGrouped) {
-        if (isMangaMode && isMangaSeasonGrouped) {
-            seasons.mapNotNull { it.posterUrl?.takeIf { u -> u.isNotBlank() } }.distinct().size > 1
-        } else {
-            hasSeasonPosters
-        }
+    val hasSeasonPosters = seasons.any { !it.posterUrl.isNullOrBlank() }
+    val hasDistinctBookPosters = if (isMangaMode && isMangaSeasonGrouped) {
+        seasons.mapNotNull { it.posterUrl?.takeIf { u -> u.isNotBlank() } }.distinct().size > 1
+    } else {
+        hasSeasonPosters
     }
-    val totalItemsAcrossSeasons = remember(episodesBySeason, episodes) {
-        val byMap = episodesBySeason.values.sumOf { it.size }
-        if (byMap > 0) byMap else episodes.size
-    }
+    val totalItemsAcrossSeasons = episodesBySeason.values.sumOf { it.size }.takeIf { it > 0 } ?: episodes.size
     val useProgressAsWatchedTruth = isMangaMode && (
         totalItemsAcrossSeasons > 200 ||
             (watchedEpisodes.isEmpty() && (currentTotalProgress ?: 0) > 0)
@@ -168,17 +188,19 @@ fun DetailSeriesContent(
         }
     }
 
+    val seasonEpisodes = episodesBySeason[selectedSeasonNumber]
+        ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
+
     val handleEpisodeClick: (MediaEpisode) -> Unit = { ep ->
         val isWatched = isEpWatched(ep)
         if (!isWatched && isFillerSkipEnabled) {
-            val sEps = episodesBySeason[selectedSeasonNumber] ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
-            val precedingFillers = sEps.filter {
+            val precedingFillers = seasonEpisodes.filter {
                 it.episodeNumber < ep.episodeNumber &&
-                it.isFiller &&
-                (it.seasonNumber to it.episodeNumber) !in watchedEpisodes
+                    it.isFiller &&
+                    (it.seasonNumber to it.episodeNumber) !in watchedEpisodes
             }
             if (precedingFillers.isNotEmpty()) {
-                fillerPromptEpisode = ep
+                seriesState.fillerPromptEpisode = ep
             } else {
                 onToggleEpisodeWatched(ep)
             }
@@ -187,12 +209,9 @@ fun DetailSeriesContent(
         }
     }
 
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // 1. Seasons Section Header with 1:1 Nuvio "Posters" / "Text" Button and Smooth 280ms Height Animation
-        if (seasons.size > 1) {
+    // 1. Seasons Section Header & Poster/Text Selector
+    if (seasons.size > 1) {
+        item(key = "series_seasons_selector", contentType = "series_seasons") {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -227,15 +246,15 @@ fun DetailSeriesContent(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color.White.copy(alpha = 0.08f))
                                 .clickable {
-                                    val next = if (currentSeasonViewMode == "Posters") "Text" else "Posters"
-                                    currentSeasonViewMode = next
+                                    val next = if (seriesState.currentSeasonViewMode == "Posters") "Text" else "Posters"
+                                    seriesState.currentSeasonViewMode = next
                                     onSeasonViewModeChanged?.invoke(next)
                                 }
                                 .padding(horizontal = 10.dp, vertical = 5.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (currentSeasonViewMode == "Posters") "Posters" else "Text",
+                                text = if (seriesState.currentSeasonViewMode == "Posters") "Posters" else "Text",
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color.White
@@ -244,9 +263,8 @@ fun DetailSeriesContent(
                     }
                 }
 
-                // 2. Season Selector (Posters Rail vs Text Chips with 1:1 Nuvio Fluid Transition)
                 Crossfade(
-                    targetState = if (hasDistinctBookPosters) currentSeasonViewMode else "Text",
+                    targetState = if (hasDistinctBookPosters) seriesState.currentSeasonViewMode else "Text",
                     animationSpec = tween(220),
                     label = "season_view_mode"
                 ) { mode ->
@@ -271,11 +289,13 @@ fun DetailSeriesContent(
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
 
-        // 3. Episodes Header with Layout Switcher (Horizontal / List / Vertical Cards)
-        val seasonEpisodes = episodesBySeason[selectedSeasonNumber] ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
+    // 2. Episodes / Chapters / Volumes Header + Controls Bar
+    item(key = "series_controls_header", contentType = "series_controls") {
         val currentSeason = seasons.firstOrNull { it.seasonNumber == selectedSeasonNumber }
         val totalInSeason = currentSeason?.episodeCount ?: seasonEpisodes.size
         val watchedInSeason = if (useProgressAsWatchedTruth) {
@@ -287,7 +307,7 @@ fun DetailSeriesContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+                .padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -307,7 +327,6 @@ fun DetailSeriesContent(
                 )
             }
 
-            // Layout Mode Switcher Icon Button, Manga/Novel Stepper, LN Cards/Posters Toggle & Skip Fillers Chip
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -346,7 +365,7 @@ fun DetailSeriesContent(
                             modifier = Modifier
                                 .height(28.dp)
                                 .then(
-                                    if (onJumpToProgress != null) Modifier.clickable { showJumpDialog = true }
+                                    if (onJumpToProgress != null) Modifier.clickable { seriesState.showJumpDialog = true }
                                     else Modifier
                                 )
                                 .padding(horizontal = 8.dp),
@@ -396,12 +415,12 @@ fun DetailSeriesContent(
                             .height(28.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color.White.copy(alpha = 0.08f))
-                            .clickable { lnShowPosterGrid = !lnShowPosterGrid }
+                            .clickable { seriesState.lnShowPosterGrid = !seriesState.lnShowPosterGrid }
                             .padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (lnShowPosterGrid) "Posters" else "Cards",
+                            text = if (seriesState.lnShowPosterGrid) "Posters" else "Cards",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color.White
@@ -443,18 +462,18 @@ fun DetailSeriesContent(
 
                 IconButton(
                     onClick = {
-                        if (lnShowPosterGrid) lnShowPosterGrid = false
-                        val nextMode = when (currentLayoutMode) {
+                        if (seriesState.lnShowPosterGrid) seriesState.lnShowPosterGrid = false
+                        val nextMode = when (seriesState.currentLayoutMode) {
                             EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
                             EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
                             EpisodeLayoutMode.VERTICAL_CARD -> EpisodeLayoutMode.HORIZONTAL
                         }
-                        currentLayoutMode = nextMode
+                        seriesState.currentLayoutMode = nextMode
                         onLayoutModeChanged?.invoke(nextMode)
                     },
                     modifier = Modifier.size(32.dp)
                 ) {
-                    val iconVector = when (currentLayoutMode) {
+                    val iconVector = when (seriesState.currentLayoutMode) {
                         EpisodeLayoutMode.HORIZONTAL -> Icons.Default.ViewStream
                         EpisodeLayoutMode.LIST -> Icons.Default.ViewAgenda
                         EpisodeLayoutMode.VERTICAL_CARD -> Icons.Default.GridView
@@ -468,109 +487,163 @@ fun DetailSeriesContent(
                 }
             }
         }
+    }
 
-        // 4. Render Active Episode / Volume / Chapter Layout Mode with 1:1 Nuvio Directional Slide & Instant Switching
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .animateContentSize(tween(250))
-        ) {
-            AnimatedContent(
-                targetState = Triple(selectedSeasonNumber, currentLayoutMode, lnShowPosterGrid),
-                transitionSpec = {
-                    val fromSeason = initialState.first
-                    val toSeason = targetState.first
-                    val fromIdx = seasons.indexOfFirst { it.seasonNumber == fromSeason }.takeIf { it >= 0 } ?: 0
-                    val toIdx = seasons.indexOfFirst { it.seasonNumber == toSeason }.takeIf { it >= 0 } ?: 0
-                    val dir = if (toIdx >= fromIdx) 1 else -1
-                    (fadeIn(tween(220)) + slideInHorizontally(tween(220)) { dir * it / 5 })
-                        .togetherWith(
-                            fadeOut(tween(170)) + slideOutHorizontally(tween(170)) { -dir * it / 5 }
-                        )
-                },
-                label = "season_episodes_transition"
-            ) { (seasonNum, mode, showLnGrid) ->
-                val activeSeasonEps = episodesBySeason[seasonNum] ?: episodes.filter { it.seasonNumber == seasonNum }
-                if (activeSeasonEps.isEmpty()) {
+    // 3. Virtualized Episode / Volume / Chapter Items (Zero "Show More" / "Show Earlier" Buttons)
+    if (seasonEpisodes.isEmpty()) {
+        item(key = "series_empty_$selectedSeasonNumber", contentType = "series_empty") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 32.dp, horizontal = 20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isMangaMode) "No entries listed yet" else "Season in production • Episodes will appear as broadcast dates are announced",
+                    color = TextMuted,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    } else if (isLightNovelVolumeMode && seriesState.lnShowPosterGrid) {
+        val rows = seasonEpisodes.chunked(3)
+        itemsIndexed(
+            items = rows,
+            key = { rowIdx, row -> "ln_grid_${selectedSeasonNumber}_${rowIdx}_${row.firstOrNull()?.episodeNumber}" },
+            contentType = { _, _ -> "ln_grid_row" }
+        ) { _, rowItems ->
+            LightNovelVolumePosterRow(
+                rowItems = rowItems,
+                isEpWatched = ::isEpWatched,
+                fallbackCoverUrl = fallbackCoverUrl,
+                onToggleWatched = handleEpisodeClick,
+                onLongPress = { seriesState.activeActionSheetEpisode = it },
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+            )
+        }
+    } else {
+        when (seriesState.currentLayoutMode) {
+            EpisodeLayoutMode.HORIZONTAL -> {
+                item(key = "series_horiz_$selectedSeasonNumber", contentType = "series_horiz") {
+                    EpisodeHorizontalRow(
+                        episodes = seasonEpisodes,
+                        watchedEpisodes = watchedEpisodes,
+                        fallbackImageUrl = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl,
+                        scale = layoutScale,
+                        onToggleWatched = handleEpisodeClick,
+                        onLongPress = { seriesState.activeActionSheetEpisode = it },
+                        useProgressAsWatchedTruth = useProgressAsWatchedTruth,
+                        currentTotalProgress = currentTotalProgress,
+                        isMangaMode = isMangaMode,
+                        isLightNovelVolumeMode = isLightNovelVolumeMode
+                    )
+                }
+            }
+
+            EpisodeLayoutMode.LIST -> {
+                val listCardHeight = if (isLightNovelVolumeMode) (116.dp * layoutScale).coerceAtLeast(98.dp) else (120.dp * layoutScale).coerceAtLeast(96.dp)
+                val listImageWidth = if (isLightNovelVolumeMode) (78.dp * layoutScale).coerceAtLeast(66.dp) else (120.dp * layoutScale).coerceAtLeast(96.dp)
+                val effectiveFallback = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl
+                itemsIndexed(
+                    items = seasonEpisodes,
+                    key = { idx, ep -> "ep_list_${ep.seasonNumber}_${ep.episodeNumber}_${ep.id}_$idx" },
+                    contentType = { _, _ -> "ep_list_card" }
+                ) { _, episode ->
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 32.dp, horizontal = 20.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
                     ) {
-                        Text(
-                            text = if (isMangaMode) "No entries listed yet" else "Season in production • Episodes will appear as broadcast dates are announced",
-                            color = TextMuted,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center
+                        EpisodeListCardItem(
+                            episode = episode,
+                            isWatched = isEpWatched(episode),
+                            fallbackImageUrl = effectiveFallback,
+                            cardHeight = listCardHeight,
+                            imageWidth = listImageWidth,
+                            onToggleWatched = { handleEpisodeClick(episode) },
+                            onLongPress = { seriesState.activeActionSheetEpisode = episode },
+                            isMangaMode = isMangaMode,
+                            isLightNovelVolumeMode = isLightNovelVolumeMode
                         )
                     }
-                } else if (isLightNovelVolumeMode && showLnGrid) {
-                    LightNovelVolumePosterGrid(
-                        volumes = activeSeasonEps,
-                        isEpWatched = ::isEpWatched,
-                        fallbackCoverUrl = fallbackCoverUrl,
-                        onToggleWatched = handleEpisodeClick,
-                        onLongPress = { activeActionSheetEpisode = it }
-                    )
-                } else {
-                    when (mode) {
-                        EpisodeLayoutMode.HORIZONTAL -> {
-                            EpisodeHorizontalRow(
-                                episodes = activeSeasonEps,
-                                watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl,
-                                scale = layoutScale,
-                                onToggleWatched = handleEpisodeClick,
-                                onLongPress = { activeActionSheetEpisode = it },
-                                useProgressAsWatchedTruth = useProgressAsWatchedTruth,
-                                currentTotalProgress = currentTotalProgress,
-                                isMangaMode = isMangaMode,
-                                isLightNovelVolumeMode = isLightNovelVolumeMode
-                            )
-                        }
+                }
+            }
 
-                        EpisodeLayoutMode.LIST -> {
-                            EpisodeListColumn(
-                                episodes = activeSeasonEps,
-                                watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl,
-                                scale = layoutScale,
-                                onToggleWatched = handleEpisodeClick,
-                                onLongPress = { activeActionSheetEpisode = it },
-                                useProgressAsWatchedTruth = useProgressAsWatchedTruth,
-                                currentTotalProgress = currentTotalProgress,
-                                isMangaMode = isMangaMode,
-                                isLightNovelVolumeMode = isLightNovelVolumeMode
-                            )
-                        }
-
-                        EpisodeLayoutMode.VERTICAL_CARD -> {
-                            EpisodeVerticalCardColumn(
-                                episodes = activeSeasonEps,
-                                watchedEpisodes = watchedEpisodes,
-                                fallbackImageUrl = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl,
-                                scale = layoutScale,
-                                onToggleWatched = handleEpisodeClick,
-                                onLongPress = { activeActionSheetEpisode = it },
-                                useProgressAsWatchedTruth = useProgressAsWatchedTruth,
-                                currentTotalProgress = currentTotalProgress,
-                                isMangaMode = isMangaMode,
-                                isLightNovelVolumeMode = isLightNovelVolumeMode
-                            )
-                        }
+            EpisodeLayoutMode.VERTICAL_CARD -> {
+                val effectiveFallback = if (isMangaMode) fallbackCoverUrl else fallbackBackdropUrl
+                itemsIndexed(
+                    items = seasonEpisodes,
+                    key = { idx, ep -> "ep_vcard_${ep.seasonNumber}_${ep.episodeNumber}_${ep.id}_$idx" },
+                    contentType = { _, _ -> "ep_vcard" }
+                ) { _, episode ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 7.dp)
+                    ) {
+                        EpisodeVerticalCardItem(
+                            episode = episode,
+                            isWatched = isEpWatched(episode),
+                            fallbackImageUrl = effectiveFallback,
+                            scale = layoutScale,
+                            onToggleWatched = { handleEpisodeClick(episode) },
+                            onLongPress = { seriesState.activeActionSheetEpisode = episode },
+                            isMangaMode = isMangaMode,
+                            isLightNovelVolumeMode = isLightNovelVolumeMode
+                        )
                     }
                 }
             }
         }
     }
 
+    item(key = "series_end_spacer", contentType = "spacer") {
+        Spacer(modifier = Modifier.height(20.dp))
+    }
+}
+
+@Composable
+fun DetailSeriesDialogs(
+    seriesState: DetailSeriesUiState,
+    seasons: List<MediaSeason>,
+    episodes: List<MediaEpisode>,
+    episodesBySeason: Map<Int, List<MediaEpisode>>,
+    watchedEpisodes: Set<Pair<Int, Int>>,
+    selectedSeasonNumber: Int,
+    isFillerSkipEnabled: Boolean,
+    isMangaMode: Boolean,
+    isLightNovelVolumeMode: Boolean,
+    maxTotalProgress: Int?,
+    currentTotalProgress: Int?,
+    onToggleEpisodeWatched: (MediaEpisode) -> Unit,
+    onMarkPreviousWatched: (MediaEpisode) -> Unit,
+    onToggleSeasonWatched: (Int) -> Unit,
+    onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
+    onJumpToProgress: ((Int) -> Unit)? = null
+) {
+    val totalItemsAcrossSeasons = remember(episodesBySeason, episodes) {
+        val byMap = episodesBySeason.values.sumOf { it.size }
+        if (byMap > 0) byMap else episodes.size
+    }
+    val useProgressAsWatchedTruth = isMangaMode && (
+        totalItemsAcrossSeasons > 200 ||
+            (watchedEpisodes.isEmpty() && (currentTotalProgress ?: 0) > 0)
+        )
+    fun isEpWatched(ep: MediaEpisode): Boolean {
+        return if (useProgressAsWatchedTruth) {
+            ep.episodeNumber <= (currentTotalProgress ?: 0)
+        } else {
+            (ep.seasonNumber to ep.episodeNumber) in watchedEpisodes
+        }
+    }
+
     // Watched Action Sheet
-    activeActionSheetEpisode?.let { ep ->
+    seriesState.activeActionSheetEpisode?.let { ep ->
         val currentSeasonObj = seasons.firstOrNull { it.seasonNumber == ep.seasonNumber }
         val seasonLabel = currentSeasonObj?.name ?: "Season ${ep.seasonNumber}"
         val isWatched = isEpWatched(ep)
-        val seasonEps = episodes.filter { it.seasonNumber == ep.seasonNumber }
+        val seasonEps = episodesBySeason[ep.seasonNumber] ?: episodes.filter { it.seasonNumber == ep.seasonNumber }
         val isSeasonWatched = seasonEps.isNotEmpty() && seasonEps.all { isEpWatched(it) }
 
         EpisodeWatchedActionSheet(
@@ -579,22 +652,39 @@ fun DetailSeriesContent(
             isEpisodeWatched = isWatched,
             canMarkPreviousEpisodes = ep.episodeNumber > 1 || ep.seasonNumber > 1,
             isSeasonWatched = isSeasonWatched,
-            onDismiss = { activeActionSheetEpisode = null },
-            onToggleWatched = { handleEpisodeClick(ep) },
+            onDismiss = { seriesState.activeActionSheetEpisode = null },
+            onToggleWatched = {
+                if (!isWatched && isFillerSkipEnabled) {
+                    val activeEps = episodesBySeason[selectedSeasonNumber]
+                        ?: episodes.filter { it.seasonNumber == selectedSeasonNumber }
+                    val precedingFillers = activeEps.filter {
+                        it.episodeNumber < ep.episodeNumber &&
+                            it.isFiller &&
+                            (it.seasonNumber to it.episodeNumber) !in watchedEpisodes
+                    }
+                    if (precedingFillers.isNotEmpty()) {
+                        seriesState.fillerPromptEpisode = ep
+                    } else {
+                        onToggleEpisodeWatched(ep)
+                    }
+                } else {
+                    onToggleEpisodeWatched(ep)
+                }
+            },
             onMarkPreviousWatched = { onMarkPreviousWatched(ep) },
             onToggleSeasonWatched = { onToggleSeasonWatched(ep.seasonNumber) }
         )
     }
 
     // Instant Keypad Jump Dialog for Chapters & Volumes
-    if (showJumpDialog && onJumpToProgress != null) {
+    if (seriesState.showJumpDialog && onJumpToProgress != null) {
         val currentCh = currentTotalProgress ?: 0
         val unitName = if (isLightNovelVolumeMode) "Volume" else "Chapter"
-        var inputText by remember(showJumpDialog) { mutableStateOf(currentCh.toString()) }
+        var inputText by remember(seriesState.showJumpDialog) { mutableStateOf(currentCh.toString()) }
         val parsedVal = inputText.trim().toIntOrNull()
         val maxVal = maxTotalProgress?.takeIf { it > 0 }
         AlertDialog(
-            onDismissRequest = { showJumpDialog = false },
+            onDismissRequest = { seriesState.showJumpDialog = false },
             containerColor = Color(0xFF121215),
             titleContentColor = Color.White,
             textContentColor = Color.White.copy(alpha = 0.85f),
@@ -659,7 +749,7 @@ fun DetailSeriesContent(
                         val target = (parsedVal ?: currentCh).coerceAtLeast(0).let {
                             if (maxVal != null) it.coerceAtMost(maxVal) else it
                         }
-                        showJumpDialog = false
+                        seriesState.showJumpDialog = false
                         onJumpToProgress(target)
                     }
                 ) {
@@ -671,7 +761,7 @@ fun DetailSeriesContent(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showJumpDialog = false }) {
+                TextButton(onClick = { seriesState.showJumpDialog = false }) {
                     Text("Cancel", color = Color.White.copy(alpha = 0.70f))
                 }
             }
@@ -679,10 +769,10 @@ fun DetailSeriesContent(
     }
 
     // Skip Fillers Confirmation Dialog
-    if (fillerPromptEpisode != null) {
-        val targetEp = fillerPromptEpisode!!
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { fillerPromptEpisode = null },
+    if (seriesState.fillerPromptEpisode != null) {
+        val targetEp = seriesState.fillerPromptEpisode!!
+        AlertDialog(
+            onDismissRequest = { seriesState.fillerPromptEpisode = null },
             containerColor = Color(0xFF141416),
             titleContentColor = Color.White,
             textContentColor = Color.White.copy(alpha = 0.85f),
@@ -701,10 +791,10 @@ fun DetailSeriesContent(
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = {
                         val ep = targetEp
-                        fillerPromptEpisode = null
+                        seriesState.fillerPromptEpisode = null
                         if (onMarkWatchedChoice != null) {
                             onMarkWatchedChoice(ep, true)
                         } else {
@@ -720,10 +810,10 @@ fun DetailSeriesContent(
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(
+                TextButton(
                     onClick = {
                         val ep = targetEp
-                        fillerPromptEpisode = null
+                        seriesState.fillerPromptEpisode = null
                         if (onMarkWatchedChoice != null) {
                             onMarkWatchedChoice(ep, false)
                         } else {
@@ -934,99 +1024,105 @@ private fun EpisodeHorizontalRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LightNovelVolumePosterGrid(
-    volumes: List<MediaEpisode>,
+private fun LightNovelVolumePosterRow(
+    rowItems: List<MediaEpisode>,
     isEpWatched: (MediaEpisode) -> Boolean,
     fallbackCoverUrl: String?,
     onToggleWatched: (MediaEpisode) -> Unit,
-    onLongPress: (MediaEpisode) -> Unit
+    onLongPress: (MediaEpisode) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val rows = remember(volumes) { volumes.chunked(3) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        rows.forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+        rowItems.forEach { vol ->
+            val isRead = isEpWatched(vol)
+            val primaryUrl = vol.stillUrl?.takeIf { it.isNotBlank() }
+            val fallbackUrl = fallbackCoverUrl?.takeIf { it.isNotBlank() && it != primaryUrl }
+            var primaryFailed by remember(primaryUrl) { mutableStateOf(false) }
+            var fallbackFailed by remember(fallbackUrl) { mutableStateOf(false) }
+            val activeRaw = when {
+                primaryUrl != null && !primaryFailed -> primaryUrl
+                fallbackUrl != null && !fallbackFailed -> fallbackUrl
+                else -> null
+            }
+            val coverModel = remember(activeRaw) { toCoilImageModel(activeRaw) }
+            val volBadge = remember(vol.title, vol.episodeNumber) {
+                extractVolumeBadgeLabel(vol.title, vol.episodeNumber)
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .combinedClickable(
+                        onClick = { onToggleWatched(vol) },
+                        onLongClick = { onLongPress(vol) }
+                    ),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                rowItems.forEach { vol ->
-                    val isRead = isEpWatched(vol)
-                    val cover = vol.stillUrl?.takeIf { it.isNotBlank() } ?: fallbackCoverUrl
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .combinedClickable(
-                                onClick = { onToggleWatched(vol) },
-                                onLongClick = { onLongPress(vol) }
-                            ),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(2f / 3f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFF141416))
-                                .then(
-                                    if (isRead) Modifier.border(1.5.dp, AccentJade.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
-                                    else Modifier.border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                                )
-                        ) {
-                            if (!cover.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = cover,
-                                    contentDescription = vol.title,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(2f / 3f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF141416))
+                        .then(
+                            if (isRead) Modifier.border(1.5.dp, AccentJade.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
+                            else Modifier.border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        )
+                ) {
+                    if (coverModel != null) {
+                        AsyncImage(
+                            model = coverModel,
+                            contentDescription = vol.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            onError = {
+                                if (activeRaw == primaryUrl) primaryFailed = true else fallbackFailed = true
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            0f to Color.Transparent,
-                                            0.55f to Color.Transparent,
-                                            1f to Color.Black.copy(alpha = 0.88f)
-                                        )
-                                    )
-                            )
-                            NuvioAnimatedWatchedBadge(
-                                isWatched = isRead,
-                                onClick = { onToggleWatched(vol) },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(6.dp)
-                            )
-                            Text(
-                                text = "Vol. ${vol.episodeNumber}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                maxLines = 1,
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(horizontal = 7.dp, vertical = 6.dp)
-                            )
-                        }
-                        val formattedDate = remember(vol.airDate) { formatEpisodeAirDate(vol.airDate) }
-                        Text(
-                            text = formattedDate ?: vol.title,
-                            fontSize = 10.5.sp,
-                            color = Color.White.copy(alpha = 0.65f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    0.55f to Color.Transparent,
+                                    1f to Color.Black.copy(alpha = 0.88f)
+                                )
+                            )
+                    )
+                    NuvioAnimatedWatchedBadge(
+                        isWatched = isRead,
+                        onClick = { onToggleWatched(vol) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                    )
+                    Text(
+                        text = volBadge,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(horizontal = 7.dp, vertical = 6.dp)
+                    )
                 }
-                repeat(3 - rowItems.size) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
+                val formattedDate = remember(vol.airDate) { formatEpisodeAirDate(vol.airDate) }
+                Text(
+                    text = formattedDate ?: vol.title,
+                    fontSize = 10.5.sp,
+                    color = Color.White.copy(alpha = 0.65f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
+        }
+        repeat(3 - rowItems.size) {
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 }
@@ -1063,16 +1159,27 @@ private fun EpisodeThumbnailLayer(
     isMangaMode: Boolean = false,
     isLightNovelVolumeMode: Boolean = false
 ) {
-    val stillUrl = episode.stillUrl?.takeIf { it.isNotBlank() }
-        ?: if (isMangaMode) fallbackCoverUrl?.takeIf { it.isNotBlank() } else null
-    var loadFailed by remember(stillUrl) { mutableStateOf(false) }
-    if (!stillUrl.isNullOrBlank() && !loadFailed) {
+    val primaryUrl = episode.stillUrl?.takeIf { it.isNotBlank() }
+    val fallbackUrl = if (isMangaMode) fallbackCoverUrl?.takeIf { it.isNotBlank() && it != primaryUrl } else null
+    var primaryFailed by remember(primaryUrl) { mutableStateOf(false) }
+    var fallbackFailed by remember(fallbackUrl) { mutableStateOf(false) }
+
+    val activeRaw = when {
+        primaryUrl != null && !primaryFailed -> primaryUrl
+        fallbackUrl != null && !fallbackFailed -> fallbackUrl
+        else -> null
+    }
+    val activeModel = remember(activeRaw) { toCoilImageModel(activeRaw) }
+
+    if (activeModel != null) {
         AsyncImage(
-            model = stillUrl,
+            model = activeModel,
             contentDescription = episode.title,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
-            onError = { loadFailed = true }
+            onError = {
+                if (activeRaw == primaryUrl) primaryFailed = true else fallbackFailed = true
+            }
         )
     } else {
         Box(
@@ -1082,7 +1189,7 @@ private fun EpisodeThumbnailLayer(
             contentAlignment = Alignment.Center
         ) {
             val badgeTxt = when {
-                isLightNovelVolumeMode -> "Vol.${episode.episodeNumber}"
+                isLightNovelVolumeMode -> extractVolumeBadgeLabel(episode.title, episode.episodeNumber)
                 isMangaMode -> "Ch.${episode.episodeNumber}"
                 else -> formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
             }
@@ -1259,100 +1366,6 @@ private fun EpisodeHorizontalCard(
     }
 }
 
-/**
- * Mode 2: Nuvio Compact List (1:1 Nuvio Phone Metrics: 120x120dp square thumbnail with badge on top-left, watched on top-right, metadata on right)
- */
-@Composable
-private fun EpisodeListColumn(
-    episodes: List<MediaEpisode>,
-    watchedEpisodes: Set<Pair<Int, Int>>,
-    fallbackImageUrl: String?,
-    scale: Float,
-    onToggleWatched: (MediaEpisode) -> Unit,
-    onLongPress: (MediaEpisode) -> Unit,
-    useProgressAsWatchedTruth: Boolean = false,
-    currentTotalProgress: Int? = null,
-    isMangaMode: Boolean = false,
-    isLightNovelVolumeMode: Boolean = false
-) {
-    val cardHeight = if (isLightNovelVolumeMode) (116.dp * scale).coerceAtLeast(98.dp) else (120.dp * scale).coerceAtLeast(96.dp)
-    val imageWidth = if (isLightNovelVolumeMode) (78.dp * scale).coerceAtLeast(66.dp) else (120.dp * scale).coerceAtLeast(96.dp)
-
-    val totalCount = episodes.size
-    val initialAnchor = remember(episodes, currentTotalProgress) {
-        if (totalCount <= 40) 0
-        else {
-            val ch = currentTotalProgress ?: 0
-            val idx = if (ch > 0) episodes.indexOfFirst { it.episodeNumber >= ch }.takeIf { it >= 0 } ?: 0 else 0
-            (idx - 10).coerceIn(0, (totalCount - 25).coerceAtLeast(0))
-        }
-    }
-    var windowStart by remember(episodes, initialAnchor) { mutableStateOf(initialAnchor) }
-    var windowEnd by remember(episodes, initialAnchor) { mutableStateOf((initialAnchor + 25).coerceAtMost(totalCount)) }
-    val visibleEpisodes = if (totalCount > 40) episodes.subList(windowStart, windowEnd) else episodes
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        if (totalCount > 40 && windowStart > 0) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { windowStart = (windowStart - 25).coerceAtLeast(0) }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↑ Show Earlier ($windowStart remaining)",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        visibleEpisodes.forEach { episode ->
-            val isWatched = if (useProgressAsWatchedTruth) {
-                episode.episodeNumber <= (currentTotalProgress ?: 0)
-            } else {
-                (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
-            }
-            EpisodeListCardItem(
-                episode = episode,
-                isWatched = isWatched,
-                fallbackImageUrl = fallbackImageUrl,
-                cardHeight = cardHeight,
-                imageWidth = imageWidth,
-                onToggleWatched = { onToggleWatched(episode) },
-                onLongPress = { onLongPress(episode) },
-                isMangaMode = isMangaMode,
-                isLightNovelVolumeMode = isLightNovelVolumeMode
-            )
-        }
-        if (totalCount > 40 && windowEnd < totalCount) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { windowEnd = (windowEnd + 25).coerceAtMost(totalCount) }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↓ Show More (${totalCount - windowEnd} remaining)",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1496,97 +1509,6 @@ private fun EpisodeListCardItem(
     }
 }
 
-/**
- * Mode 3: Vertical Hero Cards (Full-Width 16:9 vertical cards with in-image metadata)
- * The third setting requested: looks like the horizontal card, but arranged vertically.
- */
-@Composable
-private fun EpisodeVerticalCardColumn(
-    episodes: List<MediaEpisode>,
-    watchedEpisodes: Set<Pair<Int, Int>>,
-    fallbackImageUrl: String?,
-    scale: Float,
-    onToggleWatched: (MediaEpisode) -> Unit,
-    onLongPress: (MediaEpisode) -> Unit,
-    useProgressAsWatchedTruth: Boolean = false,
-    currentTotalProgress: Int? = null,
-    isMangaMode: Boolean = false,
-    isLightNovelVolumeMode: Boolean = false
-) {
-    val totalCount = episodes.size
-    val initialAnchor = remember(episodes, currentTotalProgress) {
-        if (totalCount <= 40) 0
-        else {
-            val ch = currentTotalProgress ?: 0
-            val idx = if (ch > 0) episodes.indexOfFirst { it.episodeNumber >= ch }.takeIf { it >= 0 } ?: 0 else 0
-            (idx - 10).coerceIn(0, (totalCount - 25).coerceAtLeast(0))
-        }
-    }
-    var windowStart by remember(episodes, initialAnchor) { mutableStateOf(initialAnchor) }
-    var windowEnd by remember(episodes, initialAnchor) { mutableStateOf((initialAnchor + 25).coerceAtMost(totalCount)) }
-    val visibleEpisodes = if (totalCount > 40) episodes.subList(windowStart, windowEnd) else episodes
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        if (totalCount > 40 && windowStart > 0) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { windowStart = (windowStart - 25).coerceAtLeast(0) }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↑ Show Earlier ($windowStart remaining)",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-        visibleEpisodes.forEach { episode ->
-            val isWatched = if (useProgressAsWatchedTruth) {
-                episode.episodeNumber <= (currentTotalProgress ?: 0)
-            } else {
-                (episode.seasonNumber to episode.episodeNumber) in watchedEpisodes
-            }
-            EpisodeVerticalCardItem(
-                episode = episode,
-                isWatched = isWatched,
-                fallbackImageUrl = fallbackImageUrl,
-                scale = scale,
-                onToggleWatched = { onToggleWatched(episode) },
-                onLongPress = { onLongPress(episode) },
-                isMangaMode = isMangaMode,
-                isLightNovelVolumeMode = isLightNovelVolumeMode
-            )
-        }
-        if (totalCount > 40 && windowEnd < totalCount) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { windowEnd = (windowEnd + 25).coerceAtMost(totalCount) }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "↓ Show More (${totalCount - windowEnd} remaining)",
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1795,9 +1717,10 @@ private fun SeasonPosterScrollRow(
                     } else {
                         posterModel
                     }
-                    if (!effectivePoster.isNullOrBlank()) {
+                    val effectivePosterModel = remember(effectivePoster) { toCoilImageModel(effectivePoster) }
+                    if (effectivePosterModel != null) {
                         AsyncImage(
-                            model = effectivePoster,
+                            model = effectivePosterModel,
                             contentDescription = label,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,

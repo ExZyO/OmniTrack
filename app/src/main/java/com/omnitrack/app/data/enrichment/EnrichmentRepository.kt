@@ -30,9 +30,11 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -2419,7 +2421,11 @@ class EnrichmentRepository(
         val title: String,
         val coverUrl: String?,
         val releaseDate: String?,
-        val synopsis: String?
+        val synopsis: String?,
+        val label: String? = null,
+        val titleOrig: String? = null,
+        val romajiOrig: String? = null,
+        val bookType: String? = null
     )
 
     data class RanobeDbSeriesDetails(
@@ -2842,7 +2848,7 @@ class EnrichmentRepository(
                     for ((sNum, sLabel, range) in muSeasons) {
                         val validRangeEnd = range.last.coerceAtMost(totalChapters)
                         if (range.first > totalChapters) continue
-                        val sCover = volumeCovers[sNum] ?: fallbackCoverUrl
+                        val sCover = volumeCovers[sNum]
                         seasonsList.add(
                             com.omnitrack.app.data.model.MediaSeason(
                                 seasonNumber = sNum,
@@ -2874,7 +2880,7 @@ class EnrichmentRepository(
                 } else if (totalVolCount >= 2) {
                     val approxPerVol = (totalChapters.toDouble() / totalVolCount.toDouble()).coerceAtLeast(1.0)
                     for (vol in 1..totalVolCount) {
-                        val vCover = volumeCovers[vol] ?: fallbackCoverUrl
+                        val vCover = volumeCovers[vol]
                         seasonsList.add(
                             com.omnitrack.app.data.model.MediaSeason(
                                 seasonNumber = vol,
@@ -2891,7 +2897,7 @@ class EnrichmentRepository(
                         val mappedVol = (feed?.volNum ?: kitsu?.first)
                             ?.takeIf { it in 1..totalVolCount }
                             ?: kotlin.math.ceil(ch / approxPerVol).toInt().coerceIn(1, totalVolCount)
-                        val vCover = volumeCovers[mappedVol] ?: fallbackCoverUrl
+                        val vCover = volumeCovers[mappedVol]
                         val chTitle = feed?.title ?: kitsu?.second ?: "Chapter $ch"
                         epMap[mappedVol]?.add(
                             com.omnitrack.app.data.model.MediaEpisode(
@@ -2914,7 +2920,7 @@ class EnrichmentRepository(
                     }
                     seasonsList.removeAll { (epMap[it.seasonNumber]?.isEmpty()) == true }
                 } else {
-                    val sCover = volumeCovers[1] ?: fallbackCoverUrl
+                    val sCover = volumeCovers[1]
                     seasonsList.add(
                         com.omnitrack.app.data.model.MediaSeason(
                             seasonNumber = 1,
@@ -3008,6 +3014,48 @@ class EnrichmentRepository(
         }
     }
 
+    private fun scoreRanobeSearchCandidate(
+        query: String,
+        baseQuery: String?,
+        nativeTitle: String?,
+        node: JsonObject
+    ): Int? {
+        val candNames = listOfNotNull(
+            node["title"].cleanString(),
+            node["romaji"].cleanString(),
+            node["romaji_orig"].cleanString(),
+            node["title_orig"].cleanString()
+        )
+        if (candNames.isEmpty()) return null
+
+        val queriesToCheck = listOfNotNull(query, baseQuery, nativeTitle).distinct()
+        val isMatch = queriesToCheck.any { q -> isNovelTitleMatch(q, candNames) }
+        if (!isMatch) return null
+
+        fun normSimple(s: String): String = stripNovelEditionSuffix(s).lowercase()
+            .replace(Regex("""[^\p{L}\p{N}]"""), "")
+
+        val qNorms = queriesToCheck.map(::normSimple).filter { it.isNotBlank() }
+        var score = 0
+        if (candNames.any { c -> normSimple(c) in qNorms }) {
+            score += 1000
+        }
+        val queryLower = query.lowercase()
+        val spinoffTerms = listOf(
+            "guidebook", "character book", "special book", "recollection",
+            "short story", "artbook", "fanbook", "anthology", "side stor"
+        )
+        val candJoinedLower = candNames.joinToString(" ").lowercase()
+        if (spinoffTerms.any { term -> term in candJoinedLower && term !in queryLower }) {
+            score -= 600
+        }
+        val cNumBooks = (node["c_num_books"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+            ?: (node["volumes"] as? JsonObject)?.get("count")?.let { it as? JsonPrimitive }?.contentOrNull?.toIntOrNull()
+            ?: 0
+        score += minOf(cNumBooks, 50) * 6
+        return score
+    }
+
     suspend fun fetchRanobeDbSeriesDetails(
         title: String,
         nativeTitle: String? = null
@@ -3021,30 +3069,49 @@ class EnrichmentRepository(
             ranobeDbSeriesCache[cacheKey]?.let { return@coalesce it }
             NetworkPacer.withGeneralPacing {
                 try {
-                    val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
-                    val searchReq = Request.Builder()
-                        .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=6")
-                        .header("User-Agent", "OmniTrack/1.0 (Android)")
-                        .get()
-                        .build()
-                    val matchedSeriesId = client.newCall(searchReq).execute().use { resp ->
-                        if (!resp.isSuccessful) return@withGeneralPacing null
-                        val body = resp.body?.string() ?: return@withGeneralPacing null
-                        val seriesArr = json.parseToJsonElement(body).jsonObject["series"]?.jsonArray.orEmpty()
-                        val matched = seriesArr.firstOrNull { node ->
-                            val o = node.jsonObject
-                            isNovelTitleMatch(
-                                cleanQuery,
-                                listOf(
-                                    o["title"].cleanString(),
-                                    o["romaji_orig"].cleanString(),
-                                    o["title_orig"].cleanString(),
-                                    nativeTitle
-                                )
-                            )
+                    val subSeriesRegex = Regex(
+                        """\s*[:\-–—]\s*(?:Year|Part|Act)\s*\d+.*$|\s*[:\-–—]\s*\d+-nensei.*$""",
+                        RegexOption.IGNORE_CASE
+                    )
+                    val baseQuery = cleanQuery.replace(subSeriesRegex, "").trim()
+                        .takeIf { it.isNotBlank() && it != cleanQuery }
+
+                    fun searchSeriesCandidates(q: String): List<JsonObject> {
+                        val encoded = URLEncoder.encode(q, "UTF-8")
+                        val searchReq = Request.Builder()
+                            .url("https://ranobedb.org/api/v0/series?q=$encoded&limit=8")
+                            .header("User-Agent", "OmniTrack/1.0 (Android)")
+                            .get()
+                            .build()
+                        return client.newCall(searchReq).execute().use { resp ->
+                            if (!resp.isSuccessful) return emptyList()
+                            val body = resp.body?.string() ?: return emptyList()
+                            val root = json.parseToJsonElement(body) as? JsonObject ?: return emptyList()
+                            val seriesArr = root["series"] as? JsonArray ?: return emptyList()
+                            seriesArr.mapNotNull { it as? JsonObject }
                         }
-                        matched?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                    } ?: return@withGeneralPacing null
+                    }
+
+                    var candidates = searchSeriesCandidates(cleanQuery)
+                    var bestCandidate = candidates
+                        .mapNotNull { node ->
+                            scoreRanobeSearchCandidate(cleanQuery, baseQuery, nativeTitle, node)?.let { it to node }
+                        }
+                        .maxByOrNull { it.first }
+                        ?.second
+
+                    if (bestCandidate == null && baseQuery != null) {
+                        candidates = searchSeriesCandidates(baseQuery)
+                        bestCandidate = candidates
+                            .mapNotNull { node ->
+                                scoreRanobeSearchCandidate(cleanQuery, baseQuery, nativeTitle, node)?.let { it to node }
+                            }
+                            .maxByOrNull { it.first }
+                            ?.second
+                    }
+
+                    val matchedSeriesId = (bestCandidate?.get("id") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                        ?: return@withGeneralPacing null
 
                     val detailReq = Request.Builder()
                         .url("https://ranobedb.org/api/v0/series/$matchedSeriesId")
@@ -3054,47 +3121,102 @@ class EnrichmentRepository(
                     client.newCall(detailReq).execute().use { resp ->
                         if (!resp.isSuccessful) return@withGeneralPacing null
                         val body = resp.body?.string() ?: return@withGeneralPacing null
-                        val series = json.parseToJsonElement(body).jsonObject["series"]?.jsonObject
-                            ?: return@withGeneralPacing null
+                        val root = json.parseToJsonElement(body) as? JsonObject ?: return@withGeneralPacing null
+                        val series = root["series"] as? JsonObject ?: return@withGeneralPacing null
 
                         val sTitle = series["title"].cleanString() ?: cleanQuery
                         val sNative = series["title_orig"].cleanString()
                         val sDesc = series["book_description"].cleanString() ?: series["description"].cleanString()
-                        val alId = series["anilist_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                        val malId = series["mal_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                        val rating = series["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        val alId = (series["anilist_id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                        val malId = (series["mal_id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                        val rating = (series["rating"] as? JsonObject)
+                            ?.get("score")?.let { it as? JsonPrimitive }?.contentOrNull?.toFloatOrNull()
+                            ?: (series["rating"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull()
                         val olang = series["olang"].cleanString()?.uppercase()
 
-                        val books = series["books"]?.jsonArray.orEmpty().mapIndexedNotNull { idx, elem ->
-                            val b = elem.jsonObject
-                            val bTitle = b["title"].cleanString() ?: return@mapIndexedNotNull null
-                            val volNum = Regex("""(?:Vol\.?|Volume)\s*(\d+)""", RegexOption.IGNORE_CASE)
-                                .find(bTitle)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: (idx + 1)
-                            val rawDate = b["c_release_date"]?.jsonPrimitive?.contentOrNull?.trim()
+                        data class RawRanobeBook(
+                            val uniqueKey: String,
+                            val sortOrder: Int,
+                            val origIdx: Int,
+                            val title: String,
+                            val titleOrig: String?,
+                            val romajiOrig: String?,
+                            val bookType: String?,
+                            val coverUrl: String?,
+                            val releaseDate: String?,
+                            val synopsis: String?,
+                            val label: String?
+                        )
+
+                        val rawBooks = (series["books"] as? JsonArray).orEmpty().mapIndexedNotNull { idx, elem ->
+                            val b = elem as? JsonObject ?: return@mapIndexedNotNull null
+                            val bookId = (b["id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+                            val sortOrder = (b["sort_order"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: Int.MAX_VALUE
+                            val bookType = b["book_type"].cleanString()
+                            val titleOrig = b["title_orig"].cleanString()
+                            val romajiOrig = b["romaji_orig"].cleanString()
+                            val bTitle = b["title"].cleanString() ?: romajiOrig ?: titleOrig ?: return@mapIndexedNotNull null
+                            val rawDate = (b["c_release_date"] as? JsonPrimitive)?.contentOrNull?.trim()
                             val formattedDate = if (rawDate != null && rawDate.length == 8 && rawDate.all { it.isDigit() }) {
                                 "${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}"
                             } else null
-                            val imgFile = b["image"]?.jsonObject?.get("filename").cleanString()
+                            val imgFile = (b["image"] as? JsonObject)?.get("filename").cleanString()
                             val covUrl = imgFile?.let { "https://images.ranobedb.org/$it" }
                             val bDesc = b["description"].cleanString()
-                            RanobeDbVolume(
-                                number = volNum,
+
+                            val volMatch = Regex("""(?:Vol\.?|Volume)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(bTitle)
+                                ?: romajiOrig?.let { Regex("""(?:Vol\.?|Volume)\s*(\d+(?:\.\d+)?)""", RegexOption.IGNORE_CASE).find(it) }
+                                ?: Regex("""(?:\d+年生編|第)\s*(\d+(?:\.\d+)?)""").find(bTitle)
+                                ?: titleOrig?.let { Regex("""(?:\d+年生編|第)\s*(\d+(?:\.\d+)?)""").find(it) }
+                                ?: Regex("""\s(\d+(?:\.\d+)?)\s*$""").find(bTitle)
+                            val label = volMatch?.groupValues?.getOrNull(1)?.let { "Vol. $it" }
+
+                            RawRanobeBook(
+                                uniqueKey = bookId?.toString() ?: "$sortOrder:$bTitle",
+                                sortOrder = sortOrder,
+                                origIdx = idx,
                                 title = bTitle,
+                                titleOrig = titleOrig,
+                                romajiOrig = romajiOrig,
+                                bookType = bookType,
                                 coverUrl = covUrl,
                                 releaseDate = formattedDate,
-                                synopsis = bDesc
+                                synopsis = bDesc,
+                                label = label
                             )
-                        }.distinctBy { it.number }
+                        }
+                            .sortedWith(compareBy<RawRanobeBook> { it.sortOrder }.thenBy { it.origIdx })
+                            .distinctBy { it.uniqueKey }
 
-                        val publishers = series["publishers"]?.jsonArray.orEmpty().mapNotNull { elem ->
-                            val p = elem.jsonObject
-                            val name = p["romaji"].cleanString() ?: p["name"].cleanString()
-                            name
+                        val hasMainBooks = rawBooks.any { it.bookType.equals("main", ignoreCase = true) }
+                        val filteredRawBooks = if (hasMainBooks) {
+                            rawBooks.filter { it.bookType == null || it.bookType.equals("main", ignoreCase = true) }
+                        } else {
+                            rawBooks
+                        }
+
+                        val books = filteredRawBooks.mapIndexed { idx, rb ->
+                            RanobeDbVolume(
+                                number = idx + 1,
+                                title = rb.title,
+                                coverUrl = rb.coverUrl,
+                                releaseDate = rb.releaseDate,
+                                synopsis = rb.synopsis,
+                                label = rb.label ?: "Vol. ${idx + 1}",
+                                titleOrig = rb.titleOrig,
+                                romajiOrig = rb.romajiOrig,
+                                bookType = rb.bookType
+                            )
+                        }
+
+                        val publishers = (series["publishers"] as? JsonArray).orEmpty().mapNotNull { elem ->
+                            val p = elem as? JsonObject ?: return@mapNotNull null
+                            p["romaji"].cleanString() ?: p["name"].cleanString()
                         }.distinct()
 
                         val staffSeen = mutableSetOf<String>()
-                        val staffList = series["staff"]?.jsonArray.orEmpty().mapNotNull { elem ->
-                            val st = elem.jsonObject
+                        val staffList = (series["staff"] as? JsonArray).orEmpty().mapNotNull { elem ->
+                            val st = elem as? JsonObject ?: return@mapNotNull null
                             val roleType = st["role_type"].cleanString()?.lowercase() ?: "staff"
                             val roleLabel = when (roleType) {
                                 "author" -> "Author"
@@ -3106,7 +3228,7 @@ class EnrichmentRepository(
                             val sName = st["romaji"].cleanString() ?: st["name"].cleanString() ?: return@mapNotNull null
                             val dedupeKey = "${sName.lowercase()}:$roleLabel"
                             if (!staffSeen.add(dedupeKey)) return@mapNotNull null
-                            val stId = st["staff_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                            val stId = (st["staff_id"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
                             AnimeStaffItem(
                                 staffId = stId,
                                 name = sName,
@@ -3511,7 +3633,41 @@ class EnrichmentRepository(
             val totalCount: Int?
 
             if (isLightNovel) {
-                val ranobeVols = ranobe?.volumes.orEmpty()
+                val allRanobeVols = ranobe?.volumes.orEmpty()
+                val ranobeVols = if (allRanobeVols.isNotEmpty()) {
+                    val titleBlob = "${item.title} ${item.nativeTitle.orEmpty()}"
+                    val requestedYear = (
+                        Regex("""(?:Year|Part)\s*(\d+)""", RegexOption.IGNORE_CASE).find(titleBlob)
+                            ?: Regex("""(\d+)(?:年生編|-nensei)""", RegexOption.IGNORE_CASE).find(titleBlob)
+                        )?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+                    fun bookMatchesYear(v: RanobeDbVolume, year: Int): Boolean {
+                        val yrRegex = Regex("""(?:Year|Part)\s*$year\b|${year}年生編|${year}-nensei""", RegexOption.IGNORE_CASE)
+                        return listOfNotNull(v.title, v.titleOrig, v.romajiOrig).any { yrRegex.containsMatchIn(it) }
+                    }
+
+                    fun bookHasLaterYear(v: RanobeDbVolume): Boolean {
+                        val laterRegex = Regex("""(?:Year|Part)\s*[2-9]\b|[2-9]年生編|[2-9]-nensei""", RegexOption.IGNORE_CASE)
+                        return listOfNotNull(v.title, v.titleOrig, v.romajiOrig).any { laterRegex.containsMatchIn(it) }
+                    }
+
+                    when {
+                        requestedYear != null && requestedYear >= 2 -> {
+                            allRanobeVols.filter { bookMatchesYear(it, requestedYear) }.ifEmpty { allRanobeVols }
+                        }
+                        allRanobeVols.any { bookHasLaterYear(it) } && allRanobeVols.any { !bookHasLaterYear(it) } -> {
+                            val expectedTotal = knownTotalVolumes ?: item.totalProgress?.toInt() ?: 0
+                            if (item.anilistId != null || item.malId != null || expectedTotal in 1 until allRanobeVols.size) {
+                                allRanobeVols.filterNot { bookHasLaterYear(it) }.ifEmpty { allRanobeVols }
+                            } else {
+                                allRanobeVols
+                            }
+                        }
+                        else -> allRanobeVols
+                    }
+                } else {
+                    emptyList()
+                }
                 val targetVolCount = maxOf(
                     ranobeVols.size,
                     knownTotalVolumes ?: 0,
@@ -3519,14 +3675,15 @@ class EnrichmentRepository(
                 )
                 totalCount = targetVolCount.takeIf { it > 0 }
                 if (ranobeVols.isNotEmpty()) {
-                    val volList = ranobeVols.map { v ->
+                    val volList = ranobeVols.mapIndexed { idx, v ->
+                        val volNum = idx + 1
                         com.omnitrack.app.data.model.MediaEpisode(
-                            id = v.number.toLong(),
-                            episodeNumber = v.number,
+                            id = volNum.toLong(),
+                            episodeNumber = volNum,
                             seasonNumber = 1,
                             title = v.title,
-                            overview = v.synopsis ?: ranobe?.synopsis,
-                            stillUrl = v.coverUrl ?: item.coverUrl,
+                            overview = v.synopsis,
+                            stillUrl = v.coverUrl,
                             airDate = v.releaseDate
                         )
                     }.toMutableList()
@@ -3535,7 +3692,7 @@ class EnrichmentRepository(
                             seasonNumber = 1,
                             name = "Volumes",
                             episodeCount = volList.size,
-                            posterUrl = volList.firstOrNull()?.stillUrl ?: item.coverUrl
+                            posterUrl = volList.firstOrNull { !it.stillUrl.isNullOrBlank() }?.stillUrl
                         )
                     )
                     epMap[1] = volList
@@ -3547,7 +3704,7 @@ class EnrichmentRepository(
                             seasonNumber = 1,
                             title = "Volume $v",
                             overview = null,
-                            stillUrl = item.coverUrl,
+                            stillUrl = null,
                             airDate = null
                         )
                     }.toMutableList()
@@ -3556,7 +3713,7 @@ class EnrichmentRepository(
                             seasonNumber = 1,
                             name = "Volumes",
                             episodeCount = volList.size,
-                            posterUrl = item.coverUrl
+                            posterUrl = null
                         )
                     )
                     epMap[1] = volList
@@ -3590,7 +3747,7 @@ class EnrichmentRepository(
                                     seasonNumber = sNum,
                                     name = sLabel,
                                     episodeCount = (end - range.first + 1).coerceAtLeast(1),
-                                    posterUrl = item.coverUrl
+                                    posterUrl = null
                                 )
                             )
                             epMap[sNum] = (range.first..end).map { ch ->
@@ -3600,7 +3757,7 @@ class EnrichmentRepository(
                                     seasonNumber = sNum,
                                     title = "Chapter $ch",
                                     overview = sLabel,
-                                    stillUrl = item.coverUrl,
+                                    stillUrl = null,
                                     airDate = null
                                 )
                             }.toMutableList()
@@ -3617,7 +3774,7 @@ class EnrichmentRepository(
                                     seasonNumber = book,
                                     name = "Book $book ($chCursor–$end)",
                                     episodeCount = (end - chCursor + 1).coerceAtLeast(1),
-                                    posterUrl = item.coverUrl
+                                    posterUrl = null
                                 )
                             )
                             epMap[book] = (chCursor..end).map { ch ->
@@ -3627,7 +3784,7 @@ class EnrichmentRepository(
                                     seasonNumber = book,
                                     title = "Chapter $ch",
                                     overview = "Book $book",
-                                    stillUrl = item.coverUrl,
+                                    stillUrl = null,
                                     airDate = null
                                 )
                             }.toMutableList()
@@ -3639,7 +3796,7 @@ class EnrichmentRepository(
                                 seasonNumber = 1,
                                 name = "All Chapters",
                                 episodeCount = totalCh,
-                                posterUrl = item.coverUrl
+                                posterUrl = null
                             )
                         )
                         epMap[1] = (1..totalCh).map { ch ->
@@ -3649,7 +3806,7 @@ class EnrichmentRepository(
                                 seasonNumber = 1,
                                 title = "Chapter $ch",
                                 overview = null,
-                                stillUrl = item.coverUrl,
+                                stillUrl = null,
                                 airDate = null
                             )
                         }.toMutableList()

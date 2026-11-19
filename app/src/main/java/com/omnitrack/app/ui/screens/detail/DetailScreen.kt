@@ -30,10 +30,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -56,6 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -123,9 +124,11 @@ import com.omnitrack.app.ui.screens.detail.components.DetailExternalLinksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNamesSynonymsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
-import com.omnitrack.app.ui.screens.detail.components.DetailSeriesContent
+import com.omnitrack.app.ui.screens.detail.components.DetailSeriesDialogs
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
+import com.omnitrack.app.ui.screens.detail.components.detailSeriesItems
+import com.omnitrack.app.ui.screens.detail.components.rememberDetailSeriesState
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
 import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
@@ -207,14 +210,17 @@ fun DetailScreen(
         deferredSectionsAllowed = true
     }
 
-    val scrollState = rememberScrollState()
+    val lazyListState = rememberLazyListState()
+    val isAtTopOfList = {
+        lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0
+    }
 
     BackHandler(enabled = sheetBackStack.isNotEmpty() || uiState.isPreviewMode || viewModel.isPreviewActive()) {
         if (sheetBackStack.isNotEmpty()) {
             sheetBackStack.removeAt(sheetBackStack.lastIndex)
             val restoredOffset = viewModel.popScrollOffset()
             if (restoredOffset != null) {
-                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
             }
         } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
             val handled = viewModel.closePreview()
@@ -223,7 +229,7 @@ fun DetailScreen(
             } else {
                 val restoredOffset = viewModel.popScrollOffset()
                 if (restoredOffset != null) {
-                    coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                    coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
                 }
             }
         } else {
@@ -243,9 +249,9 @@ fun DetailScreen(
                 backdropBitmap = backdropBitmap,
                 backdropTargetUrl = effectiveBanner,
                 onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
                     viewModel.openPreview(recItem)
-                    coroutineScope.launch { scrollState.scrollTo(0) }
+                    coroutineScope.launch { lazyListState.scrollToItem(0) }
                 },
                 onOpenCharacter = { charItem ->
                     sheetBackStack.add(DetailSheetTarget.AnimeCharacter(charItem))
@@ -266,9 +272,9 @@ fun DetailScreen(
                 backdropTargetUrl = effectiveBanner,
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
                     viewModel.openPreview(recItem)
-                    coroutineScope.launch { scrollState.scrollTo(0) }
+                    coroutineScope.launch { lazyListState.scrollToItem(0) }
                 }
             )
         }
@@ -280,9 +286,9 @@ fun DetailScreen(
                 backdropTargetUrl = effectiveBanner,
                 onDismissRequest = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
                     viewModel.openPreview(recItem)
-                    coroutineScope.launch { scrollState.scrollTo(0) }
+                    coroutineScope.launch { lazyListState.scrollToItem(0) }
                 }
             )
         }
@@ -299,7 +305,7 @@ fun DetailScreen(
                     backdropTargetUrl = effectiveBanner,
                     onBack = { sheetBackStack.removeLastOrNull() },
                     onOpenMediaPreview = { recItem ->
-                        viewModel.saveScrollOffset(scrollState.value)
+                        viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
                         viewModel.openPreview(recItem)
                     }
                 )
@@ -318,9 +324,9 @@ fun DetailScreen(
                 backdropTargetUrl = effectiveBanner,
                 onBack = { sheetBackStack.removeLastOrNull() },
                 onOpenMediaPreview = { recItem ->
-                    viewModel.saveScrollOffset(scrollState.value)
+                    viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
                     viewModel.openPreview(recItem)
-                    coroutineScope.launch { scrollState.scrollTo(0) }
+                    coroutineScope.launch { lazyListState.scrollToItem(0) }
                 }
             )
             return
@@ -346,8 +352,8 @@ fun DetailScreen(
                 available: Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
             ): Offset {
-                // If scrollState > 0, this gesture is scrolling content, so disarm pull-down
-                if (scrollState.value > 0) {
+                // If not at top of list, this gesture is scrolling content, so disarm pull-down
+                if (!isAtTopOfList()) {
                     isPullDownArmed = false
                 }
                 return Offset.Zero
@@ -361,17 +367,17 @@ fun DetailScreen(
                 if (consumed.y != 0f) {
                     scrollConsumedInGesture += kotlin.math.abs(consumed.y)
                 }
-                // Arm pull-down ONLY if zero scroll was consumed in this gesture AND scrollState is at 0
+                // Arm pull-down ONLY if zero scroll was consumed in this gesture AND list is at top
                 if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput &&
                     scrollConsumedInGesture == 0f &&
-                    scrollState.value == 0 &&
+                    isAtTopOfList() &&
                     available.y > 0
                 ) {
                     isPullDownArmed = true
                 }
 
-                // Only accumulate dismiss drag if gesture strictly started at scrollState == 0 with zero prior scroll
-                if (isPullDownArmed && available.y > 0 && scrollState.value == 0) {
+                // Only accumulate dismiss drag if gesture strictly started at top with zero prior scroll
+                if (isPullDownArmed && available.y > 0 && isAtTopOfList()) {
                     dragOffsetY += available.y * 0.5f
                     return Offset(0f, available.y)
                 }
@@ -445,8 +451,8 @@ fun DetailScreen(
         gestureBaseItemId = item?.id
         animatableOffsetX.snapTo(0f)
         dragOffsetY = 0f
-        if (switchedEntry && scrollState.value > 0) {
-            scrollState.scrollTo(0)
+        if (switchedEntry && !isAtTopOfList()) {
+            lazyListState.scrollToItem(0)
         }
         frozenPrevPreview = uiState.previousItem
         frozenNextPreview = uiState.nextItem
@@ -530,8 +536,8 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        if (scrollState.value > 0) {
-                                            scrollState.scrollTo(0)
+                                        if (!isAtTopOfList()) {
+                                            lazyListState.scrollToItem(0)
                                         }
                                         val navigated = viewModel.navigateToPrevious()
                                         if (!navigated) {
@@ -549,8 +555,8 @@ fun DetailScreen(
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        if (scrollState.value > 0) {
-                                            scrollState.scrollTo(0)
+                                        if (!isAtTopOfList()) {
+                                            lazyListState.scrollToItem(0)
                                         }
                                         val navigated = viewModel.navigateToNext()
                                         if (!navigated) {
@@ -689,78 +695,90 @@ fun DetailScreen(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState)
+            val seriesUiState = rememberDetailSeriesState(
+                itemKey = item.id.takeIf { it > 0 } ?: item.title,
+                initialSeasonViewMode = seasonViewMode,
+                layoutMode = episodeLayoutMode
+            )
+            val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+            val isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
+            val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item.coverUrl
+
+            LazyColumn(
+                state = lazyListState,
+                modifier = Modifier.fillMaxSize()
             ) {
-                // PRESENTATION MODE 1 or 2
-                if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                    DetailHeroHeaderSection(
-                        item = item,
-                        backdropTargetUrl = backdropTargetUrl,
-                        englishTitle = uiState.englishTitle,
-                        romajiTitle = uiState.romajiTitle,
-                        heroClearLogoUrl = uiState.heroClearLogoUrl,
-                        novelDetailMeta = uiState.novelDetailMeta,
-                        onToggleTitle = { viewModel.togglePreferredTitle() },
-                        onOptionsClick = { showOptionsMenu = true },
-                        onEditProgress = { showProgressEditSheet = true },
-                        onEditStatus = { showStatusPickerSheet = true },
-                        onEditScore = { showScoreRatingSheet = true },
-                        onOpenTrackers = { showMultiTrackerSheet = true }
-                    )
-                } else {
-                    DetailClassicHeaderSection(
-                        item = item,
-                        coverImageModel = coverImageModel,
-                        backdropTargetUrl = backdropTargetUrl,
-                        englishTitle = uiState.englishTitle,
-                        romajiTitle = uiState.romajiTitle,
-                        heroClearLogoUrl = uiState.heroClearLogoUrl,
-                        novelDetailMeta = uiState.novelDetailMeta,
-                        onToggleTitle = { viewModel.togglePreferredTitle() },
-                        onCoverClick = { showArtworkPicker = true },
-                        onCoverLoaded = { url ->
-                            if (coverCache != null) {
-                                val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                    coverCache.promoteFromDiskCache(url, diskCache)
-                                }
-                            }
-                        },
-                        onOptionsClick = { showOptionsMenu = true },
-                        onEditProgress = { showProgressEditSheet = true },
-                        onEditStatus = { showStatusPickerSheet = true },
-                        onEditScore = { showScoreRatingSheet = true },
-                        onOpenTrackers = { showMultiTrackerSheet = true }
-                    )
-                }
+                item(key = "detail_top_header", contentType = "top_header") {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // PRESENTATION MODE 1 or 2
+                        if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
+                            DetailHeroHeaderSection(
+                                item = item,
+                                backdropTargetUrl = backdropTargetUrl,
+                                englishTitle = uiState.englishTitle,
+                                romajiTitle = uiState.romajiTitle,
+                                heroClearLogoUrl = uiState.heroClearLogoUrl,
+                                novelDetailMeta = uiState.novelDetailMeta,
+                                onToggleTitle = { viewModel.togglePreferredTitle() },
+                                onOptionsClick = { showOptionsMenu = true },
+                                onEditProgress = { showProgressEditSheet = true },
+                                onEditStatus = { showStatusPickerSheet = true },
+                                onEditScore = { showScoreRatingSheet = true },
+                                onOpenTrackers = { showMultiTrackerSheet = true }
+                            )
+                        } else {
+                            DetailClassicHeaderSection(
+                                item = item,
+                                coverImageModel = coverImageModel,
+                                backdropTargetUrl = backdropTargetUrl,
+                                englishTitle = uiState.englishTitle,
+                                romajiTitle = uiState.romajiTitle,
+                                heroClearLogoUrl = uiState.heroClearLogoUrl,
+                                novelDetailMeta = uiState.novelDetailMeta,
+                                onToggleTitle = { viewModel.togglePreferredTitle() },
+                                onCoverClick = { showArtworkPicker = true },
+                                onCoverLoaded = { url ->
+                                    if (coverCache != null) {
+                                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            coverCache.promoteFromDiskCache(url, diskCache)
+                                        }
+                                    }
+                                },
+                                onOptionsClick = { showOptionsMenu = true },
+                                onEditProgress = { showProgressEditSheet = true },
+                                onEditStatus = { showStatusPickerSheet = true },
+                                onEditScore = { showScoreRatingSheet = true },
+                                onOpenTrackers = { showMultiTrackerSheet = true }
+                            )
+                        }
 
-                // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
-                val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
-                val hasBackdrop = backdropTargetUrl != null
-                if (hasProgressControls) {
-                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
-                    DetailProgressSection(
-                        item = item,
-                        onUpdateProgress = { viewModel.updateProgress(it) },
-                        onUpdatePlaytime = { viewModel.updatePlaytime(it) },
-                        onTogglePlatform = { viewModel.togglePlatform(it) },
-                        onUpdateStatus = { viewModel.updateStatus(it) }
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                } else {
-                    Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
-                }
+                        // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
+                        val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                        val hasBackdrop = backdropTargetUrl != null
+                        if (hasProgressControls) {
+                            Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
+                            DetailProgressSection(
+                                item = item,
+                                onUpdateProgress = { viewModel.updateProgress(it) },
+                                onUpdatePlaytime = { viewModel.updatePlaytime(it) },
+                                onTogglePlatform = { viewModel.togglePlatform(it) },
+                                onUpdateStatus = { viewModel.updateStatus(it) }
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                        } else {
+                            Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
+                        }
 
-                // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
-                if (!item.synopsis.isNullOrBlank()) {
-                    DetailSynopsisSection(
-                        synopsis = item.synopsis,
-                        dominantAccent = dominantAccent
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
+                        // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
+                        if (!item.synopsis.isNullOrBlank()) {
+                            DetailSynopsisSection(
+                                synopsis = item.synopsis,
+                                dominantAccent = dominantAccent
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
+                    }
                 }
 
                 // 3. Dynamic Reorderable Sections (configured in Settings > Layout > Details Page)
@@ -768,27 +786,28 @@ fun DetailScreen(
                 enabledSections.forEach { sectionItem ->
                     when (sectionItem.key) {
                         DetailSectionKey.AIRING_STATUS -> {
-                            if (uiState.animeAiring != null) {
-                                DetailAiringStatusLine(
-                                    schedule = uiState.animeAiring,
-                                    modifier = Modifier.padding(bottom = 16.dp)
-                                )
+                            val airing = uiState.animeAiring
+                            if (airing != null) {
+                                item(key = "section_airing_status", contentType = "airing_status") {
+                                    DetailAiringStatusLine(
+                                        schedule = airing,
+                                        modifier = Modifier.padding(bottom = 16.dp)
+                                    )
+                                }
                             }
                         }
                         DetailSectionKey.EPISODES -> {
                             if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
-                                val isReadingType = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
-                                DetailSeriesContent(
+                                detailSeriesItems(
+                                    seriesState = seriesUiState,
                                     seasons = uiState.realSeasons,
                                     episodes = uiState.realEpisodes,
                                     episodesBySeason = uiState.episodesBySeason,
                                     watchedEpisodes = uiState.watchedEpisodes,
                                     selectedSeasonNumber = uiState.selectedSeasonNumber,
-                                    fallbackBackdropUrl = item.bannerUrl,
-                                    fallbackCoverUrl = item.coverUrl,
-                                    layoutMode = episodeLayoutMode,
+                                    fallbackBackdropUrl = effectiveBanner,
+                                    fallbackCoverUrl = fallbackSeriesCover,
                                     layoutScale = episodeLayoutScale,
-                                    initialSeasonViewMode = seasonViewMode,
                                     onSeasonViewModeChanged = { next ->
                                         coroutineScope.launch { prefManager.updateSeasonViewMode(next) }
                                     },
@@ -797,15 +816,12 @@ fun DetailScreen(
                                     },
                                     onSelectSeason = { viewModel.selectSeason(it) },
                                     onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
-                                    onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
                                     onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
                                     isFillerSkipEnabled = uiState.isFillerSkipEnabled,
                                     onToggleSkipFillers = { viewModel.toggleSkipFillers() },
-                                    onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
                                     isMangaMode = isReadingType,
                                     isMangaSeasonGrouped = uiState.isMangaSeasonGrouped,
-                                    isLightNovelVolumeMode = item.mediaType == MediaType.NOVEL && uiState.isLightNovelMode,
-                                    maxTotalProgress = item.totalProgress?.toInt(),
+                                    isLightNovelVolumeMode = isLightNovelVolumeMode,
                                     currentTotalProgress = item.currentProgress.toInt(),
                                     onStepProgress = if (isReadingType) {
                                         { delta -> viewModel.stepChapterProgress(delta) }
@@ -814,220 +830,266 @@ fun DetailScreen(
                                         { target -> viewModel.jumpToChapterOrVolume(target) }
                                     } else null
                                 )
-                                Spacer(modifier = Modifier.height(20.dp))
                             }
                         }
                         DetailSectionKey.FRANCHISE -> {
                             if (deferredSectionsAllowed && uiState.animeRelations.isNotEmpty()) {
-                                DetailFranchiseSection(
-                                    relations = uiState.animeRelations,
-                                    onRelationClick = { relation ->
-                                        viewModel.saveScrollOffset(scrollState.value)
-                                        viewModel.openRelationPreview(relation)
-                                        coroutineScope.launch { scrollState.scrollTo(0) }
+                                item(key = "section_franchise", contentType = "franchise") {
+                                    Column {
+                                        DetailFranchiseSection(
+                                            relations = uiState.animeRelations,
+                                            onRelationClick = { relation ->
+                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+                                                viewModel.openRelationPreview(relation)
+                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                         DetailSectionKey.CAST -> {
                             if (deferredSectionsAllowed) {
-                                if (item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
-                                    if (uiState.animeCharacters.isNotEmpty()) {
-                                        DetailAnimeCastSection(
-                                            characters = uiState.animeCharacters,
-                                            isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL,
-                                            onCharacterClick = { character ->
-                                                sheetBackStack.add(DetailSheetTarget.AnimeCharacter(character))
-                                            },
-                                            onVoiceActorClick = { char ->
-                                                if (char.voiceActorId != null) {
-                                                    sheetBackStack.add(
-                                                        DetailSheetTarget.AnimeStaff(
-                                                            AnimeStaffItem(
-                                                                staffId = char.voiceActorId,
-                                                                name = char.voiceActorName ?: "Voice Actor",
-                                                                role = "Voice Actor",
-                                                                imageUrl = char.voiceActorImageUrl
-                                                            )
-                                                        )
+                                val isAnimeLike = item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+                                val hasAnimeCast = isAnimeLike && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())
+                                val hasStdCast = !isAnimeLike && uiState.cast.isNotEmpty()
+                                if (hasAnimeCast || hasStdCast) {
+                                    item(key = "section_cast", contentType = "cast") {
+                                        Column {
+                                            if (isAnimeLike) {
+                                                if (uiState.animeCharacters.isNotEmpty()) {
+                                                    DetailAnimeCastSection(
+                                                        characters = uiState.animeCharacters,
+                                                        isMangaOrNovel = isReadingType,
+                                                        onCharacterClick = { character ->
+                                                            sheetBackStack.add(DetailSheetTarget.AnimeCharacter(character))
+                                                        },
+                                                        onVoiceActorClick = { char ->
+                                                            if (char.voiceActorId != null) {
+                                                                sheetBackStack.add(
+                                                                    DetailSheetTarget.AnimeStaff(
+                                                                        AnimeStaffItem(
+                                                                            staffId = char.voiceActorId,
+                                                                            name = char.voiceActorName ?: "Voice Actor",
+                                                                            role = "Voice Actor",
+                                                                            imageUrl = char.voiceActorImageUrl
+                                                                        )
+                                                                    )
+                                                                )
+                                                            }
+                                                        }
                                                     )
                                                 }
+                                                if (uiState.animeStaff.isNotEmpty()) {
+                                                    if (uiState.animeCharacters.isNotEmpty()) {
+                                                        Spacer(modifier = Modifier.height(16.dp))
+                                                    }
+                                                    DetailAnimeStaffSection(
+                                                        staff = uiState.animeStaff,
+                                                        isMangaOrNovel = isReadingType,
+                                                        onStaffClick = { staff ->
+                                                            sheetBackStack.add(DetailSheetTarget.AnimeStaff(staff))
+                                                        }
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(20.dp))
+                                            } else {
+                                                DetailCastSection(
+                                                    cast = uiState.cast,
+                                                    onCastMemberClick = { member ->
+                                                        sheetBackStack.add(DetailSheetTarget.Person(member))
+                                                    }
+                                                )
+                                                Spacer(modifier = Modifier.height(20.dp))
                                             }
-                                        )
-                                    }
-                                    if (uiState.animeStaff.isNotEmpty()) {
-                                        if (uiState.animeCharacters.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(16.dp))
                                         }
-                                        DetailAnimeStaffSection(
-                                            staff = uiState.animeStaff,
-                                            isMangaOrNovel = item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL,
-                                            onStaffClick = { staff ->
-                                                sheetBackStack.add(DetailSheetTarget.AnimeStaff(staff))
-                                            }
-                                        )
                                     }
-                                    if (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.height(20.dp))
-                                    }
-                                } else if (uiState.cast.isNotEmpty()) {
-                                    DetailCastSection(
-                                        cast = uiState.cast,
-                                        onCastMemberClick = { member ->
-                                            sheetBackStack.add(DetailSheetTarget.Person(member))
-                                        }
-                                    )
-                                    Spacer(modifier = Modifier.height(20.dp))
                                 }
                             }
                         }
                         DetailSectionKey.NETWORKS -> {
                             if (deferredSectionsAllowed) {
-                                DetailNetworksSection(
-                                    item = item,
-                                    companies = uiState.companies,
-                                    onCompanyClick = { company ->
-                                        sheetBackStack.add(DetailSheetTarget.Company(company))
+                                item(key = "section_networks", contentType = "networks") {
+                                    Column {
+                                        DetailNetworksSection(
+                                            item = item,
+                                            companies = uiState.companies,
+                                            onCompanyClick = { company ->
+                                                sheetBackStack.add(DetailSheetTarget.Company(company))
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                         DetailSectionKey.GENRES_TAGS -> {
                             if (deferredSectionsAllowed) {
-                                DetailGenresTagsSection(
-                                    item = item,
-                                    tags = uiState.tags,
-                                    onGenreOrTagClick = { name, isTag ->
-                                        sheetBackStack.add(
-                                            DetailSheetTarget.Company(
-                                                NetworkProductionCompany(
-                                                    id = null,
-                                                    name = name,
-                                                    logoUrl = null,
-                                                    kind = if (isTag) "anime_tag" else "anime_genre"
+                                item(key = "section_genres_tags", contentType = "genres_tags") {
+                                    Column {
+                                        DetailGenresTagsSection(
+                                            item = item,
+                                            tags = uiState.tags,
+                                            onGenreOrTagClick = { name, isTag ->
+                                                sheetBackStack.add(
+                                                    DetailSheetTarget.Company(
+                                                        NetworkProductionCompany(
+                                                            id = null,
+                                                            name = name,
+                                                            logoUrl = null,
+                                                            kind = if (isTag) "anime_tag" else "anime_genre"
+                                                        )
+                                                    )
                                                 )
-                                            )
+                                            }
                                         )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                         DetailSectionKey.NAMES_SYNONYMS -> {
                             if (deferredSectionsAllowed) {
-                                DetailNamesSynonymsSection(
-                                    item = item,
-                                    englishTitle = uiState.englishTitle,
-                                    romajiTitle = uiState.romajiTitle,
-                                    nativeTitle = item.nativeTitle,
-                                    synonyms = uiState.synonyms
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                item(key = "section_names_synonyms", contentType = "names_synonyms") {
+                                    Column {
+                                        DetailNamesSynonymsSection(
+                                            item = item,
+                                            englishTitle = uiState.englishTitle,
+                                            romajiTitle = uiState.romajiTitle,
+                                            nativeTitle = item.nativeTitle,
+                                            synonyms = uiState.synonyms
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
                         DetailSectionKey.DETAILS_INFO -> {
                             if (deferredSectionsAllowed) {
-                                DetailGeneralInfoSection(
-                                    item = item,
-                                    popularity = uiState.popularity,
-                                    favourites = uiState.favourites,
-                                    durationMinutes = uiState.durationMinutes,
-                                    format = uiState.format,
-                                    season = uiState.season,
-                                    seasonYear = uiState.seasonYear,
-                                    source = uiState.source,
-                                    countryOfOrigin = uiState.countryOfOrigin,
-                                    startDate = uiState.startDate,
-                                    endDate = uiState.endDate,
-                                    nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                item(key = "section_details_info", contentType = "details_info") {
+                                    Column {
+                                        DetailGeneralInfoSection(
+                                            item = item,
+                                            popularity = uiState.popularity,
+                                            favourites = uiState.favourites,
+                                            durationMinutes = uiState.durationMinutes,
+                                            format = uiState.format,
+                                            season = uiState.season,
+                                            seasonYear = uiState.seasonYear,
+                                            source = uiState.source,
+                                            countryOfOrigin = uiState.countryOfOrigin,
+                                            startDate = uiState.startDate,
+                                            endDate = uiState.endDate,
+                                            nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
                         DetailSectionKey.EXTERNAL_LINKS -> {
                             if (deferredSectionsAllowed && uiState.externalLinks.isNotEmpty()) {
-                                DetailExternalLinksSection(
-                                    links = uiState.externalLinks
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                item(key = "section_external_links", contentType = "external_links") {
+                                    Column {
+                                        DetailExternalLinksSection(
+                                            links = uiState.externalLinks
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
                         DetailSectionKey.TRAILERS -> {
                             if (deferredSectionsAllowed && uiState.trailers.isNotEmpty()) {
-                                DetailTrailersSection(
-                                    trailers = uiState.trailers,
-                                    contentTitle = item.title
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                item(key = "section_trailers", contentType = "trailers") {
+                                    Column {
+                                        DetailTrailersSection(
+                                            trailers = uiState.trailers,
+                                            contentTitle = item.title
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
                             }
                         }
                         DetailSectionKey.REVIEWS -> {
                             if (deferredSectionsAllowed) {
-                                UnifiedDiscussionSection(
-                                    mediaType = item.mediaType,
-                                    mediaTitle = item.title,
-                                    reviews = uiState.reviews,
-                                    episodeOrChapterCount = item.totalProgress?.toInt() ?: uiState.realEpisodes.size.takeIf { it > 0 },
-                                    comments = uiState.discussionComments,
-                                    isLoading = isCommentsLoading,
-                                    seasons = uiState.realSeasons,
-                                    selectedSeasonNumber = uiState.selectedSeasonNumber,
-                                    currentUsername = uiState.currentUsername,
-                                    hasAniList = ((item.anilistId != null && item.anilistId > 0) || (uiState.item?.anilistId != null && (uiState.item?.anilistId ?: 0) > 0)),
-                                    onSeasonSelect = { viewModel.selectSeason(it) },
-                                    onTagSelect = { tag -> viewModel.selectDiscussionTag(tag) },
-                                    onPostComment = { content, tag, parentId ->
-                                        viewModel.postDiscussionComment(content, tag, parentId)
-                                    },
-                                    onEditComment = { commentId, newContent ->
-                                        viewModel.editDiscussionComment(commentId, newContent)
-                                    },
-                                    onDeleteComment = { commentId ->
-                                        viewModel.deleteDiscussionComment(commentId)
-                                    },
-                                    onVote = { commentId, voteType ->
-                                        viewModel.voteDiscussionComment(commentId, voteType)
-                                    },
-                                    onUserClick = { username, anilistUserId ->
-                                        sheetBackStack.add(DetailSheetTarget.UserProfile(username, anilistUserId))
-                                    },
-                                    onSortChange = { sort ->
-                                        viewModel.changeDiscussionSort(sort)
-                                    },
-                                    onLoadReplies = { commentId ->
-                                        viewModel.loadCommentReplies(commentId)
+                                item(key = "section_reviews", contentType = "reviews") {
+                                    Column {
+                                        UnifiedDiscussionSection(
+                                            mediaType = item.mediaType,
+                                            mediaTitle = item.title,
+                                            reviews = uiState.reviews,
+                                            episodeOrChapterCount = item.totalProgress?.toInt() ?: uiState.realEpisodes.size.takeIf { it > 0 },
+                                            comments = uiState.discussionComments,
+                                            isLoading = isCommentsLoading,
+                                            seasons = uiState.realSeasons,
+                                            selectedSeasonNumber = uiState.selectedSeasonNumber,
+                                            currentUsername = uiState.currentUsername,
+                                            hasAniList = ((item.anilistId != null && item.anilistId > 0) || (uiState.item?.anilistId != null && (uiState.item?.anilistId ?: 0) > 0)),
+                                            onSeasonSelect = { viewModel.selectSeason(it) },
+                                            onTagSelect = { tag -> viewModel.selectDiscussionTag(tag) },
+                                            onPostComment = { content, tag, parentId ->
+                                                viewModel.postDiscussionComment(content, tag, parentId)
+                                            },
+                                            onEditComment = { commentId, newContent ->
+                                                viewModel.editDiscussionComment(commentId, newContent)
+                                            },
+                                            onDeleteComment = { commentId ->
+                                                viewModel.deleteDiscussionComment(commentId)
+                                            },
+                                            onVote = { commentId, voteType ->
+                                                viewModel.voteDiscussionComment(commentId, voteType)
+                                            },
+                                            onUserClick = { username, anilistUserId ->
+                                                sheetBackStack.add(DetailSheetTarget.UserProfile(username, anilistUserId))
+                                            },
+                                            onSortChange = { sort ->
+                                                viewModel.changeDiscussionSort(sort)
+                                            },
+                                            onLoadReplies = { commentId ->
+                                                viewModel.loadCommentReplies(commentId)
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                         DetailSectionKey.COLLECTION -> {
                             if (deferredSectionsAllowed && item.mediaType == MediaType.MOVIE && uiState.collectionItems.isNotEmpty()) {
-                                DetailCollectionSection(
-                                    collectionName = uiState.collectionName ?: "Collection",
-                                    items = uiState.collectionItems,
-                                    onSelectItem = {
-                                        viewModel.saveScrollOffset(scrollState.value)
-                                        viewModel.openPreview(it)
-                                        coroutineScope.launch { scrollState.scrollTo(0) }
+                                item(key = "section_collection", contentType = "collection") {
+                                    Column {
+                                        DetailCollectionSection(
+                                            collectionName = uiState.collectionName ?: "Collection",
+                                            items = uiState.collectionItems,
+                                            onSelectItem = {
+                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+                                                viewModel.openPreview(it)
+                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                         DetailSectionKey.RECOMMENDATIONS -> {
                             if (deferredSectionsAllowed && uiState.recommendations.isNotEmpty()) {
-                                RecommendationsSection(
-                                    recommendations = uiState.recommendations,
-                                    onSelectRecommendation = {
-                                        viewModel.saveScrollOffset(scrollState.value)
-                                        viewModel.openPreview(it)
-                                        coroutineScope.launch { scrollState.scrollTo(0) }
+                                item(key = "section_recommendations", contentType = "recommendations") {
+                                    Column {
+                                        RecommendationsSection(
+                                            recommendations = uiState.recommendations,
+                                            onSelectRecommendation = {
+                                                viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+                                                viewModel.openPreview(it)
+                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
                                     }
-                                )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                }
                             }
                         }
                     }
@@ -1035,32 +1097,36 @@ fun DetailScreen(
 
                 // PREVIEW MODE HERO ACTION: + Add to Library
                 if (uiState.isPreviewMode) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 8.dp)
-                    ) {
-                        Button(
-                            onClick = { viewModel.addToLibrary(item) },
+                    item(key = "preview_add_button", contentType = "preview_add") {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(52.dp),
-                            shape = RoundedCornerShape(999.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentJade)
+                                .padding(horizontal = 20.dp, vertical = 8.dp)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Add to Library",
-                                color = AmoledBlack,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                            Button(
+                                onClick = { viewModel.addToLibrary(item) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(52.dp),
+                                shape = RoundedCornerShape(999.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentJade)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Add to Library",
+                                    color = AmoledBlack,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(48.dp))
+                item(key = "bottom_spacer", contentType = "spacer") {
+                    Spacer(modifier = Modifier.height(48.dp))
+                }
             }
 
             // Top Status Bar Gradient Scrim (so white back arrow never vanishes on bright banners)
@@ -1077,7 +1143,12 @@ fun DetailScreen(
             )
 
             // 1:1 Nuvio Parity: Top Floating Bar with Back Arrow, Centered Logo/Title, and Watched Checkmark
-            val headerAlpha = ((scrollState.value - 40f) / 160f).coerceIn(0f, 1f)
+            val headerAlpha by remember {
+                derivedStateOf {
+                    if (lazyListState.firstVisibleItemIndex > 0) 1f
+                    else ((lazyListState.firstVisibleItemScrollOffset - 40f) / 160f).coerceIn(0f, 1f)
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1094,7 +1165,7 @@ fun DetailScreen(
                             sheetBackStack.removeAt(sheetBackStack.lastIndex)
                             val restoredOffset = viewModel.popScrollOffset()
                             if (restoredOffset != null) {
-                                coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                                coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
                             }
                         } else if (uiState.isPreviewMode || viewModel.isPreviewActive()) {
                             val handled = viewModel.closePreview()
@@ -1103,7 +1174,7 @@ fun DetailScreen(
                             } else {
                                 val restoredOffset = viewModel.popScrollOffset()
                                 if (restoredOffset != null) {
-                                    coroutineScope.launch { scrollState.scrollTo(restoredOffset) }
+                                    coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
                                 }
                             }
                         } else {
@@ -1315,6 +1386,27 @@ fun DetailScreen(
                     }
                 )
             }
+
+            DetailSeriesDialogs(
+                seriesState = seriesUiState,
+                seasons = uiState.realSeasons,
+                episodes = uiState.realEpisodes,
+                episodesBySeason = uiState.episodesBySeason,
+                watchedEpisodes = uiState.watchedEpisodes,
+                selectedSeasonNumber = uiState.selectedSeasonNumber,
+                isFillerSkipEnabled = uiState.isFillerSkipEnabled,
+                isMangaMode = isReadingType,
+                isLightNovelVolumeMode = isLightNovelVolumeMode,
+                maxTotalProgress = item.totalProgress?.toInt(),
+                currentTotalProgress = item.currentProgress.toInt(),
+                onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
+                onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
+                onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
+                onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
+                onJumpToProgress = if (isReadingType) {
+                    { target -> viewModel.jumpToChapterOrVolume(target) }
+                } else null
+            )
         }
     }
 }
