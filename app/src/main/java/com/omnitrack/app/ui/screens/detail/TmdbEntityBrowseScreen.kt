@@ -53,6 +53,7 @@ import com.omnitrack.app.ui.components.ArtworkBackdrop
 import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
+import com.omnitrack.app.ui.screens.detail.components.powerampPullDownToBack
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -340,7 +341,7 @@ fun TmdbEntityBrowseScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .com.omnitrack.app.ui.screens.detail.components.powerampPullDownToBack(
+            .powerampPullDownToBack(
                 isAtTop = { scrollState.value == 0 },
                 onBack = onBack
             )
