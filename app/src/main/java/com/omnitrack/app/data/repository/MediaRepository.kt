@@ -4,11 +4,13 @@ import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
+import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
+import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import kotlinx.coroutines.flow.Flow
@@ -19,8 +21,28 @@ class MediaRepository(
     private val mediaDao: MediaDao,
     private val categoryDao: CategoryDao,
     private val syncQueueDao: SyncQueueDao? = null,
-    private val episodeProgressDao: EpisodeProgressDao? = null
+    private val episodeProgressDao: EpisodeProgressDao? = null,
+    private val vnRouteDao: VnRouteDao? = null
 ) {
+    fun getVnRoutes(mediaId: Long): Flow<List<VnRouteEntity>> =
+        (vnRouteDao?.getRoutesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getVnRoutesOnce(mediaId: Long): List<VnRouteEntity> =
+        vnRouteDao?.getRoutesForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertVnRoute(route: VnRouteEntity): Long? = vnRouteDao?.insertRoute(route)
+
+    suspend fun insertVnRoutes(routes: List<VnRouteEntity>) {
+        if (routes.isNotEmpty()) vnRouteDao?.insertRoutes(routes)
+    }
+
+    suspend fun updateVnRoute(route: VnRouteEntity) {
+        vnRouteDao?.updateRoute(route)
+    }
+
+    suspend fun deleteVnRouteById(routeId: Long) {
+        vnRouteDao?.deleteRouteById(routeId)
+    }
     fun getEpisodeProgress(mediaId: Long): Flow<List<EpisodeProgressEntity>> =
         (episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
@@ -106,9 +128,14 @@ class MediaRepository(
         anilistId: Long? = null,
         malId: Long? = null,
         tmdbId: Long? = null,
+        vndbId: String? = null,
         title: String? = null,
         mediaType: MediaType? = null
     ): MediaItemEntity? {
+        if (!vndbId.isNullOrBlank()) {
+            val found = mediaDao.findByVndbId(vndbId.trim())
+            if (found != null) return found
+        }
         if (anilistId != null && anilistId > 0) {
             val found = mediaDao.findByAnilistId(anilistId)
             if (found != null) return found

@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.R
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.VnDetailMeta
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
@@ -51,9 +52,10 @@ fun NuvioRatingsRow(
     malScore: Float? = null,
     kitsuScore: Float? = null,
     mangaUpdatesScore: Float? = null,
-    bangumiScore: Float? = null
+    bangumiScore: Float? = null,
+    vnDetailMeta: VnDetailMeta? = null
 ) {
-    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore) {
+    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta) {
         val list = mutableListOf<RatingBadgeData>()
 
         // 1. IMDb (Gold Logo 30x16dp)
@@ -266,27 +268,32 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 10. Steam Positive % (Games, e.g. 94% in Steam blue #66C0F4)
-        if (item.mediaType == MediaType.GAME) {
-            item.communityScore?.let { score ->
-                if (score > 0) {
-                    val steamVal = if (score <= 10f) (score * 10).roundToInt() else score.roundToInt()
-                    list.add(
-                        RatingBadgeData(
-                            source = "steam",
-                            displayName = "Steam",
-                            iconRes = R.drawable.brand_steam,
-                            valueText = "$steamVal%",
-                            valueColor = Color(0xFF66C0F4)
-                        )
+        // 10. Steam Positive % (Games or Visual Novels with bridged Steam AppID)
+        val effSteamPct = when {
+            item.mediaType == MediaType.GAME -> item.communityScore?.let {
+                if (it <= 10f) (it * 10).roundToInt() else it.roundToInt()
+            }
+            item.mediaType == MediaType.VISUAL_NOVEL -> vnDetailMeta?.steamPositivePct
+            else -> null
+        }
+        effSteamPct?.let { steamVal ->
+            if (steamVal > 0) {
+                list.add(
+                    RatingBadgeData(
+                        source = "steam",
+                        displayName = "Steam",
+                        iconRes = R.drawable.brand_steam,
+                        valueText = "$steamVal%",
+                        valueColor = Color(0xFF66C0F4)
                     )
-                }
+                )
             }
         }
 
-        // 11. VNDB Rating (Visual Novels, e.g. 8.50 in VNDB blue #2A5684)
+        // 11. VNDB Rating (Visual Novels, e.g. 9.02 in VNDB blue #6BA4E8)
         if (item.mediaType == MediaType.VISUAL_NOVEL) {
-            item.communityScore?.let { score ->
+            val effVn = vnDetailMeta?.vndbScore ?: item.communityScore
+            effVn?.let { score ->
                 if (score > 0) {
                     val vnVal = if (score > 10f) score / 10.0 else score.toDouble()
                     list.add(
@@ -295,7 +302,7 @@ fun NuvioRatingsRow(
                             displayName = "VNDB",
                             iconRes = R.drawable.brand_vndb,
                             valueText = formatTwoDecimals(vnVal),
-                            valueColor = Color(0xFF2A5684)
+                            valueColor = Color(0xFF6BA4E8)
                         )
                     )
                 }

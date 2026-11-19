@@ -68,11 +68,13 @@ object OmniBackupManager {
             val mediaItems = database.mediaDao().getAllMedia().first()
             val categories = database.categoryDao().getAllCategories().first()
             val syncQueue = database.syncQueueDao().getPendingTasksSnapshot()
+            val vnRoutes = database.vnRouteDao().getAllRoutesOnce()
 
             val dbDump = OmniDatabaseDump(
                 mediaItems = mediaItems,
                 categories = categories,
-                syncQueue = syncQueue
+                syncQueue = syncQueue,
+                vnRoutes = vnRoutes
             )
             val dbDumpJson = json.encodeToString(dbDump)
             val checksum = sha256(dbDumpJson)
@@ -223,6 +225,7 @@ object OmniBackupManager {
                 database.mediaDao().deleteAllMedia()
                 database.categoryDao().deleteAllCategories()
                 database.syncQueueDao().clearQueue()
+                database.vnRouteDao().deleteAllRoutes()
 
                 if (dump.categories.isNotEmpty()) {
                     database.categoryDao().insertAll(dump.categories)
@@ -232,6 +235,9 @@ object OmniBackupManager {
                 }
                 for (task in dump.syncQueue) {
                     database.syncQueueDao().enqueue(task)
+                }
+                if (dump.vnRoutes.isNotEmpty()) {
+                    database.vnRouteDao().insertRoutes(dump.vnRoutes)
                 }
             }
 
@@ -269,7 +275,8 @@ object OmniBackupManager {
                         "poster_card_corner_radius_dp",
                         "poster_card_depth_edge_strength",
                         "poster_card_depth_sheen_strength",
-                        "poster_card_depth_edge_coverage"
+                        "poster_card_depth_edge_coverage",
+                        "vn_spoiler_level"
                     )
                     val knownFloatKeys = setOf("episode_layout_scale")
 

@@ -8,7 +8,8 @@ data class AnimeCharacterItem(
     val voiceActorId: Long? = null,
     val voiceActorName: String? = null,
     val voiceActorImageUrl: String? = null,
-    val voiceActorLanguage: String = "JP"
+    val voiceActorLanguage: String = "JP",
+    val vndbCharacterId: String? = null
 )
 
 data class AnimeRelationItem(
@@ -19,7 +20,8 @@ data class AnimeRelationItem(
     val coverUrl: String?,
     val bannerUrl: String? = null,
     val year: Int? = null,
-    val mediaType: MediaType = MediaType.ANIME
+    val mediaType: MediaType = MediaType.ANIME,
+    val vndbId: String? = null
 )
 
 data class AnimeAiringSchedule(
@@ -122,7 +124,10 @@ data class AnimeTagItem(
     val name: String,
     val rank: Int? = null,
     val isMediaSpoiler: Boolean = false,
-    val isGeneralSpoiler: Boolean = false
+    val isGeneralSpoiler: Boolean = false,
+    val category: String? = null,
+    val spoilerLevel: Int = 0,
+    val rating: Float? = null
 )
 
 data class ExternalLinkItem(

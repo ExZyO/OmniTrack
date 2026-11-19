@@ -6,6 +6,8 @@ import kotlinx.serialization.Serializable
 enum class DetailSectionKey(val displayName: String, val description: String) {
     AIRING_STATUS("Airing Schedule", "Live episode countdown and local broadcast time"),
     EPISODES("Seasons & Episodes", "Season selector and episode cards"),
+    SCREENSHOTS("Screenshots & CGs", "Visual novel CG gallery and banner picker"),
+    RELEASES("Releases & Translations", "Official editions, fan patches, voice acting, and platforms"),
     FRANCHISE("Franchise & Adaptations", "Related movies, spin-offs, manga, and light novels"),
     CAST("Characters & Cast", "Character portraits and voice actors (Seiyuu)"),
     NETWORKS("Studios & Networks", "Animation studios and broadcasting networks"),
@@ -29,6 +31,8 @@ object DetailsPageLayoutDefaults {
     val defaultSections: List<DetailSectionItem> = listOf(
         DetailSectionItem(DetailSectionKey.AIRING_STATUS, isEnabled = true),
         DetailSectionItem(DetailSectionKey.EPISODES, isEnabled = true),
+        DetailSectionItem(DetailSectionKey.SCREENSHOTS, isEnabled = true),
+        DetailSectionItem(DetailSectionKey.RELEASES, isEnabled = true),
         DetailSectionItem(DetailSectionKey.FRANCHISE, isEnabled = true),
         DetailSectionItem(DetailSectionKey.CAST, isEnabled = true),
         DetailSectionItem(DetailSectionKey.NETWORKS, isEnabled = true),

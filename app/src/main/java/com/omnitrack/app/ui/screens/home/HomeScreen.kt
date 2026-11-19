@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -125,6 +127,8 @@ fun HomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedMangaSubtype by rememberSaveable { mutableStateOf("ALL") }
     var selectedNovelSubtype by rememberSaveable { mutableStateOf("ALL") }
+    var selectedVnOriginSubtype by rememberSaveable { mutableStateOf("ALL") }
+    var selectedVnLengthSubtype by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -433,6 +437,16 @@ fun HomeScreen(
                             }
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.VISUAL_NOVEL) {
+                            VnUnderlineFilterBar(
+                                selectedOrigin = selectedVnOriginSubtype,
+                                selectedLength = selectedVnLengthSubtype,
+                                onOriginSelected = { selectedVnOriginSubtype = it },
+                                onLengthSelected = { selectedVnLengthSubtype = it },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -454,11 +468,13 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype) {
                                     uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
                                         (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
+                                        (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnOriginSubtype == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(item.originCountry, item.nativeTitle) == selectedVnOriginSubtype) &&
+                                        (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnLengthSubtype == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(item.runtimeMinutes) == selectedVnLengthSubtype) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
@@ -677,5 +693,70 @@ internal fun inferNovelSubtype(
         "LIGHT_NOVEL"
     } else {
         "WEB_NOVEL"
+    }
+}
+
+@Composable
+internal fun VnUnderlineFilterBar(
+    selectedOrigin: String,
+    selectedLength: String,
+    onOriginSelected: (String) -> Unit,
+    onLengthSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        UnderlineFilterGroup(
+            options = listOf("ALL" to "All", "JP" to "Japanese", "EN" to "English / OELVN", "CNKR" to "CN / KR"),
+            selectedKey = selectedOrigin,
+            onSelected = onOriginSelected
+        )
+        UnderlineFilterGroup(
+            options = listOf("ALL" to "Any Length", "SHORT" to "Short (<10h)", "MEDIUM" to "Medium", "LONG" to "Long", "VLONG" to "Very Long (50h+)"),
+            selectedKey = selectedLength,
+            onSelected = onLengthSelected
+        )
+    }
+}
+
+@Composable
+private fun UnderlineFilterGroup(
+    options: List<Pair<String, String>>,
+    selectedKey: String,
+    onSelected: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEach { (key, label) ->
+            val isSelected = selectedKey == key
+            Column(
+                modifier = Modifier
+                    .width(IntrinsicSize.Max)
+                    .clickable { onSelected(key) }
+                    .padding(top = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.50f)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Transparent)
+                )
+            }
+        }
     }
 }

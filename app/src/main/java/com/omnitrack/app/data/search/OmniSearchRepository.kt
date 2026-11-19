@@ -22,6 +22,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -1044,7 +1046,7 @@ class OmniSearchRepository(
         try {
             val payload = buildJsonObject {
                 put("filters", json.parseToJsonElement("[\"search\", \"=\", \"$query\"]"))
-                put("fields", "id, title, alttitle, rating, description, image.url, screenshots.url")
+                put("fields", "id, title, alttitle, olang, length, length_minutes, released, rating, description, image{url,sexual,violence}, screenshots{url,sexual,violence}")
             }
 
             val request = Request.Builder()
@@ -1063,24 +1065,45 @@ class OmniSearchRepository(
                     val id = obj["id"].cleanString() ?: return@mapNotNull null
                     val title = obj["title"].cleanString() ?: return@mapNotNull null
                     val altTitle = obj["alttitle"].cleanString()
+                    val olang = obj["olang"].cleanString()
+                    val origin = when (olang?.lowercase()) {
+                        "ja" -> "JP"
+                        "en" -> "EN"
+                        "zh", "zh-hans", "zh-hant" -> "CN"
+                        "ko" -> "KR"
+                        else -> olang?.uppercase()?.take(2)
+                    }
+                    val lengthMinutes = obj["length_minutes"]?.jsonPrimitive?.intOrNull
+                    val releaseYear = obj["released"].cleanString()?.take(4)?.takeIf { y -> y.length == 4 && y.all { it.isDigit() } }
                     val imageObj = obj["image"]?.jsonObject
                     val cover = imageObj?.get("url").cleanString() ?: return@mapNotNull null
                     val screenshots = obj["screenshots"]?.jsonArray
-                    val firstScreenshot = screenshots?.firstOrNull()?.jsonObject?.get("url").cleanString()
+                    val safeShot = screenshots?.firstOrNull {
+                        val s = it.jsonObject
+                        (s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f) < 0.5f && (s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f) < 1f
+                    }?.jsonObject?.get("url").cleanString()
+                        ?: screenshots?.firstOrNull()?.jsonObject?.get("url").cleanString()
 
                     val rating = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
-                    val desc = cleanSynopsis(obj["description"].cleanString()?.replace(Regex("\\[[^\\]]*\\]"), ""))
+                    val desc = cleanSynopsis(
+                        obj["description"].cleanString()
+                            ?.replace(Regex("\\[spoiler].*?\\[/spoiler]", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+                            ?.replace(Regex("\\[[^\\]]*]"), "")
+                    )
 
                     SearchResultItem(
                         title = title,
                         nativeTitle = altTitle,
                         synopsis = desc,
                         coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
-                        bannerUrl = firstScreenshot?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        bannerUrl = safeShot?.let { LosslessCoverMapper.toLosslessUrl(it) },
                         mediaType = MediaType.VISUAL_NOVEL,
+                        releaseYear = releaseYear,
                         communityScore = rating,
                         sourceProvider = "VNDB",
-                        vndbId = id
+                        vndbId = id,
+                        originCountry = origin,
+                        runtimeMinutes = lengthMinutes
                     )
                 }
             }

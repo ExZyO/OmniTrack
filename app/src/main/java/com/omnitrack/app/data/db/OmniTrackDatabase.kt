@@ -11,14 +11,16 @@ import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
+import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
+import com.omnitrack.app.data.db.entity.VnRouteEntity
 
 @Database(
-    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class],
-    version = 13,
+    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class, VnRouteEntity::class],
+    version = 14,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -28,6 +30,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun episodeProgressDao(): EpisodeProgressDao
+    abstract fun vnRouteDao(): VnRouteDao
 
     companion object {
         @Volatile
@@ -88,6 +91,29 @@ abstract class OmniTrackDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS vn_routes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        mediaId INTEGER NOT NULL,
+                        routeName TEXT NOT NULL,
+                        routeType TEXT NOT NULL DEFAULT 'HEROINE',
+                        characterId TEXT,
+                        characterImageUrl TEXT,
+                        isCompleted INTEGER NOT NULL DEFAULT 0,
+                        completedAtMs INTEGER,
+                        userRating REAL,
+                        userNote TEXT,
+                        isBookmarked INTEGER NOT NULL DEFAULT 0,
+                        isSpoiler INTEGER NOT NULL DEFAULT 0,
+                        sortOrder INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_vn_routes_mediaId ON vn_routes(mediaId)")
+            }
+        }
+
         fun getDatabase(context: Context): OmniTrackDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -95,7 +121,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {

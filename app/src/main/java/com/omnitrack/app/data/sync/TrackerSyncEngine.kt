@@ -361,10 +361,32 @@ class TrackerSyncEngine(
     ): Boolean = NetworkPacer.withVndbPacing {
         if (token.isNullOrBlank() || item.vndbId == null) return@withVndbPacing true
         try {
+            val activeLabelId = when (item.status) {
+                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> 1
+                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> 2
+                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> 3
+                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> 4
+                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> 5
+                else -> null
+            }
             val payload = buildJsonObject {
+                if (activeLabelId != null) {
+                    put("labels_set", kotlinx.serialization.json.buildJsonArray {
+                        add(kotlinx.serialization.json.JsonPrimitive(activeLabelId))
+                    })
+                    put("labels_unset", kotlinx.serialization.json.buildJsonArray {
+                        listOf(1, 2, 3, 4, 5).filter { it != activeLabelId }.forEach {
+                            add(kotlinx.serialization.json.JsonPrimitive(it))
+                        }
+                    })
+                }
                 val vote = item.userRating?.let { (it * 10f).toInt().coerceIn(10, 100) }
                 if (vote != null) put("vote", vote)
                 item.anilistNotes?.take(2000)?.let { put("notes", it) }
+                if (item.status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED) {
+                    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+                    put("finished", today)
+                }
             }
             val request = Request.Builder()
                 .url("https://api.vndb.org/kana/ulist/${item.vndbId}")

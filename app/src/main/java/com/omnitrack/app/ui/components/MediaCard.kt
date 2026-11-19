@@ -85,7 +85,8 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     anilistId = anilistId,
     malId = malId,
     originCountry = originCountry,
-    platform = platform
+    platform = platform,
+    runtimeMinutes = runtimeMinutes
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -388,6 +389,17 @@ fun MediaCard(
                 lineHeight = 16.sp,
                 modifier = Modifier.padding(horizontal = 2.dp)
             )
+            if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                Text(
+                    text = com.omnitrack.app.data.model.formatVnCardBadge(item.originCountry, item.runtimeMinutes),
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
+            }
         }
     }
 }

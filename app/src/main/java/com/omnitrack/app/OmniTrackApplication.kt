@@ -39,7 +39,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
     }
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
-    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao()) }
+    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao(), database.vnRouteDao()) }
     val coverCache by lazy { CoverCache(this) }
     val preferenceManager by lazy { PreferenceManager(this) }
     val omniSearchRepository by lazy { OmniSearchRepository() }
@@ -69,6 +69,8 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.customMalClientId.collect { TrackerAccountVerifier.customMalClientId = it } }
             launch { preferenceManager.customSimklClientId.collect { TrackerAccountVerifier.customSimklClientId = it } }
             launch { preferenceManager.customSimklClientSecret.collect { TrackerAccountVerifier.customSimklClientSecret = it } }
+            launch { preferenceManager.vnSpoilerLevel.collect { PreferenceManager.cachedVnSpoilerLevel = it } }
+            launch { preferenceManager.vnNsfwFilterMode.collect { PreferenceManager.cachedVnNsfwFilterMode = it } }
         }
 
         AppLogger.i("Application", "OmniTrack launched successfully.")

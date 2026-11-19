@@ -3,6 +3,7 @@ package com.omnitrack.app.data.backup
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
+import com.omnitrack.app.data.db.entity.VnRouteEntity
 import kotlinx.serialization.Serializable
 import java.io.File
 
@@ -22,7 +23,8 @@ data class OmniBackupManifest(
 data class OmniDatabaseDump(
     val mediaItems: List<MediaItemEntity> = emptyList(),
     val categories: List<CategoryEntity> = emptyList(),
-    val syncQueue: List<SyncQueueEntity> = emptyList()
+    val syncQueue: List<SyncQueueEntity> = emptyList(),
+    val vnRoutes: List<VnRouteEntity> = emptyList()
 )
 
 @Serializable

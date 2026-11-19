@@ -9,5 +9,6 @@ data class ArtworkCandidate(
     val description: String? = null,
     val width: Int? = null,
     val height: Int? = null,
-    val isBanner: Boolean = false
+    val isBanner: Boolean = false,
+    val isNsfw: Boolean = false
 )

@@ -349,6 +349,39 @@ fun VisualPresentationScreen(
                 }
             }
 
+            // Section 6: Visual Novels (Spoilers & NSFW)
+            PresentationSectionTitle("VISUAL NOVELS (SPOILERS & NSFW)")
+            val vnSpoilerLevel by prefManager.vnSpoilerLevel.collectAsState(initial = com.omnitrack.app.data.model.VnSpoilerLevel.MINOR)
+            val vnNsfwMode by prefManager.vnNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Default Spoiler Visibility", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                com.omnitrack.app.data.model.VnSpoilerLevel.entries.forEach { level ->
+                    PresentationChoiceCard(
+                        title = level.displayName,
+                        description = level.description,
+                        isSelected = vnSpoilerLevel == level,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch { prefManager.updateVnSpoilerLevel(level) }
+                        }
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("NSFW CG & Artwork Filter", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                com.omnitrack.app.data.model.VnNsfwFilterMode.entries.forEach { mode ->
+                    PresentationChoiceCard(
+                        title = mode.displayName,
+                        description = mode.description,
+                        isSelected = vnNsfwMode == mode,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch { prefManager.updateVnNsfwFilterMode(mode) }
+                        }
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

@@ -144,14 +144,29 @@ import com.omnitrack.app.ui.screens.detail.components.UnifiedDiscussionSection
 import com.omnitrack.app.ui.screens.detail.components.SeasonEpisodesSection
 import com.omnitrack.app.ui.screens.detail.components.ScoreRatingSheet
 import com.omnitrack.app.ui.screens.detail.components.statusColor
+import android.widget.Toast
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.input.KeyboardType
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.AnimeStaffItem
+import com.omnitrack.app.data.model.VnDetailMeta
+import com.omnitrack.app.data.model.VnNsfwFilterMode
+import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.DetailScreenshotsGallerySection
+import com.omnitrack.app.ui.screens.detail.components.DetailVnReleasesSection
+import com.omnitrack.app.ui.screens.detail.components.DetailVnRoutesSection
 import com.omnitrack.app.ui.screens.detail.components.UserMediaListOverlay
 import com.omnitrack.app.ui.screens.detail.components.UserProfileSheet
+import com.omnitrack.app.ui.screens.detail.components.VnRouteDetailSheet
 import com.omnitrack.app.ui.screens.detail.components.VolumeChapterDetailSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
@@ -177,6 +192,7 @@ sealed class DetailSheetTarget {
     data class Person(val person: CastMember) : DetailSheetTarget()
     data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
     data class VolumeChapterDetail(val seasonNumber: Int, val episodeNumber: Int) : DetailSheetTarget()
+    data class VnRoute(val routeId: Long) : DetailSheetTarget()
 }
 
 private sealed class DetailNavStep {
@@ -199,6 +215,9 @@ fun DetailScreen(
     val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
     val seasonViewMode by prefManager.seasonViewMode.collectAsState(initial = "Posters")
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
+    val vnSpoilerLevel by prefManager.vnSpoilerLevel.collectAsState(initial = VnSpoilerLevel.MINOR)
+    val vnNsfwFilterMode by prefManager.vnNsfwFilterMode.collectAsState(initial = VnNsfwFilterMode.BLUR_TAP)
+    var showVnPlaytimeDialog by remember { mutableStateOf(false) }
 
     val uiState by viewModel.uiState.collectAsState()
     val isCommentsLoading by viewModel.isCommentsLoading.collectAsState()
@@ -737,9 +756,16 @@ fun DetailScreen(
                                 romajiTitle = uiState.romajiTitle,
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
                                 novelDetailMeta = uiState.novelDetailMeta,
+                                vnDetailMeta = uiState.vnDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onOptionsClick = { showOptionsMenu = true },
-                                onEditProgress = { showProgressEditSheet = true },
+                                onEditProgress = {
+                                    if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                                        showVnPlaytimeDialog = true
+                                    } else {
+                                        showProgressEditSheet = true
+                                    }
+                                },
                                 onEditStatus = { showStatusPickerSheet = true },
                                 onEditScore = { showScoreRatingSheet = true },
                                 onOpenTrackers = { showMultiTrackerSheet = true }
@@ -753,6 +779,7 @@ fun DetailScreen(
                                 romajiTitle = uiState.romajiTitle,
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
                                 novelDetailMeta = uiState.novelDetailMeta,
+                                vnDetailMeta = uiState.vnDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onCoverClick = { showArtworkPicker = true },
                                 onCoverLoaded = { url ->
@@ -764,7 +791,13 @@ fun DetailScreen(
                                     }
                                 },
                                 onOptionsClick = { showOptionsMenu = true },
-                                onEditProgress = { showProgressEditSheet = true },
+                                onEditProgress = {
+                                    if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                                        showVnPlaytimeDialog = true
+                                    } else {
+                                        showProgressEditSheet = true
+                                    }
+                                },
                                 onEditStatus = { showStatusPickerSheet = true },
                                 onEditScore = { showScoreRatingSheet = true },
                                 onOpenTrackers = { showMultiTrackerSheet = true }
@@ -772,7 +805,7 @@ fun DetailScreen(
                         }
 
                         // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
-                        val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+                        val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.MOVIE)
                         val hasBackdrop = backdropTargetUrl != null
                         if (hasProgressControls) {
                             Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -792,7 +825,9 @@ fun DetailScreen(
                         if (!item.synopsis.isNullOrBlank()) {
                             DetailSynopsisSection(
                                 synopsis = item.synopsis,
-                                dominantAccent = dominantAccent
+                                dominantAccent = dominantAccent,
+                                isVisualNovel = item.mediaType == MediaType.VISUAL_NOVEL,
+                                vnSpoilerLevel = vnSpoilerLevel
                             )
                             Spacer(modifier = Modifier.height(14.dp))
                         }
@@ -815,7 +850,26 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.EPISODES -> {
-                            if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
+                            if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                                item(key = "section_vn_routes", contentType = "vn_routes") {
+                                    Column {
+                                        DetailVnRoutesSection(
+                                            item = item,
+                                            vnMeta = uiState.vnDetailMeta,
+                                            routes = uiState.vnRoutes,
+                                            spoilerLevel = vnSpoilerLevel,
+                                            onStepPlaytime = { viewModel.stepVnPlaytime(it) },
+                                            onSetExactPlaytime = { viewModel.setVnPlaytimeExact(it) },
+                                            onToggleRouteCompleted = { viewModel.toggleVnRouteCompleted(it) },
+                                            onAddCustomRoute = { viewModel.addCustomVnRoute(it) },
+                                            onOpenRouteDetail = { route ->
+                                                pushSheet(DetailSheetTarget.VnRoute(route.id))
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            } else if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
                                 detailSeriesItems(
                                     seriesState = seriesUiState,
                                     seasons = uiState.realSeasons,
@@ -854,6 +908,35 @@ fun DetailScreen(
                                 )
                             }
                         }
+                        DetailSectionKey.SCREENSHOTS -> {
+                            if (sectionsReady && item.mediaType == MediaType.VISUAL_NOVEL && uiState.vnDetailMeta.screenshots.isNotEmpty()) {
+                                item(key = "section_vn_screenshots", contentType = "vn_screenshots") {
+                                    Column {
+                                        DetailScreenshotsGallerySection(
+                                            screenshots = uiState.vnDetailMeta.screenshots,
+                                            nsfwFilterMode = vnNsfwFilterMode,
+                                            onSetAsHeroBanner = { url ->
+                                                viewModel.setCgAsHeroBanner(url)
+                                                Toast.makeText(context, "Hero banner updated", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                        DetailSectionKey.RELEASES -> {
+                            if (sectionsReady && item.mediaType == MediaType.VISUAL_NOVEL && uiState.vnDetailMeta.releases.isNotEmpty()) {
+                                item(key = "section_vn_releases", contentType = "vn_releases") {
+                                    Column {
+                                        DetailVnReleasesSection(
+                                            releases = uiState.vnDetailMeta.releases
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
                         DetailSectionKey.FRANCHISE -> {
                             if (sectionsReady && uiState.animeRelations.isNotEmpty()) {
                                 item(key = "section_franchise", contentType = "franchise") {
@@ -871,7 +954,10 @@ fun DetailScreen(
                         }
                         DetailSectionKey.CAST -> {
                             if (sectionsReady) {
-                                val isAnimeLike = item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL
+                                val isAnimeLike = item.mediaType == MediaType.ANIME ||
+                                    item.mediaType == MediaType.MANGA ||
+                                    item.mediaType == MediaType.NOVEL ||
+                                    item.mediaType == MediaType.VISUAL_NOVEL
                                 val hasAnimeCast = isAnimeLike && (uiState.animeCharacters.isNotEmpty() || uiState.animeStaff.isNotEmpty())
                                 val hasStdCast = !isAnimeLike && uiState.cast.isNotEmpty()
                                 if (hasAnimeCast || hasStdCast) {
@@ -886,7 +972,7 @@ fun DetailScreen(
                                                             pushSheet(DetailSheetTarget.AnimeCharacter(character))
                                                         },
                                                         onVoiceActorClick = { char ->
-                                                            if (char.voiceActorId != null) {
+                                                            if (item.mediaType != MediaType.VISUAL_NOVEL && char.voiceActorId != null) {
                                                                 pushSheet(
                                                                     DetailSheetTarget.AnimeStaff(
                                                                         AnimeStaffItem(
@@ -909,7 +995,9 @@ fun DetailScreen(
                                                         staff = uiState.animeStaff,
                                                         isMangaOrNovel = isReadingType,
                                                         onStaffClick = { staff ->
-                                                            pushSheet(DetailSheetTarget.AnimeStaff(staff))
+                                                            if (item.mediaType != MediaType.VISUAL_NOVEL) {
+                                                                pushSheet(DetailSheetTarget.AnimeStaff(staff))
+                                                            }
                                                         }
                                                     )
                                                 }
@@ -953,6 +1041,8 @@ fun DetailScreen(
                                         DetailGenresTagsSection(
                                             item = item,
                                             tags = uiState.tags,
+                                            vnSpoilerLevel = vnSpoilerLevel,
+                                            vnNsfwFilterMode = vnNsfwFilterMode,
                                             onGenreOrTagClick = { name, isTag ->
                                                 pushSheet(
                                                     DetailSheetTarget.Company(
@@ -1003,7 +1093,8 @@ fun DetailScreen(
                                             countryOfOrigin = uiState.countryOfOrigin,
                                             startDate = uiState.startDate,
                                             endDate = uiState.endDate,
-                                            nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds
+                                            nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds,
+                                            vnDetailMeta = if (item.mediaType == MediaType.VISUAL_NOVEL) uiState.vnDetailMeta else null
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1365,6 +1456,51 @@ fun DetailScreen(
                 )
             }
 
+            if (showVnPlaytimeDialog) {
+                var hoursText by remember(item.id, item.playtimeHours) {
+                    mutableStateOf(String.format(java.util.Locale.US, "%.1f", item.playtimeHours))
+                }
+                AlertDialog(
+                    onDismissRequest = { showVnPlaytimeDialog = false },
+                    containerColor = AmoledBlack,
+                    title = {
+                        Text("Playtime (Hours)", color = Color.White, fontWeight = FontWeight.Bold)
+                    },
+                    text = {
+                        OutlinedTextField(
+                            value = hoursText,
+                            onValueChange = { next ->
+                                if (next.length <= 7 && next.all { it.isDigit() || it == '.' }) {
+                                    hoursText = next
+                                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color.White,
+                                unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val parsed = hoursText.toDoubleOrNull()
+                            if (parsed != null) viewModel.setVnPlaytimeExact(parsed)
+                            showVnPlaytimeDialog = false
+                        }) {
+                            Text("Save", color = AccentGold, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showVnPlaytimeDialog = false }) {
+                            Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        }
+                    }
+                )
+            }
+
             // Chimanew Instant Status Bottom Sheet
             if (showStatusPickerSheet) {
                 ChimanewStatusBottomSheet(
@@ -1459,9 +1595,15 @@ fun DetailScreen(
                     presentationSettings = presentationSettings,
                     backdropBitmap = backdropBitmap,
                     backdropTargetUrl = effectiveBanner,
+                    vnProfile = topSheet.character.vndbCharacterId?.let { uiState.vnDetailMeta.characterProfiles[it] },
+                    vnSpoilerLevel = vnSpoilerLevel,
                     onDismissRequest = { stepBackOneLevel() },
                     onOpenMediaPreview = { recItem -> pushPreview(recItem) },
-                    onOpenStaff = { staffItem -> pushSheet(DetailSheetTarget.AnimeStaff(staffItem)) }
+                    onOpenStaff = { staffItem ->
+                        if (item?.mediaType != MediaType.VISUAL_NOVEL) {
+                            pushSheet(DetailSheetTarget.AnimeStaff(staffItem))
+                        }
+                    }
                 )
             }
             is DetailSheetTarget.AnimeStaff -> {
@@ -1551,6 +1693,20 @@ fun DetailScreen(
                         presentationSettings = presentationSettings,
                         backdropBitmap = backdropBitmap,
                         backdropTargetUrl = effectiveBanner
+                    )
+                }
+            }
+            is DetailSheetTarget.VnRoute -> {
+                val activeRoute = uiState.vnRoutes.firstOrNull { it.id == topSheet.routeId }
+                if (activeRoute != null) {
+                    VnRouteDetailSheet(
+                        route = activeRoute,
+                        presentationSettings = presentationSettings,
+                        backdropBitmap = backdropBitmap,
+                        backdropTargetUrl = effectiveBanner,
+                        onSave = { updated -> viewModel.saveVnRouteDetails(updated) },
+                        onDelete = { routeId -> viewModel.deleteVnRoute(routeId) },
+                        onDismiss = { stepBackOneLevel() }
                     )
                 }
             }
@@ -1659,6 +1815,7 @@ private fun SiblingDetailPreview(
                     romajiTitle = cachedAux?.romajiTitle,
                     heroClearLogoUrl = siblingClearLogo,
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
+                    vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -1674,6 +1831,7 @@ private fun SiblingDetailPreview(
                     romajiTitle = cachedAux?.romajiTitle,
                     heroClearLogoUrl = siblingClearLogo,
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
+                    vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -1684,7 +1842,7 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            val hasProgressControls = displayItem.mediaType in listOf(MediaType.GAME, MediaType.VISUAL_NOVEL, MediaType.MOVIE)
+            val hasProgressControls = displayItem.mediaType in listOf(MediaType.GAME, MediaType.MOVIE)
             val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -1703,12 +1861,16 @@ private fun SiblingDetailPreview(
             if (!displayItem.synopsis.isNullOrBlank()) {
                 DetailSynopsisSection(
                     synopsis = displayItem.synopsis,
-                    dominantAccent = dominantAccent
+                    dominantAccent = dominantAccent,
+                    isVisualNovel = displayItem.mediaType == MediaType.VISUAL_NOVEL
                 )
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            DetailShowDetailsSection(item = displayItem)
+            DetailShowDetailsSection(
+                item = displayItem,
+                vnDetailMeta = if (displayItem.mediaType == MediaType.VISUAL_NOVEL) cachedAux?.vnDetailMeta else null
+            )
         }
     }
 }
@@ -1986,6 +2148,7 @@ private fun DetailHeroHeaderSection(
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
+    vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -2139,7 +2302,8 @@ private fun DetailHeroHeaderSection(
             malScore = novelDetailMeta.malScore,
             kitsuScore = novelDetailMeta.kitsuScore,
             mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
-            bangumiScore = novelDetailMeta.bangumiScore
+            bangumiScore = novelDetailMeta.bangumiScore,
+            vnDetailMeta = vnDetailMeta
         )
         UnboxedStatsRow(
             item = item,
@@ -2160,6 +2324,7 @@ private fun DetailClassicHeaderSection(
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
+    vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -2359,7 +2524,8 @@ private fun DetailClassicHeaderSection(
                 malScore = novelDetailMeta.malScore,
                 kitsuScore = novelDetailMeta.kitsuScore,
                 mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
-                bangumiScore = novelDetailMeta.bangumiScore
+                bangumiScore = novelDetailMeta.bangumiScore,
+                vnDetailMeta = vnDetailMeta
             )
             UnboxedStatsRow(
                 item = item,
@@ -2375,21 +2541,35 @@ private fun DetailClassicHeaderSection(
 @Composable
 private fun DetailSynopsisSection(
     synopsis: String,
-    dominantAccent: Color
+    dominantAccent: Color,
+    isVisualNovel: Boolean = false,
+    vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR
 ) {
     val context = LocalContext.current
     var synopsisExpanded by remember { mutableStateOf(false) }
     var canExpandSynopsis by remember { mutableStateOf(false) }
+    var revealedSpoilerIndices by remember(synopsis) { mutableStateOf<Set<Int>>(emptySet()) }
     var isSpeaking by remember { mutableStateOf(false) }
     var ttsInstance by remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
 
-    val cleanText = remember(synopsis) {
+    val baseClean = remember(synopsis) {
         synopsis
             .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
             .replace(Regex("""<[^>]*>"""), "")
             .replace(Regex("""\n{3,}"""), "\n\n")
             .replace(Regex("""\s*[\(\[]\s*$"""), "")
             .trim()
+    }
+    val vnSegments = remember(baseClean, isVisualNovel) {
+        if (isVisualNovel) parseVndbBbCodeSegments(baseClean) else emptyList()
+    }
+    val hasInlineVnSpoilers = remember(vnSegments) { vnSegments.any { it.second } }
+    val cleanText = remember(baseClean, vnSegments, hasInlineVnSpoilers, isVisualNovel) {
+        when {
+            hasInlineVnSpoilers -> vnSegments.filter { !it.second }.joinToString(" ") { it.first.trim() }.trim()
+            isVisualNovel -> vnSegments.joinToString("") { it.first }.trim()
+            else -> baseClean
+        }
     }
 
     LaunchedEffect(cleanText) {
@@ -2407,7 +2587,7 @@ private fun DetailSynopsisSection(
         }
     }
 
-    if (cleanText.isBlank()) return
+    if (cleanText.isBlank() && !hasInlineVnSpoilers) return
 
     Column(
         modifier = Modifier
@@ -2493,23 +2673,62 @@ private fun DetailSynopsisSection(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    enabled = canExpandSynopsis,
+                    enabled = canExpandSynopsis && (!hasInlineVnSpoilers || !synopsisExpanded),
                     onClick = { synopsisExpanded = !synopsisExpanded }
                 )
         ) {
-            Text(
-                text = cleanText,
-                color = Color.White.copy(alpha = 0.90f),
-                fontSize = 13.5.sp,
-                lineHeight = 20.sp,
-                maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
-                overflow = TextOverflow.Ellipsis,
-                onTextLayout = { textLayoutResult ->
-                    if (!synopsisExpanded) {
-                        canExpandSynopsis = textLayoutResult.hasVisualOverflow || textLayoutResult.lineCount > 3
+            if (isVisualNovel && hasInlineVnSpoilers && synopsisExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    vnSegments.forEachIndexed { idx, (segText, isSpoilerSeg) ->
+                        if (isSpoilerSeg && vnSpoilerLevel != VnSpoilerLevel.ALL && idx !in revealedSpoilerIndices) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(6.dp))
+                                    .clickable { revealedSpoilerIndices = revealedSpoilerIndices + idx }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = "Spoiler — tap to reveal",
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = segText.trim(),
+                                color = Color.White.copy(alpha = 0.90f),
+                                fontSize = 13.5.sp,
+                                lineHeight = 20.sp
+                            )
+                        }
                     }
                 }
-            )
+            } else {
+                val previewText = if (hasInlineVnSpoilers && cleanText.isBlank()) {
+                    "[Contains plot spoiler — tap to expand]"
+                } else {
+                    cleanText
+                }
+                Text(
+                    text = previewText,
+                    color = Color.White.copy(alpha = 0.90f),
+                    fontSize = 13.5.sp,
+                    lineHeight = 20.sp,
+                    maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { textLayoutResult ->
+                        if (!synopsisExpanded) {
+                            canExpandSynopsis = textLayoutResult.hasVisualOverflow ||
+                                textLayoutResult.lineCount > 3 ||
+                                hasInlineVnSpoilers
+                        }
+                    }
+                )
+            }
         }
         if (canExpandSynopsis) {
             Text(

@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.ImageBitmap
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PresentationSettings
@@ -65,8 +68,12 @@ import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeCharacterVoiceActor
 import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.model.AnimeVoiceActorDetail
+import com.omnitrack.app.data.model.VnCharacterProfile
+import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.ui.components.AniListMarkdownText
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.SurfaceCard
@@ -79,7 +86,7 @@ private fun formatCompactNumber(num: Int?): String? {
     return if (num >= 1000) String.format("%.1fk", num / 1000f) else num.toString()
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AnimeCharacterSheet(
     character: AnimeCharacterItem?,
@@ -87,6 +94,8 @@ fun AnimeCharacterSheet(
     presentationSettings: PresentationSettings? = null,
     backdropBitmap: ImageBitmap? = null,
     backdropTargetUrl: String? = null,
+    vnProfile: VnCharacterProfile? = null,
+    vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR,
     onDismissRequest: () -> Unit,
     onOpenMediaPreview: ((RecommendationItem) -> Unit)? = null,
     onOpenStaff: ((AnimeStaffItem) -> Unit)? = null
@@ -102,14 +111,23 @@ fun AnimeCharacterSheet(
     val charScrollState = rememberScrollState()
     val staffScrollState = rememberScrollState()
 
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(vnProfile == null) }
     var detail by remember { mutableStateOf<AnimeCharacterDetail?>(null) }
+    var revealedBioSpoilers by remember(vnProfile?.vndbCharId, character.characterId) { mutableStateOf<Set<Int>>(emptySet()) }
+    var revealedTraitIds by remember(vnProfile?.vndbCharId, character.characterId) { mutableStateOf<Set<String>>(emptySet()) }
+    var revealAllTraits by remember(vnProfile?.vndbCharId, character.characterId) { mutableStateOf(false) }
 
-    LaunchedEffect(character.characterId) {
-        isLoading = true
-        showingVoiceActor = false
-        detail = enrichmentRepo.fetchAnimeCharacterDetail(character.characterId)
-        isLoading = false
+    LaunchedEffect(character.characterId, vnProfile?.vndbCharId) {
+        if (vnProfile != null) {
+            isLoading = false
+            showingVoiceActor = false
+            detail = null
+        } else {
+            isLoading = true
+            showingVoiceActor = false
+            detail = enrichmentRepo.fetchAnimeCharacterDetail(character.characterId)
+            isLoading = false
+        }
     }
 
     InWindowBottomSheet(
@@ -172,6 +190,25 @@ fun AnimeCharacterSheet(
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
                 // Character Header (100% Unboxed)
+                val headerImageUrl = vnProfile?.imageUrl ?: detail?.imageUrl ?: character.characterImageUrl
+                val headerName = vnProfile?.name ?: detail?.name ?: character.characterName
+                val headerNativeName = vnProfile?.nativeName ?: detail?.nativeName
+                val headerRoleLabel = if (vnProfile != null) {
+                    when (vnProfile.role.lowercase()) {
+                        "main" -> "MAIN HEROINE"
+                        "primary" -> "PROTAGONIST"
+                        "side" -> "SIDE CHARACTER"
+                        else -> "SUPPORTING CHARACTER"
+                    }
+                } else {
+                    if (character.characterRole == "MAIN") "MAIN CHARACTER" else "SUPPORTING CHARACTER"
+                }
+                val isLeadRole = if (vnProfile != null) {
+                    vnProfile.role.lowercase() in listOf("main", "primary")
+                } else {
+                    character.characterRole == "MAIN"
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -181,10 +218,10 @@ fun AnimeCharacterSheet(
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(detail?.imageUrl ?: character.characterImageUrl)
+                            .data(headerImageUrl)
                             .crossfade(true)
                             .build(),
-                        contentDescription = detail?.name ?: character.characterName,
+                        contentDescription = headerName,
                         modifier = Modifier
                             .width(84.dp)
                             .height(112.dp)
@@ -198,17 +235,16 @@ fun AnimeCharacterSheet(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = detail?.name ?: character.characterName,
+                            text = headerName,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        val nativeName = detail?.nativeName
-                        if (!nativeName.isNullOrBlank()) {
+                        if (!headerNativeName.isNullOrBlank()) {
                             Text(
-                                text = nativeName,
+                                text = headerNativeName,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Normal,
                                 color = TextSecondary
@@ -217,22 +253,39 @@ fun AnimeCharacterSheet(
 
                         // Unboxed Role Label
                         Text(
-                            text = if (character.characterRole == "MAIN") "MAIN CHARACTER" else "SUPPORTING CHARACTER",
+                            text = headerRoleLabel,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (character.characterRole == "MAIN") AccentArctic else TextMuted,
+                            color = if (isLeadRole) AccentArctic else TextMuted,
                             letterSpacing = 0.4.sp
                         )
                     }
                 }
 
                 // 100% Unboxed Vitals (NO BOXES / NO CHIPS)
-                val vitalsList = buildList {
-                    detail?.age?.takeIf { it.isNotBlank() }?.let { add("$it yrs") }
-                    detail?.gender?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    detail?.dateOfBirth?.takeIf { it.isNotBlank() }?.let { add(it) }
-                    detail?.bloodType?.takeIf { it.isNotBlank() }?.let { add("Blood $it") }
-                    formatCompactNumber(detail?.favourites)?.let { add("$it ♥") }
+                val vitalsList = if (vnProfile != null) {
+                    buildList {
+                        vnProfile.heightCm?.takeIf { it > 0 }?.let { add("$it cm") }
+                        vnProfile.weightKg?.takeIf { it > 0 }?.let { add("$it kg") }
+                        vnProfile.birthday?.takeIf { it.isNotBlank() }?.let { add(it) }
+                        vnProfile.bloodType?.takeIf { it.isNotBlank() }?.let { add("Type ${it.uppercase()}") }
+                        vnProfile.age?.takeIf { it > 0 }?.let { add("$it yrs") }
+                        vnProfile.sex?.takeIf { it.isNotBlank() }?.lowercase()?.let { sx ->
+                            when (sx) {
+                                "f" -> add("Female")
+                                "m" -> add("Male")
+                                "b" -> add("Both")
+                            }
+                        }
+                    }
+                } else {
+                    buildList {
+                        detail?.age?.takeIf { it.isNotBlank() }?.let { add("$it yrs") }
+                        detail?.gender?.takeIf { it.isNotBlank() }?.let { add(it) }
+                        detail?.dateOfBirth?.takeIf { it.isNotBlank() }?.let { add(it) }
+                        detail?.bloodType?.takeIf { it.isNotBlank() }?.let { add("Blood $it") }
+                        formatCompactNumber(detail?.favourites)?.let { add("$it ♥") }
+                    }
                 }
                 if (vitalsList.isNotEmpty()) {
                     Column(
@@ -349,7 +402,7 @@ fun AnimeCharacterSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = vaId != null) {
+                            .clickable(enabled = vaId != null && vnProfile == null) {
                                 if (onOpenStaff != null && vaId != null) {
                                     onOpenStaff(
                                         AnimeStaffItem(
@@ -400,7 +453,7 @@ fun AnimeCharacterSheet(
                             )
                         }
 
-                        if (vaId != null) {
+                        if (vaId != null && vnProfile == null) {
                             Text(
                                 text = "›",
                                 fontSize = 22.sp,
@@ -428,7 +481,8 @@ fun AnimeCharacterSheet(
                 }
 
                 // Biography Section with Clickable Markdown / Spoilers
-                val biography = detail?.biography
+                val vnBio = vnProfile?.description?.takeIf { it.isNotBlank() }
+                val biography = vnBio ?: detail?.biography
                 if (!biography.isNullOrBlank()) {
                     Column(
                         modifier = Modifier
@@ -443,10 +497,113 @@ fun AnimeCharacterSheet(
                             color = TextPrimary
                         )
 
-                        AniListMarkdownText(
-                            text = biography,
-                            collapsedMaxLines = 4
-                        )
+                        if (vnProfile != null) {
+                            val segments = remember(biography) { parseVndbBbCodeSegments(biography) }
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                segments.forEachIndexed { idx, (segText, isSpoilerSeg) ->
+                                    if (isSpoilerSeg && vnSpoilerLevel != VnSpoilerLevel.ALL && idx !in revealedBioSpoilers) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(Color.White.copy(alpha = 0.06f))
+                                                .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(6.dp))
+                                                .clickable { revealedBioSpoilers = revealedBioSpoilers + idx }
+                                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "Spoiler — tap to reveal",
+                                                fontSize = 12.5.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                    } else {
+                                        Text(
+                                            text = segText.trim(),
+                                            fontSize = 13.5.sp,
+                                            lineHeight = 20.sp,
+                                            color = TextPrimary.copy(alpha = 0.90f)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            AniListMarkdownText(
+                                text = biography,
+                                collapsedMaxLines = 4
+                            )
+                        }
+                    }
+                }
+
+                // VNDB Character Traits (Flat Tokens, Zero Pills)
+                val vnTraits = vnProfile?.traits.orEmpty()
+                if (vnTraits.isNotEmpty()) {
+                    val hasHiddenTraits = vnTraits.any { it.spoilerLevel > vnSpoilerLevel.level }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Traits",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            if (hasHiddenTraits) {
+                                Text(
+                                    text = if (revealAllTraits) "Hide Spoilers" else "Reveal Spoilers",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White.copy(alpha = 0.70f),
+                                    modifier = Modifier.clickable { revealAllTraits = !revealAllTraits }
+                                )
+                            }
+                        }
+
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(7.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            vnTraits.forEach { trait ->
+                                val isMasked = trait.spoilerLevel > vnSpoilerLevel.level &&
+                                    !revealAllTraits &&
+                                    trait.id !in revealedTraitIds
+                                val traitLabel = buildString {
+                                    trait.groupName?.takeIf { it.isNotBlank() }?.let { grp ->
+                                        append(grp)
+                                        append(": ")
+                                    }
+                                    append(trait.name)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.White.copy(alpha = 0.06f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                                        .clickable(enabled = isMasked) {
+                                            revealedTraitIds = revealedTraitIds + trait.id
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = traitLabel,
+                                        fontSize = 12.sp,
+                                        color = if (isMasked) Color.White.copy(alpha = 0.65f) else TextPrimary,
+                                        modifier = if (isMasked) Modifier.blur(6.dp) else Modifier
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 

@@ -1239,8 +1239,8 @@ class ArtworkWaterfallRepository(
     private fun fetchVndbCovers(title: String): List<ArtworkCandidate> {
         return try {
             val payload = buildJsonObject {
-                put("filters", json.parseToJsonElement("[\"search\", \"=\", \"$title\"]"))
-                put("fields", "title, image.url, screenshots.url")
+                put("filters", json.parseToJsonElement("[\"search\", \"=\", ${JsonPrimitive(title)}]"))
+                put("fields", "id, title, image{url,sexual,violence}, screenshots{url,sexual,violence}, extlinks{name,id}")
             }
 
             val request = Request.Builder()
@@ -1255,35 +1255,91 @@ class ArtworkWaterfallRepository(
                 val results = parsed["results"]?.jsonArray ?: return emptyList()
 
                 val candidates = mutableListOf<ArtworkCandidate>()
-                results.forEach { item ->
+                results.forEachIndexed { resIdx, item ->
                     val obj = item.jsonObject
+                    val vnId = obj["id"].cleanString()
                     val vnTitle = obj["title"].cleanString() ?: title
                     val imageObj = obj["image"] as? JsonObject
                     val coverUrl = imageObj?.get("url").cleanString()
+                    val coverSex = imageObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                    val coverViol = imageObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
                     if (!coverUrl.isNullOrBlank()) {
                         candidates.add(
                             ArtworkCandidate(
                                 url = coverUrl,
                                 sourceName = "VNDB",
                                 description = vnTitle,
-                                isBanner = false
+                                isBanner = false,
+                                isNsfw = coverSex > 0.45f || coverViol > 0.9f
                             )
                         )
                     }
 
                     val screenshots = obj["screenshots"] as? JsonArray
                     screenshots?.forEachIndexed { idx, shot ->
-                        val shotUrl = (shot as? JsonObject)?.get("url").cleanString()
+                        val shotObj = shot as? JsonObject
+                        val shotUrl = shotObj?.get("url").cleanString()
+                        val sSex = shotObj?.get("sexual")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                        val sViol = shotObj?.get("violence")?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
                         if (!shotUrl.isNullOrBlank()) {
                             candidates.add(
                                 ArtworkCandidate(
                                     url = shotUrl,
                                     sourceName = "VNDB Screenshot",
                                     description = "$vnTitle (Visual Novel Screenshot ${idx + 1})",
-                                    isBanner = true
+                                    isBanner = true,
+                                    isNsfw = sSex > 0.45f || sViol > 0.9f
                                 )
                             )
                         }
+                    }
+
+                    // For top match, check VNDB /release for canonical released Steam AppID artwork
+                    if (resIdx == 0 && !vnId.isNullOrBlank()) {
+                        val relPayload = buildJsonObject {
+                            put("filters", json.parseToJsonElement("[\"and\",[\"vn\",\"=\",[\"id\",\"=\",\"$vnId\"]],[\"platform\",\"=\",\"win\"]]"))
+                            put("fields", "title,released,official,patch,extlinks{name,id}")
+                            put("results", 15)
+                            put("sort", "released")
+                        }.toString()
+                        val relReq = Request.Builder()
+                            .url("https://api.vndb.org/kana/release")
+                            .post(relPayload.toRequestBody("application/json".toMediaType()))
+                            .build()
+                        try {
+                            client.newCall(relReq).execute().use { relResp ->
+                                val relBody = relResp.body?.string()
+                                if (relResp.isSuccessful && !relBody.isNullOrBlank()) {
+                                    val relArr = json.parseToJsonElement(relBody).jsonObject["results"]?.jsonArray
+                                    val steamId = relArr?.firstOrNull { rEl ->
+                                        val rObj = rEl.jsonObject
+                                        val rDate = rObj["released"].cleanString()
+                                        val isOfficial = rObj["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: true
+                                        val isPatch = rObj["patch"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+                                        val hasSteam = rObj["extlinks"]?.jsonArray?.any { it.jsonObject["name"].cleanString() == "steam" } == true
+                                        hasSteam && isOfficial && !isPatch && !rDate.isNullOrBlank() && !rDate.equals("TBA", true) && rDate <= "2099-01-01" && !rObj["title"].cleanString().orEmpty().contains("reboot", true)
+                                    }?.jsonObject?.get("extlinks")?.jsonArray?.firstOrNull { it.jsonObject["name"].cleanString() == "steam" }?.jsonObject?.get("id").cleanString()?.toLongOrNull()
+                                    if (steamId != null) {
+                                        candidates.add(
+                                            ArtworkCandidate(
+                                                url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamId/library_600x900_2x.jpg",
+                                                sourceName = "Steam",
+                                                description = "$vnTitle (Steam 600x900 Capsule)",
+                                                isBanner = false
+                                            )
+                                        )
+                                        candidates.add(
+                                            ArtworkCandidate(
+                                                url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$steamId/library_hero.jpg",
+                                                sourceName = "Steam Hero",
+                                                description = "$vnTitle (Steam Hero Banner)",
+                                                isBanner = true
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
                 candidates

@@ -149,6 +149,8 @@ fun DiscoverView(
     var searchGen by remember { mutableStateOf(0L) }
     var selectedMangaSubFilter by remember { mutableStateOf("ALL") }
     var selectedNovelSubFilter by remember { mutableStateOf("ALL") }
+    var selectedVnOriginSubFilter by remember { mutableStateOf("ALL") }
+    var selectedVnLengthSubFilter by remember { mutableStateOf("ALL") }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -539,6 +541,16 @@ fun DiscoverView(
             }
         }
 
+        if (selectedFilter == MediaType.VISUAL_NOVEL) {
+            com.omnitrack.app.ui.screens.home.VnUnderlineFilterBar(
+                selectedOrigin = selectedVnOriginSubFilter,
+                selectedLength = selectedVnLengthSubFilter,
+                onOriginSelected = { selectedVnOriginSubFilter = it },
+                onLengthSelected = { selectedVnLengthSubFilter = it },
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
         // AI Resolution Banner
         if (aiResolutionBanner != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -570,7 +582,7 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter) {
+        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
             when {
                 selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> base.filter {
@@ -580,6 +592,10 @@ fun DiscoverView(
                     com.omnitrack.app.ui.screens.home.inferNovelSubtype(
                         it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
                     ) == selectedNovelSubFilter
+                }
+                selectedFilter == MediaType.VISUAL_NOVEL -> base.filter {
+                    (selectedVnOriginSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(it.originCountry, it.nativeTitle) == selectedVnOriginSubFilter) &&
+                        (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
                 }
                 else -> base
             }
@@ -660,6 +676,7 @@ fun DiscoverView(
                         artworkRole = "DEFAULT",
                         originCountry = item.originCountry,
                         platform = item.platform,
+                        runtimeMinutes = item.runtimeMinutes,
                         lastUpdated = System.currentTimeMillis()
                     )
 

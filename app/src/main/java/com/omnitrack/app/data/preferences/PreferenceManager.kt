@@ -11,6 +11,8 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.VnNsfwFilterMode
+import com.omnitrack.app.data.model.VnSpoilerLevel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -160,6 +162,8 @@ class PreferenceManager(private val context: Context) {
         val SEASON_VIEW_MODE = stringPreferencesKey("season_view_mode")
         val CUSTOM_POSTER_URL_PATTERN = stringPreferencesKey("custom_poster_url_pattern")
         val PREFERRED_TITLE_LANGUAGE = stringPreferencesKey("preferred_title_language")
+        val VN_SPOILER_LEVEL = intPreferencesKey("vn_spoiler_level")
+        val VN_NSFW_FILTER_MODE = stringPreferencesKey("vn_nsfw_filter_mode")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -556,9 +560,37 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    val vnSpoilerLevel: Flow<VnSpoilerLevel> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            VnSpoilerLevel.fromLevel(prefs[PreferencesKeys.VN_SPOILER_LEVEL])
+        }
+
+    suspend fun updateVnSpoilerLevel(level: VnSpoilerLevel) {
+        cachedVnSpoilerLevel = level
+        context.dataStore.edit { it[PreferencesKeys.VN_SPOILER_LEVEL] = level.level }
+    }
+
+    val vnNsfwFilterMode: Flow<VnNsfwFilterMode> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            VnNsfwFilterMode.fromName(prefs[PreferencesKeys.VN_NSFW_FILTER_MODE])
+        }
+
+    suspend fun updateVnNsfwFilterMode(mode: VnNsfwFilterMode) {
+        cachedVnNsfwFilterMode = mode
+        context.dataStore.edit { it[PreferencesKeys.VN_NSFW_FILTER_MODE] = mode.name }
+    }
+
     companion object {
         @Volatile
         var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
+
+        @Volatile
+        var cachedVnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR
+
+        @Volatile
+        var cachedVnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP
 
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")

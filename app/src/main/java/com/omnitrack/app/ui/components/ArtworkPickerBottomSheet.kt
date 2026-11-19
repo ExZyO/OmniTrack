@@ -204,20 +204,24 @@ fun ArtworkPickerBottomSheet(
         fetchCandidates(false)
     }
 
-    // Filter covers and banners according to exclusions
-    val displayedCovers = remember(allCandidates, excludedSources) {
+    // Filter covers and banners according to exclusions and VN NSFW settings
+    val hideNsfwCandidates = mediaType == MediaType.VISUAL_NOVEL &&
+        com.omnitrack.app.data.preferences.PreferenceManager.cachedVnNsfwFilterMode ==
+        com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
+
+    val displayedCovers = remember(allCandidates, excludedSources, hideNsfwCandidates) {
         if ("ALL" in excludedSources) {
-            allCandidates.filter { !it.isBanner && it.sourceName.equals("Default", ignoreCase = true) }
+            allCandidates.filter { !it.isBanner && it.sourceName.equals("Default", ignoreCase = true) && (!hideNsfwCandidates || !it.isNsfw) }
         } else {
-            allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources }
+            allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources && (!hideNsfwCandidates || !it.isNsfw) }
         }
     }
 
-    val displayedBanners = remember(allCandidates, excludedSources) {
+    val displayedBanners = remember(allCandidates, excludedSources, hideNsfwCandidates) {
         if ("ALL" in excludedSources) {
             emptyList()
         } else {
-            allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources }
+            allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources && (!hideNsfwCandidates || !it.isNsfw) }
         }
     }
 

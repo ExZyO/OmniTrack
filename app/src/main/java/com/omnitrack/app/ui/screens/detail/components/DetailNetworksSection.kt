@@ -54,6 +54,7 @@ fun DetailNetworksSection(
     ) == "LIGHT_NOVEL"
     val sectionTitle = when {
         item.mediaType == MediaType.ANIME -> "Studios & Networks"
+        item.mediaType == MediaType.VISUAL_NOVEL -> "Developers"
         isNovel -> if (isLightNovel) "Imprints & Publishers" else "Web Platforms & Publishers"
         isManga -> "Magazines & Publishers"
         isSeries -> "Networks"
