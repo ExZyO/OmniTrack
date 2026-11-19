@@ -524,7 +524,7 @@ class DetailViewModel(
 
         // 0ms Detail Aux Synchronous Cache Hit (Cast, Trailers, Recommendations, Reviews, Companies, Collection):
         val cachedAux = if (mediaId > 0L) {
-            DetailAuxMemoryCache.getCacheKey(mediaId)?.let { DetailAuxMemoryCache.cache[it] }
+            latestRoomItemCache[mediaId]?.let { DetailAuxMemoryCache.getCacheKey(it) }?.let { DetailAuxMemoryCache.cache[it] }
                 ?: SeriesContentMemoryCache.resolvedTmdbIdCache[mediaId]?.let {
                     DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("tv", it)]
                         ?: DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey("movie", it)]
@@ -556,6 +556,8 @@ class DetailViewModel(
             if (cachedAux.nextAiringEpisode != null) _nextAiringEpisode.value = cachedAux.nextAiringEpisode
             if (cachedAux.englishTitle != null) _englishTitle.value = cachedAux.englishTitle
             if (cachedAux.romajiTitle != null) _romajiTitle.value = cachedAux.romajiTitle
+            _isMangaSeasonGrouped.value = cachedAux.isMangaSeasonGrouped
+            _novelDetailMeta.value = cachedAux.novelDetailMeta
         }
 
         if (trackerTokenManager != null) {
@@ -592,7 +594,7 @@ class DetailViewModel(
                 maybeEnrich(ephemeral)
             }
         } else if (mediaId > 0L) {
-            val preCachedAux = DetailAuxMemoryCache.getCacheKey(mediaId)?.let { DetailAuxMemoryCache.cache[it] }
+            val preCachedAux = latestRoomItemCache[mediaId]?.let { DetailAuxMemoryCache.getCacheKey(it) }?.let { DetailAuxMemoryCache.cache[it] }
             if (preCachedAux == null) {
                 activeTransitionGen += 1L
                 initialPreArmGen = activeTransitionGen
@@ -1216,7 +1218,7 @@ class DetailViewModel(
     }
 
     fun openPreview(previewEntity: MediaItemEntity) {
-        val hasDirectIdCache = previewEntity.id > 0L && DetailAuxMemoryCache.getCacheKey(previewEntity.id)?.let { DetailAuxMemoryCache.cache.containsKey(it) } == true
+        val hasDirectIdCache = previewEntity.id > 0L && DetailAuxMemoryCache.getCacheKey(previewEntity)?.let { DetailAuxMemoryCache.cache.containsKey(it) } == true
         if (!hasDirectIdCache) {
             preArmPreviewLoadingIfUncached(previewEntity.anilistId, previewEntity.tmdbId, previewEntity.mediaType)
         }
@@ -1611,7 +1613,7 @@ class DetailViewModel(
         val itemTmdbKey = if (allowTmdbAuxKey) {
             item.tmdbId?.let { DetailAuxMemoryCache.getTmdbCacheKey(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", it) }
         } else null
-        val idKey = if (item.id > 0L) DetailAuxMemoryCache.getCacheKey(item.id) else null
+        val idKey = if (item.id > 0L) DetailAuxMemoryCache.getCacheKey(item.mediaType, item.id) else null
 
         // 1. Instant 0ms Memory Cache Hit
         val existingCached = (cacheKey?.let { DetailAuxMemoryCache.cache[it] })
@@ -2105,7 +2107,7 @@ class DetailViewModel(
                             _companies.value = compList.distinctBy { it.name.lowercase().trim() }
                         }
 
-                        if (animeDetails.anilistId != null) {
+                        if (animeDetails.anilistId != null && item.mediaType == MediaType.ANIME) {
                             resolvedAniListId = animeDetails.anilistId
                             if (_heroClearLogoUrl.value.isNullOrBlank()) {
                                 viewModelScope.launch(Dispatchers.IO) {
@@ -3588,6 +3590,8 @@ class DetailViewModel(
         _startDate.value = cached.startDate
         _endDate.value = cached.endDate
         _externalLinks.value = cached.externalLinks
+        _isMangaSeasonGrouped.value = cached.isMangaSeasonGrouped
+        _novelDetailMeta.value = cached.novelDetailMeta
     }
 
     private fun restoreSeriesFromMemoryCache(targetItem: MediaItemEntity?, targetId: Long) {
@@ -3611,10 +3615,11 @@ class DetailViewModel(
     }
 
     private fun resolveAuxCache(targetId: Long, item: MediaItemEntity?): CachedDetailAux? {
-        return DetailAuxMemoryCache.getCacheKey(targetId)?.let { DetailAuxMemoryCache.cache[it] }
-            ?: item?.let { DetailAuxMemoryCache.getCacheKey(it) }?.let { DetailAuxMemoryCache.cache[it] }
-            ?: item?.tmdbId?.takeIf { item.mediaType != MediaType.ANIME || item.anilistId == null || item.anilistId <= 0L }?.let {
-                DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", it)]
+        val targetItem = item ?: latestRoomItemCache[targetId]
+        val key = targetItem?.let { DetailAuxMemoryCache.getCacheKey(it) }
+        return key?.let { DetailAuxMemoryCache.cache[it] }
+            ?: targetItem?.tmdbId?.takeIf { targetItem.mediaType != MediaType.ANIME || targetItem.anilistId == null || targetItem.anilistId <= 0L }?.let {
+                DetailAuxMemoryCache.cache[DetailAuxMemoryCache.getTmdbCacheKey(if (targetItem.mediaType == MediaType.MOVIE) "movie" else "tv", it)]
             }
     }
 
@@ -4078,16 +4083,20 @@ internal object DetailAuxMemoryCache {
     val cache = java.util.concurrent.ConcurrentHashMap<String, CachedDetailAux>()
 
     fun getCacheKey(item: MediaItemEntity): String? {
-        if (item.id > 0L) return "id_${item.id}"
-        if (item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0L) return "anilist_${item.anilistId}"
+        if (item.id > 0L) return "id_${item.mediaType}_${item.id}"
+        if (item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0L) return "anilist_${item.mediaType}_${item.anilistId}"
         if (item.tmdbId != null && item.tmdbId > 0L) return "tmdb_${if (item.mediaType == MediaType.MOVIE) "movie" else "tv"}_${item.tmdbId}"
-        if (item.anilistId != null && item.anilistId > 0L) return "anilist_${item.anilistId}"
-        if (item.malId != null && item.malId > 0L) return "mal_${item.malId}"
+        if (item.anilistId != null && item.anilistId > 0L) return "anilist_${item.mediaType}_${item.anilistId}"
+        if (item.malId != null && item.malId > 0L) return "mal_${item.mediaType}_${item.malId}"
         return null
     }
 
     fun getCacheKey(mediaId: Long): String? {
-        return if (mediaId > 0L) "id_$mediaId" else null
+        return null
+    }
+
+    fun getCacheKey(mediaType: MediaType, mediaId: Long): String? {
+        return if (mediaId > 0L) "id_${mediaType}_$mediaId" else null
     }
 
     fun getTmdbCacheKey(type: String, tmdbId: Long): String {

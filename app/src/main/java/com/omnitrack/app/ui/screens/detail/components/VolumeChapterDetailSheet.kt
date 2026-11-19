@@ -733,17 +733,15 @@ fun VolumeChapterDetailSheet(
 
                 HorizontalDivider(color = Color.White.copy(alpha = 0.14f))
 
-                // 4. Precision Scrollable Rating Ruler (Unrated, 1.0 – 10.0 in 0.1 steps)
-                PrecisionRatingRuler(
-                    itemKey = ep.seasonNumber to ep.episodeNumber,
+                // 4. Exact Matching Clean Organic Rating Control (Unrated, 1.0 – 10.0 in 0.1 steps)
+                VolumeChapterRatingSection(
                     rating = personalRating,
-                    onLiveRatingChange = { live -> personalRating = live },
-                    onRatingCommitted = { committed ->
-                        personalRating = committed
+                    onRatingChanged = { newRating ->
+                        personalRating = newRating
                         onSaveMetadata(
                             ep.seasonNumber,
                             ep.episodeNumber,
-                            committed,
+                            newRating,
                             noteDraft.trim().takeIf { it.isNotBlank() },
                             isBookmarkedState,
                             customLabelDraft.trim().takeIf { it.isNotBlank() }
@@ -856,129 +854,34 @@ fun VolumeChapterDetailSheet(
     }
 }
 
-private fun rulerIndexToRating(idx: Int): Float? =
-    if (idx <= 0) null else (9 + idx.coerceIn(1, 91)) / 10f
-
-private fun ratingToRulerIndex(rating: Float?): Int =
-    if (rating == null || rating < 1.0f) 0
-    else (((rating.coerceIn(1.0f, 10.0f) - 1.0f) * 10f).roundToInt() + 1).coerceIn(1, 91)
-
 @Composable
-private fun PrecisionRatingRuler(
-    itemKey: Any,
+private fun VolumeChapterRatingSection(
     rating: Float?,
-    onLiveRatingChange: (Float?) -> Unit,
-    onRatingCommitted: (Float?) -> Unit
+    onRatingChanged: (Float?) -> Unit
 ) {
-    val density = LocalDensity.current
-    val haptic = LocalHapticFeedback.current
-    val focusManager = LocalFocusManager.current
-    val tickSpacing = 12.dp
-    val tickSpacingPx = remember(density) { with(density) { tickSpacing.toPx() } }
-    val rulerScrollState = rememberScrollState()
-
-    var lastSyncedItemKey by remember { mutableStateOf<Any?>(null) }
-    var isProgrammaticSync by remember { mutableStateOf(true) }
-    var lastObservedIndex by remember { mutableIntStateOf(ratingToRulerIndex(rating)) }
-
-    var isEditingText by remember(itemKey) { mutableStateOf(false) }
-    var ratingInputDraft by remember(itemKey) {
-        mutableStateOf(rating?.let { String.format(Locale.US, "%.1f", it) }.orEmpty())
+    var sliderValue by remember(rating) {
+        mutableFloatStateOf(rating?.coerceIn(1.0f, 10.0f) ?: 0.0f)
+    }
+    var textInput by remember(rating) {
+        mutableStateOf(if (rating != null && rating >= 1.0f) String.format(Locale.US, "%.1f", rating) else "")
     }
 
-    LaunchedEffect(itemKey, rating, tickSpacingPx) {
-        val targetIdx = ratingToRulerIndex(rating)
-        val targetPx = (targetIdx * tickSpacingPx).roundToInt()
-        if (!rulerScrollState.isScrollInProgress && kotlin.math.abs(rulerScrollState.value - targetPx) > 1) {
-            isProgrammaticSync = true
-            try {
-                lastObservedIndex = targetIdx
-                if (lastSyncedItemKey != itemKey) {
-                    lastSyncedItemKey = itemKey
-                    rulerScrollState.scrollTo(targetPx)
-                } else {
-                    rulerScrollState.animateScrollTo(targetPx)
-                }
-            } finally {
-                isProgrammaticSync = false
-            }
+    val isUnrated = sliderValue < 0.95f
+
+    fun commitScore(newScore: Float) {
+        if (newScore < 0.95f) {
+            sliderValue = 0.0f
+            textInput = ""
+            onRatingChanged(null)
         } else {
-            lastSyncedItemKey = itemKey
-            lastObservedIndex = targetIdx
-            isProgrammaticSync = false
+            val clamped = ((newScore.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
+            sliderValue = clamped
+            textInput = String.format(Locale.US, "%.1f", clamped)
+            onRatingChanged(clamped)
         }
     }
 
-    val liveIndex by remember(tickSpacingPx) {
-        derivedStateOf { (rulerScrollState.value / tickSpacingPx).roundToInt().coerceIn(0, 91) }
-    }
-
-    LaunchedEffect(liveIndex) {
-        if (!isProgrammaticSync && rulerScrollState.isScrollInProgress && liveIndex != lastObservedIndex) {
-            lastObservedIndex = liveIndex
-            val liveRating = rulerIndexToRating(liveIndex)
-            onLiveRatingChange(liveRating)
-            if (liveIndex == 0 || (liveIndex - 1) % 5 == 0) {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            }
-        }
-    }
-
-    LaunchedEffect(rulerScrollState, tickSpacingPx) {
-        var wasScrolling = false
-        snapshotFlow { rulerScrollState.isScrollInProgress }.collect { scrolling ->
-            if (wasScrolling && !scrolling && !isProgrammaticSync) {
-                val snapIdx = (rulerScrollState.value / tickSpacingPx).roundToInt().coerceIn(0, 91)
-                val snapPx = (snapIdx * tickSpacingPx).roundToInt()
-                if (kotlin.math.abs(rulerScrollState.value - snapPx) > 1) {
-                    isProgrammaticSync = true
-                    try {
-                        rulerScrollState.animateScrollTo(snapPx)
-                    } finally {
-                        isProgrammaticSync = false
-                    }
-                }
-                val committed = rulerIndexToRating(snapIdx)
-                lastObservedIndex = snapIdx
-                onLiveRatingChange(committed)
-                onRatingCommitted(committed)
-            }
-            wasScrolling = scrolling
-        }
-    }
-
-    fun submitTypedRating() {
-        val trimmed = ratingInputDraft.trim()
-        val parsed = trimmed.toFloatOrNull()
-        val resolved = when {
-            trimmed.isEmpty() || parsed == null -> rating
-            parsed <= 0f -> null
-            else -> ((parsed.coerceIn(1.0f, 10.0f) * 10f).roundToInt()) / 10f
-        }
-        isEditingText = false
-        focusManager.clearFocus()
-        onRatingCommitted(resolved)
-    }
-
-    val textMeasurer = rememberTextMeasurer()
-    val labelStyle = remember {
-        TextStyle(
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-    val preMeasuredLabels = remember(textMeasurer, labelStyle) {
-        buildMap {
-            put(0, textMeasurer.measure("—", style = labelStyle))
-            for (whole in 1..10) {
-                val idx = 1 + (whole - 1) * 10
-                put(idx, textMeasurer.measure(whole.toString(), style = labelStyle))
-            }
-        }
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -992,214 +895,185 @@ private fun PrecisionRatingRuler(
                     color = Color.White
                 )
                 Text(
-                    text = "Slide Unrated · 1.0 – 10.0 (tap score to type)",
-                    fontSize = 11.sp,
-                    color = Color.White
+                    text = if (isUnrated) "Unrated · Slide 1.0 to 10.0" else "Personal rating (${String.format(Locale.US, "%.1f", sliderValue)} / 10.0)",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.55f)
                 )
+            }
+
+            if (!isUnrated) {
+                Text(
+                    text = "Clear",
+                    color = Color(0xFFEF4444),
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { commitScore(0.0f) }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // 1. Unboxed Hero Score (No outlines, no box: open space typography flanked by circular steppers)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RepeatingHoldButton(
+                onStep = {
+                    if (!isUnrated) {
+                        if (sliderValue <= 1.05f) {
+                            commitScore(0.0f)
+                        } else {
+                            commitScore(sliderValue - 0.1f)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.08f))
+            ) {
+                Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus 0.1", tint = Color.White)
             }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (isEditingText) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.42f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        BasicTextField(
-                            value = ratingInputDraft,
-                            onValueChange = { input ->
-                                if (input.length <= 4 && input.all { it.isDigit() || it == '.' }) {
-                                    ratingInputDraft = input
-                                }
-                            },
-                            textStyle = TextStyle(
-                                color = AccentGold,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                textAlign = TextAlign.Center
-                            ),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Decimal,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(onDone = { submitTypedRating() }),
-                            cursorBrush = SolidColor(AccentGold),
-                            singleLine = true,
-                            modifier = Modifier.width(42.dp)
-                        )
-                        Text(
-                            text = "Set",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentJade,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(AccentJade.copy(alpha = 0.18f))
-                                .clickable { submitTypedRating() }
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.34f))
-                            .clickable {
-                                ratingInputDraft = rating?.let { String.format(Locale.US, "%.1f", it) }.orEmpty()
-                                isEditingText = true
-                            }
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (rating != null) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = AccentGold,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = "${String.format(Locale.US, "%.1f", rating)} / 10",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = AccentGold
-                            )
-                        } else {
-                            Text(
-                                text = "Unrated",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = if (isUnrated) Color.White.copy(alpha = 0.25f) else AccentGold,
+                    modifier = Modifier.size(26.dp)
+                )
 
-                if (rating != null) {
+                if (isUnrated) {
                     Text(
-                        text = "Clear",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        text = "Unrated",
+                        color = Color.White.copy(alpha = 0.45f),
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = 0.30f))
-                            .clickable {
-                                isEditingText = false
-                                onRatingCommitted(null)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { commitScore(7.0f) }
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                } else {
+                    BasicTextField(
+                        value = textInput,
+                        onValueChange = { input ->
+                            textInput = input
+                            val parsed = input.toFloatOrNull()
+                            if (parsed != null) {
+                                if (parsed < 1.0f) {
+                                    commitScore(0.0f)
+                                } else {
+                                    commitScore(parsed.coerceIn(1.0f, 10.0f))
+                                }
                             }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                        },
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 40.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = TextAlign.Center
+                        ),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        cursorBrush = SolidColor(AccentGold),
+                        singleLine = true,
+                        modifier = Modifier.width(100.dp)
+                    )
+
+                    Text(
+                        text = "/ 10",
+                        color = Color.White.copy(alpha = 0.35f),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
+            }
+
+            RepeatingHoldButton(
+                onStep = {
+                    if (isUnrated) {
+                        commitScore(1.0f)
+                    } else {
+                        commitScore(sliderValue + 0.1f)
+                    }
+                },
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(AccentGold.copy(alpha = 0.20f))
+            ) {
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Plus 0.1", tint = AccentGold)
             }
         }
 
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(68.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(Color.Black.copy(alpha = 0.34f))
+        // 2. Smooth Continuous Slider (0.0 = Unrated, 1.0 to 10.0 in 0.1 steps)
+        Slider(
+            value = sliderValue,
+            onValueChange = { commitScore(it) },
+            valueRange = 0.0f..10.0f,
+            steps = 99,
+            colors = SliderDefaults.colors(
+                thumbColor = if (isUnrated) Color.White.copy(alpha = 0.5f) else Color.White,
+                activeTrackColor = if (isUnrated) Color.White.copy(alpha = 0.15f) else AccentGold,
+                inactiveTrackColor = Color.White.copy(alpha = 0.10f)
+            ),
+            modifier = Modifier.padding(horizontal = 2.dp)
+        )
+
+        // 3. Clean Borderless Delta Stepper Buttons + Unrated Quick Pill
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val rulerWidth = maxWidth
-            // Layer 1: GPU-drawn visible ruler ticks (zero recompositions during 120Hz scroll)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val scrollPx = rulerScrollState.value.toFloat()
-                val centerX = size.width / 2f
-                val startIdx = ((scrollPx - centerX) / tickSpacingPx).toInt().coerceAtLeast(0)
-                val endIdx = ((scrollPx + centerX) / tickSpacingPx).toInt().coerceAtMost(91)
-
-                val topPad = 12.dp.toPx()
-                val majorTickH = 22.dp.toPx()
-                val halfTickH = 15.dp.toPx()
-                val minorTickH = 9.dp.toPx()
-                val majorStroke = 2.dp.toPx()
-                val halfStroke = 1.5.dp.toPx()
-                val minorStroke = 1.1.dp.toPx()
-                val labelTop = topPad + majorTickH + 5.dp.toPx()
-
-                for (i in startIdx..endIdx) {
-                    val x = centerX + i * tickSpacingPx - scrollPx
-                    val isUnratedMark = i == 0
-                    val isWhole = i >= 1 && (i - 1) % 10 == 0
-                    val isHalf = i >= 1 && (i - 1) % 10 == 5
-                    val isCentered = kotlin.math.abs(x - centerX) <= tickSpacingPx * 0.45f
-
-                    val tickH = when {
-                        isUnratedMark || isWhole -> majorTickH
-                        isHalf -> halfTickH
-                        else -> minorTickH
-                    }
-                    val strokeW = when {
-                        isUnratedMark || isWhole -> majorStroke
-                        isHalf -> halfStroke
-                        else -> minorStroke
-                    }
-                    val tickColor = when {
-                        isCentered && i >= 1 -> AccentGold
-                        isUnratedMark || isWhole -> Color.White
-                        isHalf -> Color.White.copy(alpha = 0.85f)
-                        else -> Color.White.copy(alpha = 0.55f)
-                    }
-
-                    drawLine(
-                        color = tickColor,
-                        start = Offset(x, topPad + (majorTickH - tickH) * 0.5f),
-                        end = Offset(x, topPad + (majorTickH + tickH) * 0.5f),
-                        strokeWidth = strokeW,
-                        cap = StrokeCap.Round
-                    )
-
-                    preMeasuredLabels[i]?.let { measured ->
-                        drawText(
-                            textLayoutResult = measured,
-                            topLeft = Offset(
-                                x - measured.size.width / 2f,
-                                labelTop
-                            )
-                        )
-                    }
-                }
-
-                // Fixed Center Indicator Needle
-                val needleW = 3.dp.toPx()
-                val needleColor = if (rating != null) AccentGold else Color.White
-                drawRoundRect(
-                    color = needleColor,
-                    topLeft = Offset(centerX - needleW / 2f, 4.dp.toPx()),
-                    size = Size(needleW, 34.dp.toPx()),
-                    cornerRadius = CornerRadius(needleW / 2f, needleW / 2f)
+            Box(
+                modifier = Modifier
+                    .weight(1.1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (isUnrated) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
+                    .clickable { commitScore(0.0f) }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Unrated",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isUnrated) Color.White else Color.White.copy(alpha = 0.50f)
                 )
             }
 
-            // Layer 2: Soft Edge Fade
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.horizontalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.45f),
-                            0.10f to Color.Transparent,
-                            0.90f to Color.Transparent,
-                            1.0f to Color.Black.copy(alpha = 0.45f)
-                        )
+            val deltas = listOf(-1.0f, -0.5f, -0.1f, 0.1f, 0.5f, 1.0f)
+            deltas.forEach { delta ->
+                val isPos = delta > 0
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isPos) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.06f))
+                        .clickable {
+                            val base = if (isUnrated) (if (isPos) 1.0f else 0.0f) else sliderValue
+                            commitScore(base + delta)
+                        }
+                        .padding(vertical = 9.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isPos) "+${String.format(Locale.US, "%.1f", delta)}" else String.format(Locale.US, "%.1f", delta),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isPos) AccentGold else Color.White.copy(alpha = 0.70f)
                     )
-            )
-
-            // Layer 3: Native Touch Scroll Layer
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .horizontalScroll(rulerScrollState)
-            ) {
-                Spacer(modifier = Modifier.width(rulerWidth + tickSpacing * 91))
+                }
             }
         }
     }
