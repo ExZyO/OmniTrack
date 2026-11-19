@@ -129,6 +129,8 @@ fun HomeScreen(
     var selectedNovelSubtype by rememberSaveable { mutableStateOf("ALL") }
     var selectedVnOriginSubtype by rememberSaveable { mutableStateOf("ALL") }
     var selectedVnLengthSubtype by rememberSaveable { mutableStateOf("ALL") }
+    var selectedGamePlatform by rememberSaveable { mutableStateOf("ALL") }
+    var selectedGameCompletion by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -447,6 +449,16 @@ fun HomeScreen(
                             )
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.GAME) {
+                            GameUnderlineFilterBar(
+                                selectedPlatform = selectedGamePlatform,
+                                selectedCompletion = selectedGameCompletion,
+                                onPlatformSelected = { selectedGamePlatform = it },
+                                onCompletionSelected = { selectedGameCompletion = it },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -468,13 +480,21 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion) {
                                     uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
                                         (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
                                         (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnOriginSubtype == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(item.originCountry, item.nativeTitle) == selectedVnOriginSubtype) &&
                                         (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnLengthSubtype == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(item.runtimeMinutes) == selectedVnLengthSubtype) &&
+                                        (pageMediaType != MediaType.GAME || selectedGamePlatform == "ALL" || selectedGamePlatform in com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platforms, item.platform)) &&
+                                        (pageMediaType != MediaType.GAME || selectedGameCompletion == "ALL" || when (selectedGameCompletion) {
+                                            "MAIN" -> item.gameCompletionTier.equals("MAIN", true) || item.gameCompletionTier.equals("MAIN_PLUS", true)
+                                            "COMP" -> item.gameCompletionTier.equals("COMPLETIONIST", true) || item.gameCompletionTier.equals("PLATINUM", true)
+                                            "BEATEN" -> item.status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                                            "BACKLOG" -> item.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                                            else -> true
+                                        }) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
@@ -693,6 +713,48 @@ internal fun inferNovelSubtype(
         "LIGHT_NOVEL"
     } else {
         "WEB_NOVEL"
+    }
+}
+
+@Composable
+internal fun GameUnderlineFilterBar(
+    selectedPlatform: String,
+    selectedCompletion: String?,
+    onPlatformSelected: (String) -> Unit,
+    onCompletionSelected: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        UnderlineFilterGroup(
+            options = listOf(
+                "ALL" to "All",
+                "PC" to "PC",
+                "PS" to "PlayStation",
+                "SWI" to "Switch",
+                "XBOX" to "Xbox",
+                "DECK" to "Steam Deck",
+                "MOBILE" to "Mobile",
+                "RETRO" to "Retro"
+            ),
+            selectedKey = selectedPlatform,
+            onSelected = onPlatformSelected
+        )
+        if (selectedCompletion != null && onCompletionSelected != null) {
+            UnderlineFilterGroup(
+                options = listOf(
+                    "ALL" to "All Tiers",
+                    "MAIN" to "Main / Main+",
+                    "COMP" to "100% / Plat",
+                    "BEATEN" to "Completed",
+                    "BACKLOG" to "Backlog"
+                ),
+                selectedKey = selectedCompletion,
+                onSelected = onCompletionSelected
+            )
+        }
     }
 }
 

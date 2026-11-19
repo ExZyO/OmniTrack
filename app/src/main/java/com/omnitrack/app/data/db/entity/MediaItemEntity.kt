@@ -46,6 +46,7 @@ data class MediaItemEntity(
     val mangadexId: String? = null,
     val bangumiId: Long? = null,
     val igdbId: Long? = null,
+    val steamAppId: Long? = null,
     val originCountry: String? = null,
     val customCoverPath: String? = null,
     val customBannerPath: String? = null,
@@ -90,6 +91,7 @@ data class MediaItemEntity(
     val steamAchievementsUnlocked: Int? = null,
     val steamAchievementsTotal: Int? = null,
     val platforms: String? = null,
+    val gameCompletionTier: String? = null,
     val trackerProgressOverrides: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

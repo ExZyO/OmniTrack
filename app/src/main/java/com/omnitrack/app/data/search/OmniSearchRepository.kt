@@ -61,6 +61,7 @@ class OmniSearchRepository(
         "RanobeDB" to 6,
         "MangaDex" to 7,
         "MangaUpdates" to 8,
+        "IGDB" to 8,
         "Steam" to 9,
         "VNDB" to 10,
         "Bangumi" to 11,
@@ -109,6 +110,8 @@ class OmniSearchRepository(
                     malId = existing.malId ?: item.malId,
                     bangumiId = existing.bangumiId ?: item.bangumiId,
                     mangadexId = existing.mangadexId ?: item.mangadexId,
+                    igdbId = existing.igdbId ?: item.igdbId,
+                    steamAppId = existing.steamAppId ?: item.steamAppId,
                     originCountry = existing.originCountry ?: item.originCountry,
                     platform = existing.platform ?: item.platform,
                     bannerUrl = existing.bannerUrl ?: item.bannerUrl,
@@ -164,6 +167,7 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchMangaUpdatesNovels(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
                     deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey) })
+                    deferreds.add(launchProvider { searchIgdbGames(trimmed) })
                     deferreds.add(launchProvider { searchSteam(trimmed) })
                     deferreds.add(launchProvider { searchVndb(trimmed) })
                     deferreds.add(launchProvider { searchBooks(trimmed) })
@@ -204,6 +208,7 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.MOVIE) })
                 }
                 MediaType.GAME -> {
+                    deferreds.add(launchProvider { searchIgdbGames(trimmed) })
                     deferreds.add(launchProvider { searchSteam(trimmed) })
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 4, defaultType = MediaType.GAME) })
                 }
@@ -1014,17 +1019,17 @@ class OmniSearchRepository(
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withSteamPacing emptyList()
                 val body = response.body?.string() ?: return@withSteamPacing emptyList()
-                val root = json.parseToJsonElement(body).jsonObject
-                val items = root["items"]?.jsonArray ?: return@withSteamPacing emptyList()
+                val root = json.parseToJsonElement(body) as? JsonObject ?: return@withSteamPacing emptyList()
+                val items = root["items"] as? JsonArray ?: return@withSteamPacing emptyList()
 
                 items.mapNotNull { node ->
-                    val obj = node.jsonObject
+                    val obj = node as? JsonObject ?: return@mapNotNull null
                     val appId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
                     val name = obj["name"].cleanString() ?: return@mapNotNull null
 
                     // High-res Steam 600x900 vertical capsule artwork
                     val cover = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg"
-                    val banner = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"
+                    val banner = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_hero.jpg"
 
                     SearchResultItem(
                         title = name,
@@ -1032,7 +1037,8 @@ class OmniSearchRepository(
                         bannerUrl = LosslessCoverMapper.toLosslessUrl(banner),
                         mediaType = MediaType.GAME,
                         sourceProvider = "Steam",
-                        igdbId = appId
+                        steamAppId = appId,
+                        platform = "PC"
                     )
                 }
             }
@@ -1040,6 +1046,59 @@ class OmniSearchRepository(
             if (e is CancellationException) throw e
             AppLogger.w("OmniSearchRepository", "Search exception for $query: ${e.message}")
             emptyList()
+        }
+    }
+
+    private suspend fun searchIgdbGames(query: String): List<SearchResultItem> {
+        val id = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientId
+        val secret = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientSecret
+        if (id.isBlank() || secret.isBlank()) return emptyList()
+        return com.omnitrack.app.data.enrichment.IgdbApiClient(client).searchGames(id, secret, query, limit = 16)
+    }
+
+    suspend fun fetchDiscoverGamesShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val id = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientId
+        val secret = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientSecret
+        if (id.isNotBlank() && secret.isNotBlank()) {
+            val igdbItems = com.omnitrack.app.data.enrichment.IgdbApiClient(client).fetchDiscoverGames(id, secret, shelf, limit = 14)
+            if (igdbItems.isNotEmpty()) return@withContext igdbItems
+        }
+        // Keyless Steam Featured Categories fallback
+        NetworkPacer.withSteamPacing {
+            try {
+                val req = Request.Builder()
+                    .url("https://store.steampowered.com/api/featuredcategories/?l=english&cc=US")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withSteamPacing emptyList()
+                    val body = resp.body?.string() ?: return@withSteamPacing emptyList()
+                    val root = json.parseToJsonElement(body) as? JsonObject ?: return@withSteamPacing emptyList()
+                    val catKey = when (shelf.lowercase()) {
+                        "top_rated" -> "top_sellers"
+                        "upcoming" -> "coming_soon"
+                        else -> "new_releases"
+                    }
+                    val arr = (root[catKey] as? JsonObject)?.get("items") as? JsonArray ?: return@withSteamPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el as? JsonObject ?: return@mapNotNull null
+                        val appId = o["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: return@mapNotNull null
+                        val name = o["name"].cleanString() ?: return@mapNotNull null
+                        SearchResultItem(
+                            title = name,
+                            coverUrl = LosslessCoverMapper.toLosslessUrl("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg"),
+                            bannerUrl = LosslessCoverMapper.toLosslessUrl("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_hero.jpg"),
+                            mediaType = MediaType.GAME,
+                            sourceProvider = "Steam",
+                            steamAppId = appId,
+                            platform = "PC"
+                        )
+                    }.distinctBy { it.steamAppId }.take(14)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
         }
     }
 

@@ -577,7 +577,8 @@ fun TrackerAccountsSheet(
                         tokenManager.saveSteamId64(null)
                         Toast.makeText(context, "Steam disconnected", Toast.LENGTH_SHORT).show()
                     }
-                }
+                },
+                onImportLibrary = { syncEngine.importSteamLibrary() }
             )
 
             // 9. TMDb
@@ -1345,12 +1346,15 @@ private fun SteamTrackerCard(
     initialApiKey: String,
     initialSteamId64: String,
     onSave: (String, String) -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onImportLibrary: (suspend () -> com.omnitrack.app.data.sync.SteamImportSummary)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var apiKeyText by remember(initialApiKey) { mutableStateOf(initialApiKey) }
     var steamIdText by remember(initialSteamId64) { mutableStateOf(initialSteamId64) }
     var isApiKeyRevealed by remember { mutableStateOf(false) }
+    var isImportingLibrary by remember { mutableStateOf(false) }
     var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
 
     LaunchedEffect(initialApiKey, initialSteamId64) {
@@ -1575,6 +1579,50 @@ private fun SteamTrackerCard(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        if (isConnected && onImportLibrary != null) {
+            Button(
+                onClick = {
+                    if (!isImportingLibrary) {
+                        scope.launch {
+                            isImportingLibrary = true
+                            val summary = onImportLibrary()
+                            isImportingLibrary = false
+                            val msg = summary.error ?: "Imported ${summary.imported} new games, updated ${summary.updated}"
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                },
+                enabled = !isImportingLibrary,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF66C0F4).copy(alpha = 0.16f),
+                    contentColor = Color(0xFF66C0F4),
+                    disabledContainerColor = Color.White.copy(alpha = 0.06f),
+                    disabledContentColor = TextMuted
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isImportingLibrary) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF66C0F4),
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Importing Steam Library...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.CloudDownload,
+                        contentDescription = null,
+                        tint = Color(0xFF66C0F4),
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Import Steam Library & Playtime", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }

@@ -20,10 +20,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as lazyRowItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -151,6 +154,28 @@ fun DiscoverView(
     var selectedNovelSubFilter by remember { mutableStateOf("ALL") }
     var selectedVnOriginSubFilter by remember { mutableStateOf("ALL") }
     var selectedVnLengthSubFilter by remember { mutableStateOf("ALL") }
+    var selectedGamePlatformSubFilter by remember { mutableStateOf("ALL") }
+    var gameShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
+    var isLoadingGameShelves by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedFilter) {
+        if (selectedFilter == MediaType.GAME && gameShelves.isEmpty() && !isLoadingGameShelves) {
+            isLoadingGameShelves = true
+            try {
+                val trending = searchRepository.fetchDiscoverGamesShelves("trending")
+                val topRated = searchRepository.fetchDiscoverGamesShelves("top_rated")
+                val upcoming = searchRepository.fetchDiscoverGamesShelves("upcoming")
+                gameShelves = mapOf(
+                    "Trending Now" to trending,
+                    "Top Critically Acclaimed" to topRated,
+                    "Upcoming Releases" to upcoming
+                ).filterValues { it.isNotEmpty() }
+            } catch (_: Exception) {
+            } finally {
+                isLoadingGameShelves = false
+            }
+        }
+    }
 
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = homeViewModel?.discoverGridScrollIndex ?: 0,
@@ -551,6 +576,15 @@ fun DiscoverView(
             )
         }
 
+        if (selectedFilter == MediaType.GAME) {
+            com.omnitrack.app.ui.screens.home.GameUnderlineFilterBar(
+                selectedPlatform = selectedGamePlatformSubFilter,
+                selectedCompletion = null,
+                onPlatformSelected = { selectedGamePlatformSubFilter = it },
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
         // AI Resolution Banner
         if (aiResolutionBanner != null) {
             Spacer(modifier = Modifier.height(10.dp))
@@ -582,7 +616,7 @@ fun DiscoverView(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter) {
+        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter, selectedGamePlatformSubFilter) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
             when {
                 selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> base.filter {
@@ -596,6 +630,10 @@ fun DiscoverView(
                 selectedFilter == MediaType.VISUAL_NOVEL -> base.filter {
                     (selectedVnOriginSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(it.originCountry, it.nativeTitle) == selectedVnOriginSubFilter) &&
                         (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
+                }
+                selectedFilter == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> base.filter {
+                    val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(it.platform, null)
+                    groups.isEmpty() || selectedGamePlatformSubFilter in groups
                 }
                 else -> base
             }
@@ -641,7 +679,7 @@ fun DiscoverView(
                     contentPadding = PaddingValues(bottom = 110.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.vndbId ?: 0L}" }) { item ->
+                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: 0L}" }) { item ->
                     val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
                         com.omnitrack.app.ui.screens.home.inferNovelSubtype(
                             item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
@@ -722,6 +760,91 @@ fun DiscoverView(
                     fontSize = 13.5.sp,
                     color = TextMuted
                 )
+            }
+        } else if (selectedFilter == MediaType.GAME) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 110.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                if (isLoadingGameShelves && gameShelves.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                    }
+                }
+                gameShelves.forEach { (shelfTitle, shelfItems) ->
+                    val filteredShelf = if (selectedGamePlatformSubFilter == "ALL") shelfItems else shelfItems.filter { item ->
+                        val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platform, null)
+                        groups.isEmpty() || selectedGamePlatformSubFilter in groups
+                    }
+                    if (filteredShelf.isNotEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = shelfTitle,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                lazyRowItems(
+                                    items = filteredShelf,
+                                    key = { "${shelfTitle}_${it.igdbId ?: it.steamAppId ?: it.title}" }
+                                ) { game ->
+                                    val inLib = allMedia.firstOrNull { summary ->
+                                        summary.mediaType == MediaType.GAME && (
+                                            (game.igdbId != null && summary.title.equals(game.title, true)) ||
+                                                (game.steamAppId != null && summary.steamAppId == game.steamAppId) ||
+                                                summary.title.equals(game.title, ignoreCase = true)
+                                            )
+                                    }
+                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
+                                        title = game.title,
+                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: game.coverUrl,
+                                        subtitle = game.releaseYear ?: game.platform,
+                                        rating = game.communityScore,
+                                        onClick = {
+                                            if (inLib != null) {
+                                                onItemClick(inLib.id)
+                                            } else {
+                                                EphemeralPreviewHolder.previewItem = game.toMediaItemEntity()
+                                                onItemClick(-1L)
+                                            }
+                                        },
+                                        cardWidth = 112.dp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                val gameSpotlight = allMedia.filter { it.mediaType == MediaType.GAME }.take(12)
+                if (gameSpotlight.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "In Your Games Library",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            lazyRowItems(gameSpotlight, key = { "lib_game_${it.id}" }) { summary ->
+                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
+                                    title = summary.title,
+                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
+                                    subtitle = com.omnitrack.app.data.model.formatGameCardBadge(summary.platforms, summary.platform, summary.playtimeHours, summary.runtimeMinutes),
+                                    rating = summary.userRating ?: summary.communityScore,
+                                    onClick = { onItemClick(summary.id) },
+                                    cardWidth = 112.dp
+                                )
+                            }
+                        }
+                    }
+                }
             }
         } else {
             // Spotlight from library when search box is empty

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -42,6 +44,7 @@ import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.omnitrack.app.data.model.GameMediaAsset
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnScreenshotItem
 import com.omnitrack.app.ui.theme.AccentGold
@@ -235,6 +238,216 @@ fun DetailScreenshotsGallerySection(
                     Button(
                         onClick = {
                             onSetAsHeroBanner(visibleShots[pagerState.currentPage].url)
+                            lightboxInitialIndex = null
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGold,
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1.4f)
+                    ) {
+                        Text("Set as Hero Banner", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailGameGallerySection(
+    assets: List<GameMediaAsset>,
+    onSetAsHeroBanner: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (assets.isEmpty()) return
+
+    val context = LocalContext.current
+    val hasCleanArt = remember(assets) { assets.any { !it.isScreenshot } }
+    val hasScreenshots = remember(assets) { assets.any { it.isScreenshot } }
+    var selectedFilter by remember(hasCleanArt) {
+        mutableStateOf(if (hasCleanArt) "CLEAN" else "ALL")
+    }
+    val visibleAssets = remember(assets, selectedFilter) {
+        when (selectedFilter) {
+            "CLEAN" -> assets.filter { !it.isScreenshot }.ifEmpty { assets }
+            "SCREENSHOTS" -> assets.filter { it.isScreenshot }.ifEmpty { assets }
+            else -> assets
+        }
+    }
+    var lightboxInitialIndex by remember { mutableStateOf<Int?>(null) }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Artwork & Screenshots",
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                letterSpacing = (-0.3).sp
+            )
+            Text(
+                text = "Tap to preview · Set Banner",
+                fontSize = 11.5.sp,
+                color = Color.White.copy(alpha = 0.65f)
+            )
+        }
+
+        if (hasCleanArt && hasScreenshots) {
+            val tabs = listOf(
+                "CLEAN" to "Clean Art",
+                "SCREENSHOTS" to "Screenshots",
+                "ALL" to "All (${assets.size})"
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
+            ) {
+                tabs.forEach { (key, label) ->
+                    val selected = selectedFilter == key
+                    Column(
+                        modifier = Modifier
+                            .width(IntrinsicSize.Max)
+                            .clickable { selectedFilter = key },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (selected) Color.White else Color.White.copy(alpha = 0.48f),
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(if (selected) Color.White else Color.Transparent)
+                        )
+                    }
+                }
+            }
+        }
+
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            itemsIndexed(visibleAssets, key = { idx, asset -> "${asset.url}_$idx" }) { idx, asset ->
+                Box(
+                    modifier = Modifier
+                        .width(188.dp)
+                        .height(106.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .clickable { lightboxInitialIndex = idx }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(asset.thumbnailUrl ?: asset.url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = asset.label ?: "Game Media ${idx + 1}",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
+                    )
+                }
+            }
+        }
+    }
+
+    val activeIdx = lightboxInitialIndex
+    if (activeIdx != null && activeIdx in visibleAssets.indices) {
+        val pagerState = rememberPagerState(
+            initialPage = activeIdx,
+            pageCount = { visibleAssets.size }
+        )
+        Dialog(
+            onDismissRequest = { lightboxInitialIndex = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.94f))
+                    .navigationBarsPadding()
+            ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    val currentAsset = visibleAssets[page]
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(currentAsset.url)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = currentAsset.label ?: "Game Asset ${page + 1}",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 42.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${visibleAssets.size}",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    visibleAssets[pagerState.currentPage].label?.takeIf { it.isNotBlank() }?.let { lbl ->
+                        Text(
+                            text = lbl,
+                            color = Color.White.copy(alpha = 0.58f),
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = { lightboxInitialIndex = null },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.White.copy(alpha = 0.12f),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Close", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            onSetAsHeroBanner(visibleAssets[pagerState.currentPage].url)
                             lightboxInitialIndex = null
                         },
                         colors = ButtonDefaults.buttonColors(

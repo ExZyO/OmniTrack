@@ -69,12 +69,14 @@ object OmniBackupManager {
             val categories = database.categoryDao().getAllCategories().first()
             val syncQueue = database.syncQueueDao().getPendingTasksSnapshot()
             val vnRoutes = database.vnRouteDao().getAllRoutesOnce()
+            val gameEntries = database.gameEntryDao().getAllEntriesOnce()
 
             val dbDump = OmniDatabaseDump(
                 mediaItems = mediaItems,
                 categories = categories,
                 syncQueue = syncQueue,
-                vnRoutes = vnRoutes
+                vnRoutes = vnRoutes,
+                gameEntries = gameEntries
             )
             val dbDumpJson = json.encodeToString(dbDump)
             val checksum = sha256(dbDumpJson)
@@ -226,6 +228,7 @@ object OmniBackupManager {
                 database.categoryDao().deleteAllCategories()
                 database.syncQueueDao().clearQueue()
                 database.vnRouteDao().deleteAllRoutes()
+                database.gameEntryDao().deleteAllEntries()
 
                 if (dump.categories.isNotEmpty()) {
                     database.categoryDao().insertAll(dump.categories)
@@ -238,6 +241,9 @@ object OmniBackupManager {
                 }
                 if (dump.vnRoutes.isNotEmpty()) {
                     database.vnRouteDao().insertRoutes(dump.vnRoutes)
+                }
+                if (dump.gameEntries.isNotEmpty()) {
+                    database.gameEntryDao().insertEntries(dump.gameEntries)
                 }
             }
 

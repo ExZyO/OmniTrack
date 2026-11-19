@@ -5,21 +5,38 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.data.repository.MediaRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
+
+data class SteamImportSummary(
+    val imported: Int,
+    val updated: Int,
+    val error: String? = null
+)
 
 /**
  * Background multi-tracker synchronization engine.
@@ -446,8 +463,163 @@ class TrackerSyncEngine(
             totalImported += pullTraktLibrary(tokens.traktToken)
         }
 
+        // 4. Steam Owned Games Library Pull
+        if (!tokens.steamApiKey.isNullOrBlank() && !tokens.steamId64.isNullOrBlank()) {
+            onStatus("Syncing Steam library & playtime...")
+            val steamSummary = importSteamLibrary(onStatus)
+            totalImported += steamSummary.imported + steamSummary.updated
+        }
+
         onStatus("Sync complete! $totalImported items imported/updated.")
         totalImported
+    }
+
+    private fun JsonElement?.asSafeObj(): JsonObject? = this as? JsonObject
+    private fun JsonElement?.asSafeArr(): JsonArray? = this as? JsonArray
+    private fun JsonElement?.asSafeStr(): String? =
+        (this as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+    private fun JsonElement?.asSafeLong(): Long? =
+        (this as? JsonPrimitive)?.takeIf { it !is JsonNull }?.longOrNull
+    private fun JsonElement?.asSafeInt(): Int? =
+        (this as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+
+    suspend fun importSteamLibrary(
+        onStatus: (String) -> Unit = {}
+    ): SteamImportSummary = withContext(Dispatchers.IO) {
+        val tokens = tokenManager.tokens.firstOrNull()
+        val apiKey = tokens?.steamApiKey?.trim().orEmpty()
+        val rawSteamId = tokens?.steamId64?.trim().orEmpty()
+        if (apiKey.isBlank() || rawSteamId.isBlank()) {
+            return@withContext SteamImportSummary(0, 0, "Connect Steam API Key & SteamID64 first")
+        }
+
+        val resolvedSteamId = TrackerAccountVerifier.resolveSteamId(rawSteamId, apiKey) ?: rawSteamId
+        if (resolvedSteamId.isBlank()) {
+            return@withContext SteamImportSummary(0, 0, "Could not resolve SteamID64")
+        }
+
+        data class SteamOwnedGame(
+            val appId: Long,
+            val name: String,
+            val playtimeMinutes: Int
+        )
+
+        onStatus("Fetching Steam owned games...")
+        val fetchResult: Pair<List<SteamOwnedGame>, String?> = NetworkPacer.withGeneralPacing {
+            try {
+                val url = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/" +
+                    "?key=${URLEncoder.encode(apiKey, "UTF-8")}" +
+                    "&steamid=${URLEncoder.encode(resolvedSteamId, "UTF-8")}" +
+                    "&include_appinfo=1&include_played_free_games=1&format=json"
+
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        return@withGeneralPacing emptyList<SteamOwnedGame>() to "Steam API error HTTP ${response.code}"
+                    }
+                    val body = response.body?.string().orEmpty()
+                    if (body.isBlank()) {
+                        return@withGeneralPacing emptyList<SteamOwnedGame>() to "Empty response from Steam API"
+                    }
+                    val root = json.parseToJsonElement(body).asSafeObj()
+                    val gamesArr = root?.get("response").asSafeObj()?.get("games").asSafeArr()
+                        ?: return@withGeneralPacing emptyList<SteamOwnedGame>() to
+                            "No Steam games returned — ensure Steam Game Details privacy is Public"
+
+                    val parsed = gamesArr.mapNotNull { elem ->
+                        val obj = elem.asSafeObj() ?: return@mapNotNull null
+                        val appId = obj["appid"].asSafeLong()?.takeIf { it > 0L } ?: return@mapNotNull null
+                        val name = obj["name"].asSafeStr() ?: return@mapNotNull null
+                        val mins = obj["playtime_forever"].asSafeInt() ?: 0
+                        SteamOwnedGame(appId = appId, name = name, playtimeMinutes = mins)
+                    }.sortedByDescending { it.playtimeMinutes }
+
+                    parsed to null
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList<SteamOwnedGame>() to (e.message ?: "Steam import failed")
+            }
+        }
+
+        val (ownedGames, fetchError) = fetchResult
+        if (fetchError != null) {
+            return@withContext SteamImportSummary(0, 0, fetchError)
+        }
+        if (ownedGames.isEmpty()) {
+            return@withContext SteamImportSummary(0, 0, "0 owned games found on Steam account")
+        }
+
+        var imported = 0
+        var updated = 0
+
+        for (g in ownedGames) {
+            val steamHours = ((g.playtimeMinutes / 6.0).roundToInt() / 10.0)
+            val existing = repository.findExistingMedia(
+                steamAppId = g.appId,
+                title = g.name,
+                mediaType = com.omnitrack.app.data.model.MediaType.GAME
+            )
+            if (existing != null) {
+                val nextSteamId = existing.steamAppId ?: g.appId
+                val nextHours = maxOf(existing.playtimeHours, steamHours)
+                val nextProgress = maxOf(existing.currentProgress, steamHours)
+                val existingPlatforms = existing.platforms?.split(",")
+                    ?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+                val nextPlatforms = if (existingPlatforms.isEmpty()) {
+                    "PC"
+                } else if (existingPlatforms.none { it.equals("PC", ignoreCase = true) }) {
+                    (existingPlatforms + "PC").joinToString(", ")
+                } else {
+                    existing.platforms
+                }
+                val nextStatus = if (nextHours > 0.0 &&
+                    existing.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                ) {
+                    com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                } else {
+                    existing.status
+                }
+                val changed = existing.copy(
+                    steamAppId = nextSteamId,
+                    playtimeHours = nextHours,
+                    currentProgress = nextProgress,
+                    platforms = nextPlatforms,
+                    platform = existing.platform ?: "PC",
+                    status = nextStatus
+                )
+                if (changed != existing) {
+                    repository.updateMedia(changed)
+                    updated++
+                }
+            } else {
+                val cover = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appId}/library_600x900_2x.jpg"
+                val hero = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${g.appId}/library_hero.jpg"
+                val status = if (steamHours > 0.0) {
+                    com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                } else {
+                    com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                }
+                repository.insertMedia(
+                    MediaItemEntity(
+                        title = g.name,
+                        coverUrl = cover,
+                        bannerUrl = hero,
+                        mediaType = com.omnitrack.app.data.model.MediaType.GAME,
+                        status = status,
+                        playtimeHours = steamHours,
+                        currentProgress = steamHours,
+                        platform = "PC",
+                        platforms = "PC",
+                        steamAppId = g.appId
+                    )
+                )
+                imported++
+            }
+        }
+
+        onStatus("Steam: imported $imported, updated $updated games")
+        SteamImportSummary(imported = imported, updated = updated)
     }
 
     private suspend fun pullAniListLibrary(token: String): Int = NetworkPacer.withAniListPacing {

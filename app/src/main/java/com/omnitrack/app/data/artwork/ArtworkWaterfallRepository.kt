@@ -106,14 +106,15 @@ class ArtworkWaterfallRepository(
         forceRefresh: Boolean = false,
         vndbId: String? = null,
         englishTitle: String? = null,
+        steamAppId: Long? = null,
         initialCandidates: List<ArtworkCandidate> = emptyList(),
         onPartialResults: ((List<ArtworkCandidate>) -> Unit)? = null
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val clean = cleanTitle(title)
-        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}"
+        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}"
 
-        fun vnBannerRank(candidate: ArtworkCandidate): Int {
+        fun cleanArtBannerRank(candidate: ArtworkCandidate): Int {
             if (!candidate.isBanner) return 0
             if (candidate.isScreenshot) return 10
             return when (candidate.sourceName.lowercase()) {
@@ -139,9 +140,9 @@ class ArtworkWaterfallRepository(
                         }
                     }
                 )
-                MediaType.VISUAL_NOVEL -> list.sortedWith(
+                MediaType.VISUAL_NOVEL, MediaType.GAME -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
-                        .thenBy { vnBannerRank(it) }
+                        .thenBy { cleanArtBannerRank(it) }
                 )
                 else -> list
             }
@@ -346,9 +347,10 @@ class ArtworkWaterfallRepository(
                 }
 
                 MediaType.GAME -> {
-                    launchProvider { fetchSteamCovers(title) }
+                    launchProvider { fetchSteamCovers(title, steamAppId) }
+                    launchProvider { fetchBangumiCovers(nativeTitle ?: romajiTitle ?: title, type = 4) }
                     if (!sgdbKey.isNullOrBlank()) {
-                        launchProvider { fetchSteamGridDbArtwork(title, null, sgdbKey) }
+                        launchProvider { fetchSteamGridDbArtwork(title, steamAppId, sgdbKey) }
                     }
                     if (!igdbId.isNullOrBlank() && !igdbSecret.isNullOrBlank()) {
                         launchProvider {
@@ -1288,29 +1290,40 @@ class ArtworkWaterfallRepository(
         val igdbSlug: String? = null
     )
 
-    private suspend fun fetchSteamCovers(title: String): List<ArtworkCandidate> = coroutineScope {
+    private suspend fun fetchSteamCovers(title: String, knownSteamAppId: Long? = null): List<ArtworkCandidate> = coroutineScope {
         try {
-            val encoded = URLEncoder.encode(title, "UTF-8")
-            val request = Request.Builder()
-                .url("https://store.steampowered.com/api/storesearch/?term=$encoded&l=english&cc=US")
-                .get()
-                .build()
+            val matchedApps: List<Pair<String, String>> = buildList {
+                if (knownSteamAppId != null && knownSteamAppId > 0L) {
+                    add(knownSteamAppId.toString() to title)
+                }
+                val encoded = URLEncoder.encode(title, "UTF-8")
+                val request = Request.Builder()
+                    .url("https://store.steampowered.com/api/storesearch/?term=$encoded&l=english&cc=US")
+                    .get()
+                    .build()
 
-            val matchedApps: List<Pair<String, String>> = client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@coroutineScope emptyList()
-                val responseStr = response.body?.string() ?: return@coroutineScope emptyList()
-                val parsed = json.parseToJsonElement(responseStr).asObj() ?: return@coroutineScope emptyList()
-                val items = parsed["items"].asArr() ?: return@coroutineScope emptyList()
-                items.take(3).mapNotNull { elem ->
-                    val o = elem.asObj() ?: return@mapNotNull null
-                    val id = o["id"].cleanString() ?: return@mapNotNull null
-                    val name = o["name"].cleanString() ?: title
-                    id to name
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val responseStr = response.body?.string()
+                        if (!responseStr.isNullOrBlank()) {
+                            val parsed = json.parseToJsonElement(responseStr).asObj()
+                            val items = parsed?.get("items").asArr()
+                            items?.take(3)?.forEach { elem ->
+                                val o = elem.asObj() ?: return@forEach
+                                val id = o["id"].cleanString() ?: return@forEach
+                                val name = o["name"].cleanString() ?: title
+                                if (none { it.first == id }) {
+                                    add(id to name)
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            if (matchedApps.isEmpty()) return@coroutineScope emptyList()
 
             val candidates = mutableListOf<ArtworkCandidate>()
-            for ((id, name) in matchedApps) {
+            for ((id, name) in matchedApps.take(3)) {
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg", sourceName = "Steam", description = "$name (Library 2x)", isBanner = false))
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg", sourceName = "Steam", description = name, isBanner = false))
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg", sourceName = "Steam Hero", description = "$name (Hero Banner)", isBanner = true, isScreenshot = false))
@@ -1338,7 +1351,7 @@ class ArtworkWaterfallRepository(
                                             batch.add(ArtworkCandidate(url = headerImg, sourceName = "Steam", description = "$name (Store Header)", isBanner = true, isScreenshot = false))
                                         }
                                         val screenshots = appData["screenshots"].asArr()
-                                        screenshots?.take(4)?.forEachIndexed { idx, s ->
+                                        screenshots?.take(10)?.forEachIndexed { idx, s ->
                                             val sUrl = s.asObj()?.get("path_full").cleanString()
                                             if (!sUrl.isNullOrBlank()) {
                                                 batch.add(ArtworkCandidate(url = sUrl, sourceName = "Steam", description = "$name (Screenshot ${idx + 1})", isBanner = true, isScreenshot = true))

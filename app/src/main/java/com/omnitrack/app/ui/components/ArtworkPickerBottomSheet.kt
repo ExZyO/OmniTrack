@@ -129,6 +129,7 @@ fun ArtworkPickerBottomSheet(
     defaultCoverUrl: String? = null,
     vndbId: String? = null,
     englishTitle: String? = null,
+    steamAppId: Long? = null,
     initialCandidates: List<ArtworkCandidate> = emptyList(),
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
@@ -146,7 +147,7 @@ fun ArtworkPickerBottomSheet(
     val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache ?: CoverCache(context) }
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId) { mutableStateOf(initialCandidates) }
+    var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId) { mutableStateOf(initialCandidates) }
     var isLoading by remember { mutableStateOf(false) }
     var excludedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDirectUrlInput by remember { mutableStateOf(false) }
@@ -202,6 +203,7 @@ fun ArtworkPickerBottomSheet(
                 forceRefresh = forceRefresh,
                 vndbId = vndbId,
                 englishTitle = englishTitle,
+                steamAppId = steamAppId,
                 initialCandidates = initialCandidates,
                 onPartialResults = { partial ->
                     scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
@@ -214,7 +216,7 @@ fun ArtworkPickerBottomSheet(
         }
     }
 
-    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId, vndbId) {
+    LaunchedEffect(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId) {
         fetchCandidates(false)
     }
 
@@ -832,11 +834,12 @@ fun ArtworkPickerBottomSheet(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             var userPickedBannerFilter by remember { mutableStateOf<String?>(null) }
+                            val supportsCleanBannerFilter = mediaType == MediaType.VISUAL_NOVEL || mediaType == MediaType.GAME
                             val cleanBannerCount = remember(displayedBanners) { displayedBanners.count { !it.isScreenshot } }
                             val shotBannerCount = remember(displayedBanners) { displayedBanners.count { it.isScreenshot } }
                             val activeVnBannerFilter = userPickedBannerFilter ?: if (cleanBannerCount > 0) "CLEAN" else "ALL"
-                            val visibleBanners = remember(displayedBanners, mediaType, activeVnBannerFilter) {
-                                if (mediaType != MediaType.VISUAL_NOVEL) {
+                            val visibleBanners = remember(displayedBanners, supportsCleanBannerFilter, activeVnBannerFilter) {
+                                if (!supportsCleanBannerFilter) {
                                     displayedBanners
                                 } else when (activeVnBannerFilter) {
                                     "CLEAN" -> displayedBanners.filter { !it.isScreenshot }
@@ -845,7 +848,7 @@ fun ArtworkPickerBottomSheet(
                                 }
                             }
 
-                            if (mediaType == MediaType.VISUAL_NOVEL && displayedBanners.isNotEmpty()) {
+                            if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -895,7 +898,7 @@ fun ArtworkPickerBottomSheet(
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Text(
-                                            text = if (mediaType == MediaType.VISUAL_NOVEL && displayedBanners.isNotEmpty()) {
+                                            text = if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
                                                 "No clean widescreen art found — try the Screenshots tab."
                                             } else {
                                                 "No dedicated widescreen banners found online."

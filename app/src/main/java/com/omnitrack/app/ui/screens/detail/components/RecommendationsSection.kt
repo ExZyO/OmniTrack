@@ -49,6 +49,7 @@ data class RecommendationItem(
     val tmdbId: Long? = null,
     val anilistId: Long? = null,
     val malId: Long? = null,
+    val igdbId: Long? = null,
     val bannerUrl: String? = null
 )
 

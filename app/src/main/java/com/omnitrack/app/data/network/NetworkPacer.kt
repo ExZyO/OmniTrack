@@ -57,6 +57,10 @@ object NetworkPacer {
     private var lastAniZipCallTime = 0L
     private const val ANIZIP_MIN_INTERVAL_MS = 100L
 
+    private val igdbSemaphore = Semaphore(2)
+    @Volatile private var lastIgdbCallTime = 0L
+    private const val IGDB_MIN_INTERVAL_MS = 270L
+
     private val generalSemaphore = Semaphore(2)
 
     private val coalescingMutex = Mutex()
@@ -183,6 +187,19 @@ object NetworkPacer {
         }
     }
 
+    suspend fun <T> withIgdbPacing(block: suspend () -> T): T = igdbSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastIgdbCallTime
+        if (elapsed < IGDB_MIN_INTERVAL_MS) {
+            delay(IGDB_MIN_INTERVAL_MS - elapsed)
+        }
+        try {
+            block()
+        } finally {
+            lastIgdbCallTime = System.currentTimeMillis()
+        }
+    }
+
     suspend fun <T> withGeneralPacing(block: suspend () -> T): T = generalSemaphore.withPermit {
         block()
     }
@@ -194,6 +211,7 @@ object NetworkPacer {
             "mangadex" in lower -> withMangaDexPacing(block)
             "themoviedb" in lower || "tmdb" in lower -> withTmdbPacing(block)
             "steam" in lower -> withSteamPacing(block)
+            "igdb" in lower -> withIgdbPacing(block)
             "bgm.tv" in lower || "bangumi" in lower -> withBangumiPacing(block)
             "vndb" in lower -> withVndbPacing(block)
             "jikan" in lower -> withJikanPacing(block)

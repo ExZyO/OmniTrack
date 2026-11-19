@@ -114,7 +114,6 @@ import com.omnitrack.app.ui.components.ArtworkPickerBottomSheet
 import com.omnitrack.app.ui.components.BackgroundMode
 import com.omnitrack.app.ui.components.ChapterStepper
 import com.omnitrack.app.ui.components.CoverGlowBox
-import com.omnitrack.app.ui.components.GameProgressCard
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
@@ -154,6 +153,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.AnimeStaffItem
+import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnSpoilerLevel
@@ -161,9 +161,13 @@ import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.DetailGameAchievementsSection
+import com.omnitrack.app.ui.screens.detail.components.DetailGameGallerySection
+import com.omnitrack.app.ui.screens.detail.components.DetailGameTrackingSection
 import com.omnitrack.app.ui.screens.detail.components.DetailScreenshotsGallerySection
 import com.omnitrack.app.ui.screens.detail.components.DetailVnReleasesSection
 import com.omnitrack.app.ui.screens.detail.components.DetailVnRoutesSection
+import com.omnitrack.app.ui.screens.detail.components.GameEntryDetailSheet
 import com.omnitrack.app.ui.screens.detail.components.UserMediaListOverlay
 import com.omnitrack.app.ui.screens.detail.components.UserProfileSheet
 import com.omnitrack.app.ui.screens.detail.components.VnRouteDetailSheet
@@ -193,6 +197,7 @@ sealed class DetailSheetTarget {
     data class Company(val company: NetworkProductionCompany) : DetailSheetTarget()
     data class VolumeChapterDetail(val seasonNumber: Int, val episodeNumber: Int) : DetailSheetTarget()
     data class VnRoute(val routeId: Long) : DetailSheetTarget()
+    data class GameEntry(val entryId: Long) : DetailSheetTarget()
 }
 
 private sealed class DetailNavStep {
@@ -757,10 +762,11 @@ fun DetailScreen(
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
                                 novelDetailMeta = uiState.novelDetailMeta,
                                 vnDetailMeta = uiState.vnDetailMeta,
+                                gameDetailMeta = uiState.gameDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = {
-                                    if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                                    if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
                                         showVnPlaytimeDialog = true
                                     } else {
                                         showProgressEditSheet = true
@@ -780,6 +786,7 @@ fun DetailScreen(
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
                                 novelDetailMeta = uiState.novelDetailMeta,
                                 vnDetailMeta = uiState.vnDetailMeta,
+                                gameDetailMeta = uiState.gameDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onCoverClick = { showArtworkPicker = true },
                                 onCoverLoaded = { url ->
@@ -792,7 +799,7 @@ fun DetailScreen(
                                 },
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = {
-                                    if (item.mediaType == MediaType.VISUAL_NOVEL) {
+                                    if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
                                         showVnPlaytimeDialog = true
                                     } else {
                                         showProgressEditSheet = true
@@ -805,7 +812,7 @@ fun DetailScreen(
                         }
 
                         // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
-                        val hasProgressControls = item.mediaType in listOf(MediaType.GAME, MediaType.MOVIE)
+                        val hasProgressControls = item.mediaType == MediaType.MOVIE
                         val hasBackdrop = backdropTargetUrl != null
                         if (hasProgressControls) {
                             Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -829,6 +836,37 @@ fun DetailScreen(
                                 isVisualNovel = item.mediaType == MediaType.VISUAL_NOVEL,
                                 vnSpoilerLevel = vnSpoilerLevel
                             )
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
+
+                        // Collapsible IGDB Storyline (for Games)
+                        val gameStoryline = uiState.gameDetailMeta.storyline?.takeIf { it.isNotBlank() }
+                        if (item.mediaType == MediaType.GAME && gameStoryline != null) {
+                            var showStoryline by remember(item.id, gameStoryline) { mutableStateOf(false) }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = if (showStoryline) "Hide Storyline ▴" else "Show Storyline ▾",
+                                    color = AccentGold,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clickable { showStoryline = !showStoryline }
+                                        .padding(vertical = 2.dp)
+                                )
+                                if (showStoryline) {
+                                    Text(
+                                        text = gameStoryline,
+                                        color = TextSecondary,
+                                        fontSize = 13.5.sp,
+                                        lineHeight = 20.sp
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(14.dp))
                         }
                     }
@@ -864,6 +902,33 @@ fun DetailScreen(
                                             onAddCustomRoute = { viewModel.addCustomVnRoute(it) },
                                             onOpenRouteDetail = { route ->
                                                 pushSheet(DetailSheetTarget.VnRoute(route.id))
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            } else if (item.mediaType == MediaType.GAME) {
+                                item(key = "section_game_tracking", contentType = "game_tracking") {
+                                    Column {
+                                        DetailGameTrackingSection(
+                                            item = item,
+                                            gameMeta = uiState.gameDetailMeta,
+                                            entries = uiState.gameEntries,
+                                            onStepPlaytime = { viewModel.stepGamePlaytime(it) },
+                                            onSetExactPlaytime = { viewModel.setGamePlaytimeExact(it) },
+                                            onSelectCompletionTier = { viewModel.updateGameCompletionTier(it) },
+                                            onTogglePlatform = { viewModel.togglePlatform(it) },
+                                            onToggleEntryCompleted = { viewModel.toggleGameEntryCompleted(it) },
+                                            onAddCustomEntry = { name, type ->
+                                                viewModel.addCustomGameEntry(name, type)
+                                            },
+                                            onOpenEntryDetail = { entry ->
+                                                pushSheet(DetailSheetTarget.GameEntry(entry.id))
+                                            },
+                                            onSyncSteam = {
+                                                viewModel.syncSteamForCurrentGame { msg ->
+                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
@@ -908,6 +973,22 @@ fun DetailScreen(
                                 )
                             }
                         }
+                        DetailSectionKey.ACHIEVEMENTS -> {
+                            if (sectionsReady && item.mediaType == MediaType.GAME) {
+                                item(key = "section_game_achievements", contentType = "game_achievements") {
+                                    Column {
+                                        DetailGameAchievementsSection(
+                                            item = item,
+                                            gameMeta = uiState.gameDetailMeta,
+                                            onUpdateManualAchievements = { u, t ->
+                                                viewModel.updateManualAchievements(u, t)
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
                         DetailSectionKey.SCREENSHOTS -> {
                             if (sectionsReady && item.mediaType == MediaType.VISUAL_NOVEL && uiState.vnDetailMeta.screenshots.isNotEmpty()) {
                                 item(key = "section_vn_screenshots", contentType = "vn_screenshots") {
@@ -915,6 +996,19 @@ fun DetailScreen(
                                         DetailScreenshotsGallerySection(
                                             screenshots = uiState.vnDetailMeta.screenshots,
                                             nsfwFilterMode = vnNsfwFilterMode,
+                                            onSetAsHeroBanner = { url ->
+                                                viewModel.setCgAsHeroBanner(url)
+                                                Toast.makeText(context, "Hero banner updated", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            } else if (sectionsReady && item.mediaType == MediaType.GAME && uiState.gameDetailMeta.mediaGallery.isNotEmpty()) {
+                                item(key = "section_game_gallery", contentType = "game_gallery") {
+                                    Column {
+                                        DetailGameGallerySection(
+                                            assets = uiState.gameDetailMeta.mediaGallery,
                                             onSetAsHeroBanner = { url ->
                                                 viewModel.setCgAsHeroBanner(url)
                                                 Toast.makeText(context, "Hero banner updated", Toast.LENGTH_SHORT).show()
@@ -1044,6 +1138,7 @@ fun DetailScreen(
                                             tags = uiState.tags,
                                             vnSpoilerLevel = vnSpoilerLevel,
                                             vnNsfwFilterMode = vnNsfwFilterMode,
+                                            gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null,
                                             onGenreOrTagClick = { name, isTag ->
                                                 pushSheet(
                                                     DetailSheetTarget.Company(
@@ -1095,7 +1190,8 @@ fun DetailScreen(
                                             startDate = uiState.startDate,
                                             endDate = uiState.endDate,
                                             nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds,
-                                            vnDetailMeta = if (item.mediaType == MediaType.VISUAL_NOVEL) uiState.vnDetailMeta else null
+                                            vnDetailMeta = if (item.mediaType == MediaType.VISUAL_NOVEL) uiState.vnDetailMeta else null,
+                                            gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1400,7 +1496,8 @@ fun DetailScreen(
 
             // Cover & Banner artwork customization bottom sheet (Option A multi-tab)
             if (showArtworkPicker) {
-                val initialArtCandidates = remember(item.id, losslessCover, item.bannerUrl, uiState.vnDetailMeta) {
+                val effectiveGameSteamAppId = item.steamAppId ?: uiState.gameDetailMeta.steamAppId
+                val initialArtCandidates = remember(item.id, losslessCover, item.bannerUrl, uiState.vnDetailMeta, uiState.gameDetailMeta, effectiveGameSteamAppId) {
                     buildList {
                         val effectiveInitCover = losslessCover.takeIf { it.isNotBlank() } ?: item.coverUrl
                         if (effectiveInitCover.isNotBlank()) {
@@ -1424,7 +1521,8 @@ fun DetailScreen(
                                 )
                             )
                         }
-                        uiState.vnDetailMeta.steamAppId?.let { appId ->
+                        val seedSteamAppId = uiState.vnDetailMeta.steamAppId ?: effectiveGameSteamAppId
+                        seedSteamAppId?.let { appId ->
                             add(
                                 com.omnitrack.app.data.artwork.ArtworkCandidate(
                                     url = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg",
@@ -1455,6 +1553,17 @@ fun DetailScreen(
                                 )
                             )
                         }
+                        uiState.gameDetailMeta.mediaGallery.forEachIndexed { idx, asset ->
+                            add(
+                                com.omnitrack.app.data.artwork.ArtworkCandidate(
+                                    url = asset.url,
+                                    sourceName = if (asset.isScreenshot) "Game Screenshot" else "Game Artwork",
+                                    description = asset.label ?: "Game Art ${idx + 1}",
+                                    isBanner = true,
+                                    isScreenshot = asset.isScreenshot
+                                )
+                            )
+                        }
                     }
                 }
                 ArtworkPickerBottomSheet(
@@ -1474,6 +1583,7 @@ fun DetailScreen(
                     defaultCoverUrl = item.coverUrl,
                     vndbId = item.vndbId,
                     englishTitle = uiState.englishTitle,
+                    steamAppId = effectiveGameSteamAppId,
                     initialCandidates = initialArtCandidates,
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
@@ -1548,7 +1658,13 @@ fun DetailScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             val parsed = hoursText.toDoubleOrNull()
-                            if (parsed != null) viewModel.setVnPlaytimeExact(parsed)
+                            if (parsed != null) {
+                                if (item.mediaType == MediaType.GAME) {
+                                    viewModel.setGamePlaytimeExact(parsed)
+                                } else {
+                                    viewModel.setVnPlaytimeExact(parsed)
+                                }
+                            }
                             showVnPlaytimeDialog = false
                         }) {
                             Text("Save", color = AccentGold, fontWeight = FontWeight.Bold)
@@ -1771,6 +1887,20 @@ fun DetailScreen(
                     )
                 }
             }
+            is DetailSheetTarget.GameEntry -> {
+                val activeEntry = uiState.gameEntries.firstOrNull { it.id == topSheet.entryId }
+                if (activeEntry != null) {
+                    GameEntryDetailSheet(
+                        entry = activeEntry,
+                        presentationSettings = presentationSettings,
+                        backdropBitmap = backdropBitmap,
+                        backdropTargetUrl = effectiveBanner,
+                        onSave = { updated -> viewModel.saveGameEntryDetails(updated) },
+                        onDelete = { entryId -> viewModel.deleteGameEntry(entryId) },
+                        onDismiss = { stepBackOneLevel() }
+                    )
+                }
+            }
             null -> {}
         }
 }
@@ -1787,7 +1917,7 @@ private fun SiblingDetailPreview(
     presentationSettings: PresentationSettings,
     modifier: Modifier = Modifier
 ) {
-    val cachedAux = remember(item.id, item.mediaType, item.tmdbId, item.anilistId, item.malId) {
+    val cachedAux = remember(item.id, item.mediaType, item.tmdbId, item.anilistId, item.malId, item.igdbId, item.steamAppId) {
         val allowTmdbFallback = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE ||
             (item.mediaType == MediaType.ANIME && (item.anilistId == null || item.anilistId <= 0L))
         DetailAuxMemoryCache.getCacheKey(item)?.let { DetailAuxMemoryCache.cache[it] }
@@ -1877,6 +2007,7 @@ private fun SiblingDetailPreview(
                     heroClearLogoUrl = siblingClearLogo,
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
+                    gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
                     onOptionsClick = {},
                     onEditProgress = {},
                     onEditStatus = {},
@@ -1893,6 +2024,7 @@ private fun SiblingDetailPreview(
                     heroClearLogoUrl = siblingClearLogo,
                     novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
                     vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
+                    gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
                     onCoverClick = {},
                     onCoverLoaded = {},
                     onOptionsClick = {},
@@ -1903,7 +2035,7 @@ private fun SiblingDetailPreview(
                 )
             }
 
-            val hasProgressControls = displayItem.mediaType in listOf(MediaType.GAME, MediaType.MOVIE)
+            val hasProgressControls = displayItem.mediaType == MediaType.MOVIE
             val hasBackdrop = backdropTargetUrl != null
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -1930,7 +2062,8 @@ private fun SiblingDetailPreview(
 
             DetailShowDetailsSection(
                 item = displayItem,
-                vnDetailMeta = if (displayItem.mediaType == MediaType.VISUAL_NOVEL) cachedAux?.vnDetailMeta else null
+                vnDetailMeta = if (displayItem.mediaType == MediaType.VISUAL_NOVEL) cachedAux?.vnDetailMeta else null,
+                gameDetailMeta = if (displayItem.mediaType == MediaType.GAME) cachedAux?.gameDetailMeta else null
             )
         }
     }
@@ -1955,7 +2088,8 @@ private fun UnboxedStatsRow(
             item.vndbId,
             item.comickId,
             item.bangumiId,
-            item.igdbId
+            item.igdbId,
+            item.steamAppId
         ).size
     }
 
@@ -2210,6 +2344,7 @@ private fun DetailHeroHeaderSection(
     heroClearLogoUrl: String? = null,
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
+    gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -2364,7 +2499,8 @@ private fun DetailHeroHeaderSection(
             kitsuScore = novelDetailMeta.kitsuScore,
             mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
             bangumiScore = novelDetailMeta.bangumiScore,
-            vnDetailMeta = vnDetailMeta
+            vnDetailMeta = vnDetailMeta,
+            gameDetailMeta = gameDetailMeta
         )
         UnboxedStatsRow(
             item = item,
@@ -2386,6 +2522,7 @@ private fun DetailClassicHeaderSection(
     heroClearLogoUrl: String? = null,
     novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
+    gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -2586,7 +2723,8 @@ private fun DetailClassicHeaderSection(
                 kitsuScore = novelDetailMeta.kitsuScore,
                 mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
                 bangumiScore = novelDetailMeta.bangumiScore,
-                vnDetailMeta = vnDetailMeta
+                vnDetailMeta = vnDetailMeta,
+                gameDetailMeta = gameDetailMeta
             )
             UnboxedStatsRow(
                 item = item,
@@ -2830,20 +2968,7 @@ private fun DetailProgressSection(
             }
 
             MediaType.GAME -> {
-                GameProgressCard(
-                    hoursPlayed = item.playtimeHours,
-                    storyProgress = item.currentProgress,
-                    totalStoryChapters = item.totalProgress,
-                    achievementsUnlocked = item.steamAchievementsUnlocked,
-                    achievementsTotal = item.steamAchievementsTotal,
-                    selectedPlatforms = item.platforms?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
-                        ?: item.platform?.let { setOf(it) }
-                        ?: emptySet(),
-                    steamAppId = null,
-                    onHoursChanged = onUpdatePlaytime,
-                    onStoryProgressChanged = onUpdateProgress,
-                    onPlatformToggled = onTogglePlatform
-                )
+                // Retired legacy boxed GameProgressCard; rendered by borderless DetailGameTrackingSection
             }
 
             MediaType.VISUAL_NOVEL -> {

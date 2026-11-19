@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.R
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
 import kotlin.math.absoluteValue
@@ -53,9 +54,10 @@ fun NuvioRatingsRow(
     kitsuScore: Float? = null,
     mangaUpdatesScore: Float? = null,
     bangumiScore: Float? = null,
-    vnDetailMeta: VnDetailMeta? = null
+    vnDetailMeta: VnDetailMeta? = null,
+    gameDetailMeta: GameDetailMeta? = null
 ) {
-    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta) {
+    val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta, gameDetailMeta) {
         val list = mutableListOf<RatingBadgeData>()
 
         // 1. IMDb (Gold Logo 30x16dp)
@@ -158,8 +160,44 @@ fun NuvioRatingsRow(
             }
         }
 
+        // 5b. IGDB User & Critic Scores (Video Games)
+        if (item.mediaType == MediaType.GAME) {
+            val effIgdbUser = gameDetailMeta?.igdbUserRating ?: if (item.igdbId != null || gameDetailMeta?.steamPositivePct == null) item.communityScore else null
+            effIgdbUser?.let { score ->
+                if (score > 0f) {
+                    val userVal = if (score > 10f) score / 10.0 else score.toDouble()
+                    list.add(
+                        RatingBadgeData(
+                            source = "igdb",
+                            displayName = "IGDB",
+                            iconRes = R.drawable.brand_igdb,
+                            iconWidth = 16.dp,
+                            iconHeight = 16.dp,
+                            valueText = formatOneDecimal(userVal),
+                            valueColor = Color(0xFFA78BFA)
+                        )
+                    )
+                }
+            }
+            gameDetailMeta?.igdbCriticRating?.let { critic ->
+                if (critic > 0) {
+                    list.add(
+                        RatingBadgeData(
+                            source = "igdb_critic",
+                            displayName = "Critics",
+                            iconRes = R.drawable.ic_critic_score,
+                            iconWidth = 16.dp,
+                            iconHeight = 16.dp,
+                            valueText = "$critic",
+                            valueColor = Color(0xFFF5C518)
+                        )
+                    )
+                }
+            }
+        }
+
         // 6. Metacritic (e.g. 65)
-        item.metacriticScore?.let { meta ->
+        (item.metacriticScore ?: gameDetailMeta?.metacriticScore)?.let { meta ->
             if (meta > 0) {
                 val metaColor = when {
                     meta >= 61 -> Color(0xFF66CC33)
@@ -220,7 +258,7 @@ fun NuvioRatingsRow(
         }
 
         // 9. Bangumi Score (10-point decimal scale, e.g. 8.2 in pink #F09199)
-        val effBgmScore = bangumiScore ?: if (item.bangumiId != null) item.communityScore else null
+        val effBgmScore = bangumiScore ?: gameDetailMeta?.bangumiScore ?: if (item.bangumiId != null) item.communityScore else null
         effBgmScore?.let { score ->
             if (score > 0) {
                 val bgmVal = if (score > 10f) score / 10.0 else score.toDouble()
@@ -270,9 +308,7 @@ fun NuvioRatingsRow(
 
         // 10. Steam Positive % (Games or Visual Novels with bridged Steam AppID)
         val effSteamPct = when {
-            item.mediaType == MediaType.GAME -> item.communityScore?.let {
-                if (it <= 10f) (it * 10).roundToInt() else it.roundToInt()
-            }
+            item.mediaType == MediaType.GAME -> gameDetailMeta?.steamPositivePct
             item.mediaType == MediaType.VISUAL_NOVEL -> vnDetailMeta?.steamPositivePct
             else -> null
         }

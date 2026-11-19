@@ -291,6 +291,7 @@ class PreferenceManager(private val context: Context) {
         .map { it[PreferencesKeys.STEAMGRIDDB_API_KEY] ?: "" }
 
     suspend fun updateSteamGridDbApiKey(key: String) {
+        cachedSteamGridDbApiKey = key
         context.dataStore.edit { it[PreferencesKeys.STEAMGRIDDB_API_KEY] = key }
     }
 
@@ -303,6 +304,8 @@ class PreferenceManager(private val context: Context) {
         .map { it[PreferencesKeys.IGDB_CLIENT_SECRET] ?: "" }
 
     suspend fun updateIgdbCredentials(clientId: String, clientSecret: String) {
+        cachedIgdbClientId = clientId
+        cachedIgdbClientSecret = clientSecret
         context.dataStore.edit {
             it[PreferencesKeys.IGDB_CLIENT_ID] = clientId
             it[PreferencesKeys.IGDB_CLIENT_SECRET] = clientSecret
@@ -617,6 +620,15 @@ class PreferenceManager(private val context: Context) {
 
         @Volatile
         var cachedVnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP
+
+        @Volatile
+        var cachedSteamGridDbApiKey: String = ""
+
+        @Volatile
+        var cachedIgdbClientId: String = ""
+
+        @Volatile
+        var cachedIgdbClientSecret: String = ""
 
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")

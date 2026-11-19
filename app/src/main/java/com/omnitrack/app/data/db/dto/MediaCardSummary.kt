@@ -32,5 +32,9 @@ data class MediaCardSummary(
     val malId: Long? = null,
     val originCountry: String? = null,
     val platform: String? = null,
-    val runtimeMinutes: Int? = null
+    val runtimeMinutes: Int? = null,
+    val playtimeHours: Double = 0.0,
+    val platforms: String? = null,
+    val steamAppId: Long? = null,
+    val gameCompletionTier: String? = null
 )

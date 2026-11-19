@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
@@ -44,6 +44,12 @@ interface MediaDao {
 
     @Query("SELECT * FROM media_items WHERE vndbId = :vndbId LIMIT 1")
     suspend fun findByVndbId(vndbId: String): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE steamAppId = :steamAppId AND mediaType = :type LIMIT 1")
+    suspend fun findBySteamAppId(steamAppId: Long, type: MediaType = MediaType.GAME): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE igdbId = :igdbId AND mediaType = :type LIMIT 1")
+    suspend fun findByIgdbId(igdbId: Long, type: MediaType = MediaType.GAME): MediaItemEntity?
 
     @Query("SELECT * FROM media_items WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND mediaType = :type LIMIT 1")
     suspend fun findByTitleAndType(title: String, type: MediaType): MediaItemEntity?

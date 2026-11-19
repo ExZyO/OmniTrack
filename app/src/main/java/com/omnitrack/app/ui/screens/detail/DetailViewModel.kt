@@ -4,10 +4,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
+import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
+import com.omnitrack.app.data.enrichment.GameEnrichmentSource
 import com.omnitrack.app.data.enrichment.VisualNovelEnrichmentSource
+import com.omnitrack.app.data.model.GameCompletionTier
+import com.omnitrack.app.data.model.GameDetailMeta
+import com.omnitrack.app.data.model.GameEntryType
 import com.omnitrack.app.data.model.VnCharacterProfile
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.MediaEpisode
@@ -142,6 +147,8 @@ data class DetailUiState(
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     val vnRoutes: List<VnRouteEntity> = emptyList(),
+    val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    val gameEntries: List<GameEntryEntity> = emptyList(),
     val episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap()
 )
 
@@ -188,7 +195,8 @@ private data class PreviewAndAux(
     val isFillerSkipEnabled: Boolean = false,
     val isMangaSeasonGrouped: Boolean = false,
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
-    val vnDetailMeta: VnDetailMeta = VnDetailMeta()
+    val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
+    val gameDetailMeta: GameDetailMeta = GameDetailMeta()
 )
 
 class DetailViewModel(
@@ -201,6 +209,7 @@ class DetailViewModel(
 ) : ViewModel() {
 
     private val visualNovelEnrichmentSource = VisualNovelEnrichmentSource()
+    private val gameEnrichmentSource = GameEnrichmentSource()
     private val _mediaId = MutableStateFlow(mediaId)
     private val _previewStack = MutableStateFlow<List<MediaItemEntity>>(emptyList())
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
@@ -259,6 +268,7 @@ class DetailViewModel(
     private val _isMangaSeasonGrouped = MutableStateFlow(false)
     private val _novelDetailMeta = MutableStateFlow(NovelDetailMeta())
     private val _vnDetailMeta = MutableStateFlow(VnDetailMeta())
+    private val _gameDetailMeta = MutableStateFlow(GameDetailMeta())
     private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
@@ -269,6 +279,8 @@ class DetailViewModel(
     private val latestEpisodeProgressCache = java.util.concurrent.ConcurrentHashMap<Long, List<EpisodeProgressEntity>>()
     private val latestVnRoutesCache = java.util.concurrent.ConcurrentHashMap<Long, List<VnRouteEntity>>()
     private val vnAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
+    private val latestGameEntriesCache = java.util.concurrent.ConcurrentHashMap<Long, List<GameEntryEntity>>()
+    private val gameAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private val previewMetaCache = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, EpisodeProgressEntity>>()
     private val _previewEpisodeMeta = MutableStateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>>(emptyMap())
     val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
@@ -717,7 +729,7 @@ class DetailViewModel(
             hasStaleRatings
         )
         val gen = activeTransitionGen
-        if (item.mediaType == MediaType.VISUAL_NOVEL) {
+        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
             markTransitionEnrichReady(gen)
             return
         }
@@ -862,7 +874,8 @@ class DetailViewModel(
         val isPreview: Boolean,
         val item: MediaItemEntity?,
         val progressList: List<EpisodeProgressEntity>,
-        val vnRoutes: List<VnRouteEntity> = emptyList()
+        val vnRoutes: List<VnRouteEntity> = emptyList(),
+        val gameEntries: List<GameEntryEntity> = emptyList()
     )
 
     private val auxFlow: Flow<PreviewAndAux> = combine(
@@ -910,7 +923,8 @@ class DetailViewModel(
             _isFillerSkipEnabled,
             _isMangaSeasonGrouped,
             _novelDetailMeta,
-            _vnDetailMeta
+            _vnDetailMeta,
+            _gameDetailMeta
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -957,7 +971,8 @@ class DetailViewModel(
             isFillerSkipEnabled = (args[40] as? Boolean) ?: false,
             isMangaSeasonGrouped = (args[41] as? Boolean) ?: false,
             novelDetailMeta = (args[42] as? NovelDetailMeta) ?: NovelDetailMeta(),
-            vnDetailMeta = (args[43] as? VnDetailMeta) ?: VnDetailMeta()
+            vnDetailMeta = (args[43] as? VnDetailMeta) ?: VnDetailMeta(),
+            gameDetailMeta = (args[44] as? GameDetailMeta) ?: GameDetailMeta()
         )
     }
 
@@ -973,16 +988,21 @@ class DetailViewModel(
                         .distinctUntilChanged(),
                     repository.getVnRoutes(currentId)
                         .onStart { emit(latestVnRoutesCache[currentId] ?: emptyList()) }
+                        .distinctUntilChanged(),
+                    repository.getGameEntries(currentId)
+                        .onStart { emit(latestGameEntriesCache[currentId] ?: emptyList()) }
                         .distinctUntilChanged()
-                ) { progressList, vnRoutes ->
+                ) { progressList, vnRoutes, gameEntries ->
                     latestEpisodeProgressCache[currentId] = progressList
                     latestVnRoutesCache[currentId] = vnRoutes
+                    latestGameEntriesCache[currentId] = gameEntries
                     ActiveRoomSnapshot(
                         currentId = currentId,
                         isPreview = true,
                         item = null,
                         progressList = progressList,
-                        vnRoutes = vnRoutes
+                        vnRoutes = vnRoutes,
+                        gameEntries = gameEntries
                     )
                 }
             } else {
@@ -992,7 +1012,8 @@ class DetailViewModel(
                         isPreview = true,
                         item = null,
                         progressList = emptyList(),
-                        vnRoutes = emptyList()
+                        vnRoutes = emptyList(),
+                        gameEntries = emptyList()
                     )
                 )
             }
@@ -1017,18 +1038,25 @@ class DetailViewModel(
                                 .onStart {
                                     emit(latestVnRoutesCache[currentItem.id] ?: emptyList())
                                 }
+                                .distinctUntilChanged(),
+                            repository.getGameEntries(currentItem.id)
+                                .onStart {
+                                    emit(latestGameEntriesCache[currentItem.id] ?: emptyList())
+                                }
                                 .distinctUntilChanged()
-                        ) { progressList, vnRoutes ->
+                        ) { progressList, vnRoutes, gameEntries ->
                             if (currentItem.id > 0L) {
                                 latestEpisodeProgressCache[currentItem.id] = progressList
                                 latestVnRoutesCache[currentItem.id] = vnRoutes
+                                latestGameEntriesCache[currentItem.id] = gameEntries
                             }
                             ActiveRoomSnapshot(
                                 currentId = currentItem.id,
                                 isPreview = false,
                                 item = currentItem,
                                 progressList = progressList,
-                                vnRoutes = vnRoutes
+                                vnRoutes = vnRoutes,
+                                gameEntries = gameEntries
                             )
                         }
                     } else {
@@ -1038,7 +1066,8 @@ class DetailViewModel(
                                 isPreview = false,
                                 item = null,
                                 progressList = emptyList(),
-                                vnRoutes = emptyList()
+                                vnRoutes = emptyList(),
+                                gameEntries = emptyList()
                             )
                         )
                     }
@@ -1073,6 +1102,13 @@ class DetailViewModel(
                 room.vnRoutes
             } else if (aux.previewItem.id > 0L) {
                 latestVnRoutesCache[aux.previewItem.id] ?: emptyList()
+            } else {
+                emptyList()
+            }
+            val previewGameEntries = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
+                room.gameEntries
+            } else if (aux.previewItem.id > 0L) {
+                latestGameEntriesCache[aux.previewItem.id] ?: emptyList()
             } else {
                 emptyList()
             }
@@ -1139,7 +1175,9 @@ class DetailViewModel(
                 } else false,
                 novelDetailMeta = aux.novelDetailMeta,
                 vnDetailMeta = aux.vnDetailMeta,
-                vnRoutes = previewRoutes
+                vnRoutes = previewRoutes,
+                gameDetailMeta = aux.gameDetailMeta,
+                gameEntries = previewGameEntries
             )
         } else {
             val targetId = _mediaId.value
@@ -1155,6 +1193,11 @@ class DetailViewModel(
                     room.vnRoutes
                 } else {
                     latestVnRoutesCache[effectiveItem.id] ?: emptyList()
+                }
+                val itemGameEntries = if (!room.isPreview && room.currentId == effectiveItem.id) {
+                    room.gameEntries
+                } else {
+                    latestGameEntriesCache[effectiveItem.id] ?: emptyList()
                 }
                 val siblings = _stableSiblingIds.value.ifEmpty {
                     ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
@@ -1238,7 +1281,9 @@ class DetailViewModel(
                     } else false,
                     novelDetailMeta = aux.novelDetailMeta,
                     vnDetailMeta = aux.vnDetailMeta,
-                    vnRoutes = itemRoutes
+                    vnRoutes = itemRoutes,
+                    gameDetailMeta = aux.gameDetailMeta,
+                    gameEntries = itemGameEntries
                 )
             } else {
                 DetailUiState(isLoading = false)
@@ -1303,6 +1348,7 @@ class DetailViewModel(
         _isMangaSeasonGrouped.value = false
         _novelDetailMeta.value = NovelDetailMeta()
         _vnDetailMeta.value = VnDetailMeta()
+        _gameDetailMeta.value = GameDetailMeta()
     }
 
     fun isPreviewActive(): Boolean =
@@ -1311,8 +1357,16 @@ class DetailViewModel(
     private fun quickHasAuxCacheForPreview(
         anilistId: Long?,
         tmdbId: Long?,
-        mediaType: MediaType
+        mediaType: MediaType,
+        igdbId: Long? = null,
+        steamAppId: Long? = null
     ): Boolean {
+        if (mediaType == MediaType.GAME && igdbId != null && igdbId > 0L) {
+            if (DetailAuxMemoryCache.cache.containsKey("igdb_$igdbId")) return true
+        }
+        if (mediaType == MediaType.GAME && steamAppId != null && steamAppId > 0L) {
+            if (DetailAuxMemoryCache.cache.containsKey("steam_$steamAppId")) return true
+        }
         if (anilistId != null && anilistId > 0L) {
             if (DetailAuxMemoryCache.cache.containsKey("anilist_${mediaType}_$anilistId")) return true
         }
@@ -1325,8 +1379,14 @@ class DetailViewModel(
         return false
     }
 
-    private fun preArmPreviewLoadingIfUncached(anilistId: Long?, tmdbId: Long?, mediaType: MediaType) {
-        if (!quickHasAuxCacheForPreview(anilistId, tmdbId, mediaType)) {
+    private fun preArmPreviewLoadingIfUncached(
+        anilistId: Long?,
+        tmdbId: Long?,
+        mediaType: MediaType,
+        igdbId: Long? = null,
+        steamAppId: Long? = null
+    ) {
+        if (!quickHasAuxCacheForPreview(anilistId, tmdbId, mediaType, igdbId, steamAppId)) {
             transitionLoadingJob?.cancel()
             transitionGraceJob?.cancel()
             activeTransitionGen += 1L
@@ -1339,12 +1399,13 @@ class DetailViewModel(
     }
 
     fun openPreview(rec: RecommendationItem) {
-        preArmPreviewLoadingIfUncached(rec.anilistId, rec.tmdbId, rec.mediaType)
+        preArmPreviewLoadingIfUncached(rec.anilistId, rec.tmdbId, rec.mediaType, igdbId = rec.igdbId)
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.findExistingMedia(
                 anilistId = rec.anilistId,
                 malId = rec.malId,
                 tmdbId = rec.tmdbId,
+                igdbId = rec.igdbId,
                 title = rec.title,
                 mediaType = rec.mediaType
             )
@@ -1359,6 +1420,7 @@ class DetailViewModel(
                 tmdbId = rec.tmdbId,
                 anilistId = rec.anilistId,
                 malId = rec.malId,
+                igdbId = rec.igdbId,
                 status = TrackingStatus.PLAN_TO_TRACK
             )
             withContext(Dispatchers.Main.immediate) {
@@ -1370,7 +1432,13 @@ class DetailViewModel(
     fun openPreview(previewEntity: MediaItemEntity) {
         val hasDirectIdCache = previewEntity.id > 0L && DetailAuxMemoryCache.getCacheKey(previewEntity)?.let { DetailAuxMemoryCache.cache.containsKey(it) } == true
         if (!hasDirectIdCache) {
-            preArmPreviewLoadingIfUncached(previewEntity.anilistId, previewEntity.tmdbId, previewEntity.mediaType)
+            preArmPreviewLoadingIfUncached(
+                anilistId = previewEntity.anilistId,
+                tmdbId = previewEntity.tmdbId,
+                mediaType = previewEntity.mediaType,
+                igdbId = previewEntity.igdbId,
+                steamAppId = previewEntity.steamAppId
+            )
         }
         viewModelScope.launch(Dispatchers.IO) {
             val target = if (previewEntity.id <= 0L) {
@@ -1379,6 +1447,8 @@ class DetailViewModel(
                     malId = previewEntity.malId,
                     tmdbId = previewEntity.tmdbId,
                     vndbId = previewEntity.vndbId,
+                    igdbId = previewEntity.igdbId,
+                    steamAppId = previewEntity.steamAppId,
                     title = previewEntity.title,
                     mediaType = previewEntity.mediaType
                 ) ?: previewEntity
@@ -1394,18 +1464,21 @@ class DetailViewModel(
     fun openRelationPreview(relation: AnimeRelationItem) {
         val format = relation.format.uppercase()
         val targetType = when {
+            relation.mediaType == MediaType.GAME || format == "GAME" || format == "DLC" || format == "EXPANSION" || format == "REMAKE" || format == "REMASTER" -> MediaType.GAME
             relation.mediaType == MediaType.VISUAL_NOVEL || !relation.vndbId.isNullOrBlank() || format == "VN" || format == "VISUAL_NOVEL" -> MediaType.VISUAL_NOVEL
             format == "MANGA" -> MediaType.MANGA
             format == "NOVEL" -> MediaType.NOVEL
             format == "MOVIE" -> MediaType.MOVIE
             else -> MediaType.ANIME
         }
-        val anilistIdForLookup = relation.id.takeIf { it > 0L && targetType != MediaType.VISUAL_NOVEL }
-        preArmPreviewLoadingIfUncached(anilistIdForLookup, null, targetType)
+        val anilistIdForLookup = relation.id.takeIf { it > 0L && targetType != MediaType.VISUAL_NOVEL && targetType != MediaType.GAME }
+        val igdbIdForLookup = relation.id.takeIf { it > 0L && targetType == MediaType.GAME }
+        preArmPreviewLoadingIfUncached(anilistIdForLookup, null, targetType, igdbId = igdbIdForLookup)
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.findExistingMedia(
                 anilistId = anilistIdForLookup,
                 vndbId = relation.vndbId,
+                igdbId = igdbIdForLookup,
                 title = relation.title,
                 mediaType = targetType
             )
@@ -1417,6 +1490,7 @@ class DetailViewModel(
                 mediaType = targetType,
                 anilistId = anilistIdForLookup,
                 vndbId = relation.vndbId,
+                igdbId = igdbIdForLookup,
                 releaseYear = relation.year?.toString(),
                 status = TrackingStatus.PLAN_TO_TRACK
             )
@@ -1853,7 +1927,8 @@ class DetailViewModel(
             _favourites.value = existingCached.favourites
             _durationMinutes.value = existingCached.durationMinutes
             _vnDetailMeta.value = existingCached.vnDetailMeta
-            if (item.mediaType == MediaType.VISUAL_NOVEL && existingCached.vnDiscussionComments.isNotEmpty()) {
+            _gameDetailMeta.value = existingCached.gameDetailMeta
+            if ((item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) && existingCached.vnDiscussionComments.isNotEmpty()) {
                 _discussionComments.value = existingCached.vnDiscussionComments
             }
         }
@@ -1920,7 +1995,8 @@ class DetailViewModel(
                 _isMangaSeasonGrouped.value = it.isMangaSeasonGrouped
                 _novelDetailMeta.value = it.novelDetailMeta
                 _vnDetailMeta.value = it.vnDetailMeta
-                if (item.mediaType == MediaType.VISUAL_NOVEL && it.vnDiscussionComments.isNotEmpty()) {
+                _gameDetailMeta.value = it.gameDetailMeta
+                if ((item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) && it.vnDiscussionComments.isNotEmpty()) {
                     _discussionComments.value = it.vnDiscussionComments
                 }
             }
@@ -1961,7 +2037,8 @@ class DetailViewModel(
                     isMangaSeasonGrouped = _isMangaSeasonGrouped.value,
                     novelDetailMeta = _novelDetailMeta.value,
                     vnDetailMeta = _vnDetailMeta.value,
-                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL) _discussionComments.value else emptyList()
+                    gameDetailMeta = _gameDetailMeta.value,
+                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) _discussionComments.value else emptyList()
                 )
                 if (!isStillCurrentItem()) return
                 if (cacheKey != null) DetailAuxMemoryCache.cache[cacheKey] = aux
@@ -2076,6 +2153,122 @@ class DetailViewModel(
                                 metacriticScore = vnData.metacriticScore ?: currentPreview.metacriticScore,
                                 synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
                                 bannerUrl = if (shouldUpgradePreviewBanner) (vnData.bannerUrl ?: currentPreview.bannerUrl) else currentPreview.bannerUrl
+                            )
+                            _previewItem.value = updatedPreview
+                            _previewStack.update { stack ->
+                                if (stack.isNotEmpty()) stack.dropLast(1) + updatedPreview else listOf(updatedPreview)
+                            }
+                        }
+                    }
+                }
+                markTransitionAuxReady(auxGen)
+                persistAuxCache()
+                return@launch
+            }
+
+            if (item.mediaType == MediaType.GAME) {
+                val igdbClientId = preferenceManager?.igdbClientId?.firstOrNull()?.ifBlank { null }
+                    ?: PreferenceManager.cachedIgdbClientId.ifBlank { null }
+                val igdbClientSecret = preferenceManager?.igdbClientSecret?.firstOrNull()?.ifBlank { null }
+                    ?: PreferenceManager.cachedIgdbClientSecret.ifBlank { null }
+                val sgdbKey = preferenceManager?.steamGridDbApiKey?.firstOrNull()?.ifBlank { null }
+                    ?: PreferenceManager.cachedSteamGridDbApiKey.ifBlank { null }
+                val tokens = trackerTokenManager?.tokens?.firstOrNull()
+                val steamApiKey = tokens?.steamApiKey?.ifBlank { null }
+                val rawSteamId64 = tokens?.steamId64?.ifBlank { null }
+                val steamId64 = if (steamApiKey != null && rawSteamId64 != null) {
+                    com.omnitrack.app.data.sync.TrackerAccountVerifier.resolveSteamId(rawSteamId64, steamApiKey) ?: rawSteamId64
+                } else null
+
+                val gameData = gameEnrichmentSource.fetchFullGameData(
+                    item = item,
+                    igdbClientId = igdbClientId,
+                    igdbClientSecret = igdbClientSecret,
+                    steamGridDbApiKey = sgdbKey,
+                    steamApiKey = steamApiKey,
+                    steamId64 = steamId64
+                )
+                if (!isStillCurrentItem()) return@launch
+
+                if (gameData != null) {
+                    _gameDetailMeta.value = gameData.gameDetailMeta
+                    _companies.value = gameData.companies
+                    _animeRelations.value = gameData.relations
+                    _recommendations.value = gameData.similarGames
+                    _tags.value = gameData.tags
+                    _synonyms.value = gameData.synonyms
+                    _externalLinks.value = gameData.externalLinks
+                    _trailers.value = gameData.trailers
+                    gameData.title?.let { _englishTitle.value = it }
+                    gameData.startDate?.let { _startDate.value = it }
+                    gameData.runtimeMinutes?.let { _durationMinutes.value = it }
+                    _format.value = "GAME"
+                    if (gameData.discussionComments.isNotEmpty()) {
+                        _discussionComments.value = gameData.discussionComments
+                    }
+                    if (!gameData.clearLogoUrl.isNullOrBlank()) {
+                        EnrichmentRepository.putCachedClearart(item, gameData.clearLogoUrl)
+                        _heroClearLogoUrl.value = gameData.clearLogoUrl
+                    }
+
+                    if (item.id > 0L) {
+                        val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                        val shouldUpgradeBanner = latest.customBannerPath.isNullOrBlank() && (
+                            latest.bannerUrl.isNullOrBlank() ||
+                                (latest.bannerUrl.contains("header.jpg") && !gameData.bannerUrl.isNullOrBlank() && !gameData.bannerUrl.contains("header.jpg"))
+                            )
+                        val shouldUpgradeCover = latest.customCoverPath.isNullOrBlank() &&
+                            (latest.coverUrl.isBlank() || latest.coverUrl.contains("placeholder")) &&
+                            !gameData.coverUrl.isNullOrBlank()
+                        val nextPlaytime = if (gameData.steamPlaytimeHours != null && gameData.steamPlaytimeHours > latest.playtimeHours) {
+                            gameData.steamPlaytimeHours
+                        } else latest.playtimeHours
+                        val nextProgress = maxOf(latest.currentProgress, nextPlaytime)
+                        val updated = latest.copy(
+                            igdbId = gameData.resolvedIgdbId ?: latest.igdbId,
+                            steamAppId = gameData.resolvedSteamAppId ?: latest.steamAppId,
+                            synopsis = latest.synopsis?.takeIf { it.isNotBlank() } ?: gameData.synopsis,
+                            coverUrl = if (shouldUpgradeCover) gameData.coverUrl!! else latest.coverUrl,
+                            bannerUrl = if (shouldUpgradeBanner) (gameData.bannerUrl ?: latest.bannerUrl) else latest.bannerUrl,
+                            clearartUrl = gameData.clearLogoUrl ?: latest.clearartUrl,
+                            communityScore = gameData.communityScore ?: latest.communityScore,
+                            metacriticScore = gameData.metacriticScore ?: latest.metacriticScore,
+                            releaseYear = gameData.releaseYear ?: latest.releaseYear,
+                            contentRating = gameData.contentRating ?: latest.contentRating,
+                            runtimeMinutes = gameData.runtimeMinutes ?: latest.runtimeMinutes,
+                            studioOrNetwork = gameData.studioOrNetwork ?: latest.studioOrNetwork,
+                            platforms = latest.platforms?.takeIf { it.isNotBlank() } ?: gameData.platformsSummary,
+                            steamAchievementsUnlocked = gameData.gameDetailMeta.achievementsUnlocked ?: latest.steamAchievementsUnlocked,
+                            steamAchievementsTotal = gameData.gameDetailMeta.achievementsTotal ?: latest.steamAchievementsTotal,
+                            playtimeHours = nextPlaytime,
+                            currentProgress = nextProgress
+                        )
+                        if (isStillCurrentItem() && updated != latest) {
+                            repository.updateMedia(updated)
+                        }
+                        if (isStillCurrentItem()) {
+                            autoSeedGameEntriesIfEmpty(latest.id, gameData.gameDetailMeta.expansionSeeds)
+                        }
+                    } else if (isStillCurrentItem()) {
+                        val currentPreview = _previewItem.value
+                        if (currentPreview != null) {
+                            val shouldUpgradePreviewBanner = currentPreview.bannerUrl.isNullOrBlank() ||
+                                (currentPreview.bannerUrl.contains("header.jpg") && !gameData.bannerUrl.isNullOrBlank() && !gameData.bannerUrl.contains("header.jpg"))
+                            val updatedPreview = currentPreview.copy(
+                                igdbId = gameData.resolvedIgdbId ?: currentPreview.igdbId,
+                                steamAppId = gameData.resolvedSteamAppId ?: currentPreview.steamAppId,
+                                synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: gameData.synopsis,
+                                bannerUrl = if (shouldUpgradePreviewBanner) (gameData.bannerUrl ?: currentPreview.bannerUrl) else currentPreview.bannerUrl,
+                                clearartUrl = gameData.clearLogoUrl ?: currentPreview.clearartUrl,
+                                communityScore = gameData.communityScore ?: currentPreview.communityScore,
+                                metacriticScore = gameData.metacriticScore ?: currentPreview.metacriticScore,
+                                releaseYear = gameData.releaseYear ?: currentPreview.releaseYear,
+                                contentRating = gameData.contentRating ?: currentPreview.contentRating,
+                                runtimeMinutes = gameData.runtimeMinutes ?: currentPreview.runtimeMinutes,
+                                studioOrNetwork = gameData.studioOrNetwork ?: currentPreview.studioOrNetwork,
+                                platforms = currentPreview.platforms?.takeIf { it.isNotBlank() } ?: gameData.platformsSummary,
+                                steamAchievementsUnlocked = gameData.gameDetailMeta.achievementsUnlocked ?: currentPreview.steamAchievementsUnlocked,
+                                steamAchievementsTotal = gameData.gameDetailMeta.achievementsTotal ?: currentPreview.steamAchievementsTotal
                             )
                             _previewItem.value = updatedPreview
                             _previewStack.update { stack ->
@@ -3435,6 +3628,8 @@ class DetailViewModel(
             malId = preview.malId,
             tmdbId = preview.tmdbId,
             vndbId = preview.vndbId,
+            igdbId = preview.igdbId,
+            steamAppId = preview.steamAppId,
             title = preview.title,
             mediaType = preview.mediaType
         )
@@ -3982,7 +4177,7 @@ class DetailViewModel(
         _activeDiscussionAniListId.value = null
         _activeDiscussionTag.value = null
         _activeDiscussionSort.value = "newest"
-        _discussionComments.value = if (targetItem?.mediaType == MediaType.VISUAL_NOVEL && cached != null) {
+        _discussionComments.value = if ((targetItem?.mediaType == MediaType.VISUAL_NOVEL || targetItem?.mediaType == MediaType.GAME) && cached != null) {
             cached.vnDiscussionComments
         } else {
             emptyList()
@@ -4021,6 +4216,7 @@ class DetailViewModel(
         _isMangaSeasonGrouped.value = cached?.isMangaSeasonGrouped ?: false
         _novelDetailMeta.value = cached?.novelDetailMeta ?: NovelDetailMeta()
         _vnDetailMeta.value = cached?.vnDetailMeta ?: VnDetailMeta()
+        _gameDetailMeta.value = cached?.gameDetailMeta ?: GameDetailMeta()
 
         val resolvedTmdb = targetItem?.tmdbId ?: (if (targetId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[targetId] else null)
         val cachedSeasons = SeriesContentMemoryCache.findSeasons(targetItem, resolvedTmdb, targetId, targetItem?.anilistId)
@@ -4083,6 +4279,7 @@ class DetailViewModel(
         _isMangaSeasonGrouped.value = cached.isMangaSeasonGrouped
         _novelDetailMeta.value = cached.novelDetailMeta
         _vnDetailMeta.value = cached.vnDetailMeta
+        _gameDetailMeta.value = cached.gameDetailMeta
         if (cached.vnDiscussionComments.isNotEmpty() && _discussionComments.value.isEmpty()) {
             _discussionComments.value = cached.vnDiscussionComments
         }
@@ -4348,6 +4545,7 @@ class DetailViewModel(
             latestRoomItemCache.remove(item.id)
             latestEpisodeProgressCache.remove(item.id)
             latestVnRoutesCache.remove(item.id)
+            latestGameEntriesCache.remove(item.id)
             repository.deleteMedia(item)
         }
     }
@@ -4470,6 +4668,230 @@ class DetailViewModel(
 
     fun setCgAsHeroBanner(url: String) {
         updateBanner(url)
+    }
+
+    private suspend fun autoSeedGameEntriesIfEmpty(
+        mediaId: Long,
+        expansionSeeds: List<Pair<String, Long?>>
+    ) {
+        if (mediaId <= 0L) return
+        if (!gameAutoSeededMediaIds.add(mediaId)) return
+        val existing = repository.getGameEntriesOnce(mediaId)
+        if (existing.isNotEmpty()) return
+
+        val seeded = mutableListOf<GameEntryEntity>()
+        var order = 0
+        seeded.add(
+            GameEntryEntity(
+                mediaId = mediaId,
+                entryName = "Base Game",
+                entryType = GameEntryType.BASE_GAME.name,
+                sortOrder = order++
+            )
+        )
+        expansionSeeds.take(8).forEach { (expName, expId) ->
+            seeded.add(
+                GameEntryEntity(
+                    mediaId = mediaId,
+                    entryName = expName,
+                    entryType = GameEntryType.EXPANSION.name,
+                    igdbExpansionId = expId,
+                    sortOrder = order++
+                )
+            )
+        }
+        repository.insertGameEntries(seeded)
+    }
+
+    fun stepGamePlaytime(deltaHours: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val next = kotlin.math.round(((latest.playtimeHours + deltaHours).coerceAtLeast(0.0)) * 10.0) / 10.0
+            val nextStatus = if (next > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK && latest.autoStatusEnabled) {
+                TrackingStatus.IN_PROGRESS
+            } else latest.status
+            repository.updateMedia(latest.copy(playtimeHours = next, currentProgress = next, status = nextStatus))
+        }
+    }
+
+    fun setGamePlaytimeExact(hours: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val next = kotlin.math.round((hours.coerceAtLeast(0.0)) * 10.0) / 10.0
+            val nextStatus = if (next > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK && latest.autoStatusEnabled) {
+                TrackingStatus.IN_PROGRESS
+            } else latest.status
+            repository.updateMedia(latest.copy(playtimeHours = next, currentProgress = next, status = nextStatus))
+        }
+    }
+
+    fun updateGameCompletionTier(tier: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val cleanTier = tier?.takeIf { it.isNotBlank() && it != GameCompletionTier.NONE.name }
+            val nextStatus = if (
+                cleanTier != null &&
+                latest.status == TrackingStatus.PLAN_TO_TRACK &&
+                latest.autoStatusEnabled
+            ) {
+                if (cleanTier == GameCompletionTier.COMPLETIONIST.name || cleanTier == GameCompletionTier.PLATINUM.name) {
+                    TrackingStatus.COMPLETED
+                } else {
+                    TrackingStatus.IN_PROGRESS
+                }
+            } else latest.status
+            repository.updateMedia(latest.copy(gameCompletionTier = cleanTier, status = nextStatus))
+        }
+    }
+
+    fun toggleGameEntryCompleted(entry: GameEntryEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val nextDone = !entry.isCompleted
+            val nextTier = if (nextDone && entry.completionTier == GameCompletionTier.NONE.name) {
+                GameCompletionTier.MAIN.name
+            } else {
+                entry.completionTier
+            }
+            val updated = entry.copy(
+                isCompleted = nextDone,
+                completionTier = nextTier,
+                completedAtMs = if (nextDone) (entry.completedAtMs ?: System.currentTimeMillis()) else null
+            )
+            repository.updateGameEntry(updated)
+        }
+    }
+
+    fun addCustomGameEntry(entryName: String, entryType: String = GameEntryType.PLAYTHROUGH.name) {
+        val clean = entryName.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val existing = repository.getGameEntriesOnce(mediaId)
+            val nextOrder = (existing.maxOfOrNull { it.sortOrder } ?: -1) + 1
+            repository.insertGameEntry(
+                GameEntryEntity(
+                    mediaId = mediaId,
+                    entryName = clean,
+                    entryType = entryType,
+                    sortOrder = nextOrder
+                )
+            )
+        }
+    }
+
+    fun saveGameEntryDetails(entry: GameEntryEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sanitized = entry.copy(
+                entryName = entry.entryName.trim().ifBlank { "Untitled Entry" },
+                difficulty = entry.difficulty?.trim()?.takeIf { it.isNotBlank() },
+                platform = entry.platform?.trim()?.takeIf { it.isNotBlank() },
+                userNote = entry.userNote?.trim()?.takeIf { it.isNotBlank() }
+            )
+            repository.updateGameEntry(sanitized)
+        }
+    }
+
+    fun deleteGameEntry(entryId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteGameEntryById(entryId)
+        }
+    }
+
+    fun updateManualAchievements(unlocked: Int, total: Int) {
+        val safeTotal = total.coerceAtLeast(0)
+        val safeUnlocked = unlocked.coerceIn(0, safeTotal.coerceAtLeast(unlocked))
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            repository.updateMedia(
+                latest.copy(
+                    steamAchievementsUnlocked = safeUnlocked,
+                    steamAchievementsTotal = safeTotal
+                )
+            )
+            _gameDetailMeta.update { meta ->
+                meta.copy(
+                    achievementsUnlocked = safeUnlocked,
+                    achievementsTotal = safeTotal
+                )
+            }
+        }
+    }
+
+    fun syncSteamForCurrentGame(onResult: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val item = uiState.value.item
+            if (item == null) {
+                withContext(Dispatchers.Main) { onResult("No active game selected") }
+                return@launch
+            }
+            val tokens = trackerTokenManager?.tokens?.firstOrNull()
+            val apiKey = tokens?.steamApiKey?.trim()
+            val rawId = tokens?.steamId64?.trim()
+            if (apiKey.isNullOrBlank() || rawId.isNullOrBlank()) {
+                withContext(Dispatchers.Main) { onResult("Connect Steam API Key & SteamID64 in Tracker Accounts first") }
+                return@launch
+            }
+            val resolvedSteamUserId = com.omnitrack.app.data.sync.TrackerAccountVerifier.resolveSteamId(rawId, apiKey) ?: rawId
+            val result = gameEnrichmentSource.syncSteamStatsOnly(
+                title = item.title,
+                knownSteamAppId = item.steamAppId ?: _gameDetailMeta.value.steamAppId,
+                steamApiKey = apiKey,
+                steamId64 = resolvedSteamUserId
+            )
+            if (result.error != null) {
+                withContext(Dispatchers.Main) { onResult(result.error) }
+                return@launch
+            }
+
+            _gameDetailMeta.update { meta ->
+                meta.copy(
+                    steamAppId = result.steamAppId ?: meta.steamAppId,
+                    achievements = if (result.achievements.isNotEmpty()) result.achievements else meta.achievements,
+                    achievementsUnlocked = result.achievementsUnlocked ?: meta.achievementsUnlocked,
+                    achievementsTotal = result.achievementsTotal ?: meta.achievementsTotal,
+                    steamSyncedAtMs = System.currentTimeMillis()
+                )
+            }
+
+            if (item.id > 0L) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                val nextPlaytime = if (result.playtimeHours != null && result.playtimeHours > latest.playtimeHours) {
+                    result.playtimeHours
+                } else latest.playtimeHours
+                val updated = latest.copy(
+                    steamAppId = result.steamAppId ?: latest.steamAppId,
+                    playtimeHours = nextPlaytime,
+                    currentProgress = maxOf(latest.currentProgress, nextPlaytime),
+                    steamAchievementsUnlocked = result.achievementsUnlocked ?: latest.steamAchievementsUnlocked,
+                    steamAchievementsTotal = result.achievementsTotal ?: latest.steamAchievementsTotal
+                )
+                if (updated != latest) {
+                    repository.updateMedia(updated)
+                }
+            }
+
+            val summaryParts = buildList {
+                result.playtimeHours?.let { add(String.format(java.util.Locale.US, "%.1fh playtime", it)) }
+                if (result.achievementsUnlocked != null && result.achievementsTotal != null) {
+                    add("${result.achievementsUnlocked}/${result.achievementsTotal} achievements")
+                }
+            }
+            val msg = if (summaryParts.isNotEmpty()) {
+                "Steam synced: ${summaryParts.joinToString(" · ")}"
+            } else {
+                "Steam check complete"
+            }
+            withContext(Dispatchers.Main) { onResult(msg) }
+        }
     }
 
     /**
@@ -4687,7 +5109,8 @@ data class CachedDetailAux(
     val isMangaSeasonGrouped: Boolean = false,
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
-    val vnDiscussionComments: List<DiscussionComment> = emptyList()
+    val vnDiscussionComments: List<DiscussionComment> = emptyList(),
+    val gameDetailMeta: GameDetailMeta = GameDetailMeta()
 )
 
 internal object DetailAuxMemoryCache {
@@ -4695,6 +5118,8 @@ internal object DetailAuxMemoryCache {
 
     fun getCacheKey(item: MediaItemEntity): String? {
         if (item.id > 0L) return "id_${item.id}"
+        if (item.mediaType == MediaType.GAME && item.igdbId != null && item.igdbId > 0L) return "igdb_${item.igdbId}"
+        if (item.mediaType == MediaType.GAME && item.steamAppId != null && item.steamAppId > 0L) return "steam_${item.steamAppId}"
         if (!item.vndbId.isNullOrBlank()) return "vndb_${item.vndbId}"
         if (item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0L) {
             return "anilist_${item.mediaType}_${item.anilistId}"

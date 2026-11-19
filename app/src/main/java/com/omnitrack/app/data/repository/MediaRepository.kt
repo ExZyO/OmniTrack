@@ -2,12 +2,14 @@ package com.omnitrack.app.data.repository
 
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
+import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
+import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
@@ -22,8 +24,29 @@ class MediaRepository(
     private val categoryDao: CategoryDao,
     private val syncQueueDao: SyncQueueDao? = null,
     private val episodeProgressDao: EpisodeProgressDao? = null,
-    private val vnRouteDao: VnRouteDao? = null
+    private val vnRouteDao: VnRouteDao? = null,
+    private val gameEntryDao: GameEntryDao? = null
 ) {
+    fun getGameEntries(mediaId: Long): Flow<List<GameEntryEntity>> =
+        (gameEntryDao?.getEntriesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getGameEntriesOnce(mediaId: Long): List<GameEntryEntity> =
+        gameEntryDao?.getEntriesForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertGameEntry(entry: GameEntryEntity): Long? = gameEntryDao?.insertEntry(entry)
+
+    suspend fun insertGameEntries(entries: List<GameEntryEntity>) {
+        if (entries.isNotEmpty()) gameEntryDao?.insertEntries(entries)
+    }
+
+    suspend fun updateGameEntry(entry: GameEntryEntity) {
+        gameEntryDao?.updateEntry(entry)
+    }
+
+    suspend fun deleteGameEntryById(entryId: Long) {
+        gameEntryDao?.deleteEntryById(entryId)
+    }
+
     fun getVnRoutes(mediaId: Long): Flow<List<VnRouteEntity>> =
         (vnRouteDao?.getRoutesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
@@ -129,11 +152,21 @@ class MediaRepository(
         malId: Long? = null,
         tmdbId: Long? = null,
         vndbId: String? = null,
+        igdbId: Long? = null,
+        steamAppId: Long? = null,
         title: String? = null,
         mediaType: MediaType? = null
     ): MediaItemEntity? {
         if (!vndbId.isNullOrBlank()) {
             val found = mediaDao.findByVndbId(vndbId.trim())
+            if (found != null) return found
+        }
+        if (igdbId != null && igdbId > 0 && mediaType == MediaType.GAME) {
+            val found = mediaDao.findByIgdbId(igdbId, MediaType.GAME)
+            if (found != null) return found
+        }
+        if (steamAppId != null && steamAppId > 0 && mediaType == MediaType.GAME) {
+            val found = mediaDao.findBySteamAppId(steamAppId, MediaType.GAME)
             if (found != null) return found
         }
         if (anilistId != null && anilistId > 0) {

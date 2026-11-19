@@ -9,18 +9,20 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
+import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
+import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 
 @Database(
-    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class, VnRouteEntity::class],
-    version = 14,
+    entities = [MediaItemEntity::class, CategoryEntity::class, SyncQueueEntity::class, EpisodeProgressEntity::class, VnRouteEntity::class, GameEntryEntity::class],
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -31,6 +33,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
     abstract fun syncQueueDao(): SyncQueueDao
     abstract fun episodeProgressDao(): EpisodeProgressDao
     abstract fun vnRouteDao(): VnRouteDao
+    abstract fun gameEntryDao(): GameEntryDao
 
     companion object {
         @Volatile
@@ -114,6 +117,36 @@ abstract class OmniTrackDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_items ADD COLUMN steamAppId INTEGER")
+                db.execSQL("ALTER TABLE media_items ADD COLUMN gameCompletionTier TEXT")
+                db.execSQL("UPDATE media_items SET steamAppId = igdbId, igdbId = NULL WHERE mediaType = 'GAME' AND igdbId IS NOT NULL AND steamAppId IS NULL")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS game_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        mediaId INTEGER NOT NULL,
+                        entryName TEXT NOT NULL,
+                        entryType TEXT NOT NULL DEFAULT 'PLAYTHROUGH',
+                        igdbExpansionId INTEGER,
+                        coverUrl TEXT,
+                        platform TEXT,
+                        completionTier TEXT NOT NULL DEFAULT 'NONE',
+                        difficulty TEXT,
+                        hoursSpent REAL,
+                        startedAtMs INTEGER,
+                        completedAtMs INTEGER,
+                        isCompleted INTEGER NOT NULL DEFAULT 0,
+                        userRating REAL,
+                        userNote TEXT,
+                        isBookmarked INTEGER NOT NULL DEFAULT 0,
+                        sortOrder INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_game_entries_mediaId ON game_entries(mediaId)")
+            }
+        }
+
         fun getDatabase(context: Context): OmniTrackDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -121,7 +154,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {

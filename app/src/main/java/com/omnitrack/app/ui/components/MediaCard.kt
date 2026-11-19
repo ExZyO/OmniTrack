@@ -86,7 +86,11 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     malId = malId,
     originCountry = originCountry,
     platform = platform,
-    runtimeMinutes = runtimeMinutes
+    runtimeMinutes = runtimeMinutes,
+    playtimeHours = playtimeHours,
+    platforms = platforms,
+    steamAppId = steamAppId,
+    gameCompletionTier = gameCompletionTier
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -399,6 +403,16 @@ fun MediaCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 2.dp)
                 )
+            } else if (item.mediaType == MediaType.GAME) {
+                Text(
+                    text = com.omnitrack.app.data.model.formatGameCardBadge(item.platforms, item.platform, item.playtimeHours, item.runtimeMinutes),
+                    color = Color.White.copy(alpha = 0.56f),
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
             }
         }
     }
@@ -431,20 +445,25 @@ fun MediaCard(
 
 private fun formatProgress(item: MediaCardSummary): String {
     val unit = if (item.mediaType == MediaType.NOVEL && item.platform == "LIGHT_NOVEL") "Vol" else item.mediaType.unitLabel
-    val current = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-        String.format("%.1f", item.currentProgress)
+    val effValue = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
+        if (item.playtimeHours > 0.0) item.playtimeHours else item.currentProgress
     } else {
-        item.currentProgress.toInt().toString()
+        item.currentProgress
+    }
+    val current = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
+        String.format(java.util.Locale.US, "%.1f", effValue)
+    } else {
+        effValue.toInt().toString()
     }
 
     return if (item.totalProgress != null && item.totalProgress > 0) {
         val total = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-            String.format("%.1f", item.totalProgress)
+            String.format(java.util.Locale.US, "%.1f", item.totalProgress)
         } else {
             item.totalProgress.toInt().toString()
         }
         "$current / $total $unit"
-    } else if (item.currentProgress > 0) {
+    } else if (effValue > 0) {
         "$current $unit"
     } else {
         ""

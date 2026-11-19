@@ -44,10 +44,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.AnimeTagItem
+import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.data.model.formatProtonDbLabel
+import com.omnitrack.app.data.model.formatSteamDeckLabel
 import com.omnitrack.app.data.model.formatVndbVoicedLabel
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -82,6 +85,7 @@ fun DetailGeneralInfoSection(
     endDate: String? = null,
     nextAiringEpochSeconds: Long? = null,
     vnDetailMeta: VnDetailMeta? = null,
+    gameDetailMeta: GameDetailMeta? = null,
     modifier: Modifier = Modifier
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
@@ -175,7 +179,7 @@ fun DetailGeneralInfoSection(
         if (!airedStr.isNullOrBlank()) {
             val dateLabel = when (item.mediaType) {
                 MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK -> "Published"
-                MediaType.VISUAL_NOVEL -> "Released"
+                MediaType.VISUAL_NOVEL, MediaType.GAME -> "Released"
                 else -> "Aired"
             }
             add(dateLabel to airedStr)
@@ -237,6 +241,42 @@ fun DetailGeneralInfoSection(
             vnDetailMeta?.devStatus?.takeIf { it.isNotBlank() }?.let { dev ->
                 add("Dev Status" to dev)
             }
+        } else if (item.mediaType == MediaType.GAME) {
+            val hltb = gameDetailMeta?.hltb
+            if (hltb != null && hltb.hasAny) {
+                val hltbParts = buildList {
+                    hltb.mainHours?.let { add("~${String.format(Locale.US, "%.1f", it)}h Main") }
+                    hltb.extraHours?.let { add("~${String.format(Locale.US, "%.1f", it)}h Extra") }
+                    hltb.completeHours?.let { add("~${String.format(Locale.US, "%.1f", it)}h 100%") }
+                }
+                if (hltbParts.isNotEmpty()) {
+                    add("Time to Beat" to hltbParts.joinToString(" · "))
+                }
+            }
+            formatSteamDeckLabel(gameDetailMeta?.steamDeckCategory)?.let { deckLabel ->
+                add("Steam Deck" to deckLabel)
+            }
+            formatProtonDbLabel(gameDetailMeta?.protonDbTier)?.let { protonLabel ->
+                val withCount = gameDetailMeta?.protonDbTotal?.takeIf { it > 0 }?.let { total ->
+                    "$protonLabel ($total reports)"
+                } ?: protonLabel
+                add("ProtonDB" to withCount)
+            }
+            gameDetailMeta?.ageRatings?.takeIf { it.isNotEmpty() }?.let { ratings ->
+                add("Age Rating" to ratings.joinToString(" · "))
+            }
+            gameDetailMeta?.gameEngine?.takeIf { it.isNotBlank() }?.let { eng ->
+                add("Engine" to eng)
+            }
+            gameDetailMeta?.gameModes?.takeIf { it.isNotEmpty() }?.let { modes ->
+                add("Modes" to modes.joinToString(", "))
+            }
+            gameDetailMeta?.perspectives?.takeIf { it.isNotEmpty() }?.let { persp ->
+                add("Perspective" to persp.joinToString(", "))
+            }
+            gameDetailMeta?.supportedPlatforms?.takeIf { it.isNotEmpty() }?.let { plats ->
+                add("Supported Platforms" to plats.take(6).joinToString(", "))
+            }
         } else if (effRuntime != null && effRuntime > 0) {
             val hrs = effRuntime / 60
             val mins = effRuntime % 60
@@ -268,15 +308,15 @@ fun DetailGeneralInfoSection(
         }
 
         // 11. Certification & Platform & Production (for non-anime or fallback)
-        if (!item.contentRating.isNullOrBlank()) {
+        if (!item.contentRating.isNullOrBlank() && (item.mediaType != MediaType.GAME || gameDetailMeta?.ageRatings.isNullOrEmpty())) {
             add("Certification" to item.contentRating)
         }
-        if (!item.platforms.isNullOrBlank()) {
+        if (!item.platforms.isNullOrBlank() && (item.mediaType != MediaType.GAME || gameDetailMeta?.supportedPlatforms.isNullOrEmpty())) {
             add("Platform" to item.platforms)
         }
         if (!item.studioOrNetwork.isNullOrBlank() && !isSeries) {
             val companyLabel = when (item.mediaType) {
-                MediaType.VISUAL_NOVEL -> "Developer"
+                MediaType.VISUAL_NOVEL, MediaType.GAME -> "Developer"
                 MediaType.MANGA, MediaType.NOVEL -> "Serialization"
                 else -> "Production"
             }
@@ -483,6 +523,7 @@ fun DetailGenresTagsSection(
     tags: List<AnimeTagItem> = emptyList(),
     vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR,
     vnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP,
+    gameDetailMeta: GameDetailMeta? = null,
     onGenreOrTagClick: ((name: String, isTag: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -663,6 +704,141 @@ fun DetailGenresTagsSection(
         return
     }
 
+    if (item.mediaType == MediaType.GAME) {
+        val combinedGameTags = remember(tags, effectiveGenres, gameDetailMeta) {
+            buildList {
+                addAll(tags)
+                effectiveGenres.forEachIndexed { idx, g ->
+                    if (none { it.name.equals(g, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 10_000L + idx, name = g, category = "genre"))
+                    }
+                }
+                gameDetailMeta?.gameModes.orEmpty().forEachIndexed { idx, m ->
+                    if (none { it.name.equals(m, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 20_000L + idx, name = m, category = "mode"))
+                    }
+                }
+                gameDetailMeta?.perspectives.orEmpty().forEachIndexed { idx, p ->
+                    if (none { it.name.equals(p, ignoreCase = true) }) {
+                        add(AnimeTagItem(id = 30_000L + idx, name = p, category = "mode"))
+                    }
+                }
+            }.distinctBy { it.name.lowercase() }
+        }
+        if (combinedGameTags.isEmpty()) return
+
+        var selectedCategory by remember { mutableStateOf("ALL") }
+        var showAllTags by remember { mutableStateOf(false) }
+
+        val categories = remember(combinedGameTags) {
+            buildList {
+                add("ALL" to "All")
+                if (combinedGameTags.any { it.category.equals("genre", ignoreCase = true) }) add("genre" to "Genres")
+                if (combinedGameTags.any { it.category.equals("theme", ignoreCase = true) }) add("theme" to "Themes")
+                if (combinedGameTags.any { it.category.equals("mode", ignoreCase = true) }) add("mode" to "Modes")
+            }
+        }
+        val filteredGameTags = remember(combinedGameTags, selectedCategory) {
+            if (selectedCategory == "ALL") combinedGameTags
+            else combinedGameTags.filter { it.category.equals(selectedCategory, ignoreCase = true) }
+        }
+        val visibleGameTags = if (showAllTags) filteredGameTags else filteredGameTags.take(18)
+
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Genres & Tags",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White
+            )
+
+            if (categories.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    categories.forEach { (key, label) ->
+                        val selected = selectedCategory == key
+                        Column(
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .clickable {
+                                    selectedCategory = key
+                                    showAllTags = false
+                                },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                fontSize = 12.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(2.dp)
+                                    .background(if (selected) Color.White else Color.Transparent)
+                            )
+                        }
+                    }
+                }
+            }
+
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                visibleGameTags.forEach { tagItem ->
+                    val isGenre = tagItem.category.equals("genre", ignoreCase = true)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isGenre) AccentArctic.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.06f)
+                            )
+                            .border(
+                                1.dp,
+                                if (isGenre) AccentArctic.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.09f),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = tagItem.name,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = if (isGenre) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+
+            if (filteredGameTags.size > 18) {
+                Text(
+                    text = if (showAllTags) "Show less" else "+${filteredGameTags.size - 18} more",
+                    color = Color.White.copy(alpha = 0.72f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clickable { showAllTags = !showAllTags }
+                        .padding(vertical = 2.dp)
+                )
+            }
+        }
+        return
+    }
+
     if (effectiveGenres.isEmpty() && tags.isEmpty()) return
 
     var showAllTags by remember { mutableStateOf(false) }
@@ -773,6 +949,7 @@ fun DetailShowDetailsSection(
     favourites: Int? = null,
     durationMinutes: Int? = null,
     vnDetailMeta: VnDetailMeta? = null,
+    gameDetailMeta: GameDetailMeta? = null,
     vnSpoilerLevel: VnSpoilerLevel = VnSpoilerLevel.MINOR,
     vnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP,
     onGenreOrTagClick: ((name: String, isTag: Boolean) -> Unit)? = null,
@@ -787,7 +964,8 @@ fun DetailShowDetailsSection(
             popularity = popularity,
             favourites = favourites,
             durationMinutes = durationMinutes,
-            vnDetailMeta = vnDetailMeta
+            vnDetailMeta = vnDetailMeta,
+            gameDetailMeta = gameDetailMeta
         )
         DetailNamesSynonymsSection(
             item = item,
@@ -802,6 +980,7 @@ fun DetailShowDetailsSection(
             tags = tags,
             vnSpoilerLevel = vnSpoilerLevel,
             vnNsfwFilterMode = vnNsfwFilterMode,
+            gameDetailMeta = gameDetailMeta,
             onGenreOrTagClick = onGenreOrTagClick
         )
     }
