@@ -76,7 +76,7 @@ object BookCsvImporter {
 
             if (existing != null) {
                 val mergedNotes = when {
-                    !existing.notes.isNullOrBlank() || review.isNullOrBlank() -> existing.notes
+                    !existing.simklMemo.isNullOrBlank() || review.isNullOrBlank() -> existing.simklMemo
                     else -> review
                 }
                 val mergedStatus = if (existing.status == TrackingStatus.PLAN_TO_TRACK && status != TrackingStatus.PLAN_TO_TRACK) {
@@ -98,8 +98,8 @@ object BookCsvImporter {
                     currentProgress = nextProgress,
                     status = mergedStatus,
                     userRating = existing.userRating ?: rating10,
-                    notes = mergedNotes,
-                    categoryNames = existing.categoryNames ?: extraTags
+                    simklMemo = mergedNotes,
+                    categoryNames = existing.categoryNames.takeIf { it.isNotBlank() } ?: extraTags.orEmpty()
                 )
                 if (next != existing) {
                     mediaRepository.updateMedia(next)
@@ -110,14 +110,15 @@ object BookCsvImporter {
                 mediaRepository.insertMedia(
                     MediaItemEntity(
                         title = title,
+                        coverUrl = "",
                         mediaType = MediaType.BOOK,
                         status = status,
                         currentProgress = initProgress,
                         totalProgress = pages?.toDouble(),
                         userRating = rating10,
                         releaseYear = year,
-                        notes = review,
-                        categoryNames = extraTags,
+                        simklMemo = review,
+                        categoryNames = extraTags.orEmpty(),
                         isbn = isbn,
                         bookAuthor = author,
                         bookFormat = bookFormat

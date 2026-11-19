@@ -2411,7 +2411,7 @@ class DetailViewModel(
                         } else {
                             latest.bannerUrl
                         }
-                        val nextCover = latest.coverUrl?.takeIf { it.isNotBlank() } ?: bookData.coverUrl
+                        val nextCover = latest.coverUrl.takeIf { it.isNotBlank() } ?: bookData.coverUrl.orEmpty()
                         val updated = latest.copy(
                             openLibraryId = latest.openLibraryId?.takeIf { it.isNotBlank() } ?: bookData.resolvedOpenLibraryId,
                             hardcoverId = latest.hardcoverId?.takeIf { it.isNotBlank() } ?: bookData.resolvedHardcoverId,
@@ -2452,7 +2452,7 @@ class DetailViewModel(
                                 bookEditionLabel = currentPreview.bookEditionLabel ?: bookData.editionName,
                                 studioOrNetwork = currentPreview.studioOrNetwork ?: bookData.publisher ?: bookData.authorName,
                                 synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: bookData.synopsis,
-                                coverUrl = currentPreview.coverUrl?.takeIf { it.isNotBlank() } ?: bookData.coverUrl,
+                                coverUrl = currentPreview.coverUrl.takeIf { it.isNotBlank() } ?: bookData.coverUrl.orEmpty(),
                                 bannerUrl = currentPreview.bannerUrl?.takeIf { it.isNotBlank() } ?: bookData.bannerUrl,
                                 releaseYear = currentPreview.releaseYear ?: bookData.releaseYear,
                                 totalProgress = currentPreview.totalProgress ?: bookData.totalPages?.toDouble(),

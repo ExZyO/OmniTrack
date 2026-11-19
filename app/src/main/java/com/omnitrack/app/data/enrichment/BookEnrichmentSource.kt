@@ -743,11 +743,12 @@ class BookEnrichmentSource(
             }
         }
 
-        val resolvedPageTitle = summaryObj?.get("title").str() ?: return null
-        val qid = summaryObj["wikibase_item"].str()
-        val extract = summaryObj["extract"].str()
-        val pageUrl = summaryObj["content_urls"].obj()?.get("desktop").obj()?.get("page").str()
-        val origImg = summaryObj["originalimage"].obj()
+        val resolvedSummary = summaryObj ?: return null
+        val resolvedPageTitle = resolvedSummary["title"].str() ?: return null
+        val qid = resolvedSummary["wikibase_item"].str()
+        val extract = resolvedSummary["extract"].str()
+        val pageUrl = resolvedSummary["content_urls"].obj()?.get("desktop").obj()?.get("page").str()
+        val origImg = resolvedSummary["originalimage"].obj()
         val origImgUrl = origImg?.get("source").str()
         val origW = origImg?.get("width").intVal() ?: 0
         val origH = origImg?.get("height").intVal() ?: 0
@@ -792,7 +793,7 @@ class BookEnrichmentSource(
             illustrations.add(
                 BookIllustrationAsset(
                     url = origImgUrl,
-                    thumbnailUrl = summaryObj["thumbnail"].obj()?.get("source").str(),
+                    thumbnailUrl = resolvedSummary["thumbnail"].obj()?.get("source").str(),
                     caption = resolvedPageTitle,
                     isWideHero = isWide
                 )

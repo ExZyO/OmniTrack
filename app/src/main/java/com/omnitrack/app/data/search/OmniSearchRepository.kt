@@ -48,6 +48,17 @@ class OmniSearchRepository(
     companion object {
         private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
         private val wikidataAliasCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<String, String>>>()
+
+        fun cleanSynopsis(raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            return raw
+                .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
+                .replace(Regex("""<[^>]*>"""), "")
+                .replace(Regex("""\n{3,}"""), "\n\n")
+                .replace(Regex("""\s*[\(\[]\s*$"""), "")
+                .trim()
+                .ifBlank { null }
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -1924,17 +1935,4 @@ class OmniSearchRepository(
     }
 
     private fun cleanSynopsis(raw: String?): String? = Companion.cleanSynopsis(raw)
-
-    companion object {
-        fun cleanSynopsis(raw: String?): String? {
-            if (raw.isNullOrBlank()) return null
-            return raw
-                .replace(Regex("""<br\s*/?>""", RegexOption.IGNORE_CASE), "\n")
-                .replace(Regex("""<[^>]*>"""), "")
-                .replace(Regex("""\n{3,}"""), "\n\n")
-                .replace(Regex("""\s*[\(\[]\s*$"""), "")
-                .trim()
-                .ifBlank { null }
-        }
-    }
 }

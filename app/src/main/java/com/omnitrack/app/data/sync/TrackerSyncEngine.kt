@@ -538,7 +538,7 @@ class TrackerSyncEngine(
                     hardcoverId = existing.hardcoverId ?: rec.hardcoverId,
                     isbn = existing.isbn ?: rec.isbn13,
                     bookAuthor = existing.bookAuthor ?: rec.author,
-                    coverUrl = existing.coverUrl?.takeIf { it.isNotBlank() } ?: rec.coverUrl,
+                    coverUrl = existing.coverUrl.takeIf { it.isNotBlank() } ?: rec.coverUrl.orEmpty(),
                     releaseYear = existing.releaseYear ?: rec.releaseYear,
                     totalProgress = existing.totalProgress ?: rec.pages?.toDouble(),
                     currentProgress = nextProgress,
@@ -553,7 +553,7 @@ class TrackerSyncEngine(
                 repository.insertMedia(
                     MediaItemEntity(
                         title = rec.title,
-                        coverUrl = rec.coverUrl,
+                        coverUrl = rec.coverUrl.orEmpty(),
                         releaseYear = rec.releaseYear,
                         mediaType = com.omnitrack.app.data.model.MediaType.BOOK,
                         status = rec.status,
