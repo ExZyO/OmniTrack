@@ -1108,6 +1108,7 @@ private fun PrecisionRatingRuler(
                 .clip(RoundedCornerShape(14.dp))
                 .background(Color.Black.copy(alpha = 0.34f))
         ) {
+            val rulerWidth = maxWidth
             // Layer 1: GPU-drawn visible ruler ticks (zero recompositions during 120Hz scroll)
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val scrollPx = rulerScrollState.value.toFloat()
@@ -1198,7 +1199,7 @@ private fun PrecisionRatingRuler(
                     .fillMaxSize()
                     .horizontalScroll(rulerScrollState)
             ) {
-                Spacer(modifier = Modifier.width(maxWidth + tickSpacing * 91))
+                Spacer(modifier = Modifier.width(rulerWidth + tickSpacing * 91))
             }
         }
     }
