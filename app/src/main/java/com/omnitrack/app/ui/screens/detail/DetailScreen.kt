@@ -1225,8 +1225,8 @@ fun DetailScreen(
                                             DetailBookAuthorSection(
                                                 authorProfile = bookAuthorProfile,
                                                 onSelectWork = { rec -> pushPreview(rec) },
-                                                onOpenAuthorProfile = { profile ->
-                                                    pushSheet(DetailSheetTarget.BookAuthor(profile))
+                                                onOpenAuthorProfile = {
+                                                    pushSheet(DetailSheetTarget.BookAuthor(bookAuthorProfile))
                                                 }
                                             )
                                             Spacer(modifier = Modifier.height(20.dp))

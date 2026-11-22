@@ -268,7 +268,7 @@ fun NuvioRatingsRow(
                         source = "bangumi",
                         displayName = "Bangumi",
                         iconRes = R.drawable.brand_bangumi,
-                        valueText = formatOneDecimal(bgmVal),
+                        valueText = formatSmartRating(bgmVal),
                         valueColor = Color(0xFFF09199)
                     )
                 )
@@ -300,7 +300,7 @@ fun NuvioRatingsRow(
                         source = "mangaupdates",
                         displayName = "MangaUpdates",
                         iconRes = R.drawable.brand_mangaupdates,
-                        valueText = formatOneDecimal(muVal),
+                        valueText = formatSmartRating(muVal),
                         valueColor = Color(0xFF64B5F6)
                     )
                 )

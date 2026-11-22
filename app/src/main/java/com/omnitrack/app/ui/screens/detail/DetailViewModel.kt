@@ -5436,13 +5436,18 @@ class DetailViewModel(
                     BookFormat.PAPERBACK -> "paperback" in fmt || "softcover" in fmt || "mass market" in fmt || "trade" in fmt
                     BookFormat.EBOOK -> "ebook" in fmt || "e-book" in fmt || "kindle" in fmt || "epub" in fmt || "digital" in fmt
                     BookFormat.AUDIOBOOK -> "audio" in fmt
+                    BookFormat.ANNOTATED -> "annotated" in fmt
+                    BookFormat.BILINGUAL -> "bilingual" in fmt
                 }
             }
             fun applyFormatTo(entity: MediaItemEntity): MediaItemEntity {
                 val nextMode = when (format) {
                     BookFormat.AUDIOBOOK -> BookTrackingMode.AUDIO_MINUTES.name
                     BookFormat.EBOOK -> BookTrackingMode.PERCENT.name
-                    BookFormat.HARDCOVER, BookFormat.PAPERBACK -> BookTrackingMode.PAGES.name
+                    BookFormat.HARDCOVER,
+                    BookFormat.PAPERBACK,
+                    BookFormat.ANNOTATED,
+                    BookFormat.BILINGUAL -> BookTrackingMode.PAGES.name
                 }
                 val nextEdition = matchedEdition?.let { ed ->
                     listOfNotNull(ed.publisher?.takeIf { it.isNotBlank() }, ed.publishYear?.takeIf { it.isNotBlank() })
@@ -5458,7 +5463,7 @@ class DetailViewModel(
                     entity.totalProgress
                 }
                 val nextAudioMinutes = if (format == BookFormat.AUDIOBOOK) {
-                    entity.bookTotalAudioMinutes ?: meta.audiobookDurationMinutes
+                    entity.bookTotalAudioMinutes ?: meta.audioDurationMinutes
                 } else {
                     entity.bookTotalAudioMinutes
                 }
