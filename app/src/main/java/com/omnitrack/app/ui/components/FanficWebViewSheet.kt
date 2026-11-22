@@ -14,6 +14,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -107,10 +108,11 @@ fun FanficWebViewSheet(
     val scope = rememberCoroutineScope()
 
     val safeInitialUrl = remember(initialUrl) {
-        if (initialUrl.contains("fanfiction.net/login.php", ignoreCase = true)) {
-            "https://www.fanfiction.net"
-        } else {
-            initialUrl
+        when {
+            initialUrl.contains("fanfiction.net/login.php", ignoreCase = true) -> "https://www.fanfiction.net"
+            initialUrl.contains("://m.fanfiction.net", ignoreCase = true) ->
+                initialUrl.replace(Regex("(?i)://m\\.fanfiction\\.net"), "://www.fanfiction.net")
+            else -> initialUrl
         }
     }
 
@@ -119,6 +121,11 @@ fun FanficWebViewSheet(
     var loadProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
     var isParsingSnapshot by remember { mutableStateOf(false) }
+    var isDesktopMode by remember(initialSite, safeInitialUrl) {
+        mutableStateOf(initialSite == FanficSite.FFN || safeInitialUrl.contains("fanfiction.net", ignoreCase = true))
+    }
+    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    val defaultMobileUa = remember { mutableStateOf("") }
 
     val webViewHolder = remember { mutableStateOf<WebView?>(null) }
 
@@ -236,6 +243,36 @@ fun FanficWebViewSheet(
                         )
                     }
 
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isDesktopMode) AccentGold.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.08f))
+                            .border(
+                                0.7.dp,
+                                if (isDesktopMode) AccentGold else Color.White.copy(alpha = 0.12f),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable {
+                                val next = !isDesktopMode
+                                isDesktopMode = next
+                                webViewHolder.value?.let { wv ->
+                                    wv.settings.userAgentString = if (next) desktopUa else defaultMobileUa.value
+                                    val reloadUrl = if (next && currentUrl.contains("://m.fanfiction.net", ignoreCase = true)) {
+                                        currentUrl.replace(Regex("(?i)://m\\.fanfiction\\.net"), "://www.fanfiction.net")
+                                    } else currentUrl
+                                    wv.loadUrl(reloadUrl)
+                                }
+                            }
+                            .padding(horizontal = 7.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isDesktopMode) "PC" else "Mobile",
+                            color = if (isDesktopMode) AccentGold else TextSecondary,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
                     IconButton(onClick = { webViewHolder.value?.reload() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = TextPrimary)
                     }
@@ -308,6 +345,8 @@ fun FanficWebViewSheet(
                             settings.builtInZoomControls = true
                             settings.displayZoomControls = false
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            defaultMobileUa.value = settings.userAgentString.replace("; wv", "")
+                            settings.userAgentString = if (isDesktopMode) desktopUa else defaultMobileUa.value
 
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -338,7 +377,14 @@ fun FanficWebViewSheet(
                                 ): Boolean {
                                     val uri = request?.url ?: return false
                                     val scheme = uri.scheme?.lowercase() ?: return false
-                                    if (scheme == "http" || scheme == "https") return false
+                                    if (scheme == "http" || scheme == "https") {
+                                        val raw = uri.toString()
+                                        if (isDesktopMode && raw.contains("://m.fanfiction.net", ignoreCase = true)) {
+                                            view?.loadUrl(raw.replace(Regex("(?i)://m\\.fanfiction\\.net"), "://www.fanfiction.net"))
+                                            return true
+                                        }
+                                        return false
+                                    }
                                     runCatching {
                                         ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
                                     }

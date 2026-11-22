@@ -608,7 +608,12 @@ fun FanficImportSheet(
                                     Column {
                                         Text(site.displayName, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                                         Text(
-                                            text = if (isConnected) "Session saved (Encrypted)" else "Not signed in",
+                                            text = when {
+                                                isConnected && site == FanficSite.FFN -> "Cloudflare session saved (Encrypted)"
+                                                isConnected -> "Session saved (Encrypted)"
+                                                site == FanficSite.FFN -> "No login needed (Public) • Optional Cloudflare session"
+                                                else -> "Not signed in"
+                                            },
                                             color = if (isConnected) AccentJade else TextSecondary,
                                             fontSize = 11.5.sp
                                         )
@@ -628,15 +633,27 @@ fun FanficImportSheet(
                                     }
                                     OutlinedButton(
                                         onClick = {
+                                            val helper = if (site == FanficSite.FFN) {
+                                                "No FF.net account login is needed! Once the page loads past Cloudflare, tap 'Save Session' below (FF.net's own login/signup page has a server-side 404 bug)."
+                                            } else {
+                                                "Log into ${site.displayName}, then tap Save Session at bottom left"
+                                            }
                                             webViewTarget = Triple(
                                                 site,
                                                 site.loginUrl.ifBlank { site.baseUrl },
-                                                "Log into ${site.displayName}, then tap Save Session at bottom left"
+                                                helper
                                             )
                                         },
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
-                                        Text(if (isConnected) "Refresh" else "Sign In", fontSize = 12.sp)
+                                        Text(
+                                            text = when {
+                                                isConnected -> "Refresh"
+                                                site == FanficSite.FFN -> "Verify CF"
+                                                else -> "Sign In"
+                                            },
+                                            fontSize = 12.sp
+                                        )
                                     }
                                 }
                             }
