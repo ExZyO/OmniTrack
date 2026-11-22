@@ -125,5 +125,15 @@ data class MediaItemEntity(
     val bangumiTags: String? = null,
     val matchedTrackerMetaJson: String? = null,
     val trackerOverridesJson: String? = null,
+    val fanficSourceSite: String? = null,
+    val fanficSourceUrl: String? = null,
+    val fanficWorkId: String? = null,
+    val fanficPrimaryFandom: String? = null,
+    val fanficWordCount: Int? = null,
+    val fanficRating: String? = null,
+    val fanficWorkStatus: String? = null,
+    val fanficIsCrossover: Boolean = false,
+    val fanficTagsSearch: String? = null,
+    val fanficMetaJson: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

@@ -9,9 +9,13 @@ import com.omnitrack.app.data.db.entity.BookEntryEntity
 import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.ComicIssueEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
+import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
+import com.omnitrack.app.data.fanfic.FanficFetchResult
+import com.omnitrack.app.data.fanfic.FanficParsedWork
+import com.omnitrack.app.data.fanfic.FanficSiteEngine
 import com.omnitrack.app.data.enrichment.BookEnrichmentSource
 import com.omnitrack.app.data.enrichment.ComicEnrichmentSource
 import com.omnitrack.app.data.enrichment.ComicIssueSeed
@@ -28,6 +32,13 @@ import com.omnitrack.app.data.model.ComicDetailMeta
 import com.omnitrack.app.data.model.ComicEntryType
 import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.ComicTrackingMode
+import com.omnitrack.app.data.model.FanficSite
+import com.omnitrack.app.data.model.FanficSourceLink
+import com.omnitrack.app.data.model.FanficThreadmarkCategory
+import com.omnitrack.app.data.model.FanficWorkStatus
+import com.omnitrack.app.data.model.canonicalizeFanficUrl
+import com.omnitrack.app.data.model.decodeFanficMeta
+import com.omnitrack.app.data.model.encodeFanficMeta
 import com.omnitrack.app.data.model.GameCompletionTier
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.GameEntryType
@@ -176,7 +187,15 @@ data class DetailUiState(
     val bookQuotes: List<BookQuoteEntity> = emptyList(),
     val comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     val comicIssues: List<ComicIssueEntity> = emptyList(),
+    val fanficChapters: List<FanficChapterEntity> = emptyList(),
     val episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap()
+)
+
+data class FanficDetailAuxState(
+    val isCheckingUpdates: Boolean = false,
+    val updateMessage: String? = null,
+    val webViewPrompt: Pair<FanficSite, String>? = null,
+    val previewChapters: List<FanficChapterEntity> = emptyList()
 )
 
 private data class PreviewAndAux(
@@ -319,6 +338,9 @@ class DetailViewModel(
     private val bookAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private val latestComicIssuesCache = java.util.concurrent.ConcurrentHashMap<Long, List<ComicIssueEntity>>()
     private val comicAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
+    private val latestFanficChaptersCache = java.util.concurrent.ConcurrentHashMap<Long, List<FanficChapterEntity>>()
+    private val _fanficAuxState = MutableStateFlow(FanficDetailAuxState())
+    val fanficAuxState: StateFlow<FanficDetailAuxState> = _fanficAuxState.asStateFlow()
     private val previewMetaCache = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, EpisodeProgressEntity>>()
     private val _previewEpisodeMeta = MutableStateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>>(emptyMap())
     val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
@@ -923,7 +945,8 @@ class DetailViewModel(
         val gameEntries: List<GameEntryEntity> = emptyList(),
         val bookEntries: List<BookEntryEntity> = emptyList(),
         val bookQuotes: List<BookQuoteEntity> = emptyList(),
-        val comicIssues: List<ComicIssueEntity> = emptyList()
+        val comicIssues: List<ComicIssueEntity> = emptyList(),
+        val fanficChapters: List<FanficChapterEntity> = emptyList()
     )
 
     private val auxFlow: Flow<PreviewAndAux> = combine(
@@ -1053,15 +1076,19 @@ class DetailViewModel(
                             .distinctUntilChanged(),
                         repository.getComicIssues(currentId)
                             .onStart { emit(latestComicIssuesCache[currentId] ?: emptyList()) }
+                            .distinctUntilChanged(),
+                        repository.getFanficChapters(currentId)
+                            .onStart { emit(latestFanficChaptersCache[currentId] ?: emptyList()) }
                             .distinctUntilChanged()
-                    ) { q, c -> q to c }
-                ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues) ->
+                    ) { q, c, f -> Triple(q, c, f) }
+                ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues, fanficChapters) ->
                     latestEpisodeProgressCache[currentId] = progressList
                     latestVnRoutesCache[currentId] = vnRoutes
                     latestGameEntriesCache[currentId] = gameEntries
                     latestBookEntriesCache[currentId] = bookEntries
                     latestBookQuotesCache[currentId] = bookQuotes
                     latestComicIssuesCache[currentId] = comicIssues
+                    latestFanficChaptersCache[currentId] = fanficChapters
                     ActiveRoomSnapshot(
                         currentId = currentId,
                         isPreview = true,
@@ -1071,7 +1098,8 @@ class DetailViewModel(
                         gameEntries = gameEntries,
                         bookEntries = bookEntries,
                         bookQuotes = bookQuotes,
-                        comicIssues = comicIssues
+                        comicIssues = comicIssues,
+                        fanficChapters = fanficChapters
                     )
                 }
             } else {
@@ -1130,9 +1158,14 @@ class DetailViewModel(
                                     .onStart {
                                         emit(latestComicIssuesCache[currentItem.id] ?: emptyList())
                                     }
+                                    .distinctUntilChanged(),
+                                repository.getFanficChapters(currentItem.id)
+                                    .onStart {
+                                        emit(latestFanficChaptersCache[currentItem.id] ?: emptyList())
+                                    }
                                     .distinctUntilChanged()
-                            ) { q, c -> q to c }
-                        ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues) ->
+                            ) { q, c, f -> Triple(q, c, f) }
+                        ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues, fanficChapters) ->
                             if (currentItem.id > 0L) {
                                 latestEpisodeProgressCache[currentItem.id] = progressList
                                 latestVnRoutesCache[currentItem.id] = vnRoutes
@@ -1140,6 +1173,7 @@ class DetailViewModel(
                                 latestBookEntriesCache[currentItem.id] = bookEntries
                                 latestBookQuotesCache[currentItem.id] = bookQuotes
                                 latestComicIssuesCache[currentItem.id] = comicIssues
+                                latestFanficChaptersCache[currentItem.id] = fanficChapters
                             }
                             ActiveRoomSnapshot(
                                 currentId = currentItem.id,
@@ -1150,7 +1184,8 @@ class DetailViewModel(
                                 gameEntries = gameEntries,
                                 bookEntries = bookEntries,
                                 bookQuotes = bookQuotes,
-                                comicIssues = comicIssues
+                                comicIssues = comicIssues,
+                                fanficChapters = fanficChapters
                             )
                         }
                     } else {
@@ -1277,6 +1312,13 @@ class DetailViewModel(
             } else {
                 emptyList()
             }
+            val previewFanficChapters = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
+                room.fanficChapters
+            } else if (aux.previewItem.id > 0L) {
+                latestFanficChaptersCache[aux.previewItem.id] ?: emptyList()
+            } else {
+                emptyList()
+            }
             DetailUiState(
                 item = displayPreviewItem,
                 previousItem = null,
@@ -1347,7 +1389,8 @@ class DetailViewModel(
                 bookEntries = previewBookEntries,
                 bookQuotes = previewBookQuotes,
                 comicDetailMeta = aux.comicDetailMeta,
-                comicIssues = previewComicIssues
+                comicIssues = previewComicIssues,
+                fanficChapters = previewFanficChapters
             )
         } else {
             val targetId = _mediaId.value
@@ -1383,6 +1426,11 @@ class DetailViewModel(
                     room.comicIssues
                 } else {
                     latestComicIssuesCache[effectiveItem.id] ?: emptyList()
+                }
+                val itemFanficChapters = if (!room.isPreview && room.currentId == effectiveItem.id) {
+                    room.fanficChapters
+                } else {
+                    latestFanficChaptersCache[effectiveItem.id] ?: emptyList()
                 }
                 val siblings = _stableSiblingIds.value.ifEmpty {
                     ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
@@ -1473,7 +1521,8 @@ class DetailViewModel(
                     bookEntries = itemBookEntries,
                     bookQuotes = itemBookQuotes,
                     comicDetailMeta = aux.comicDetailMeta,
-                    comicIssues = itemComicIssues
+                    comicIssues = itemComicIssues,
+                    fanficChapters = itemFanficChapters
                 )
             } else {
                 DetailUiState(isLoading = false)
@@ -1541,6 +1590,7 @@ class DetailViewModel(
         _gameDetailMeta.value = GameDetailMeta()
         _bookDetailMeta.value = BookDetailMeta()
         _comicDetailMeta.value = ComicDetailMeta()
+        _fanficAuxState.value = FanficDetailAuxState()
     }
 
     fun isPreviewActive(): Boolean =
@@ -2077,8 +2127,21 @@ class DetailViewModel(
 
     fun addToLibrary(item: MediaItemEntity) {
         viewModelScope.launch {
-            val toInsert = item.copy(id = 0L)
-            val newId = repository.insertMedia(toInsert)
+            val existing = if (item.mediaType == MediaType.FANFICTION) {
+                repository.findExistingMedia(
+                    fanficWorkId = item.fanficWorkId,
+                    fanficSourceUrl = item.fanficSourceUrl,
+                    title = item.title,
+                    mediaType = item.mediaType
+                )
+            } else null
+            val newId = existing?.id?.takeIf { it > 0L } ?: repository.insertMedia(item.copy(id = 0L))
+            if (item.mediaType == MediaType.FANFICTION && newId > 0L) {
+                val previewChaps = _fanficAuxState.value.previewChapters
+                if (previewChaps.isNotEmpty()) {
+                    repository.upsertFanficChaptersPreservingReadState(newId, previewChaps.map { it.copy(mediaId = newId) })
+                }
+            }
             EphemeralPreviewHolder.previewItem = null
             _previewStack.value = emptyList()
             _previewItem.value = null
@@ -2685,6 +2748,62 @@ class DetailViewModel(
                     }
                 }
                 markTransitionAuxReady(auxGen)
+                persistAuxCache()
+                return@launch
+            }
+
+            if (item.mediaType == MediaType.FANFICTION) {
+                val meta = decodeFanficMeta(item.fanficMetaJson)
+                var linkId = 1L
+                val links = buildList {
+                    item.fanficSourceUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                        val site = FanficSite.fromCode(item.fanficSourceSite)
+                        add(ExternalLinkItem(id = linkId++, url = url, site = site.displayName, type = "FANFICTION"))
+                    }
+                    meta.mirrorSources.forEach { m ->
+                        if (!m.url.equals(item.fanficSourceUrl, ignoreCase = true)) {
+                            add(ExternalLinkItem(id = linkId++, url = m.url, site = FanficSite.fromCode(m.site).displayName, type = "FANFICTION"))
+                        }
+                    }
+                }
+                if (links.isNotEmpty()) {
+                    _externalLinks.value = links
+                }
+
+                val existingChaps = if (item.id > 0L) {
+                    repository.getFanficChaptersOnce(item.id)
+                } else {
+                    _fanficAuxState.value.previewChapters
+                }
+                if (existingChaps.isEmpty() && !item.fanficSourceUrl.isNullOrBlank()) {
+                    val tm = trackerTokenManager ?: com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                    when (val fetched = FanficSiteEngine.fetchFromUrl(item.fanficSourceUrl) { tm.getFanficCookie(it) }) {
+                        is FanficFetchResult.Success -> {
+                            if (isStillCurrentItem()) {
+                                val parsed = fetched.work
+                                if (item.id > 0L) {
+                                    val latest = repository.getMediaByIdOnce(item.id) ?: item
+                                    val updated = parsed.toMediaItemEntity(status = latest.status, existing = latest)
+                                    repository.updateMedia(updated)
+                                    val mapped = parsed.toChapterEntities(item.id)
+                                    if (mapped.isNotEmpty()) {
+                                        repository.upsertFanficChaptersPreservingReadState(item.id, mapped)
+                                    }
+                                } else {
+                                    val updatedPreview = parsed.toMediaItemEntity(status = item.status, existing = item)
+                                    _previewItem.value = updatedPreview
+                                    _fanficAuxState.update { it.copy(previewChapters = parsed.toChapterEntities(0L)) }
+                                }
+                            }
+                        }
+                        is FanficFetchResult.RequiresWebView -> {
+                            // Keep UI responsive; user can tap Check or source row to verify in WebView
+                        }
+                        is FanficFetchResult.Error -> Unit
+                    }
+                }
+                markTransitionAuxReady(auxGen)
+                markTransitionSeriesReady(auxGen)
                 persistAuxCache()
                 return@launch
             }
@@ -4046,6 +4165,8 @@ class DetailViewModel(
             vndbId = preview.vndbId,
             igdbId = preview.igdbId,
             steamAppId = preview.steamAppId,
+            fanficWorkId = preview.fanficWorkId,
+            fanficSourceUrl = preview.fanficSourceUrl,
             title = preview.title,
             mediaType = preview.mediaType
         )
@@ -4055,6 +4176,12 @@ class DetailViewModel(
                 status = if (preview.status == TrackingStatus.PLAN_TO_TRACK) TrackingStatus.IN_PROGRESS else preview.status
             )
         )
+        if (resolvedId > 0L && preview.mediaType == MediaType.FANFICTION) {
+            val previewChaps = _fanficAuxState.value.previewChapters
+            if (previewChaps.isNotEmpty()) {
+                repository.upsertFanficChaptersPreservingReadState(resolvedId, previewChaps.map { it.copy(mediaId = resolvedId) })
+            }
+        }
         if (resolvedId > 0L) {
             withContext(Dispatchers.Main) {
                 EphemeralPreviewHolder.previewItem = null
@@ -6245,6 +6372,279 @@ class DetailViewModel(
 
     fun setComicCoverAsArtwork(url: String, asBanner: Boolean) {
         if (asBanner) updateBanner(url) else updateCover(url)
+    }
+
+    fun dismissFanficWebViewPrompt() {
+        _fanficAuxState.update { it.copy(webViewPrompt = null) }
+    }
+
+    fun clearFanficUpdateStatus() {
+        _fanficAuxState.update { it.copy(updateMessage = null) }
+    }
+
+    fun checkFanficUpdates() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _fanficAuxState.update { it.copy(isCheckingUpdates = true, updateMessage = null, webViewPrompt = null) }
+            try {
+                val mediaId = ensureLibraryMediaId()
+                val latest = if (mediaId > 0L) repository.getMediaByIdOnce(mediaId) else _previewItem.value
+                if (latest == null) {
+                    _fanficAuxState.update { it.copy(isCheckingUpdates = false, updateMessage = "Unable to load work") }
+                    return@launch
+                }
+                val existingChaps = if (mediaId > 0L) repository.getFanficChaptersOnce(mediaId) else _fanficAuxState.value.previewChapters
+                val tm = trackerTokenManager ?: com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                val outcome = FanficSiteEngine.checkUpdatesAcrossSources(latest, existingChaps.size) { site ->
+                    tm.getFanficCookie(site)
+                }
+                val oldMeta = decodeFanficMeta(latest.fanficMetaJson)
+                val mergedMeta = oldMeta.copy(mirrorSources = outcome.updatedMirrors.ifEmpty { oldMeta.mirrorSources })
+
+                if (outcome.updatedWork != null) {
+                    val fresh = outcome.updatedWork
+                    var updatedEntity = fresh.toMediaItemEntity(status = latest.status, existing = latest)
+                        .copy(fanficMetaJson = encodeFanficMeta(fresh.toMetaPayload(mergedMeta.mirrorSources)), lastUpdated = System.currentTimeMillis())
+                    if (mediaId > 0L) {
+                        repository.updateMedia(updatedEntity)
+                        val mappedChaps = fresh.toChapterEntities(mediaId)
+                        if (mappedChaps.isNotEmpty()) {
+                            repository.upsertFanficChaptersPreservingReadState(mediaId, mappedChaps)
+                        }
+                    } else {
+                        _previewItem.value = updatedEntity
+                    }
+                    val msg = if (outcome.newChaptersFound > 0) {
+                        "Updated: found ${outcome.newChaptersFound} new chapter(s)!"
+                    } else {
+                        "Synced — up to date (${fresh.chapters.size} chapters)"
+                    }
+                    _fanficAuxState.update { it.copy(isCheckingUpdates = false, updateMessage = msg) }
+                } else {
+                    if (mediaId > 0L && outcome.updatedMirrors.isNotEmpty()) {
+                        repository.updateMedia(latest.copy(fanficMetaJson = encodeFanficMeta(mergedMeta)))
+                    }
+                    val prompt = if (outcome.requiresWebViewSite != null && outcome.requiresWebViewUrl != null) {
+                        outcome.requiresWebViewSite to outcome.requiresWebViewUrl
+                    } else null
+                    _fanficAuxState.update {
+                        it.copy(
+                            isCheckingUpdates = false,
+                            updateMessage = outcome.error ?: "No new chapters found",
+                            webViewPrompt = prompt
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _fanficAuxState.update { it.copy(isCheckingUpdates = false, updateMessage = e.message ?: "Update check failed") }
+            }
+        }
+    }
+
+    fun applyWebViewParsedFanfic(work: FanficParsedWork) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val existingMeta = decodeFanficMeta(latest.fanficMetaJson)
+            val newLink = FanficSourceLink(
+                site = work.site.code,
+                url = work.canonicalUrl,
+                externalId = work.workId,
+                isPrimary = latest.fanficSourceUrl.isNullOrBlank() || latest.fanficSourceUrl.equals(work.canonicalUrl, ignoreCase = true),
+                lastChapterCount = work.chapters.size,
+                lastWordCount = work.wordCount,
+                lastCheckedMs = System.currentTimeMillis()
+            )
+            val mergedMirrors = (existingMeta.mirrorSources + newLink).distinctBy { "${it.site}:${it.url}" }
+            val merged = work.toMediaItemEntity(status = latest.status, existing = latest).copy(
+                fanficMetaJson = encodeFanficMeta(work.toMetaPayload(mergedMirrors)),
+                lastUpdated = System.currentTimeMillis()
+            )
+            repository.updateMedia(merged)
+            val chaps = work.toChapterEntities(mediaId)
+            if (chaps.isNotEmpty()) {
+                repository.upsertFanficChaptersPreservingReadState(mediaId, chaps)
+            }
+            _fanficAuxState.update {
+                it.copy(
+                    webViewPrompt = null,
+                    updateMessage = "Imported snapshot (${chaps.size} chapters)"
+                )
+            }
+        }
+    }
+
+    fun linkFanficMirrorUrl(rawUrl: String) {
+        val clean = rawUrl.trim()
+        if (clean.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val (site, canonical, workId) = canonicalizeFanficUrl(clean)
+            val existingMeta = decodeFanficMeta(latest.fanficMetaJson)
+            val link = FanficSourceLink(
+                site = site.code,
+                url = canonical,
+                externalId = workId,
+                isPrimary = latest.fanficSourceUrl.isNullOrBlank(),
+                lastCheckedMs = System.currentTimeMillis()
+            )
+            val updatedMirrors = (existingMeta.mirrorSources + link).distinctBy { "${it.site}:${it.url}" }
+            val nextMeta = existingMeta.copy(mirrorSources = updatedMirrors)
+            repository.updateMedia(
+                latest.copy(
+                    fanficSourceSite = latest.fanficSourceSite ?: site.code,
+                    fanficSourceUrl = latest.fanficSourceUrl ?: canonical,
+                    fanficWorkId = latest.fanficWorkId ?: workId,
+                    fanficMetaJson = encodeFanficMeta(nextMeta),
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+            _fanficAuxState.update { it.copy(updateMessage = "Linked ${site.shortBadge} mirror") }
+        }
+    }
+
+    fun removeFanficMirror(link: FanficSourceLink) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = _mediaId.value
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val meta = decodeFanficMeta(latest.fanficMetaJson)
+            val filtered = meta.mirrorSources.filterNot { it.site == link.site && it.url == link.url }
+            repository.updateMedia(
+                latest.copy(fanficMetaJson = encodeFanficMeta(meta.copy(mirrorSources = filtered)))
+            )
+        }
+    }
+
+    fun toggleFanficChapterRead(chapter: FanficChapterEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val nextRead = !chapter.isRead
+            repository.updateFanficChapter(
+                chapter.copy(
+                    isRead = nextRead,
+                    readAtMs = if (nextRead) System.currentTimeMillis() else null
+                )
+            )
+            syncFanficChapterCountProgress(mediaId)
+        }
+    }
+
+    fun markFanficChaptersReadUpTo(target: FanficChapterEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val all = repository.getFanficChaptersOnce(mediaId)
+            val now = System.currentTimeMillis()
+            all.filter {
+                FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN &&
+                    it.sortOrder <= target.sortOrder &&
+                    !it.isRead
+            }.forEach { ch ->
+                repository.updateFanficChapter(ch.copy(isRead = true, readAtMs = now))
+            }
+            syncFanficChapterCountProgress(mediaId)
+        }
+    }
+
+    fun addManualFanficChapter(number: Int, title: String, category: String, url: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val existing = repository.getFanficChaptersOnce(mediaId)
+            val nextOrder = (existing.maxOfOrNull { it.sortOrder } ?: -1) + 1
+            val latest = repository.getMediaByIdOnce(mediaId)
+            repository.insertFanficChapter(
+                FanficChapterEntity(
+                    mediaId = mediaId,
+                    chapterNumber = number,
+                    title = title,
+                    category = category,
+                    sourceSite = latest?.fanficSourceSite ?: "AO3",
+                    chapterUrl = url,
+                    sortOrder = nextOrder
+                )
+            )
+            val mainCount = (existing.count { FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN } +
+                if (FanficThreadmarkCategory.fromRaw(category) == FanficThreadmarkCategory.MAIN) 1 else 0).toDouble()
+            if (latest != null && mainCount > (latest.totalProgress ?: 0.0)) {
+                repository.updateMedia(latest.copy(totalProgress = mainCount))
+            }
+        }
+    }
+
+    fun deleteFanficChapter(chapterId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = _mediaId.value
+            repository.deleteFanficChapterById(chapterId)
+            if (mediaId > 0L) syncFanficChapterCountProgress(mediaId)
+        }
+    }
+
+    private suspend fun syncFanficChapterCountProgress(mediaId: Long) {
+        val all = repository.getFanficChaptersOnce(mediaId)
+        val mainChaps = all.filter { FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN }
+        val readCount = mainChaps.count { it.isRead }.toDouble()
+        val latest = repository.getMediaByIdOnce(mediaId) ?: return
+        val cap = latest.totalProgress?.takeIf { it > 0.0 }
+        val newStatus = if (latest.autoStatusEnabled) {
+            when {
+                cap != null && readCount >= cap -> TrackingStatus.COMPLETED
+                readCount > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                else -> latest.status
+            }
+        } else latest.status
+        repository.updateMedia(
+            latest.copy(
+                currentProgress = readCount,
+                status = newStatus,
+                lastUpdated = System.currentTimeMillis()
+            )
+        )
+    }
+
+    fun stepFanficProgress(delta: Double) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val cap = latest.totalProgress?.takeIf { it > 0.0 }
+            val nextRaw = latest.currentProgress + delta
+            val clamped = if (cap != null) nextRaw.coerceIn(0.0, cap) else nextRaw.coerceAtLeast(0.0)
+            val newStatus = if (latest.autoStatusEnabled) {
+                when {
+                    cap != null && clamped >= cap -> TrackingStatus.COMPLETED
+                    clamped > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    currentProgress = clamped,
+                    status = newStatus,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun updateFanficWorkStatus(workStatus: FanficWorkStatus) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            repository.updateMedia(
+                latest.copy(
+                    fanficWorkStatus = workStatus.name,
+                    airStatus = workStatus.label,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     private fun generateMockSeasons(item: MediaItemEntity): List<Season> {

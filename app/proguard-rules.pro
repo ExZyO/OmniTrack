@@ -52,3 +52,5 @@
 -dontwarn com.google.errorprone.annotations.**
 -dontwarn coil3.**
 -dontwarn androidx.media3.**
+-dontwarn org.jsoup.**
+-keep class com.omnitrack.app.data.fanfic.** { *; }

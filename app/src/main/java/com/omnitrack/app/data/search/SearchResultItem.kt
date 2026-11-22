@@ -39,7 +39,17 @@ data class SearchResultItem(
     val originCountry: String? = null,
     val platform: String? = null,
     val totalProgress: Double? = null,
-    val runtimeMinutes: Int? = null
+    val runtimeMinutes: Int? = null,
+    val fanficSourceSite: String? = null,
+    val fanficSourceUrl: String? = null,
+    val fanficWorkId: String? = null,
+    val fanficPrimaryFandom: String? = null,
+    val fanficWordCount: Int? = null,
+    val fanficRating: String? = null,
+    val fanficWorkStatus: String? = null,
+    val fanficIsCrossover: Boolean = false,
+    val fanficTagsSearch: String? = null,
+    val fanficMetaJson: String? = null
 ) {
     fun toMediaItemEntity(status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK): MediaItemEntity {
         return MediaItemEntity(
@@ -75,7 +85,17 @@ data class SearchResultItem(
             originCountry = originCountry,
             runtimeMinutes = runtimeMinutes,
             releaseYear = releaseYear,
-            communityScore = communityScore
+            communityScore = communityScore,
+            fanficSourceSite = fanficSourceSite,
+            fanficSourceUrl = fanficSourceUrl,
+            fanficWorkId = fanficWorkId,
+            fanficPrimaryFandom = fanficPrimaryFandom,
+            fanficWordCount = fanficWordCount,
+            fanficRating = fanficRating,
+            fanficWorkStatus = fanficWorkStatus,
+            fanficIsCrossover = fanficIsCrossover,
+            fanficTagsSearch = fanficTagsSearch,
+            fanficMetaJson = fanficMetaJson
         )
     }
 }

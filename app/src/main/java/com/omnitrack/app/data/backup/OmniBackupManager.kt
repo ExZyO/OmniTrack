@@ -62,6 +62,7 @@ object OmniBackupManager {
         val k = key.lowercase(Locale.US)
         return k.startsWith("token_") ||
             k.startsWith("pkce_") ||
+            k.startsWith("fanfic_cookie_") ||
             k.contains("tmdb_pending") ||
             k.contains("api_key") ||
             k.contains("client_secret") ||
@@ -103,6 +104,7 @@ object OmniBackupManager {
             val bookQuotes = if (options.includeSubEntries) database.bookQuoteDao().getAllQuotesOnce() else emptyList()
             val episodeProgress = if (options.includeSubEntries) database.episodeProgressDao().getAllProgressOnce() else emptyList()
             val comicIssues = if (options.includeSubEntries) database.comicIssueDao().getAllIssuesOnce() else emptyList()
+            val fanficChapters = if (options.includeSubEntries) database.fanficChapterDao().getAllChaptersOnce() else emptyList()
 
             val includeDbDump = options.includeLibrary || options.includeSubEntries
             val dbDumpJson = if (includeDbDump) {
@@ -116,7 +118,8 @@ object OmniBackupManager {
                         bookEntries = bookEntries,
                         bookQuotes = bookQuotes,
                         episodeProgress = episodeProgress,
-                        comicIssues = comicIssues
+                        comicIssues = comicIssues,
+                        fanficChapters = fanficChapters
                     )
                 )
             } else null
@@ -196,7 +199,7 @@ object OmniBackupManager {
                 }
             } else emptyList()
 
-            val subEntriesCount = vnRoutes.size + gameEntries.size + bookEntries.size + bookQuotes.size
+            val subEntriesCount = vnRoutes.size + gameEntries.size + bookEntries.size + bookQuotes.size + fanficChapters.size
             val manifest = OmniBackupManifest(
                 version = 2,
                 appVersion = BuildConfig.VERSION_NAME,
@@ -355,7 +358,7 @@ object OmniBackupManager {
             val episodeCount = dump?.episodeProgress?.size ?: manifest.episodeProgressCount
             val comicCount = dump?.comicIssues?.size ?: manifest.comicIssueCount
             val subCount = dump?.let {
-                it.vnRoutes.size + it.gameEntries.size + it.bookEntries.size + it.bookQuotes.size
+                it.vnRoutes.size + it.gameEntries.size + it.bookEntries.size + it.bookQuotes.size + it.fanficChapters.size
             } ?: manifest.subEntriesCount
 
             val nonSensitivePrefCount = prefsDump?.let { p ->
@@ -518,6 +521,7 @@ object OmniBackupManager {
                     if (options.includeSubEntries) {
                         database.episodeProgressDao().deleteAllProgress()
                         database.comicIssueDao().deleteAllIssues()
+                        database.fanficChapterDao().deleteAllChapters()
                         database.vnRouteDao().deleteAllRoutes()
                         database.gameEntryDao().deleteAllEntries()
                         database.bookEntryDao().deleteAllEntries()
@@ -530,6 +534,9 @@ object OmniBackupManager {
                         if (dump.comicIssues.isNotEmpty()) {
                             database.comicIssueDao().insertIssues(dump.comicIssues)
                             restoredComicCount = dump.comicIssues.size
+                        }
+                        if (dump.fanficChapters.isNotEmpty()) {
+                            database.fanficChapterDao().insertChapters(dump.fanficChapters)
                         }
                         if (dump.vnRoutes.isNotEmpty()) {
                             database.vnRouteDao().insertRoutes(dump.vnRoutes)

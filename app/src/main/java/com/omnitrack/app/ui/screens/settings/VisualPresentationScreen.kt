@@ -360,6 +360,34 @@ fun VisualPresentationScreen(
                 }
             }
 
+            // Section 6: Fanfiction (Tab Visibility & Mature/Explicit NSFW Filter)
+            PresentationSectionTitle("FANFICTION (TAB & NSFW)")
+            val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+            val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
+            PresentationChoiceCard(
+                title = if (fanfictionEnabled) "Fanfiction Tab Visible" else "Fanfiction Tab Hidden",
+                description = "Show or hide the Fanfiction category tab, Discover shelf, and dashboard rail.",
+                isSelected = fanfictionEnabled,
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    scope.launch { prefManager.updateFanfictionEnabled(!fanfictionEnabled) }
+                }
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Mature / Explicit Cover & Tag Filter", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                com.omnitrack.app.data.model.VnNsfwFilterMode.entries.forEach { mode ->
+                    PresentationChoiceCard(
+                        title = mode.displayName,
+                        description = mode.description,
+                        isSelected = fanficNsfwMode == mode,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch { prefManager.updateFanficNsfwFilterMode(mode) }
+                        }
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

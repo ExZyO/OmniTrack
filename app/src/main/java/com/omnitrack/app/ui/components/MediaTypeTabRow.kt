@@ -41,12 +41,13 @@ import com.omnitrack.app.ui.theme.TextPrimary
 fun MediaTypeTabRow(
     selectedType: MediaType,
     onTypeSelected: (MediaType) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tabs: List<MediaType> = MediaType.filterTabs
 ) {
     val listState = rememberLazyListState()
 
-    androidx.compose.runtime.LaunchedEffect(selectedType) {
-        val index = MediaType.filterTabs.indexOf(selectedType)
+    androidx.compose.runtime.LaunchedEffect(selectedType, tabs) {
+        val index = tabs.indexOf(selectedType)
         if (index >= 0) {
             listState.animateScrollToItem(index)
         }
@@ -59,7 +60,7 @@ fun MediaTypeTabRow(
             .padding(vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        itemsIndexed(MediaType.filterTabs) { _, type ->
+        itemsIndexed(tabs) { _, type ->
             val isSelected = type == selectedType
 
             val backgroundColor by animateColorAsState(

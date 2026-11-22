@@ -458,6 +458,7 @@ fun ArtworkPickerBottomSheet(
                             MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam, AniList, IGDB, SteamGridDB & Bangumi..."
                             MediaType.BOOK -> "Querying Open Library, Hardcover, Apple Books, Google Books & Wikimedia..."
                             MediaType.COMIC -> "Querying Comic Vine, Metron, Apple Books & Open Library..."
+                            MediaType.FANFICTION -> "Querying AniList, TMDb, Bangumi, SteamGridDB & Open Library for fandom art..."
                             else -> "Querying artwork providers..."
                         }
                         Text(

@@ -120,10 +120,13 @@ import com.omnitrack.app.ui.components.BackgroundMode
 import com.omnitrack.app.ui.components.ChapterStepper
 import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.ui.components.CustomEntryEditorSheet
+import com.omnitrack.app.ui.components.FanficTypographicCover
+import com.omnitrack.app.ui.components.FanficWebViewSheet
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
+import com.omnitrack.app.ui.components.shouldBlurFanficCover
 import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
@@ -132,6 +135,7 @@ import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
 import com.omnitrack.app.ui.screens.detail.components.ComicCreatorCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailComicCreatorsCharactersSection
 import com.omnitrack.app.ui.screens.detail.components.DetailComicTrackingSection
+import com.omnitrack.app.ui.screens.detail.components.DetailFanficTrackingSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGeneralInfoSection
 import com.omnitrack.app.ui.screens.detail.components.DetailExternalLinksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
@@ -259,6 +263,10 @@ fun DetailScreen(
     var showVnPlaytimeDialog by remember { mutableStateOf(false) }
 
     val uiState by viewModel.uiState.collectAsState()
+    val fanficAuxState by viewModel.fanficAuxState.collectAsState()
+    var activeFanficWebView by remember {
+        mutableStateOf<Triple<String, com.omnitrack.app.data.model.FanficSite, com.omnitrack.app.data.db.entity.FanficChapterEntity?>?>(null)
+    }
     val isCommentsLoading by viewModel.isCommentsLoading.collectAsState()
     val previewEpisodeMeta by viewModel.previewEpisodeMeta.collectAsState()
     val ranobeBookDetails by viewModel.ranobeBookDetails.collectAsState()
@@ -788,8 +796,8 @@ fun DetailScreen(
             ) {
                 item(key = "detail_top_header", contentType = "top_header") {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books & Comics when no wide banner)
-                        val useEditorialBookHero = (item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC) &&
+                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books, Comics & Fanfiction when no wide banner)
+                        val useEditorialBookHero = (item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC || item.mediaType == MediaType.FANFICTION) &&
                             (backdropTargetUrl.isNullOrBlank() || backdropTargetUrl == effectiveCover || backdropTargetUrl == item.coverUrl)
                         if (useEditorialBookHero) {
                             DetailBookEditorialHeroSection(
@@ -1048,6 +1056,39 @@ fun DetailScreen(
                                             },
                                             onDeleteIssue = { viewModel.deleteComicIssue(it) },
                                             onSeedIssues = { count -> viewModel.seedComicIssuesRange(count) }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            } else if (item.mediaType == MediaType.FANFICTION) {
+                                item(key = "section_fanfic_tracking", contentType = "fanfic_tracking") {
+                                    val effectiveChapters = if (item.id > 0L) uiState.fanficChapters else fanficAuxState.previewChapters
+                                    Column {
+                                        DetailFanficTrackingSection(
+                                            item = item,
+                                            chapters = effectiveChapters,
+                                            isCheckingUpdates = fanficAuxState.isCheckingUpdates,
+                                            updateBannerMessage = fanficAuxState.updateMessage,
+                                            onCheckUpdates = { viewModel.checkFanficUpdates() },
+                                            onLinkMirrorUrl = { viewModel.linkFanficMirrorUrl(it) },
+                                            onRemoveMirror = { viewModel.removeFanficMirror(it) },
+                                            onToggleChapterRead = { viewModel.toggleFanficChapterRead(it) },
+                                            onMarkReadUpTo = { viewModel.markFanficChaptersReadUpTo(it) },
+                                            onAddManualChapter = { num, title, cat, url ->
+                                                viewModel.addManualFanficChapter(num, title, cat, url)
+                                            },
+                                            onDeleteChapter = { viewModel.deleteFanficChapter(it) },
+                                            onStepProgress = { viewModel.stepFanficProgress(it) },
+                                            onUpdateWorkStatus = { viewModel.updateFanficWorkStatus(it) },
+                                            onOpenChapterInWebView = { url, site, ch ->
+                                                activeFanficWebView = Triple(url, site, ch)
+                                            },
+                                            onOpenExternalUrl = { url ->
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                                }
+                                            },
+                                            onSearchFandomArt = { showArtworkPicker = true }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1663,7 +1704,7 @@ fun DetailScreen(
                     IconButton(
                         onClick = {
                             val nextStatus = if (isCompleted) {
-                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
+                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.FANFICTION) {
                                     TrackingStatus.IN_PROGRESS
                                 } else {
                                     TrackingStatus.PLAN_TO_TRACK
@@ -1836,7 +1877,9 @@ fun DetailScreen(
                     }.distinctBy { "${it.isBanner}:${it.url}" }
                 }
                 ArtworkPickerBottomSheet(
-                    title = item.title,
+                    title = if (item.mediaType == MediaType.FANFICTION) {
+                        item.fanficPrimaryFandom?.takeIf { it.isNotBlank() } ?: item.title
+                    } else item.title,
                     mediaType = item.mediaType,
                     currentCoverUrl = losslessCover,
                     currentBannerUrl = item.bannerUrl,
@@ -2001,6 +2044,34 @@ fun DetailScreen(
                     presentationSettings = presentationSettings,
                     backdropBitmap = backdropBitmap,
                     backdropTargetUrl = effectiveBanner
+                )
+            }
+
+            // Fanfiction In-App WebView (Reading Chapters or Browser Session / Verification)
+            val promptWebView = fanficAuxState.webViewPrompt
+            val activeWv = activeFanficWebView
+            if (activeWv != null) {
+                val (wvUrl, wvSite, wvChapter) = activeWv
+                FanficWebViewSheet(
+                    initialUrl = wvUrl,
+                    initialSite = wvSite,
+                    showImportButton = true,
+                    chapterReadLabel = wvChapter?.let { "Mark Ch.${it.chapterNumber} Read" },
+                    onMarkChapterRead = wvChapter?.let { ch -> { viewModel.toggleFanficChapterRead(ch) } },
+                    onPageImported = { work ->
+                        viewModel.applyWebViewParsedFanfic(work)
+                        activeFanficWebView = null
+                    },
+                    onDismiss = { activeFanficWebView = null }
+                )
+            } else if (promptWebView != null) {
+                FanficWebViewSheet(
+                    initialUrl = promptWebView.second,
+                    initialSite = promptWebView.first,
+                    helperBanner = "Complete browser sign-in or site verification, then tap Import Page",
+                    showImportButton = true,
+                    onPageImported = { work -> viewModel.applyWebViewParsedFanfic(work) },
+                    onDismiss = { viewModel.dismissFanficWebViewPrompt() }
                 )
             }
 
@@ -2884,6 +2955,7 @@ private fun DetailHeroHeaderSection(
                             if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
                         }
                         MediaType.COMIC -> item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS"
+                        MediaType.FANFICTION -> "${com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).shortBadge} FANFIC"
                         else -> item.mediaType.displayName.uppercase()
                     }
                     Text(
@@ -2903,6 +2975,11 @@ private fun DetailHeroHeaderSection(
                         MediaType.COMIC -> listOfNotNull(
                             comicDetailMeta.publisher ?: item.comicPublisher,
                             item.releaseYear?.takeIf { it.isNotBlank() }
+                        ).joinToString(" · ").takeIf { it.isNotBlank() }
+                        MediaType.FANFICTION -> listOfNotNull(
+                            item.fanficPrimaryFandom,
+                            com.omnitrack.app.data.model.formatWordCountShort(item.fanficWordCount).takeIf { it.isNotBlank() },
+                            item.bookAuthor
                         ).joinToString(" · ").takeIf { it.isNotBlank() }
                         else -> item.platform
                     }
@@ -2990,15 +3067,30 @@ private fun DetailBookEditorialHeroSection(
                     .background(Color.White.copy(alpha = 0.06f))
                     .clickable { onCoverClick() }
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(coverImageModel)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                val hasJacketImg = coverImageModel != null && (coverImageModel !is String || coverImageModel.isNotBlank())
+                if (item.mediaType == MediaType.FANFICTION && !hasJacketImg) {
+                    FanficTypographicCover(
+                        title = item.title,
+                        author = item.bookAuthor,
+                        primaryFandom = item.fanficPrimaryFandom,
+                        sourceSite = item.fanficSourceSite,
+                        ratingCode = item.fanficRating,
+                        wordCount = item.fanficWordCount,
+                        isCrossover = item.fanficIsCrossover,
+                        compact = false,
+                        isBlurred = item.customCoverPath.isNullOrBlank() && shouldBlurFanficCover(item.fanficRating)
+                    )
+                } else {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(coverImageModel)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -3037,10 +3129,10 @@ private fun DetailBookEditorialHeroSection(
                     lineHeight = 28.sp,
                     maxLines = 3
                 )
-                val creditSub = if (item.mediaType == MediaType.COMIC) {
-                    comicDetailMeta.publisher ?: item.comicPublisher ?: item.bookAuthor
-                } else {
-                    (bookDetailMeta.authorName ?: item.bookAuthor)?.let { "by $it" }
+                val creditSub = when (item.mediaType) {
+                    MediaType.COMIC -> comicDetailMeta.publisher ?: item.comicPublisher ?: item.bookAuthor
+                    MediaType.FANFICTION -> item.bookAuthor?.let { "by $it" } ?: item.fanficPrimaryFandom
+                    else -> (bookDetailMeta.authorName ?: item.bookAuthor)?.let { "by $it" }
                 }
                 if (!creditSub.isNullOrBlank()) {
                     Text(
@@ -3051,14 +3143,19 @@ private fun DetailBookEditorialHeroSection(
                         maxLines = 2
                     )
                 }
-                val metaParts = if (item.mediaType == MediaType.COMIC) {
-                    listOfNotNull(
+                val metaParts = when (item.mediaType) {
+                    MediaType.COMIC -> listOfNotNull(
                         item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS",
                         comicDetailMeta.startYear ?: item.releaseYear?.takeIf { it.isNotBlank() },
                         (item.totalProgress?.toInt() ?: comicDetailMeta.issueCount)?.takeIf { it > 0 }?.let { "$it ISSUES" }
                     ).joinToString(" · ")
-                } else {
-                    listOfNotNull(
+                    MediaType.FANFICTION -> listOfNotNull(
+                        com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).displayName.uppercase(),
+                        item.fanficPrimaryFandom?.uppercase(),
+                        com.omnitrack.app.data.model.formatWordCountShort(item.fanficWordCount).takeIf { it.isNotBlank() }?.uppercase(),
+                        item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it CH" }
+                    ).joinToString(" · ")
+                    else -> listOfNotNull(
                         bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK",
                         item.releaseYear?.takeIf { it.isNotBlank() },
                         item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it PAGES" }
@@ -3181,17 +3278,32 @@ private fun DetailClassicHeaderSection(
                 .clip(RoundedCornerShape(14.dp))
                 .clickable { onCoverClick() }
         ) {
-            AsyncImage(
-                model = coverImageModel,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onSuccess = {
-                    if (coverImageModel is String) {
-                        onCoverLoaded(coverImageModel)
+            val hasClassicCoverImg = coverImageModel != null && (coverImageModel !is String || coverImageModel.isNotBlank())
+            if (item.mediaType == MediaType.FANFICTION && !hasClassicCoverImg) {
+                FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = true,
+                    isBlurred = item.customCoverPath.isNullOrBlank() && shouldBlurFanficCover(item.fanficRating)
+                )
+            } else {
+                AsyncImage(
+                    model = coverImageModel,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                    onSuccess = {
+                        if (coverImageModel is String) {
+                            onCoverLoaded(coverImageModel)
+                        }
                     }
-                }
-            )
+                )
+            }
         }
 
         Column(
@@ -3291,6 +3403,7 @@ private fun DetailClassicHeaderSection(
                         if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
                     }
                     MediaType.COMIC -> item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS"
+                    MediaType.FANFICTION -> "${com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).shortBadge} FANFIC"
                     else -> item.mediaType.displayName.uppercase()
                 }
                 Text(
@@ -3310,6 +3423,11 @@ private fun DetailClassicHeaderSection(
                     MediaType.COMIC -> listOfNotNull(
                         comicDetailMeta.publisher ?: item.comicPublisher,
                         item.releaseYear?.takeIf { it.isNotBlank() }
+                    ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    MediaType.FANFICTION -> listOfNotNull(
+                        item.fanficPrimaryFandom,
+                        com.omnitrack.app.data.model.formatWordCountShort(item.fanficWordCount).takeIf { it.isNotBlank() },
+                        item.bookAuthor
                     ).joinToString(" · ").takeIf { it.isNotBlank() }
                     else -> item.platform
                 }
@@ -3575,7 +3693,7 @@ private fun DetailProgressSection(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         when (item.mediaType) {
-            MediaType.MANGA, MediaType.NOVEL, MediaType.COMIC -> {
+            MediaType.MANGA, MediaType.NOVEL, MediaType.COMIC, MediaType.FANFICTION -> {
                 ChapterStepper(
                     unitLabel = item.mediaType.unitLabel,
                     currentProgress = item.currentProgress,

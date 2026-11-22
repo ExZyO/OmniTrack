@@ -258,6 +258,18 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchVndb(trimmed) })
                     deferreds.add(launchProvider { searchBangumi(trimmed, type = 4, defaultType = MediaType.VISUAL_NOVEL) })
                 }
+                MediaType.FANFICTION -> {
+                    deferreds.add(launchProvider {
+                        val ao3Cookie = runCatching {
+                            com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                                .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                        }.getOrNull()
+                        com.omnitrack.app.data.fanfic.FanficSiteEngine.searchAo3(
+                            query = trimmed,
+                            cookie = ao3Cookie
+                        )
+                    })
+                }
             }
 
             currentCoroutineContext().ensureActive()

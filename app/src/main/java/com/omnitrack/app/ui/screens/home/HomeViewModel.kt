@@ -472,6 +472,11 @@ class HomeViewModel(
                     HomeRowKey.DISCOVER_MOVIES -> homeSearchRepository.fetchDiscoverMoviesShelves("trending", effectiveTmdbKey)
                     HomeRowKey.DISCOVER_GAMES -> homeSearchRepository.fetchDiscoverGamesShelves("trending")
                     HomeRowKey.DISCOVER_VNS -> homeSearchRepository.fetchDiscoverVisualNovelsShelves("popular")
+                    HomeRowKey.DISCOVER_FANFICTION -> {
+                        val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                            .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                        com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf("ao3_kudos", page = 1, cookie = ao3Cookie)
+                    }
                     else -> emptyList()
                 }
                 if (items.isNotEmpty()) {
@@ -502,6 +507,11 @@ class HomeViewModel(
                 "book_trending" -> homeSearchRepository.fetchDiscoverBooksShelves("trending", page)
                 "game_trending" -> homeSearchRepository.fetchDiscoverGamesShelves("trending", page)
                 "vn_popular" -> homeSearchRepository.fetchDiscoverVisualNovelsShelves("popular", page)
+                "fanfic_trending" -> {
+                    val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                        .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                    com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf("ao3_kudos", page, ao3Cookie)
+                }
                 else -> emptyList()
             }
             MediaType.ANIME -> homeSearchRepository.fetchDiscoverAnimeShelves(def.shelfKey, page)
@@ -514,6 +524,11 @@ class HomeViewModel(
             MediaType.MOVIE -> homeSearchRepository.fetchDiscoverMoviesShelves(def.shelfKey, effectiveTmdbKey, page)
             MediaType.GAME -> homeSearchRepository.fetchDiscoverGamesShelves(def.shelfKey, page)
             MediaType.VISUAL_NOVEL -> homeSearchRepository.fetchDiscoverVisualNovelsShelves(def.shelfKey, page)
+            MediaType.FANFICTION -> {
+                val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                    .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf(def.shelfKey, page, ao3Cookie)
+            }
         }
     }
 
@@ -527,6 +542,7 @@ class HomeViewModel(
         "ALL:book_trending" -> MediaType.BOOK
         "ALL:game_trending" -> MediaType.GAME
         "ALL:vn_popular" -> MediaType.VISUAL_NOVEL
+        "ALL:fanfic_trending" -> MediaType.FANFICTION
         else -> null
     }
 
@@ -642,6 +658,11 @@ class HomeViewModel(
                     HomeRowKey.DISCOVER_MOVIES -> homeSearchRepository.fetchDiscoverMoviesShelves("trending", effectiveTmdbKey, nextPage)
                     HomeRowKey.DISCOVER_GAMES -> homeSearchRepository.fetchDiscoverGamesShelves("trending", nextPage)
                     HomeRowKey.DISCOVER_VNS -> homeSearchRepository.fetchDiscoverVisualNovelsShelves("popular", nextPage)
+                    HomeRowKey.DISCOVER_FANFICTION -> {
+                        val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                            .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                        com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf("ao3_kudos", nextPage, ao3Cookie)
+                    }
                     else -> emptyList()
                 }
                 if (more.isNotEmpty()) {

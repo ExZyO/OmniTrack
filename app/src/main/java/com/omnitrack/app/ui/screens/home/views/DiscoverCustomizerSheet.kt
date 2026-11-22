@@ -76,21 +76,23 @@ fun DiscoverCustomizerSheet(
     val settings by preferenceManager.discoverCustomizationSettings.collectAsState(
         initial = DiscoverCustomizationSettings()
     )
+    val fanfictionEnabled by preferenceManager.fanfictionEnabled.collectAsState(initial = true)
     var selectedTab by remember { mutableIntStateOf(0) }
 
-    val allCategories = remember {
-        listOf(
-            MediaType.ALL,
-            MediaType.ANIME,
-            MediaType.MANGA,
-            MediaType.COMIC,
-            MediaType.NOVEL,
-            MediaType.BOOK,
-            MediaType.SHOW,
-            MediaType.MOVIE,
-            MediaType.GAME,
-            MediaType.VISUAL_NOVEL
-        )
+    val allCategories = remember(fanfictionEnabled) {
+        buildList {
+            add(MediaType.ALL)
+            add(MediaType.ANIME)
+            add(MediaType.MANGA)
+            add(MediaType.COMIC)
+            add(MediaType.NOVEL)
+            if (fanfictionEnabled) add(MediaType.FANFICTION)
+            add(MediaType.BOOK)
+            add(MediaType.SHOW)
+            add(MediaType.MOVIE)
+            add(MediaType.GAME)
+            add(MediaType.VISUAL_NOVEL)
+        }
     }
 
     ModalBottomSheet(

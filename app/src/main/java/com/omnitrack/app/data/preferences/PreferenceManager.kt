@@ -120,6 +120,13 @@ object DiscoverShelfCatalog {
         DiscoverShelfDef("NOVEL:trending_ln", MediaType.NOVEL, "trending_ln", "Trending Light Novels"),
         DiscoverShelfDef("NOVEL:top_rated_ln", MediaType.NOVEL, "top_rated_ln", "Top Rated Light Novels"),
 
+        // Fanfiction (AO3 live shelves)
+        DiscoverShelfDef("ALL:fanfic_trending", MediaType.ALL, "fanfic_trending", "Popular Fanfiction (AO3)"),
+        DiscoverShelfDef("FANFICTION:ao3_kudos", MediaType.FANFICTION, "ao3_kudos", "Most Kudosed on AO3"),
+        DiscoverShelfDef("FANFICTION:ao3_updated", MediaType.FANFICTION, "ao3_updated", "Recently Updated on AO3"),
+        DiscoverShelfDef("FANFICTION:ao3_complete", MediaType.FANFICTION, "ao3_complete", "Top Completed Works (20k+)"),
+        DiscoverShelfDef("FANFICTION:ao3_crossovers", MediaType.FANFICTION, "ao3_crossovers", "Popular Crossovers"),
+
         // Books
         DiscoverShelfDef("BOOK:trending", MediaType.BOOK, "trending", "Trending This Week"),
         DiscoverShelfDef("BOOK:classics_poetry", MediaType.BOOK, "classics_poetry", "Classics & Epic Poetry"),
@@ -224,7 +231,8 @@ enum class HomeRowKey(val displayName: String, val description: String) {
     DISCOVER_SHOWS("Trending TV Shows", "Popular & top-rated TV series"),
     DISCOVER_MOVIES("Trending Movies", "Popular & top-rated films"),
     DISCOVER_GAMES("Trending Games", "Trending & acclaimed games"),
-    DISCOVER_VNS("Top Visual Novels", "Popular & top-rated visual novels")
+    DISCOVER_VNS("Top Visual Novels", "Popular & top-rated visual novels"),
+    DISCOVER_FANFICTION("Popular Fanfiction", "Most-kudosed AO3 works & crossovers")
 }
 
 @Serializable
@@ -424,6 +432,8 @@ class PreferenceManager(private val context: Context) {
         val PREFERRED_TITLE_LANGUAGE = stringPreferencesKey("preferred_title_language")
         val VN_SPOILER_LEVEL = intPreferencesKey("vn_spoiler_level")
         val VN_NSFW_FILTER_MODE = stringPreferencesKey("vn_nsfw_filter_mode")
+        val FANFICTION_ENABLED = booleanPreferencesKey("fanfiction_enabled")
+        val FANFIC_NSFW_FILTER_MODE = stringPreferencesKey("fanfic_nsfw_filter_mode")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -1301,6 +1311,27 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.VN_NSFW_FILTER_MODE] = mode.name }
     }
 
+    val fanfictionEnabled: Flow<Boolean> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> prefs[PreferencesKeys.FANFICTION_ENABLED] ?: true }
+        .distinctUntilChanged()
+
+    suspend fun updateFanfictionEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.FANFICTION_ENABLED] = enabled }
+    }
+
+    val fanficNsfwFilterMode: Flow<VnNsfwFilterMode> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            VnNsfwFilterMode.fromName(prefs[PreferencesKeys.FANFIC_NSFW_FILTER_MODE])
+        }
+        .distinctUntilChanged()
+
+    suspend fun updateFanficNsfwFilterMode(mode: VnNsfwFilterMode) {
+        cachedFanficNsfwFilterMode = mode
+        context.dataStore.edit { it[PreferencesKeys.FANFIC_NSFW_FILTER_MODE] = mode.name }
+    }
+
     companion object {
         @Volatile
         var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
@@ -1310,6 +1341,9 @@ class PreferenceManager(private val context: Context) {
 
         @Volatile
         var cachedVnNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP
+
+        @Volatile
+        var cachedFanficNsfwFilterMode: VnNsfwFilterMode = VnNsfwFilterMode.BLUR_TAP
 
         @Volatile
         var cachedSteamGridDbApiKey: String = ""
@@ -1342,6 +1376,7 @@ class PreferenceManager(private val context: Context) {
             MediaType.MOVIE -> listOf("TMDb", "Bangumi", "RPDB")
             MediaType.GAME -> listOf("SteamGridDB", "Steam", "IGDB", "Bangumi")
             MediaType.VISUAL_NOVEL -> listOf("VNDB Kana", "SteamGridDB", "Steam", "Bangumi", "AniList GraphQL", "IGDB")
+            MediaType.FANFICTION -> listOf("AniList GraphQL", "TMDb", "SteamGridDB", "Hardcover", "IGDB", "Open Library")
             MediaType.ALL -> listOf("Default")
         }
     }

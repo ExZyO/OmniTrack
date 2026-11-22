@@ -58,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -147,11 +148,28 @@ fun HomeScreen(
     val prefManager = remember(context) { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager }
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
+    val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+    val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
+    val visibleFilterTabs = remember(fanfictionEnabled) {
+        if (fanfictionEnabled) MediaType.filterTabs else MediaType.filterTabs.filter { it != MediaType.FANFICTION }
+    }
+    val sharedFanficUrl by com.omnitrack.app.SharedFanficUrlBus.pendingUrl.collectAsState()
+    var showFanficImportSheet by remember { mutableStateOf(false) }
+    var fanficImportInitialTab by remember { mutableIntStateOf(0) }
+    var fanficImportInitialUrl by remember { mutableStateOf("") }
+    LaunchedEffect(sharedFanficUrl) {
+        val shared = sharedFanficUrl ?: return@LaunchedEffect
+        fanficImportInitialTab = 0
+        fanficImportInitialUrl = shared
+        showFanficImportSheet = true
+        com.omnitrack.app.SharedFanficUrlBus.consume()
+    }
+
     val uiState by viewModel.uiState.collectAsState()
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
-    val gridStates = remember { List(MediaType.filterTabs.size) { androidx.compose.foundation.lazy.grid.LazyGridState() } }
-    val listStates = remember { List(MediaType.filterTabs.size) { LazyListState() } }
+    val gridStates = remember { MediaType.filterTabs.associateWith { androidx.compose.foundation.lazy.grid.LazyGridState() } }
+    val listStates = remember { MediaType.filterTabs.associateWith { LazyListState() } }
 
     var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.HOME) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -204,6 +222,12 @@ fun HomeScreen(
     var selectedBookCategory by rememberSaveable { mutableStateOf("ALL") }
     var selectedComicPublisher by rememberSaveable { mutableStateOf("ALL") }
     var selectedComicFormat by rememberSaveable { mutableStateOf("ALL") }
+    var selectedFanficSite by rememberSaveable { mutableStateOf("ALL") }
+    var selectedFanficRating by rememberSaveable { mutableStateOf("ALL") }
+    var selectedFanficStatus by rememberSaveable { mutableStateOf("ALL") }
+    var selectedFanficMinWords by rememberSaveable { mutableIntStateOf(0) }
+    var fanficCrossoverOnly by rememberSaveable { mutableStateOf(false) }
+    var fanficTagFilter by rememberSaveable { mutableStateOf("") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check (detects ready releases & active CI builds)
@@ -238,12 +262,18 @@ fun HomeScreen(
     // Kinematic category pager
     val pagerState = rememberPagerState(
         initialPage = 0,
-        pageCount = { MediaType.filterTabs.size }
+        pageCount = { visibleFilterTabs.size }
     )
 
     // Sync pager swipe with viewmodel tab selection
-    LaunchedEffect(pagerState.currentPage) {
-        viewModel.selectMediaType(MediaType.filterTabs[pagerState.currentPage])
+    LaunchedEffect(visibleFilterTabs.size) {
+        if (pagerState.currentPage >= visibleFilterTabs.size) {
+            pagerState.scrollToPage(0)
+        }
+    }
+    LaunchedEffect(pagerState.currentPage, visibleFilterTabs) {
+        val target = visibleFilterTabs.getOrNull(pagerState.currentPage) ?: MediaType.ALL
+        viewModel.selectMediaType(target)
     }
 
     // Auto-focus search text field when opened
@@ -330,7 +360,7 @@ fun HomeScreen(
                             }
                         },
                         onNavigateToLibraryCategory = { type ->
-                            val targetPage = MediaType.filterTabs.indexOf(type).coerceAtLeast(0)
+                            val targetPage = visibleFilterTabs.indexOf(type).coerceAtLeast(0)
                             viewModel.selectMediaType(type)
                             coroutineScope.launch { pagerState.scrollToPage(targetPage) }
                             currentNavDestination = NavDestination.LIBRARY
@@ -342,7 +372,9 @@ fun HomeScreen(
                         onRefresh = {
                             viewModel.loadHomeTrending(force = true)
                             viewModel.loadReleaseCalendar(force = true)
-                        }
+                        },
+                        fanfictionEnabled = fanfictionEnabled,
+                        fanficNsfwMode = fanficNsfwMode
                     )
                 }
 
@@ -426,16 +458,22 @@ fun HomeScreen(
                                     )
                                 }
 
-                                // Add Custom Entry button
+                                // Add Custom Entry or Import Fanfic button
                                 Box(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
                                         .background(DarkSurfaceElevated)
                                         .clickable {
-                                            customEntryInitTitle = ""
-                                            customEntryInitType = if (uiState.selectedMediaType == MediaType.ALL) MediaType.NOVEL else uiState.selectedMediaType
-                                            showCustomEntrySheet = true
+                                            if (uiState.selectedMediaType == MediaType.FANFICTION) {
+                                                fanficImportInitialTab = 0
+                                                fanficImportInitialUrl = ""
+                                                showFanficImportSheet = true
+                                            } else {
+                                                customEntryInitTitle = ""
+                                                customEntryInitType = if (uiState.selectedMediaType == MediaType.ALL) MediaType.NOVEL else uiState.selectedMediaType
+                                                showCustomEntrySheet = true
+                                            }
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -541,8 +579,9 @@ fun HomeScreen(
                         // Media type tabs with fluid click animation to slide pager
                         MediaTypeTabRow(
                             selectedType = uiState.selectedMediaType,
+                            tabs = visibleFilterTabs,
                             onTypeSelected = { type ->
-                                val targetPage = MediaType.filterTabs.indexOf(type)
+                                val targetPage = visibleFilterTabs.indexOf(type)
                                 if (targetPage >= 0 && targetPage != pagerState.currentPage) {
                                     coroutineScope.launch {
                                         pagerState.animateScrollToPage(
@@ -675,6 +714,29 @@ fun HomeScreen(
                             )
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.FANFICTION) {
+                            FanficUnderlineFilterBar(
+                                selectedSite = selectedFanficSite,
+                                selectedRating = selectedFanficRating,
+                                selectedStatus = selectedFanficStatus,
+                                minWords = selectedFanficMinWords,
+                                crossoverOnly = fanficCrossoverOnly,
+                                tagFilter = fanficTagFilter,
+                                onSiteSelected = { selectedFanficSite = it },
+                                onRatingSelected = { selectedFanficRating = it },
+                                onStatusSelected = { selectedFanficStatus = it },
+                                onMinWordsSelected = { selectedFanficMinWords = it },
+                                onCrossoverToggle = { fanficCrossoverOnly = !fanficCrossoverOnly },
+                                onTagFilterChanged = { fanficTagFilter = it },
+                                onOpenImport = {
+                                    fanficImportInitialTab = 0
+                                    fanficImportInitialUrl = ""
+                                    showFanficImportSheet = true
+                                },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -694,10 +756,13 @@ fun HomeScreen(
                                 state = pagerState,
                                 modifier = Modifier.fillMaxSize()
                             ) { pageIndex ->
-                                val pageMediaType = MediaType.filterTabs[pageIndex]
+                                val pageMediaType = visibleFilterTabs.getOrElse(pageIndex) { MediaType.ALL }
+                                val pageGridState = gridStates[pageMediaType] ?: gridStates.getValue(MediaType.ALL)
+                                val pageListState = listStates[pageMediaType] ?: listStates.getValue(MediaType.ALL)
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory, selectedComicPublisher, selectedComicFormat, librarySortMode) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory, selectedComicPublisher, selectedComicFormat, selectedFanficSite, selectedFanficRating, selectedFanficStatus, selectedFanficMinWords, fanficCrossoverOnly, fanficTagFilter, fanficNsfwMode, librarySortMode) {
                                     val filtered = uiState.allMediaSummaries.filter { item ->
+                                        !(item.mediaType == MediaType.FANFICTION && com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode)) &&
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
                                         (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
@@ -715,12 +780,23 @@ fun HomeScreen(
                                         (pageMediaType != MediaType.BOOK || selectedBookCategory == "ALL" || com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, null) == selectedBookCategory) &&
                                         (pageMediaType != MediaType.COMIC || selectedComicPublisher == "ALL" || com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisher) &&
                                         (pageMediaType != MediaType.COMIC || selectedComicFormat == "ALL" || com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormat) &&
+                                        (pageMediaType != MediaType.FANFICTION || selectedFanficSite == "ALL" || item.fanficSourceSite.equals(selectedFanficSite, ignoreCase = true)) &&
+                                        (pageMediaType != MediaType.FANFICTION || selectedFanficRating == "ALL" || com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).code == selectedFanficRating) &&
+                                        (pageMediaType != MediaType.FANFICTION || selectedFanficStatus == "ALL" || com.omnitrack.app.data.model.FanficWorkStatus.fromRaw(item.fanficWorkStatus).name == selectedFanficStatus) &&
+                                        (pageMediaType != MediaType.FANFICTION || selectedFanficMinWords <= 0 || (item.fanficWordCount ?: 0) >= selectedFanficMinWords) &&
+                                        (pageMediaType != MediaType.FANFICTION || !fanficCrossoverOnly || item.fanficIsCrossover) &&
+                                        (pageMediaType != MediaType.FANFICTION || fanficTagFilter.isBlank() ||
+                                            item.fanficPrimaryFandom?.contains(fanficTagFilter, ignoreCase = true) == true ||
+                                            item.fanficTagsSearch?.contains(fanficTagFilter, ignoreCase = true) == true) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
                                             item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
                                             item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.comicPublisher?.contains(searchQuery, ignoreCase = true) == true)
+                                            item.comicPublisher?.contains(searchQuery, ignoreCase = true) == true ||
+                                            item.fanficPrimaryFandom?.contains(searchQuery, ignoreCase = true) == true ||
+                                            item.fanficTagsSearch?.contains(searchQuery, ignoreCase = true) == true ||
+                                            item.fanficSourceSite?.contains(searchQuery, ignoreCase = true) == true)
                                     }
                                     when (librarySortMode) {
                                         "RATING" -> filtered.sortedWith(
@@ -784,7 +860,7 @@ fun HomeScreen(
                                     } else if (libraryViewMode == "LIST") {
                                         Box(modifier = Modifier.fillMaxSize()) {
                                             LazyColumn(
-                                                state = listStates[pageIndex],
+                                                state = pageListState,
                                                 contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = 112.dp),
                                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                                 modifier = Modifier.fillMaxSize()
@@ -808,7 +884,7 @@ fun HomeScreen(
                                             LibraryFastScroller(
                                                 items = displayedItems,
                                                 sortMode = librarySortMode,
-                                                listState = listStates[pageIndex],
+                                                listState = pageListState,
                                                 columnsCount = 1
                                             )
                                         }
@@ -826,7 +902,7 @@ fun HomeScreen(
                                                 else -> (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(2)
                                             }
                                             LazyVerticalGrid(
-                                                state = gridStates[pageIndex],
+                                                state = pageGridState,
                                                 columns = gridColumns,
                                                 contentPadding = PaddingValues(start = 14.dp, end = 16.dp, top = 6.dp, bottom = 112.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -863,7 +939,7 @@ fun HomeScreen(
                                             LibraryFastScroller(
                                                 items = displayedItems,
                                                 sortMode = librarySortMode,
-                                                gridState = gridStates[pageIndex],
+                                                gridState = pageGridState,
                                                 columnsCount = approxCols
                                             )
                                         }
@@ -885,6 +961,11 @@ fun HomeScreen(
                             showCustomEntrySheet = true
                         },
                         onOpenCustomizer = { showDiscoverCustomizerSheet = true },
+                        onOpenFanficImport = { url, tab ->
+                            fanficImportInitialUrl = url
+                            fanficImportInitialTab = tab
+                            showFanficImportSheet = true
+                        },
                         modifier = Modifier.statusBarsPadding(),
                         homeViewModel = viewModel
                     )
@@ -935,7 +1016,12 @@ fun HomeScreen(
                         onNavigateToVisualPresentation = onNavigateToVisualPresentation,
                         onNavigateToDetailsPageLayout = onNavigateToDetailsPageLayout,
                         onOpenHomeCustomizer = { showHomeCustomizerSheet = true },
-                        onOpenDiscoverCustomizer = { showDiscoverCustomizerSheet = true }
+                        onOpenDiscoverCustomizer = { showDiscoverCustomizerSheet = true },
+                        onOpenFanficSites = {
+                            fanficImportInitialUrl = ""
+                            fanficImportInitialTab = 1
+                            showFanficImportSheet = true
+                        }
                     )
                 }
             }
@@ -951,7 +1037,7 @@ fun HomeScreen(
             hazeState = hazeState,
             onActiveTabReSelected = { destination ->
                 if (destination == NavDestination.LIBRARY) {
-                    val activeGridState = gridStates.getOrNull(pagerState.currentPage)
+                    val activeGridState = visibleFilterTabs.getOrNull(pagerState.currentPage)?.let { gridStates[it] }
                     coroutineScope.launch {
                         activeGridState?.animateScrollToItem(0)
                     }
@@ -1149,6 +1235,22 @@ fun HomeScreen(
                 onDismiss = { showCustomEntrySheet = false }
             )
         }
+
+        if (showFanficImportSheet) {
+            com.omnitrack.app.ui.components.FanficImportSheet(
+                initialTab = fanficImportInitialTab,
+                initialUrl = fanficImportInitialUrl,
+                onDismiss = {
+                    showFanficImportSheet = false
+                    fanficImportInitialUrl = ""
+                },
+                onOpenDetail = { id ->
+                    showFanficImportSheet = false
+                    fanficImportInitialUrl = ""
+                    onItemClick(id)
+                }
+            )
+        }
     }
     }
 }
@@ -1187,16 +1289,34 @@ private fun LibraryListRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        AsyncImage(
-            model = coverModel,
-            contentDescription = item.title,
-            contentScale = ContentScale.Crop,
+        val hasThumbImg = coverModel != null && (coverModel !is String || coverModel.isNotBlank())
+        Box(
             modifier = Modifier
                 .width(50.dp)
                 .aspectRatio(0.68f)
                 .clip(RoundedCornerShape(8.dp))
                 .background(DarkSurfaceCard)
-        )
+        ) {
+            if (item.mediaType == MediaType.FANFICTION && !hasThumbImg) {
+                com.omnitrack.app.ui.components.FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = true
+                )
+            } else {
+                AsyncImage(
+                    model = coverModel,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
 
         Column(
             modifier = Modifier.weight(1f),
@@ -1457,6 +1577,138 @@ internal fun ComicUnderlineFilterBar(
 }
 
 @Composable
+internal fun FanficUnderlineFilterBar(
+    selectedSite: String,
+    selectedRating: String,
+    selectedStatus: String,
+    minWords: Int,
+    crossoverOnly: Boolean,
+    tagFilter: String,
+    onSiteSelected: (String) -> Unit,
+    onRatingSelected: (String) -> Unit,
+    onStatusSelected: (String) -> Unit,
+    onMinWordsSelected: (Int) -> Unit,
+    onCrossoverToggle: () -> Unit,
+    onTagFilterChanged: (String) -> Unit,
+    onOpenImport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        UnderlineFilterGroup(
+            options = listOf(
+                "ALL" to "All Sites",
+                "AO3" to "AO3",
+                "FFN" to "FF.net",
+                "SB" to "SpaceBattles",
+                "SV" to "SV",
+                "QQ" to "QQ"
+            ),
+            selectedKey = selectedSite,
+            onSelected = onSiteSelected
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(AccentGold.copy(alpha = 0.18f))
+                    .border(0.7.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(999.dp))
+                    .clickable(onClick = onOpenImport)
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text("+ Import URL", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+            }
+            listOf("ALL" to "Any Rating", "G" to "G", "T" to "T", "M" to "M", "E" to "E", "NR" to "NR").forEach { (k, lbl) ->
+                val sel = selectedRating == k
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (sel) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                        .clickable { onRatingSelected(k) }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(lbl, fontSize = 11.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, color = if (sel) AccentGold else TextSecondary)
+                }
+            }
+            listOf("ALL" to "Any Status", "ONGOING" to "Ongoing", "COMPLETE" to "Complete", "HIATUS" to "Hiatus").forEach { (k, lbl) ->
+                val sel = selectedStatus == k
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (sel) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                        .clickable { onStatusSelected(k) }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(lbl, fontSize = 11.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, color = if (sel) AccentGold else TextSecondary)
+                }
+            }
+            listOf(0 to "Any Length", 10_000 to "10k+", 50_000 to "50k+", 100_000 to "100k+").forEach { (w, lbl) ->
+                val sel = minWords == w
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (sel) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                        .clickable { onMinWordsSelected(w) }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(lbl, fontSize = 11.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, color = if (sel) AccentGold else TextSecondary)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (crossoverOnly) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                    .clickable(onClick = onCrossoverToggle)
+                    .padding(horizontal = 9.dp, vertical = 4.dp)
+            ) {
+                Text("Crossovers", fontSize = 11.sp, fontWeight = if (crossoverOnly) FontWeight.Bold else FontWeight.Medium, color = if (crossoverOnly) AccentGold else TextSecondary)
+            }
+            Row(
+                modifier = Modifier
+                    .width(145.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(DarkSurfaceElevated)
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.foundation.text.BasicTextField(
+                    value = tagFilter,
+                    onValueChange = onTagFilterChanged,
+                    singleLine = true,
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 11.sp),
+                    cursorBrush = SolidColor(AccentGold),
+                    decorationBox = { inner ->
+                        if (tagFilter.isBlank()) {
+                            Text("Fandom / ship / tag...", color = TextMuted, fontSize = 11.sp)
+                        }
+                        inner()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                if (tagFilter.isNotBlank()) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Clear",
+                        tint = TextMuted,
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clickable { onTagFilterChanged("") }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun UnderlineFilterGroup(
     options: List<Pair<String, String>>,
     selectedKey: String,
@@ -1505,5 +1757,6 @@ private fun calendarSourceLabel(type: MediaType): String = when (type) {
     MediaType.BOOK -> "Goodreads"
     MediaType.GAME -> "Steam"
     MediaType.VISUAL_NOVEL -> "VNDB"
+    MediaType.FANFICTION -> "AO3"
     else -> "AniList"
 }

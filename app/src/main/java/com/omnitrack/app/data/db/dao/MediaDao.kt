@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes, comicVineId, metronId, comicPublisher, comicFormat, comicTrackingMode, isCustomEntry, bannerFocalX, bannerFocalY, bannerZoom FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes, comicVineId, metronId, comicPublisher, comicFormat, comicTrackingMode, fanficSourceSite, fanficSourceUrl, fanficWorkId, fanficPrimaryFandom, fanficWordCount, fanficRating, fanficWorkStatus, fanficIsCrossover, fanficTagsSearch, isCustomEntry, bannerFocalX, bannerFocalY, bannerZoom FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
@@ -71,6 +71,12 @@ interface MediaDao {
 
     @Query("SELECT * FROM media_items WHERE metronId = :metronId AND mediaType = :type LIMIT 1")
     suspend fun findByMetronId(metronId: Long, type: MediaType = MediaType.COMIC): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE fanficWorkId = :workId LIMIT 1")
+    suspend fun findByFanficWorkId(workId: String): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE fanficSourceUrl = :url LIMIT 1")
+    suspend fun findByFanficUrl(url: String): MediaItemEntity?
 
     @Query("SELECT * FROM media_items WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND mediaType = :type LIMIT 1")
     suspend fun findByTitleAndType(title: String, type: MediaType): MediaItemEntity?

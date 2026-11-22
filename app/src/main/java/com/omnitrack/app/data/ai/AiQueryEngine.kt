@@ -200,6 +200,8 @@ class AiQueryEngine(
 
         val lower = query.lowercase()
         when {
+            "fanfic" in lower || "ao3" in lower || "spacebattles" in lower || "sufficient velocity" in lower || "ff.net" in lower ->
+                detectedType = MediaType.FANFICTION
             "anime" in lower -> detectedType = MediaType.ANIME
             "manga" in lower || "manhwa" in lower || "manhua" in lower -> detectedType = MediaType.MANGA
             "novel" in lower || "light novel" in lower || "web novel" in lower -> detectedType = MediaType.NOVEL

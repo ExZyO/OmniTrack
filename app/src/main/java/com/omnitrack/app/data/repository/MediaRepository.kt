@@ -5,6 +5,7 @@ import com.omnitrack.app.data.db.dao.BookQuoteDao
 import com.omnitrack.app.data.db.dao.CategoryDao
 import com.omnitrack.app.data.db.dao.ComicIssueDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
+import com.omnitrack.app.data.db.dao.FanficChapterDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
@@ -15,6 +16,7 @@ import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.ComicIssueEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
+import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
@@ -34,8 +36,56 @@ class MediaRepository(
     private val gameEntryDao: GameEntryDao? = null,
     private val bookEntryDao: BookEntryDao? = null,
     private val bookQuoteDao: BookQuoteDao? = null,
-    private val comicIssueDao: ComicIssueDao? = null
+    private val comicIssueDao: ComicIssueDao? = null,
+    private val fanficChapterDao: FanficChapterDao? = null
 ) {
+    fun getFanficChapters(mediaId: Long): Flow<List<FanficChapterEntity>> =
+        (fanficChapterDao?.getChaptersForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getFanficChaptersOnce(mediaId: Long): List<FanficChapterEntity> =
+        fanficChapterDao?.getChaptersForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertFanficChapter(chapter: FanficChapterEntity): Long? =
+        fanficChapterDao?.insertChapter(chapter)
+
+    suspend fun insertFanficChapters(chapters: List<FanficChapterEntity>) {
+        if (chapters.isNotEmpty()) fanficChapterDao?.insertChapters(chapters)
+    }
+
+    suspend fun updateFanficChapter(chapter: FanficChapterEntity) {
+        fanficChapterDao?.updateChapter(chapter)
+    }
+
+    suspend fun deleteFanficChapterById(chapterId: Long) {
+        fanficChapterDao?.deleteChapterById(chapterId)
+    }
+
+    suspend fun upsertFanficChaptersPreservingReadState(
+        mediaId: Long,
+        incomingChapters: List<FanficChapterEntity>
+    ) {
+        val dao = fanficChapterDao ?: return
+        if (mediaId <= 0L || incomingChapters.isEmpty()) return
+        val existing = dao.getChaptersForMediaOnce(mediaId)
+        val byUrl = existing.filter { !it.chapterUrl.isNullOrBlank() }.associateBy { it.chapterUrl!!.trim() }
+        val byKey = existing.associateBy { it.category to it.chapterNumber }
+
+        val merged = incomingChapters.mapIndexed { idx, inc ->
+            val old = inc.chapterUrl?.trim()?.let { byUrl[it] } ?: byKey[inc.category to inc.chapterNumber]
+            inc.copy(
+                id = old?.id ?: 0L,
+                mediaId = mediaId,
+                isRead = old?.isRead ?: inc.isRead,
+                readAtMs = old?.readAtMs ?: inc.readAtMs,
+                userRating = old?.userRating ?: inc.userRating,
+                userNote = old?.userNote ?: inc.userNote,
+                isBookmarked = old?.isBookmarked ?: inc.isBookmarked,
+                sortOrder = if (inc.sortOrder != 0) inc.sortOrder else idx
+            )
+        }
+        dao.deleteChaptersForMedia(mediaId)
+        dao.insertChapters(merged)
+    }
     fun getComicIssues(mediaId: Long): Flow<List<ComicIssueEntity>> =
         (comicIssueDao?.getIssuesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
@@ -237,9 +287,19 @@ class MediaRepository(
         isbn: String? = null,
         comicVineId: Long? = null,
         metronId: Long? = null,
+        fanficWorkId: String? = null,
+        fanficSourceUrl: String? = null,
         title: String? = null,
         mediaType: MediaType? = null
     ): MediaItemEntity? {
+        if (!fanficWorkId.isNullOrBlank()) {
+            val found = mediaDao.findByFanficWorkId(fanficWorkId.trim())
+            if (found != null) return found
+        }
+        if (!fanficSourceUrl.isNullOrBlank()) {
+            val found = mediaDao.findByFanficUrl(fanficSourceUrl.trim())
+            if (found != null) return found
+        }
         if (!vndbId.isNullOrBlank()) {
             val found = mediaDao.findByVndbId(vndbId.trim())
             if (found != null) return found
@@ -343,4 +403,39 @@ class MediaRepository(
         episodeProgressDao?.getAllProgressForMediaOnce(mediaId) ?: emptyList()
 
     suspend fun clearSyncQueue() = syncQueueDao?.clearQueue()
+
+    /**
+     * Saves a parsed fanfiction work into the library or merges its metadata + chapters
+     * with an existing matched entry (deduped by workId, canonical URL, or title).
+     * Returns (savedEntity, wasNewlyCreated).
+     */
+    suspend fun saveOrUpdateFanficWork(
+        work: com.omnitrack.app.data.fanfic.FanficParsedWork,
+        initialStatus: TrackingStatus = TrackingStatus.PLAN_TO_TRACK
+    ): Pair<MediaItemEntity, Boolean> {
+        val existing = findExistingMedia(
+            fanficWorkId = work.workId,
+            fanficSourceUrl = work.canonicalUrl,
+            title = work.title,
+            mediaType = MediaType.FANFICTION
+        )
+        return if (existing != null) {
+            val merged = work.toMediaItemEntity(status = existing.status, existing = existing)
+            updateMedia(merged)
+            val chaps = work.toChapterEntities(existing.id)
+            if (chaps.isNotEmpty()) {
+                upsertFanficChaptersPreservingReadState(existing.id, chaps)
+            }
+            merged to false
+        } else {
+            val draft = work.toMediaItemEntity(status = initialStatus, existing = null)
+            val newId = insertMedia(draft)
+            val saved = draft.copy(id = newId)
+            val chaps = work.toChapterEntities(newId)
+            if (chaps.isNotEmpty()) {
+                upsertFanficChaptersPreservingReadState(newId, chaps)
+            }
+            saved to true
+        }
+    }
 }

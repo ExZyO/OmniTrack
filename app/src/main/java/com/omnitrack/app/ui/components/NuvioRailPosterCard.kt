@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
@@ -50,7 +51,14 @@ fun NuvioRailPosterCard(
     cardWidth: Dp = 135.dp,
     cardHeight: Dp = Dp.Unspecified,
     cornerRadius: Dp = 14.dp,
-    inLibraryBadge: Boolean = false
+    inLibraryBadge: Boolean = false,
+    isFanfic: Boolean = false,
+    fanficAuthor: String? = null,
+    fanficFandom: String? = null,
+    fanficSiteCode: String? = null,
+    fanficRating: String? = null,
+    fanficWordCount: Int? = null,
+    fanficIsCrossover: Boolean = false
 ) {
     val resolvedHeight = if (cardHeight == Dp.Unspecified) cardWidth * 1.5f else cardHeight
 
@@ -70,13 +78,52 @@ fun NuvioRailPosterCard(
                 .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(cornerRadius))
         ) {
             val imageModel = remember(coverUrl) { ArtworkModelResolver.toCoilModel(coverUrl) }
-            if (imageModel != null) {
+            val isBlurred = isFanfic && shouldBlurFanficCover(fanficRating)
+            if (isFanfic && imageModel == null) {
+                FanficTypographicCover(
+                    title = title,
+                    author = fanficAuthor,
+                    primaryFandom = fanficFandom,
+                    sourceSite = fanficSiteCode,
+                    ratingCode = fanficRating,
+                    wordCount = fanficWordCount,
+                    isCrossover = fanficIsCrossover,
+                    compact = true,
+                    isBlurred = isBlurred
+                )
+            } else if (imageModel != null) {
                 AsyncImage(
                     model = imageModel,
                     contentDescription = title,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isBlurred) Modifier.blur(16.dp) else Modifier),
                     contentScale = ContentScale.Crop
                 )
+                if (isBlurred) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.72f))
+                                .border(0.8.dp, Color(0xFFF59E0B).copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = com.omnitrack.app.data.model.FanficRating.fromRaw(fanficRating).label.uppercase(),
+                                color = Color(0xFFFBBF24),
+                                fontSize = 8.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
+                }
             }
 
             if (inLibraryBadge) {

@@ -93,7 +93,7 @@ fun DetailPersonalNotesSection(
             !item.hardcoverId.isNullOrBlank()
     }
     val rewatchLabel = when (item.mediaType) {
-        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK -> "Rereads"
+        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK, MediaType.FANFICTION -> "Rereads"
         MediaType.GAME, MediaType.VISUAL_NOVEL -> "Replays"
         else -> "Rewatches"
     }

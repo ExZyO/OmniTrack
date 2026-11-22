@@ -54,6 +54,12 @@
                 <data android:scheme="chimanew" />
                 <data android:scheme="tachiyomi" />
             </intent-filter>
+            <!-- Share Sheet URL Interceptor for Fanfiction Sites (AO3, FF.net, SB, SV, QQ) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
     </application>
 

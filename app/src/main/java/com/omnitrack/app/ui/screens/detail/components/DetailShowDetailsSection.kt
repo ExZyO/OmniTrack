@@ -104,6 +104,7 @@ fun DetailGeneralInfoSection(
         MediaType.VISUAL_NOVEL -> "Visual Novel Details"
         MediaType.BOOK -> "Book Details"
         MediaType.COMIC -> "Comic Details"
+        MediaType.FANFICTION -> "Fanfiction Details"
         MediaType.MANGA, MediaType.NOVEL -> "Reading Details"
         else -> "Details"
     }
@@ -187,7 +188,7 @@ fun DetailGeneralInfoSection(
         }
         if (!airedStr.isNullOrBlank()) {
             val dateLabel = when (item.mediaType) {
-                MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK, MediaType.COMIC -> "Published"
+                MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK, MediaType.COMIC, MediaType.FANFICTION -> "Published"
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Released"
                 else -> "Aired"
             }
@@ -388,6 +389,7 @@ fun DetailGeneralInfoSection(
             val companyLabel = when (item.mediaType) {
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Developer"
                 MediaType.MANGA, MediaType.NOVEL -> "Serialization"
+                MediaType.FANFICTION -> "Site / Forum"
                 else -> "Production"
             }
             add(companyLabel to item.studioOrNetwork)

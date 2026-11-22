@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ViewCarousel
@@ -87,6 +88,7 @@ fun SettingsView(
     onNavigateToDetailsPageLayout: () -> Unit = {},
     onOpenHomeCustomizer: () -> Unit = {},
     onOpenDiscoverCustomizer: () -> Unit = {},
+    onOpenFanficSites: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -95,6 +97,7 @@ fun SettingsView(
     val tokenManager = app.trackerTokenManager
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
+    val fanficConnectedSites by tokenManager.fanficConnectedSites.collectAsState(initial = emptySet())
 
     val connectedCount = remember(tokens) {
         listOf(
@@ -128,6 +131,14 @@ fun SettingsView(
             trailingText = if (connectedCount > 0) "$connectedCount linked" else null,
             accentIcon = connectedCount > 0,
             onClick = { showTrackerAccountsSheet = true }
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Public,
+            title = "Fanfiction Sites & Import",
+            keywords = "fanfic ao3 ffn fanfiction spacebattles sufficient velocity qq cookies bookmarks",
+            trailingText = if (fanficConnectedSites.isNotEmpty()) "${fanficConnectedSites.size} sites" else null,
+            accentIcon = fanficConnectedSites.isNotEmpty(),
+            onClick = onOpenFanficSites
         ),
         SettingRowEntry(
             icon = Icons.Default.Key,
@@ -210,7 +221,7 @@ fun SettingsView(
             icon = Icons.Default.Info,
             title = "About OmniTrack",
             keywords = "about schema version database library count",
-            trailingText = "v20",
+            trailingText = "v21",
             onClick = { showAboutDialog = true }
         )
     )

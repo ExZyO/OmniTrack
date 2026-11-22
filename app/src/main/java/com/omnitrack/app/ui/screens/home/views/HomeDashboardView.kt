@@ -164,7 +164,9 @@ fun HomeDashboardView(
     modifier: Modifier = Modifier,
     posterStyle: PosterCardStyle = PosterCardStyle(),
     isRefreshing: Boolean = false,
-    onRefresh: () -> Unit = {}
+    onRefresh: () -> Unit = {},
+    fanfictionEnabled: Boolean = true,
+    fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -183,11 +185,24 @@ fun HomeDashboardView(
     val posterWidthDp = heroSettings.shelfPosterSize.widthDp.dp
     val posterHeightDp = heroSettings.shelfPosterSize.heightDp.dp
 
-    val categoryMedia = remember(allMedia, selectedCategory) {
-        if (selectedCategory == MediaType.ALL) allMedia else allMedia.filter { it.mediaType == selectedCategory }
+    val visibleAllMedia = remember(allMedia, fanfictionEnabled, fanficNsfwMode) {
+        allMedia.filterNot { item ->
+            item.mediaType == MediaType.FANFICTION &&
+                (!fanfictionEnabled || com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode))
+        }
     }
-    val categoryTrending = remember(trendingItems, selectedCategory) {
-        if (selectedCategory == MediaType.ALL) trendingItems else trendingItems.filter { it.mediaType == selectedCategory }
+    val visibleTrending = remember(trendingItems, fanfictionEnabled, fanficNsfwMode) {
+        trendingItems.filterNot { item ->
+            item.mediaType == MediaType.FANFICTION &&
+                (!fanfictionEnabled || com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode))
+        }
+    }
+
+    val categoryMedia = remember(visibleAllMedia, selectedCategory) {
+        if (selectedCategory == MediaType.ALL) visibleAllMedia else visibleAllMedia.filter { it.mediaType == selectedCategory }
+    }
+    val categoryTrending = remember(visibleTrending, selectedCategory) {
+        if (selectedCategory == MediaType.ALL) visibleTrending else visibleTrending.filter { it.mediaType == selectedCategory }
     }
 
     val allContinueItems = remember(categoryMedia) {
@@ -243,8 +258,8 @@ fun HomeDashboardView(
         heroSettings.strictRequirements,
         heroSettings.statusFilters,
         selectedCategory,
-        trendingItems,
-        allMedia,
+        visibleTrending,
+        visibleAllMedia,
         heroRefreshNonce
     ) {
         fun matchesHeroCategory(type: MediaType): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
@@ -253,8 +268,8 @@ fun HomeDashboardView(
             else -> true // "ALL"
         }
 
-        val scopedMedia = allMedia.filter { matchesHeroCategory(it.mediaType) }
-        val scopedTrending = trendingItems.filter { matchesHeroCategory(it.mediaType) }
+        val scopedMedia = visibleAllMedia.filter { matchesHeroCategory(it.mediaType) }
+        val scopedTrending = visibleTrending.filter { matchesHeroCategory(it.mediaType) }
 
         val scopedContinue = scopedMedia.filter { it.status == TrackingStatus.IN_PROGRESS }.sortedByDescending { it.lastUpdated }
         val scopedRecent = scopedMedia.sortedByDescending { it.lastUpdated }
@@ -274,6 +289,8 @@ fun HomeDashboardView(
             comicVineId = s.comicVineId,
             metronId = s.metronId,
             openLibraryId = s.openLibraryId,
+            fanficWorkId = s.fanficWorkId,
+            fanficSourceUrl = s.fanficSourceUrl,
             title = s.title,
             nativeTitle = s.nativeTitle
         )
@@ -577,7 +594,7 @@ fun HomeDashboardView(
             }
 
             // Customizable Ordered Home Shelves
-            homeRows.filter { it.isEnabled }.forEach { row ->
+            homeRows.filter { it.isEnabled && (fanfictionEnabled || it.key != HomeRowKey.DISCOVER_FANFICTION) }.forEach { row ->
                 when (row.key) {
                     HomeRowKey.CONTINUE -> {
                         if (continueItems.isNotEmpty()) {
@@ -628,6 +645,7 @@ fun HomeDashboardView(
                                             MediaType.BOOK -> "Hardcover"
                                             MediaType.GAME -> "Steam"
                                             MediaType.VISUAL_NOVEL -> "VNDB"
+                                            MediaType.FANFICTION -> "AO3"
                                             else -> "AniList"
                                         }
                                         onPreviewSearchItem(
@@ -886,12 +904,16 @@ fun HomeDashboardView(
                     HomeRowKey.DISCOVER_SHOWS,
                     HomeRowKey.DISCOVER_MOVIES,
                     HomeRowKey.DISCOVER_GAMES,
-                    HomeRowKey.DISCOVER_VNS -> {
+                    HomeRowKey.DISCOVER_VNS,
+                    HomeRowKey.DISCOVER_FANFICTION -> {
                         item(key = "row_${row.key.name}") {
                             LaunchedEffect(row.key) {
                                 onRequestDiscoverShelf(row.key)
                             }
-                            val rawShelfItems = categoryDiscoverShelves[row.key].orEmpty()
+                            val rawShelfItems = categoryDiscoverShelves[row.key].orEmpty().filterNot { item ->
+                                item.mediaType == MediaType.FANFICTION &&
+                                    com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode)
+                            }
                             val shelfItems = if (shelfLimit == Int.MAX_VALUE) rawShelfItems else rawShelfItems.take(shelfLimit)
                             if (shelfItems.isEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -983,7 +1005,7 @@ fun HomeDashboardView(
                     onDismissRequest = { categoryMenuExpanded = false },
                     containerColor = AmoledBlack
                 ) {
-                    MediaType.filterTabs.forEach { type ->
+                    (if (fanfictionEnabled) MediaType.filterTabs else MediaType.filterTabs.filter { it != MediaType.FANFICTION }).forEach { type ->
                         val selected = type == selectedCategory
                         DropdownMenuItem(
                             text = {
@@ -2262,7 +2284,14 @@ private fun HomeDiscoverSearchShelf(
                         if (libMatch != null) onItemClick(libMatch.id) else onPreviewSearchItem(item)
                     },
                     cardWidth = cardWidth,
-                    cardHeight = cardHeight
+                    cardHeight = cardHeight,
+                    isFanfic = item.mediaType == MediaType.FANFICTION,
+                    fanficAuthor = item.bookAuthor,
+                    fanficFandom = item.fanficPrimaryFandom,
+                    fanficSiteCode = item.fanficSourceSite,
+                    fanficRating = item.fanficRating,
+                    fanficWordCount = item.fanficWordCount,
+                    fanficIsCrossover = item.fanficIsCrossover
                 )
             }
         }
@@ -2301,7 +2330,14 @@ private fun MediaSummaryRail(
                     rating = summary.userRating ?: summary.communityScore,
                     onClick = { onItemClick(summary.id) },
                     cardWidth = cardWidth,
-                    cardHeight = cardHeight
+                    cardHeight = cardHeight,
+                    isFanfic = summary.mediaType == MediaType.FANFICTION,
+                    fanficAuthor = summary.bookAuthor,
+                    fanficFandom = summary.fanficPrimaryFandom,
+                    fanficSiteCode = summary.fanficSourceSite,
+                    fanficRating = summary.fanficRating,
+                    fanficWordCount = summary.fanficWordCount,
+                    fanficIsCrossover = summary.fanficIsCrossover
                 )
             }
         }

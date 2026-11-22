@@ -47,18 +47,24 @@ object ArtworkModelResolver {
         comicVineId: Long? = null,
         metronId: Long? = null,
         openLibraryId: String? = null,
+        fanficWorkId: String? = null,
+        fanficSourceUrl: String? = null,
         title: String? = null,
         nativeTitle: String? = null
     ): MediaCardSummary? {
         val cleanImdb = imdbId?.trim()?.takeIf { it.isNotBlank() }
         val cleanOpenLib = openLibraryId?.trim()?.takeIf { it.isNotBlank() }
+        val cleanFanficWork = fanficWorkId?.trim()?.takeIf { it.isNotBlank() }
+        val cleanFanficUrl = fanficSourceUrl?.trim()?.takeIf { it.isNotBlank() }
         val cleanTitle = title?.trim()?.takeIf { it.isNotBlank() }
         val cleanNative = nativeTitle?.trim()?.takeIf { it.isNotBlank() }
 
         return library.firstOrNull { summary ->
             val typeMatches = mediaType == null || mediaType == MediaType.ALL || summary.mediaType == mediaType
             typeMatches && (
-                (anilistId != null && summary.anilistId == anilistId) ||
+                (cleanFanficWork != null && summary.fanficWorkId == cleanFanficWork) ||
+                    (cleanFanficUrl != null && summary.fanficSourceUrl == cleanFanficUrl) ||
+                    (anilistId != null && summary.anilistId == anilistId) ||
                     (malId != null && summary.malId == malId) ||
                     (tmdbId != null && summary.tmdbId == tmdbId) ||
                     (cleanImdb != null && summary.imdbId?.trim()?.equals(cleanImdb, ignoreCase = true) == true) ||

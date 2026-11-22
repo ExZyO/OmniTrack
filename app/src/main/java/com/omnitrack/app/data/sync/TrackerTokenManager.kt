@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.omnitrack.app.data.model.FanficSite
 import com.omnitrack.app.data.preferences.dataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -81,6 +82,12 @@ class TrackerTokenManager(private val context: Context) {
         val MAL_VERIFIER = stringPreferencesKey("pkce_mal_verifier")
         val TRAKT_VERIFIER = stringPreferencesKey("pkce_trakt_verifier")
         val OAUTH_STATE = stringPreferencesKey("pkce_oauth_state")
+        val FANFIC_COOKIE_AO3 = stringPreferencesKey("fanfic_cookie_ao3")
+        val FANFIC_COOKIE_SB = stringPreferencesKey("fanfic_cookie_sb")
+        val FANFIC_COOKIE_SV = stringPreferencesKey("fanfic_cookie_sv")
+        val FANFIC_COOKIE_QQ = stringPreferencesKey("fanfic_cookie_qq")
+        val FANFIC_COOKIE_FFN = stringPreferencesKey("fanfic_cookie_ffn")
+        val FANFIC_AO3_USERNAME = stringPreferencesKey("fanfic_ao3_username")
     }
 
     val tokens: Flow<TrackerTokens> = context.dataStore.data
@@ -237,6 +244,48 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun saveOAuthState(state: String?) = saveToken(Keys.OAUTH_STATE, state)
     suspend fun getOAuthState(): String? = context.dataStore.data.firstOrNull()?.get(Keys.OAUTH_STATE)?.let { decrypt(it) }
 
+    private fun fanficKeyFor(site: FanficSite): Preferences.Key<String>? = when (site) {
+        FanficSite.AO3 -> Keys.FANFIC_COOKIE_AO3
+        FanficSite.SB -> Keys.FANFIC_COOKIE_SB
+        FanficSite.SV -> Keys.FANFIC_COOKIE_SV
+        FanficSite.QQ -> Keys.FANFIC_COOKIE_QQ
+        FanficSite.FFN -> Keys.FANFIC_COOKIE_FFN
+        FanficSite.OTHER -> null
+    }
+
+    val fanficConnectedSites: Flow<Set<String>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            buildSet {
+                if (!prefs[Keys.FANFIC_COOKIE_AO3].isNullOrBlank()) add(FanficSite.AO3.code)
+                if (!prefs[Keys.FANFIC_COOKIE_SB].isNullOrBlank()) add(FanficSite.SB.code)
+                if (!prefs[Keys.FANFIC_COOKIE_SV].isNullOrBlank()) add(FanficSite.SV.code)
+                if (!prefs[Keys.FANFIC_COOKIE_QQ].isNullOrBlank()) add(FanficSite.QQ.code)
+                if (!prefs[Keys.FANFIC_COOKIE_FFN].isNullOrBlank()) add(FanficSite.FFN.code)
+            }
+        }
+
+    suspend fun saveFanficCookie(site: FanficSite, cookie: String?) {
+        val key = fanficKeyFor(site) ?: return
+        saveToken(key, cookie?.trim()?.takeIf { it.isNotBlank() })
+    }
+
+    suspend fun getFanficCookie(site: FanficSite): String? {
+        val key = fanficKeyFor(site) ?: return null
+        return context.dataStore.data.firstOrNull()?.get(key)?.let { decrypt(it) }
+    }
+
+    suspend fun saveAo3Username(username: String?) {
+        val clean = username?.trim().orEmpty()
+        context.dataStore.edit { prefs ->
+            if (clean.isBlank()) prefs.remove(Keys.FANFIC_AO3_USERNAME)
+            else prefs[Keys.FANFIC_AO3_USERNAME] = clean
+        }
+    }
+
+    suspend fun getAo3Username(): String? =
+        context.dataStore.data.firstOrNull()?.get(Keys.FANFIC_AO3_USERNAME)
+
     /**
      * One-time transparent upgrade: re-encrypts any legacy v1 token entries under the
      * hardware-backed Android Keystore master key without forcing sign-out.
@@ -323,7 +372,8 @@ class TrackerTokenManager(private val context: Context) {
         fun isEncryptedTokenKey(keyName: String): Boolean =
             keyName.startsWith("token_") ||
                 keyName.startsWith("pkce_") ||
-                keyName.startsWith("tmdb_pending_")
+                keyName.startsWith("tmdb_pending_") ||
+                keyName.startsWith("fanfic_cookie_")
 
         fun encrypt(plainText: String): String {
             return try {

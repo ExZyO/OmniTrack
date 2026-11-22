@@ -437,6 +437,19 @@ class ArtworkWaterfallRepository(
                     }
                 }
 
+                MediaType.FANFICTION -> {
+                    val fandomQuery = clean.ifBlank { title }
+                    launchProvider { fetchAniListCovers(fandomQuery, isAnime = true) }
+                    launchProvider { fetchAniListCovers(fandomQuery, isAnime = false) }
+                    launchProvider { fetchTmdbArtwork(fandomQuery, isMovie = false) }
+                    launchProvider { fetchTmdbArtwork(fandomQuery, isMovie = true) }
+                    launchProvider { fetchBangumiCovers(fandomQuery, type = 1) }
+                    if (!sgdbKey.isNullOrBlank()) {
+                        launchProvider { fetchSteamGridDbArtwork(fandomQuery, null, sgdbKey) }
+                    }
+                    launchProvider { fetchOpenLibraryEditionCovers(fandomQuery, null) }
+                }
+
                 MediaType.ALL -> {
                     launchProvider { fetchAniListCovers(title, isAnime = true) }
                     launchProvider { fetchTvMazeCovers(title) }

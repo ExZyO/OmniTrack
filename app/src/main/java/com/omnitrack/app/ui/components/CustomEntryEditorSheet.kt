@@ -102,6 +102,7 @@ fun CustomEntryEditorSheet(
             MediaType.MANGA,
             MediaType.COMIC,
             MediaType.NOVEL,
+            MediaType.FANFICTION,
             MediaType.BOOK,
             MediaType.SHOW,
             MediaType.MOVIE,

@@ -39,6 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -102,6 +103,15 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     comicPublisher = comicPublisher,
     comicFormat = comicFormat,
     comicTrackingMode = comicTrackingMode,
+    fanficSourceSite = fanficSourceSite,
+    fanficSourceUrl = fanficSourceUrl,
+    fanficWorkId = fanficWorkId,
+    fanficPrimaryFandom = fanficPrimaryFandom,
+    fanficWordCount = fanficWordCount,
+    fanficRating = fanficRating,
+    fanficWorkStatus = fanficWorkStatus,
+    fanficIsCrossover = fanficIsCrossover,
+    fanficTagsSearch = fanficTagsSearch,
     isCustomEntry = isCustomEntry,
     bannerFocalX = bannerFocalX,
     bannerFocalY = bannerFocalY,
@@ -202,25 +212,76 @@ fun MediaCard(
                     enabled = cardDepthEnabled
                 )
         ) {
-            AsyncImage(
-                model = activeModel,
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                onError = {
-                    if (customPosterUrl != null && !customPosterFailed) {
-                        customPosterFailed = true
+            val isFanficBlurred = item.mediaType == MediaType.FANFICTION &&
+                shouldBlurFanficCover(item.fanficRating)
+            var fanficArtFailed by remember(activeModel) { mutableStateOf(false) }
+            val hasRenderableArt = when (activeModel) {
+                is String -> activeModel.isNotBlank() && !fanficArtFailed
+                null -> false
+                else -> !fanficArtFailed
+            }
+
+            if (item.mediaType == MediaType.FANFICTION && !hasRenderableArt) {
+                FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = isLandscape,
+                    isBlurred = isFanficBlurred
+                )
+            } else {
+                AsyncImage(
+                    model = activeModel,
+                    contentDescription = item.title,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isFanficBlurred) Modifier.blur(16.dp) else Modifier),
+                    contentScale = ContentScale.Crop,
+                    onError = {
+                        if (customPosterUrl != null && !customPosterFailed) {
+                            customPosterFailed = true
+                        } else {
+                            fanficArtFailed = true
+                        }
+                    },
+                    onSuccess = {
+                        if (activeModel is String && coverCache != null) {
+                            val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                coverCache.promoteFromDiskCache(activeModel, diskCache)
+                            }
+                        }
                     }
-                },
-                onSuccess = {
-                    if (activeModel is String && coverCache != null) {
-                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            coverCache.promoteFromDiskCache(activeModel, diskCache)
+                )
+                if (isFanficBlurred) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.Black.copy(alpha = 0.72f))
+                                .border(0.8.dp, Color(0xFFF59E0B).copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).label.uppercase(),
+                                color = Color(0xFFFBBF24),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.7.sp
+                            )
                         }
                     }
                 }
-            )
+            }
 
             // Landscape transparent title logo overlay (1:1 with Nuvio)
             val hasClearart = isLandscape && showLandscapeClearlogo && !item.clearartUrl.isNullOrBlank()
@@ -463,6 +524,23 @@ fun MediaCard(
                         totalProgress = item.totalProgress,
                         trackingMode = item.comicTrackingMode
                     ),
+                    color = TextSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
+            } else if (item.mediaType == MediaType.FANFICTION) {
+                val siteBadge = com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).shortBadge
+                val wordsShort = com.omnitrack.app.data.model.formatWordCountShort(item.fanficWordCount)
+                val badgeLine = listOfNotNull(
+                    siteBadge,
+                    wordsShort.takeIf { it.isNotBlank() },
+                    item.fanficPrimaryFandom?.takeIf { it.isNotBlank() }
+                ).joinToString(" • ")
+                Text(
+                    text = badgeLine.ifBlank { "Fanfiction" },
                     color = TextSecondary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,

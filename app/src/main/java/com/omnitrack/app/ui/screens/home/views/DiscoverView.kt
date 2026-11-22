@@ -127,6 +127,7 @@ fun DiscoverView(
     onAddMedia: (SearchResultItem) -> Unit,
     onCreateCustomEntry: (String, MediaType) -> Unit = { _, _ -> },
     onOpenCustomizer: () -> Unit = {},
+    onOpenFanficImport: (initialUrl: String, initialTab: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     homeViewModel: HomeViewModel? = null,
     searchRepository: OmniSearchRepository = remember { OmniSearchRepository() },
@@ -150,6 +151,10 @@ fun DiscoverView(
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val discoverSettings by prefManager.discoverCustomizationSettings.collectAsState(
         initial = DiscoverCustomizationSettings()
+    )
+    val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+    val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(
+        initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP
     )
 
     val queryFlow = remember(homeViewModel) { homeViewModel?.discoverSearchQuery ?: MutableStateFlow("") }
@@ -177,19 +182,20 @@ fun DiscoverView(
         }
     }
 
-    val allCategories = remember {
-        listOf(
-            MediaType.ALL,
-            MediaType.ANIME,
-            MediaType.MANGA,
-            MediaType.COMIC,
-            MediaType.NOVEL,
-            MediaType.BOOK,
-            MediaType.SHOW,
-            MediaType.MOVIE,
-            MediaType.GAME,
-            MediaType.VISUAL_NOVEL
-        )
+    val allCategories = remember(fanfictionEnabled) {
+        buildList {
+            add(MediaType.ALL)
+            add(MediaType.ANIME)
+            add(MediaType.MANGA)
+            add(MediaType.COMIC)
+            add(MediaType.NOVEL)
+            if (fanfictionEnabled) add(MediaType.FANFICTION)
+            add(MediaType.BOOK)
+            add(MediaType.SHOW)
+            add(MediaType.MOVIE)
+            add(MediaType.GAME)
+            add(MediaType.VISUAL_NOVEL)
+        }
     }
     val visibleCategories = remember(allCategories, discoverSettings.disabledCategories) {
         allCategories.filter { it.name !in discoverSettings.disabledCategories }.ifEmpty { listOf(MediaType.ALL) }
@@ -218,6 +224,9 @@ fun DiscoverView(
     var selectedBookCategorySubFilter by remember { mutableStateOf<String?>(null) }
     var selectedComicPublisherSubFilter by remember { mutableStateOf("ALL") }
     var selectedComicFormatSubFilter by remember { mutableStateOf("ALL") }
+    var selectedFanficRatingSubFilter by remember { mutableStateOf("ALL") }
+    var selectedFanficStatusSubFilter by remember { mutableStateOf("ALL") }
+    var selectedFanficCrossoverOnly by remember { mutableStateOf(false) }
 
     // Hoisted parallel Discover category shelf loading (skips disabled shelves/categories)
     LaunchedEffect(
@@ -391,24 +400,28 @@ fun DiscoverView(
     }
 
     fun filterBySubfilters(items: List<SearchResultItem>, targetType: MediaType): List<SearchResultItem> {
+        val nsfwSafe = items.filterNot { item ->
+            item.mediaType == MediaType.FANFICTION &&
+                (!fanfictionEnabled || com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode))
+        }
         return when {
-            targetType == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> items.filter {
+            targetType == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> nsfwSafe.filter {
                 com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == selectedMangaSubFilter
             }
-            targetType == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> items.filter {
+            targetType == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> nsfwSafe.filter {
                 com.omnitrack.app.ui.screens.home.inferNovelSubtype(
                     it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
                 ) == selectedNovelSubFilter
             }
-            targetType == MediaType.VISUAL_NOVEL -> items.filter {
+            targetType == MediaType.VISUAL_NOVEL -> nsfwSafe.filter {
                 (selectedVnOriginSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(it.originCountry, it.nativeTitle) == selectedVnOriginSubFilter) &&
                     (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
             }
-            targetType == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> items.filter {
+            targetType == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> nsfwSafe.filter {
                 val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(it.platform, null)
                 groups.isEmpty() || selectedGamePlatformSubFilter in groups
             }
-            targetType == MediaType.BOOK -> items.filter { item ->
+            targetType == MediaType.BOOK -> nsfwSafe.filter { item ->
                 val fmtOk = selectedBookFormatSubFilter == "ALL" ||
                     com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
                 val catOk = selectedBookCategorySubFilter == null ||
@@ -416,14 +429,22 @@ fun DiscoverView(
                     com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
                 fmtOk && catOk
             }
-            targetType == MediaType.COMIC -> items.filter { item ->
+            targetType == MediaType.COMIC -> nsfwSafe.filter { item ->
                 val pubOk = selectedComicPublisherSubFilter == "ALL" ||
                     com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisherSubFilter
                 val fmtOk = selectedComicFormatSubFilter == "ALL" ||
                     com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormatSubFilter
                 pubOk && fmtOk
             }
-            else -> items
+            targetType == MediaType.FANFICTION -> nsfwSafe.filter { item ->
+                val ratingOk = selectedFanficRatingSubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).code == selectedFanficRatingSubFilter
+                val statusOk = selectedFanficStatusSubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.FanficWorkStatus.fromRaw(item.fanficWorkStatus).name == selectedFanficStatusSubFilter
+                val xoOk = !selectedFanficCrossoverOnly || item.fanficIsCrossover
+                ratingOk && statusOk && xoOk
+            }
+            else -> nsfwSafe
         }
     }
 
@@ -449,10 +470,34 @@ fun DiscoverView(
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    text = "Live search & curated rails across all 9 verticals",
+                    text = "Live search & curated rails across all verticals",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
+            }
+            if (fanfictionEnabled) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentGold.copy(alpha = 0.14f))
+                        .clickable { onOpenFanficImport("", 0) }
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Import Fanfic URL",
+                        tint = AccentGold,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "Import URL",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold
+                    )
+                }
             }
             IconButton(
                 onClick = onOpenCustomizer,
@@ -722,6 +767,64 @@ fun DiscoverView(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
+
+            if (selectedFilter == MediaType.FANFICTION) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(AccentGold.copy(alpha = 0.18f))
+                            .clickable { onOpenFanficImport("", 0) }
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
+                        Text("Import URL / Sites", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                    }
+                    listOf("ALL" to "Any Rating", "G" to "G", "T" to "T", "M" to "M", "E" to "E").forEach { (k, lbl) ->
+                        val sel = selectedFanficRatingSubFilter == k
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (sel) AccentGold.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f))
+                                .clickable { selectedFanficRatingSubFilter = k }
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text(lbl, fontSize = 11.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, color = if (sel) AccentGold else TextSecondary)
+                        }
+                    }
+                    listOf("ALL" to "Any Status", "COMPLETE" to "Complete", "ONGOING" to "Ongoing").forEach { (k, lbl) ->
+                        val sel = selectedFanficStatusSubFilter == k
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (sel) AccentGold.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f))
+                                .clickable { selectedFanficStatusSubFilter = k }
+                                .padding(horizontal = 9.dp, vertical = 4.dp)
+                        ) {
+                            Text(lbl, fontSize = 11.sp, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, color = if (sel) AccentGold else TextSecondary)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (selectedFanficCrossoverOnly) AccentGold.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f))
+                            .clickable { selectedFanficCrossoverOnly = !selectedFanficCrossoverOnly }
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                    ) {
+                        Text("Crossovers", fontSize = 11.sp, fontWeight = if (selectedFanficCrossoverOnly) FontWeight.Bold else FontWeight.Medium, color = if (selectedFanficCrossoverOnly) AccentGold else TextSecondary)
+                    }
+                }
+            }
         }
 
         // AI Resolution Banner
@@ -767,10 +870,48 @@ fun DiscoverView(
             selectedBookFormatSubFilter,
             selectedBookCategorySubFilter,
             selectedComicPublisherSubFilter,
-            selectedComicFormatSubFilter
+            selectedComicFormatSubFilter,
+            selectedFanficRatingSubFilter,
+            selectedFanficStatusSubFilter,
+            selectedFanficCrossoverOnly,
+            fanficNsfwMode
         ) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
             filterBySubfilters(base, selectedFilter)
+        }
+
+        val detectedFanficUrl = remember(searchQuery, fanfictionEnabled) {
+            if (!fanfictionEnabled) null else com.omnitrack.app.data.model.extractFirstFanficUrl(searchQuery)
+        }
+        if (detectedFanficUrl != null) {
+            val detectedSite = com.omnitrack.app.data.model.FanficSite.fromUrl(detectedFanficUrl)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AccentGold.copy(alpha = 0.16f))
+                    .clickable { onOpenFanficImport(detectedFanficUrl, 0) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "${detectedSite.displayName} link detected",
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Tap to fetch metadata, chapters & track in OmniTrack",
+                        color = AccentGold,
+                        fontSize = 11.5.sp
+                    )
+                }
+                Text("Import", color = AccentGold, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+            }
         }
 
         if (searchQuery.trim().length >= 2) {
@@ -830,7 +971,9 @@ fun DiscoverView(
 
                                 val existingInLibrary = allMedia.firstOrNull { summary ->
                                     summary.mediaType == item.mediaType && (
-                                        (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
+                                        (item.fanficWorkId != null && summary.fanficWorkId == item.fanficWorkId) ||
+                                            (item.fanficSourceUrl != null && summary.fanficSourceUrl.equals(item.fanficSourceUrl, ignoreCase = true)) ||
+                                            (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
                                             (item.metronId != null && summary.metronId == item.metronId) ||
                                             (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
                                             summary.title.equals(item.title, ignoreCase = true) ||
@@ -867,6 +1010,15 @@ fun DiscoverView(
                                     metronId = item.metronId,
                                     comicPublisher = item.comicPublisher,
                                     comicFormat = item.comicFormat,
+                                    fanficSourceSite = item.fanficSourceSite,
+                                    fanficSourceUrl = item.fanficSourceUrl,
+                                    fanficWorkId = item.fanficWorkId,
+                                    fanficPrimaryFandom = item.fanficPrimaryFandom,
+                                    fanficWordCount = item.fanficWordCount,
+                                    fanficRating = item.fanficRating,
+                                    fanficWorkStatus = item.fanficWorkStatus,
+                                    fanficIsCrossover = item.fanficIsCrossover,
+                                    fanficTagsSearch = item.fanficTagsSearch,
                                     lastUpdated = System.currentTimeMillis()
                                 )
 
@@ -984,7 +1136,11 @@ fun DiscoverView(
                             "ALL:book_trending" -> MediaType.BOOK
                             "ALL:game_trending" -> MediaType.GAME
                             "ALL:vn_popular" -> MediaType.VISUAL_NOVEL
+                            "ALL:fanfic_trending" -> MediaType.FANFICTION
                             else -> null
+                        }
+                        if (mappedCat == MediaType.FANFICTION && !fanfictionEnabled) {
+                            return@filter false
                         }
                         if (mappedCat != null && mappedCat.name in discoverSettings.disabledCategories) {
                             return@filter false
@@ -1063,6 +1219,7 @@ fun DiscoverView(
                 MediaType.MOVIE -> listOf("Dune", "Oppenheimer", "Interstellar", "Spider-Verse", "Parasite")
                 MediaType.GAME -> listOf("Elden Ring", "Baldur's Gate 3", "Hades II", "Hollow Knight", "Disco Elysium")
                 MediaType.VISUAL_NOVEL -> listOf("Steins;Gate", "Clannad", "The House in Fata Morgana", "Umineko", "Muv-Luv")
+                MediaType.FANFICTION -> listOf("Worm", "Harry Potter", "Naruto", "My Hero Academia", "One Piece", "Crossover")
                 else -> listOf("The Hundred Reigns", "Audiobook", "Invincible", "Dune", "Frieren", "Elden Ring")
             }
 
@@ -1247,6 +1404,13 @@ fun DiscoverView(
                                             subtitle = item.bookAuthor ?: item.comicPublisher ?: item.releaseYear ?: item.mediaType.displayName,
                                             rating = item.communityScore,
                                             inLibraryBadge = inLib != null,
+                                            isFanfic = item.mediaType == MediaType.FANFICTION,
+                                            fanficAuthor = item.bookAuthor,
+                                            fanficFandom = item.fanficPrimaryFandom,
+                                            fanficSiteCode = item.fanficSourceSite,
+                                            fanficRating = item.fanficRating,
+                                            fanficWordCount = item.fanficWordCount,
+                                            fanficIsCrossover = item.fanficIsCrossover,
                                             onClick = {
                                                 if (inLib != null) {
                                                     onItemClick(inLib.id)
@@ -1303,6 +1467,13 @@ fun DiscoverView(
                                         coverUrl = summary.customCoverPath ?: summary.coverUrl,
                                         subtitle = summary.bookAuthor ?: summary.comicPublisher ?: summary.mediaType.displayName,
                                         rating = summary.userRating ?: summary.communityScore,
+                                        isFanfic = summary.mediaType == MediaType.FANFICTION,
+                                        fanficAuthor = summary.bookAuthor,
+                                        fanficFandom = summary.fanficPrimaryFandom,
+                                        fanficSiteCode = summary.fanficSourceSite,
+                                        fanficRating = summary.fanficRating,
+                                        fanficWordCount = summary.fanficWordCount,
+                                        fanficIsCrossover = summary.fanficIsCrossover,
                                         onClick = {
                                             ActiveSiblingHolder.setSiblings(categorySpotlight.map { it.id })
                                             onItemClick(summary.id)
@@ -1382,6 +1553,8 @@ private fun findLibraryMatch(allMedia: List<MediaCardSummary>, item: SearchResul
         comicVineId = item.comicVineId,
         metronId = item.metronId,
         openLibraryId = item.openLibraryId,
+        fanficWorkId = item.fanficWorkId,
+        fanficSourceUrl = item.fanficSourceUrl,
         title = item.title,
         nativeTitle = item.nativeTitle
     )

@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.omnitrack.app.data.model.extractFirstFanficUrl
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.util.AppLogger
@@ -22,6 +23,9 @@ import com.omnitrack.app.ui.theme.OmniThemeSettings
 import com.omnitrack.app.ui.theme.OmniThemeState
 import com.omnitrack.app.ui.theme.OmniTrackTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -39,6 +43,21 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+object SharedFanficUrlBus {
+    private val _pendingUrl = MutableStateFlow<String?>(null)
+    val pendingUrl: StateFlow<String?> = _pendingUrl.asStateFlow()
+
+    fun emit(url: String) {
+        if (url.isNotBlank()) {
+            _pendingUrl.value = url
+        }
+    }
+
+    fun consume() {
+        _pendingUrl.value = null
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +65,7 @@ class MainActivity : ComponentActivity() {
 
         val app = application as OmniTrackApplication
         handleAuthDeepLink(intent?.data, app)
+        handleShareIntent(intent)
 
         setContent {
             val themeSettings by app.preferenceManager.themeSettings.collectAsState(initial = OmniThemeSettings())
@@ -65,8 +85,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         val app = application as OmniTrackApplication
         handleAuthDeepLink(intent.data, app)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val mime = intent.type?.lowercase() ?: return
+        if (!mime.startsWith("text/")) return
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+        val url = extractFirstFanficUrl(sharedText) ?: return
+        SharedFanficUrlBus.emit(url)
     }
 
     private fun handleAuthDeepLink(data: Uri?, app: OmniTrackApplication) {

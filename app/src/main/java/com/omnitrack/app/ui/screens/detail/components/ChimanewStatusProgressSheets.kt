@@ -77,12 +77,12 @@ fun ChimanewStatusBottomSheet(
     val haptic = LocalHapticFeedback.current
 
     val activeVerb = when (mediaType) {
-        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK -> "Reading"
+        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK, MediaType.FANFICTION -> "Reading"
         MediaType.GAME, MediaType.VISUAL_NOVEL -> "Playing"
         else -> "Watching"
     }
     val planVerb = when (mediaType) {
-        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK -> "Plan to Read"
+        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK, MediaType.FANFICTION -> "Plan to Read"
         MediaType.GAME, MediaType.VISUAL_NOVEL -> "Plan to Play"
         else -> "Plan to Watch"
     }
