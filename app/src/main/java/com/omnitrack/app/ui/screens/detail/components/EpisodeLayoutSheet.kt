@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.ViewStream
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -36,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,9 +44,7 @@ import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -68,7 +66,7 @@ fun EpisodeLayoutSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
+        containerColor = AmoledBlack,
         dragHandle = null
     ) {
         Column(
@@ -120,50 +118,46 @@ fun EpisodeLayoutSheet(
                 color = AccentGold
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(
+            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                val modes = listOf(
                     Triple(EpisodeLayoutMode.HORIZONTAL, "Horizontal Carousel", Icons.Default.ViewStream),
                     Triple(EpisodeLayoutMode.LIST, "Vertical Compact List", Icons.Default.ViewAgenda),
                     Triple(EpisodeLayoutMode.VERTICAL_CARD, "Vertical Hero Cards", Icons.Default.ViewCarousel),
                     Triple(EpisodeLayoutMode.POSTER_GRID, "Poster Grid (Light Novels)", Icons.Default.GridView)
-                ).forEach { (mode, title, icon) ->
+                )
+                modes.forEachIndexed { index, (mode, title, icon) ->
                     val isSelected = currentMode == mode
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated)
-                            .border(
-                                width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) AccentGold else GlassBorder,
-                                shape = RoundedCornerShape(14.dp)
-                            )
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isSelected) AccentGold.copy(alpha = 0.08f) else Color.Transparent)
                             .clickable {
                                 scope.launch { preferenceManager.updateEpisodeLayoutMode(mode) }
                             }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                            .padding(horizontal = 8.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.08f)),
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.06f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = icon,
                                 contentDescription = null,
-                                tint = if (isSelected) AmoledBlack else TextSecondary,
-                                modifier = Modifier.size(20.dp)
+                                tint = if (isSelected) OnAccentColor else TextSecondary,
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = title,
-                                color = TextPrimary,
+                                color = if (isSelected) AccentGold else TextPrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -174,8 +168,19 @@ fun EpisodeLayoutSheet(
                             )
                         }
                     }
+                    if (index < modes.lastIndex) {
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.08f),
+                            thickness = 0.6.dp
+                        )
+                    }
                 }
             }
+
+            HorizontalDivider(
+                color = Color.White.copy(alpha = 0.08f),
+                thickness = 0.6.dp
+            )
 
             // Section 2: Card Size Scaling
             Row(
@@ -213,9 +218,11 @@ fun EpisodeLayoutSheet(
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                            .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                else Color.White.copy(alpha = 0.05f)
+                            )
                             .clickable {
                                 scope.launch { preferenceManager.updateEpisodeLayoutScale(scaleVal) }
                             }
@@ -226,7 +233,7 @@ fun EpisodeLayoutSheet(
                             text = label,
                             fontSize = 11.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) AmoledBlack else TextSecondary
+                            color = if (isSelected) AccentGold else TextSecondary
                         )
                     }
                 }
@@ -241,8 +248,13 @@ fun EpisodeLayoutSheet(
                 colors = SliderDefaults.colors(
                     thumbColor = AccentGold,
                     activeTrackColor = AccentGold,
-                    inactiveTrackColor = DarkSurfaceElevated
+                    inactiveTrackColor = Color.White.copy(alpha = 0.12f)
                 )
+            )
+
+            HorizontalDivider(
+                color = Color.White.copy(alpha = 0.08f),
+                thickness = 0.6.dp
             )
 
             // Section 3: Seasons View Mode
@@ -270,19 +282,21 @@ fun EpisodeLayoutSheet(
                         val isSelected = seasonViewMode == mode
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
-                            .clickable {
-                                scope.launch { preferenceManager.updateSeasonViewMode(mode) }
-                            }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
+                                .clickable {
+                                    scope.launch { preferenceManager.updateSeasonViewMode(mode) }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = mode,
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) AmoledBlack else TextSecondary
+                                color = if (isSelected) AccentGold else TextSecondary
                             )
                         }
                     }

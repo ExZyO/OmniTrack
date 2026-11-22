@@ -8,11 +8,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.ui.navigation.OmniTrackNavigation
+import com.omnitrack.app.ui.theme.OmniThemeSettings
+import com.omnitrack.app.ui.theme.OmniThemeState
 import com.omnitrack.app.ui.theme.OmniTrackTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
@@ -41,6 +46,10 @@ class MainActivity : ComponentActivity() {
         handleAuthDeepLink(intent?.data, app)
 
         setContent {
+            val themeSettings by app.preferenceManager.themeSettings.collectAsState(initial = OmniThemeSettings())
+            LaunchedEffect(themeSettings) {
+                OmniThemeState.apply(themeSettings)
+            }
             OmniTrackTheme {
                 val navController = rememberNavController()
 

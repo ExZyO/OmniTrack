@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -414,7 +414,10 @@ private fun FilmographyPosterRail(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(items) { item ->
+            itemsIndexed(
+                items = items,
+                key = { idx, item -> "${item.mediaType.name}_${item.id}_${item.character.orEmpty()}_$idx" }
+            ) { _, item ->
                 com.omnitrack.app.ui.components.NuvioRailPosterCard(
                     title = item.title,
                     coverUrl = item.posterUrl,

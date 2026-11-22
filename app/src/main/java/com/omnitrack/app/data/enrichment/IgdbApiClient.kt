@@ -362,18 +362,20 @@ class IgdbApiClient(
         clientId: String,
         clientSecret: String,
         shelf: String,
-        limit: Int = 14
+        limit: Int = 14,
+        offset: Int = 0
     ): List<SearchResultItem> = withContext(Dispatchers.IO) {
         if (clientId.isBlank() || clientSecret.isBlank()) return@withContext emptyList()
         try {
             val token = getOrFetchAccessToken(clientId, clientSecret) ?: return@withContext emptyList()
             val nowSec = System.currentTimeMillis() / 1000L
             val recentCutoff = nowSec - (365L * 24L * 3600L)
+            val safeOffset = offset.coerceAtLeast(0)
             val commonFields = "fields id,name,summary,first_release_date,rating,aggregated_rating,cover.image_id,artworks.image_id,screenshots.image_id,platforms.abbreviation,platforms.name,websites.url,external_games.external_game_source,external_games.uid,external_games.url"
             val query = when (shelf.lowercase()) {
-                "top_rated" -> "$commonFields; where aggregated_rating >= 85 & total_rating_count >= 50 & cover != null & version_parent = null; sort total_rating desc; limit $limit;"
-                "upcoming" -> "$commonFields; where first_release_date > $nowSec & hypes >= 10 & cover != null & version_parent = null; sort hypes desc; limit $limit;"
-                else -> "$commonFields; where first_release_date >= $recentCutoff & first_release_date <= $nowSec & total_rating_count >= 20 & cover != null & version_parent = null; sort total_rating_count desc; limit $limit;"
+                "top_rated" -> "$commonFields; where aggregated_rating >= 85 & total_rating_count >= 50 & cover != null & version_parent = null; sort total_rating desc; limit $limit; offset $safeOffset;"
+                "upcoming" -> "$commonFields; where first_release_date > $nowSec & hypes >= 10 & cover != null & version_parent = null; sort hypes desc; limit $limit; offset $safeOffset;"
+                else -> "$commonFields; where first_release_date >= $recentCutoff & first_release_date <= $nowSec & total_rating_count >= 20 & cover != null & version_parent = null; sort total_rating_count desc; limit $limit; offset $safeOffset;"
             }
             val arr = postIgdb("games", clientId, token, query) ?: return@withContext emptyList()
             parseSearchResults(arr)
@@ -739,8 +741,112 @@ class IgdbApiClient(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            AppLogger.w("IgdbClient", "fetchGameArtwork error for $title: ${e.message}")
+            AppLogger.w("IgdbClient", "fetchGameArtwork error: ${e.javaClass.simpleName}")
             null
+        }
+    }
+
+    suspend fun searchGamesList(
+        clientId: String,
+        clientSecret: String,
+        query: String,
+        limit: Int = 12
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        if (clientId.isBlank() || clientSecret.isBlank() || query.isBlank()) return@withContext emptyList()
+        try {
+            val token = getOrFetchAccessToken(clientId, clientSecret) ?: return@withContext emptyList()
+            val clean = query.replace("\"", "").trim()
+            val body = "fields id,name,summary,first_release_date,rating,aggregated_rating,cover.image_id,artworks.image_id; search \"$clean\"; limit $limit;"
+            NetworkPacer.withIgdbPacing {
+                val req = Request.Builder()
+                    .url("https://api.igdb.com/v4/games")
+                    .header("Client-ID", clientId.trim())
+                    .header("Authorization", "Bearer $token")
+                    .header("Accept", "application/json")
+                    .post(body.toRequestBody(plainMediaType))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withIgdbPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).arr() ?: return@withIgdbPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.obj() ?: return@mapNotNull null
+                        val id = o["id"].longVal() ?: return@mapNotNull null
+                        val name = o["name"].str() ?: return@mapNotNull null
+                        val cov = igdbCoverUrl(o["cover"].obj()?.get("image_id").str())
+                            ?: return@mapNotNull null
+                        val art = o["artworks"].arr()?.firstOrNull()?.obj()?.get("image_id").str()
+                            ?.let { igdb1080pUrl(it) }
+                        val rel = formatEpochYear(o["first_release_date"].longVal())
+                        val score = (o["aggregated_rating"].floatVal() ?: o["rating"].floatVal())
+                            ?.let { (it / 10f).coerceIn(0f, 10f) }
+                        SearchResultItem(
+                            title = name,
+                            synopsis = o["summary"].str(),
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(cov),
+                            bannerUrl = art?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                            mediaType = MediaType.GAME,
+                            releaseYear = rel,
+                            communityScore = score,
+                            sourceProvider = "IGDB",
+                            igdbId = id
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("IgdbClient", "searchGamesList ex=${e.javaClass.simpleName}")
+            emptyList()
+        }
+    }
+
+    suspend fun fetchUpcomingReleases(
+        clientId: String,
+        clientSecret: String,
+        startEpochSec: Long,
+        endEpochSec: Long
+    ): List<CalendarReleaseItem> = withContext(Dispatchers.IO) {
+        if (clientId.isBlank() || clientSecret.isBlank()) return@withContext emptyList()
+        try {
+            val token = getOrFetchAccessToken(clientId, clientSecret) ?: return@withContext emptyList()
+            val body = "fields id,date,human,game.id,game.name,game.cover.image_id,platform.abbreviation; where date >= $startEpochSec & date <= $endEpochSec; sort date asc; limit 35;"
+            NetworkPacer.withIgdbPacing {
+                val req = Request.Builder()
+                    .url("https://api.igdb.com/v4/release_dates")
+                    .header("Client-ID", clientId.trim())
+                    .header("Authorization", "Bearer $token")
+                    .header("Accept", "application/json")
+                    .post(body.toRequestBody(plainMediaType))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withIgdbPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).arr() ?: return@withIgdbPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.obj() ?: return@mapNotNull null
+                        val game = o["game"].obj() ?: return@mapNotNull null
+                        val gId = game["id"].longVal() ?: return@mapNotNull null
+                        val gName = game["name"].str() ?: return@mapNotNull null
+                        val dateSec = o["date"].longVal() ?: return@mapNotNull null
+                        val cov = igdbCoverUrl(game["cover"].obj()?.get("image_id").str()) ?: ""
+                        val platAbbr = o["platform"].obj()?.get("abbreviation").str()
+                        CalendarReleaseItem(
+                            id = "igdb_rel_${gId}_${dateSec}",
+                            title = gName,
+                            coverUrl = cov.let { if (it.isNotBlank()) LosslessCoverMapper.toLosslessUrl(it) else "" },
+                            mediaType = MediaType.GAME,
+                            episodeNumber = null,
+                            airingAtEpochSec = dateSec,
+                            igdbId = gId,
+                            formatLabel = platAbbr ?: "GAME",
+                            isDateOnly = true
+                        )
+                    }.distinctBy { it.igdbId }
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("IgdbClient", "fetchUpcomingReleases ex=${e.javaClass.simpleName}")
+            emptyList()
         }
     }
 }

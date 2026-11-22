@@ -51,7 +51,6 @@ import com.omnitrack.app.ui.components.FormattedRichText
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import java.net.URLEncoder
@@ -121,8 +120,7 @@ fun AuthorProfileBottomSheet(
                         modifier = Modifier
                             .size(88.dp)
                             .clip(CircleShape)
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, CircleShape),
+                            .background(Color.White.copy(alpha = 0.08f)),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!authorProfile.photoUrl.isNullOrBlank()) {
@@ -205,7 +203,7 @@ fun AuthorProfileBottomSheet(
 
                 // Cleaned Biography with clickable links
                 authorProfile.bio?.takeIf { it.isNotBlank() }?.let { bio ->
-                    HorizontalDivider(thickness = 1.dp, color = GlassBorder)
+                    HorizontalDivider(thickness = 0.6.dp, color = Color.White.copy(alpha = 0.10f))
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "BIOGRAPHY",
@@ -225,7 +223,7 @@ fun AuthorProfileBottomSheet(
 
                 // Notable Works 3-column poster grid
                 if (authorProfile.works.isNotEmpty()) {
-                    HorizontalDivider(thickness = 1.dp, color = GlassBorder)
+                    HorizontalDivider(thickness = 0.6.dp, color = Color.White.copy(alpha = 0.10f))
                     Text(
                         text = "NOTABLE WORKS (${authorProfile.works.size})",
                         fontSize = 11.sp,
@@ -255,8 +253,7 @@ fun AuthorProfileBottomSheet(
                                                 .fillMaxWidth()
                                                 .aspectRatio(2f / 3f)
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(DarkSurfaceElevated)
-                                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp)),
+                                                .background(Color.White.copy(alpha = 0.06f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             if (!work.coverUrl.isNullOrBlank()) {
@@ -314,8 +311,7 @@ private fun AuthorExternalLinkChip(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.08f))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.Center,

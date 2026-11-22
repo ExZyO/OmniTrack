@@ -3,16 +3,29 @@ package com.omnitrack.app.updater
 import android.content.Context
 import com.omnitrack.app.BuildConfig
 import com.omnitrack.app.util.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+
+data class GithubBuildStatus(
+    val runNumber: Long,
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val isBuilding: Boolean,
+    val htmlUrl: String,
+    val commitMsg: String
+)
 
 class AppUpdateChecker(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.sharedClient.newBuilder()
@@ -30,37 +43,120 @@ class AppUpdateChecker(
         AppLogger.i("UpdateChecker", "Checking for updates. Current version: $currentVer (code $currentCode)")
 
         try {
-            // Concurrent Multi-Source Version Query (Fast dual-channel update engine)
-            // 1. Direct GitHub Releases API (Has complete assets and release notes)
+            // Concurrent 3-Channel Update Engine (GitHub Releases API + Raw Manifest + GitHub Actions Build Status)
             val releaseApiDeferred = async { fetchFromGithubRelease() }
-
-            // 2. Raw version.json (Bypasses GitHub API rate limits completely)
             val versionJsonDeferred = async { fetchFromRawVersionJson() }
+            val buildStatusDeferred = async { fetchBuildStatus() }
 
             val apiRelease = releaseApiDeferred.await()
             val rawRelease = versionJsonDeferred.await()
+            val buildStatus = buildStatusDeferred.await()
 
-            // Merge sources: prefer API release for notes/assets, fallback to raw manifest
-            val candidate = apiRelease ?: rawRelease ?: return@withContext null
-
-            val isNew = isNewerVersion(
+            val candidate = apiRelease ?: rawRelease
+            val isReleaseNewer = candidate != null && isNewerVersion(
                 remoteVersion = candidate.version,
                 remoteCode = candidate.versionCode,
                 currentVersion = currentVer,
                 currentCode = currentCode
             )
 
-            if (isNew) {
-                AppLogger.i("UpdateChecker", "Newer version available: ${candidate.version}")
-                candidate.copy(isNewer = true)
-            } else {
-                AppLogger.i("UpdateChecker", "App is up to date (${candidate.version})")
-                null
+            val isActivelyBuildingNewer = buildStatus != null &&
+                buildStatus.isBuilding &&
+                (buildStatus.runNumber > currentCode || isReleaseNewer)
+
+            when {
+                isActivelyBuildingNewer -> {
+                    val runNum = buildStatus!!.runNumber
+                    AppLogger.i("UpdateChecker", "GitHub Actions build #$runNum is currently compiling (${buildStatus.status})")
+                    AppRelease(
+                        version = "1.0.0-b$runNum",
+                        versionCode = runNum,
+                        releaseNotes = buildStatus.commitMsg.ifBlank { candidate?.releaseNotes.orEmpty() },
+                        apkDownloadUrl = if (isReleaseNewer) candidate?.apkDownloadUrl.orEmpty() else "",
+                        releasePageUrl = candidate?.releasePageUrl?.ifBlank {
+                            "https://github.com/$githubRepo/releases"
+                        } ?: "https://github.com/$githubRepo/releases",
+                        isNewer = true,
+                        isBuilding = true,
+                        buildRunNumber = runNum,
+                        buildCommitMessage = buildStatus.commitMsg,
+                        actionsUrl = buildStatus.htmlUrl,
+                        latestRunConclusion = buildStatus.conclusion.orEmpty()
+                    )
+                }
+
+                candidate != null && isReleaseNewer -> {
+                    AppLogger.i("UpdateChecker", "Newer version available: ${candidate.version}")
+                    candidate.copy(
+                        isNewer = true,
+                        isBuilding = false,
+                        buildRunNumber = buildStatus?.runNumber ?: candidate.versionCode,
+                        buildCommitMessage = buildStatus?.commitMsg.orEmpty(),
+                        actionsUrl = buildStatus?.htmlUrl ?: "https://github.com/$githubRepo/actions",
+                        latestRunConclusion = buildStatus?.conclusion.orEmpty()
+                    )
+                }
+
+                else -> {
+                    AppLogger.i("UpdateChecker", "App is up to date (current code $currentCode)")
+                    null
+                }
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             AppLogger.e("UpdateChecker", "Failed to check for updates: ${e.message}", e)
             null
         }
+    }
+
+    suspend fun fetchBuildStatus(): GithubBuildStatus? = withContext(Dispatchers.IO) {
+        val url = "https://api.github.com/repos/$githubRepo/actions/runs?per_page=5&t=${System.currentTimeMillis()}"
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("Cache-Control", "no-store")
+            .build()
+
+        runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@runCatching null
+                val body = response.body?.string() ?: return@runCatching null
+                val root = json.parseToJsonElement(body).jsonObject
+                val runs = root["workflow_runs"]?.jsonArray ?: return@runCatching null
+                if (runs.isEmpty()) return@runCatching null
+
+                val matchingRegex = Regex("build\\s*android|apk|omnitrack", RegexOption.IGNORE_CASE)
+                val apkRun = runs.firstOrNull { el ->
+                    val name = el.jsonObject["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    matchingRegex.containsMatchIn(name)
+                }?.jsonObject ?: runs.first().jsonObject
+
+                val status = apkRun["status"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                val conclusion = apkRun["conclusion"]?.jsonPrimitive?.contentOrNull
+                val isBuilding = status.equals("in_progress", ignoreCase = true) ||
+                    status.equals("queued", ignoreCase = true) ||
+                    status.equals("requested", ignoreCase = true) ||
+                    status.equals("waiting", ignoreCase = true)
+
+                val runNum = apkRun["run_number"]?.jsonPrimitive?.longOrNull ?: 0L
+                val name = apkRun["name"]?.jsonPrimitive?.contentOrNull ?: "Build Android APK"
+                val htmlUrl = apkRun["html_url"]?.jsonPrimitive?.contentOrNull
+                    ?: "https://github.com/$githubRepo/actions"
+                val commitMsg = apkRun["head_commit"]?.jsonObject
+                    ?.get("message")?.jsonPrimitive?.contentOrNull
+                    ?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+
+                GithubBuildStatus(
+                    runNumber = runNum,
+                    name = name,
+                    status = status,
+                    conclusion = conclusion,
+                    isBuilding = isBuilding,
+                    htmlUrl = htmlUrl,
+                    commitMsg = commitMsg
+                )
+            }
+        }.getOrNull()
     }
 
     private fun fetchFromGithubRelease(): AppRelease? {
@@ -77,33 +173,35 @@ class AppUpdateChecker(
                 val body = response.body?.string() ?: return null
                 val root = json.parseToJsonElement(body).jsonObject
 
-                val tagName = root["tag_name"]?.jsonPrimitive?.content ?: ""
-                val releaseNotes = root["body"]?.jsonPrimitive?.content ?: ""
-                val htmlUrl = root["html_url"]?.jsonPrimitive?.content ?: ""
+                val tagName = root["tag_name"]?.jsonPrimitive?.contentOrNull ?: ""
+                val releaseNotes = root["body"]?.jsonPrimitive?.contentOrNull ?: ""
+                val htmlUrl = root["html_url"]?.jsonPrimitive?.contentOrNull ?: ""
 
                 var apkUrl = ""
                 val assets = root["assets"]?.jsonArray
                 if (assets != null) {
-                    val isDebug = com.omnitrack.app.BuildConfig.DEBUG
+                    val isDebug = BuildConfig.DEBUG
                     for (asset in assets) {
-                        val name = asset.jsonObject["name"]?.jsonPrimitive?.content ?: ""
+                        val obj = asset.jsonObject
+                        val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
                         if (isDebug) {
                             if (name.endsWith("-debug.apk", ignoreCase = true)) {
-                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
                                 break
                             }
                         } else {
                             if (name.endsWith(".apk", ignoreCase = true) && !name.contains("-debug", ignoreCase = true)) {
-                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
                                 break
                             }
                         }
                     }
                     if (apkUrl.isBlank()) {
                         for (asset in assets) {
-                            val name = asset.jsonObject["name"]?.jsonPrimitive?.content ?: ""
+                            val obj = asset.jsonObject
+                            val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
                             if (name.endsWith(".apk", ignoreCase = true)) {
-                                apkUrl = asset.jsonObject["browser_download_url"]?.jsonPrimitive?.content ?: ""
+                                apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
                                 break
                             }
                         }
@@ -134,7 +232,7 @@ class AppUpdateChecker(
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
                 val manifest = json.decodeFromString<VersionManifest>(body)
-                val downloadUrl = if (com.omnitrack.app.BuildConfig.DEBUG) {
+                val downloadUrl = if (BuildConfig.DEBUG) {
                     manifest.debugApkUrl.takeIf { it.isNotBlank() } ?: manifest.apkUrl
                 } else {
                     manifest.apkUrl
@@ -153,6 +251,7 @@ class AppUpdateChecker(
     /**
      * Compares remote version with local installed version:
      * - First checks build numbers if in "1.0.0-bX" format
+     * - Then compares versionCode if provided
      * - Then parses standard semver major.minor.patch
      */
     private fun isNewerVersion(
@@ -161,7 +260,6 @@ class AppUpdateChecker(
         currentVersion: String,
         currentCode: Long
     ): Boolean {
-        // Compare build numbers if present (e.g. 1.0.0-b8 vs 1.0.0-b9)
         val remoteBuild = extractBuildNumber(remoteVersion)
         val localBuild = extractBuildNumber(currentVersion)
 
@@ -169,12 +267,10 @@ class AppUpdateChecker(
             return remoteBuild > localBuild
         }
 
-        // Compare versionCode if remote explicitly provided it
         if (remoteCode > 0 && currentCode > 0 && remoteCode != currentCode) {
             return remoteCode > currentCode
         }
 
-        // Standard semver comparison
         val remoteParts = parseSemver(remoteVersion)
         val localParts = parseSemver(currentVersion)
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -60,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
@@ -78,7 +82,9 @@ fun ArtworkPriorityScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) {
+        (context.applicationContext as OmniTrackApplication).preferenceManager
+    }
     val coroutineScope = rememberCoroutineScope()
 
     val categories = remember {
@@ -160,50 +166,59 @@ fun ArtworkPriorityScreen(
             state = tabListState,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(top = 4.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            itemsIndexed(categories) { index, mediaType ->
+            itemsIndexed(
+                items = categories,
+                key = { _, mediaType -> mediaType.name }
+            ) { index, mediaType ->
                 val isSelected = pagerState.currentPage == index
-                val tabBgColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                    label = "tabBg"
-                )
                 val tabTextColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentGold else TextMuted,
+                    targetValue = if (isSelected) TextPrimary else TextMuted,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "tabText"
                 )
-                val tabBorderColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentGold.copy(alpha = 0.40f) else Color.Transparent,
+                val indicatorColor by animateColorAsState(
+                    targetValue = if (isSelected) AccentGold else Color.Transparent,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                    label = "tabBorder"
+                    label = "tabIndicator"
                 )
 
-                Box(
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(tabBgColor)
-                        .border(1.dp, tabBorderColor, RoundedCornerShape(20.dp))
+                        .width(IntrinsicSize.Max)
                         .clickable {
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(index)
                             }
                         }
-                        .padding(horizontal = 14.dp, vertical = 7.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(top = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = mediaType.displayName,
                         color = tabTextColor,
-                        fontSize = 13.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        fontSize = 13.5.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(indicatorColor)
                     )
                 }
             }
         }
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.08f),
+            thickness = 0.6.dp
+        )
 
         // Subtitle instructions row
         Row(

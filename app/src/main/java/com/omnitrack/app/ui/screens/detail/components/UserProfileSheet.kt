@@ -129,7 +129,6 @@ import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AccentRose
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.SurfaceCard
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
@@ -272,7 +271,7 @@ fun UserProfileSheet(
             ) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(36.dp),
-                    color = AccentArctic,
+                    color = AccentGold,
                     strokeWidth = 3.dp
                 )
             }
@@ -341,7 +340,7 @@ fun UserProfileSheet(
                                 .fillMaxWidth()
                                 .background(
                                     Brush.linearGradient(
-                                        listOf(AccentArctic.copy(alpha = 0.35f), AmoledBlack)
+                                        listOf(AccentGold.copy(alpha = 0.35f), AmoledBlack)
                                     )
                                 )
                         )
@@ -376,7 +375,7 @@ fun UserProfileSheet(
                             .size(76.dp)
                             .clip(CircleShape)
                             .background(SurfaceCard)
-                            .border(2.dp, AccentArctic, CircleShape)
+                            .border(2.dp, AccentGold, CircleShape)
                     ) {
                         if (!p.avatarUrl.isNullOrBlank()) {
                             AsyncImage(
@@ -417,12 +416,12 @@ fun UserProfileSheet(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                                 .padding(horizontal = 14.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = "Your Profile",
-                                color = AccentArctic,
+                                color = AccentGold,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -432,10 +431,10 @@ fun UserProfileSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
-                                .background(if (isFollowing) Color.White.copy(alpha = 0.12f) else AccentArctic)
+                                .background(if (isFollowing) Color.White.copy(alpha = 0.12f) else AccentGold)
                                 .border(
                                     1.dp,
-                                    if (isFollowing) GlassBorder else AccentArctic,
+                                    if (isFollowing) Color.White.copy(alpha = 0.14f) else AccentGold,
                                     RoundedCornerShape(999.dp)
                                 )
                                 .clickable(enabled = !isSendingFollow) {
@@ -480,7 +479,7 @@ fun UserProfileSheet(
                                 .size(34.dp)
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.08f))
-                                .border(1.dp, GlassBorder, CircleShape)
+                                .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                                 .clickable {
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     showMessageInput = !showMessageInput
@@ -502,7 +501,7 @@ fun UserProfileSheet(
                             .size(34.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
-                            .border(1.dp, GlassBorder, CircleShape)
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                             .clickable { showOverflowMenu = true },
                         contentAlignment = Alignment.Center
                     ) {
@@ -517,12 +516,12 @@ fun UserProfileSheet(
                             onDismissRequest = { showOverflowMenu = false },
                             modifier = Modifier
                                 .background(AmoledBlack)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
                         ) {
                             if (!isSelf) {
                                 DropdownMenuItem(
                                     text = { Text(if (isFollowing) "Unsubscribe / Unfollow" else "Subscribe / Follow", color = Color.White, fontSize = 13.sp) },
-                                    leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(16.dp)) },
+                                    leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp)) },
                                     onClick = {
                                         showOverflowMenu = false
                                         if (userAuthToken.isNullOrBlank()) {
@@ -540,7 +539,7 @@ fun UserProfileSheet(
                             }
                             DropdownMenuItem(
                                 text = { Text("Share Profile", color = Color.White, fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(16.dp)) },
+                                leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp)) },
                                 onClick = {
                                     showOverflowMenu = false
                                     val sendIntent = Intent(Intent.ACTION_SEND).apply {
@@ -565,7 +564,7 @@ fun UserProfileSheet(
                             )
                             DropdownMenuItem(
                                 text = { Text("Open in Browser", color = Color.White, fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(16.dp)) },
+                                leadingIcon = { Icon(Icons.Default.OpenInBrowser, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp)) },
                                 onClick = {
                                     showOverflowMenu = false
                                     try {
@@ -575,7 +574,7 @@ fun UserProfileSheet(
                             )
                             DropdownMenuItem(
                                 text = { Text("Copy Link", color = Color.White, fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(16.dp)) },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp)) },
                                 onClick = {
                                     showOverflowMenu = false
                                     clipboard.setText(AnnotatedString("https://anilist.co/user/${p.username}"))
@@ -584,7 +583,7 @@ fun UserProfileSheet(
                             )
                             DropdownMenuItem(
                                 text = { Text("Copy User ID", color = Color.White, fontSize = 13.sp) },
-                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentArctic, modifier = Modifier.size(16.dp)) },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentGold, modifier = Modifier.size(16.dp)) },
                                 onClick = {
                                     showOverflowMenu = false
                                     clipboard.setText(AnnotatedString("${p.userId}"))
@@ -603,7 +602,7 @@ fun UserProfileSheet(
                             .padding(horizontal = 20.dp, vertical = 10.dp)
                             .clip(RoundedCornerShape(999.dp))
                             .background(Color.White.copy(alpha = 0.06f))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -612,7 +611,7 @@ fun UserProfileSheet(
                             value = messageText,
                             onValueChange = { messageText = it },
                             textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                            cursorBrush = SolidColor(AccentArctic),
+                            cursorBrush = SolidColor(AccentGold),
                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                             keyboardActions = KeyboardActions(onSend = {
                                 if (messageText.isNotBlank()) {
@@ -674,7 +673,7 @@ fun UserProfileSheet(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = "Send",
-                                    tint = AccentArctic,
+                                    tint = AccentGold,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -694,7 +693,7 @@ fun UserProfileSheet(
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.05f))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                             .clickable { browsingMediaListType = true }
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
@@ -717,7 +716,7 @@ fun UserProfileSheet(
                             .weight(1f)
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color.White.copy(alpha = 0.05f))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                             .clickable { browsingMediaListType = false }
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
@@ -776,12 +775,12 @@ fun UserProfileSheet(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(999.dp))
-                                    .background(if (selectedTab == 1) AccentArctic.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.10f))
+                                    .background(if (selectedTab == 1) AccentGold.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.10f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "${p.activities.size}",
-                                    color = if (selectedTab == 1) AccentArctic else Color.White.copy(alpha = 0.70f),
+                                    color = if (selectedTab == 1) AccentGold else Color.White.copy(alpha = 0.70f),
                                     fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -834,7 +833,7 @@ fun UserProfileSheet(
                     ) {
                         Text(
                             text = "STATISTICS",
-                            color = AccentArctic,
+                            color = AccentGold,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp
@@ -929,8 +928,8 @@ fun UserProfileSheet(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(999.dp))
-                                        .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
-                                        .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(999.dp))
+                                        .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.06f))
+                                        .border(1.dp, if (isSelected) AccentGold else Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                                         .clickable { feedFilter = filterKey }
                                         .padding(horizontal = 14.dp, vertical = 6.dp)
                                 ) {
@@ -1031,7 +1030,7 @@ fun UserProfileSheet(
                                             ) {
                                                 Text(
                                                     text = act.type.replace("_", " "),
-                                                    color = AccentArctic,
+                                                    color = AccentGold,
                                                     fontSize = 11.5.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
@@ -1089,7 +1088,7 @@ fun UserProfileSheet(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (analyticsIsAnime) AccentArctic else Color.Transparent)
+                                    .background(if (analyticsIsAnime) AccentGold else Color.Transparent)
                                     .clickable { analyticsIsAnime = true }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
@@ -1105,7 +1104,7 @@ fun UserProfileSheet(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(if (!analyticsIsAnime) AccentArctic else Color.Transparent)
+                                    .background(if (!analyticsIsAnime) AccentGold else Color.Transparent)
                                     .clickable { analyticsIsAnime = false }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
@@ -1132,8 +1131,8 @@ fun UserProfileSheet(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(999.dp))
-                                        .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
-                                        .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(999.dp))
+                                        .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.06f))
+                                        .border(1.dp, if (isSelected) AccentGold else Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                                         .clickable { analyticsMetric = idx }
                                         .padding(horizontal = 14.dp, vertical = 6.dp)
                                 ) {
@@ -1169,7 +1168,7 @@ fun UserProfileSheet(
                                         .weight(1f)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Color.White.copy(alpha = 0.05f))
-                                        .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                                         .padding(vertical = 10.dp, horizontal = 4.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1251,7 +1250,7 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
         ) {
             Text(
                 text = "ACTIVITY HISTORY",
-                color = AccentArctic,
+                color = AccentGold,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp
@@ -1303,10 +1302,10 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         week.forEach { day ->
                             val color = when (day.level) {
-                                1 -> AccentArctic.copy(alpha = 0.35f)
-                                2 -> AccentArctic.copy(alpha = 0.60f)
-                                3 -> AccentArctic.copy(alpha = 0.85f)
-                                4 -> AccentArctic
+                                1 -> AccentGold.copy(alpha = 0.35f)
+                                2 -> AccentGold.copy(alpha = 0.60f)
+                                3 -> AccentGold.copy(alpha = 0.85f)
+                                4 -> AccentGold
                                 else -> Color.White.copy(alpha = 0.05f)
                             }
                             Box(
@@ -1331,10 +1330,10 @@ private fun ActivityHeatmapSection(history: List<UserActivityDay>) {
                 Text(text = "Less", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
                 listOf(0, 1, 2, 3, 4).forEach { lvl ->
                     val color = when (lvl) {
-                        1 -> AccentArctic.copy(alpha = 0.35f)
-                        2 -> AccentArctic.copy(alpha = 0.60f)
-                        3 -> AccentArctic.copy(alpha = 0.85f)
-                        4 -> AccentArctic
+                        1 -> AccentGold.copy(alpha = 0.35f)
+                        2 -> AccentGold.copy(alpha = 0.60f)
+                        3 -> AccentGold.copy(alpha = 0.85f)
+                        4 -> AccentGold
                         else -> Color.White.copy(alpha = 0.05f)
                     }
                     Box(
@@ -1408,7 +1407,7 @@ private fun AnalyticsCategoryChart(
     ) {
         Text(
             text = title,
-            color = AccentArctic,
+            color = AccentGold,
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.8.sp
@@ -1713,14 +1712,14 @@ private fun YearTrendlineChart(
             drawPath(
                 path = fillPath,
                 brush = Brush.verticalGradient(
-                    listOf(AccentArctic.copy(alpha = 0.35f), Color.Transparent)
+                    listOf(AccentGold.copy(alpha = 0.35f), Color.Transparent)
                 )
             )
 
             // Line
             drawPath(
                 path = path,
-                color = AccentArctic,
+                color = AccentGold,
                 style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round)
             )
 
@@ -1728,7 +1727,7 @@ private fun YearTrendlineChart(
             sorted.forEachIndexed { i, _ ->
                 val x = i * step
                 val y = h - ((values[i] / maxV).toFloat() * (h - 14.dp.toPx())) - 7.dp.toPx()
-                drawCircle(color = AccentArctic, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
+                drawCircle(color = AccentGold, radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(x, y))
             }
         }
 
@@ -1815,12 +1814,12 @@ private fun GenreRadarChart(
 
                 drawPath(
                     path = dataPath,
-                    color = AccentArctic.copy(alpha = 0.20f),
+                    color = AccentGold.copy(alpha = 0.20f),
                     style = Fill
                 )
                 drawPath(
                     path = dataPath,
-                    color = AccentArctic.copy(alpha = 0.80f),
+                    color = AccentGold.copy(alpha = 0.80f),
                     style = Stroke(width = 2.dp.toPx())
                 )
             }
@@ -1843,7 +1842,7 @@ private fun GenreRadarChart(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color.White.copy(alpha = 0.05f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -2109,8 +2108,8 @@ private fun UserMediaListSheetView(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(AccentArctic.copy(alpha = 0.15f))
-                        .border(1.dp, AccentArctic.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .background(AccentGold.copy(alpha = 0.15f))
+                        .border(1.dp, AccentGold.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
                         .clickable {
                             if (filteredList.isNotEmpty()) {
                                 val randomItem = filteredList.random()
@@ -2133,12 +2132,12 @@ private fun UserMediaListSheetView(
                         Icon(
                             imageVector = Icons.Default.Shuffle,
                             contentDescription = "Random",
-                            tint = AccentArctic,
+                            tint = AccentGold,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = "Random",
-                            color = AccentArctic,
+                            color = AccentGold,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -2149,8 +2148,8 @@ private fun UserMediaListSheetView(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(if (isReverseSort) AccentArctic.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, if (isReverseSort) AccentArctic else GlassBorder, RoundedCornerShape(8.dp))
+                        .background(if (isReverseSort) AccentGold.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, if (isReverseSort) AccentGold else Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
                         .clickable { isReverseSort = !isReverseSort }
                         .padding(horizontal = 8.dp, vertical = 6.dp)
                 ) {
@@ -2161,12 +2160,12 @@ private fun UserMediaListSheetView(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Sort,
                             contentDescription = "Reverse Order",
-                            tint = if (isReverseSort) AccentArctic else Color.White.copy(alpha = 0.75f),
+                            tint = if (isReverseSort) AccentGold else Color.White.copy(alpha = 0.75f),
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
                             text = if (isReverseSort) "Desc" else "Asc",
-                            color = if (isReverseSort) AccentArctic else Color.White.copy(alpha = 0.75f),
+                            color = if (isReverseSort) AccentGold else Color.White.copy(alpha = 0.75f),
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -2181,7 +2180,7 @@ private fun UserMediaListSheetView(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(Color.White.copy(alpha = 0.06f))
-                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2191,7 +2190,7 @@ private fun UserMediaListSheetView(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 textStyle = TextStyle(color = Color.White, fontSize = 13.sp),
-                cursorBrush = SolidColor(AccentArctic),
+                cursorBrush = SolidColor(AccentGold),
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 decorationBox = { innerTextField ->
@@ -2226,8 +2225,8 @@ private fun UserMediaListSheetView(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(if (isSelected) AccentArctic else Color.White.copy(alpha = 0.06f))
-                        .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(999.dp))
+                        .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, if (isSelected) AccentGold else Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                         .clickable { selectedStatusFilter = key }
                         .padding(horizontal = 12.dp, vertical = 5.dp)
                 ) {
@@ -2248,7 +2247,7 @@ private fun UserMediaListSheetView(
                     .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = AccentArctic, modifier = Modifier.size(32.dp))
+                CircularProgressIndicator(color = AccentGold, modifier = Modifier.size(32.dp))
             }
         } else if (filteredList.isEmpty()) {
             Box(
@@ -2325,7 +2324,7 @@ private fun UserMediaListSheetView(
                                 ) {
                                     Text(
                                         text = item.status,
-                                        color = AccentArctic,
+                                        color = AccentGold,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -2369,7 +2368,7 @@ private fun StatCell(title: String, value: String, onClick: (() -> Unit)? = null
     ) {
         Text(
             text = value,
-            color = if (onClick != null) AccentArctic else Color.White,
+            color = if (onClick != null) AccentGold else Color.White,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold
         )
@@ -2428,7 +2427,7 @@ private fun FavoriteMediaRail(
                             .aspectRatio(2f / 3f)
                             .clip(RoundedCornerShape(8.dp))
                             .background(SurfaceCard)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
                     ) {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
@@ -2501,7 +2500,7 @@ private fun FavoriteCharacterRail(
                             .size(72.dp)
                             .clip(CircleShape)
                             .background(SurfaceCard)
-                            .border(1.5.dp, GlassBorder, CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                     ) {
                         if (!item.imageUrl.isNullOrBlank()) {
                             AsyncImage(
@@ -2577,7 +2576,7 @@ private fun FavoriteStaffRail(
                             .size(72.dp)
                             .clip(CircleShape)
                             .background(SurfaceCard)
-                            .border(1.5.dp, GlassBorder, CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                     ) {
                         if (!item.imageUrl.isNullOrBlank()) {
                             AsyncImage(

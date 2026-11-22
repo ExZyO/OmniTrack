@@ -1,11 +1,11 @@
 package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,10 +55,9 @@ import com.omnitrack.app.data.enrichment.CalendarReleaseItem
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
+import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import java.time.Instant
@@ -80,19 +81,17 @@ fun ReleaseCalendarSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone) }
-    val weekDays = remember(today) { (0..6).map { today.plusDays(it.toLong()) } }
+    val windowDays = remember(today) { (0..13).map { today.plusDays(it.toLong()) } }
 
     val hasLibraryMatches = remember(releases) { releases.any { it.localMediaId != null } }
     var onlyLibrary by remember(hasLibraryMatches) { mutableStateOf(hasLibraryMatches) }
-    var selectedTypeFilter by remember { mutableStateOf("ALL") } // "ALL", "ANIME", "COMIC"
+    var selectedTypeFilter by remember { mutableStateOf("ALL") } // "ALL" or MediaType.name
     var selectedDate by remember { mutableStateOf(today) }
 
     val scopeFilteredReleases = remember(releases, onlyLibrary, selectedTypeFilter) {
         releases.filter { item ->
             (!onlyLibrary || item.localMediaId != null) &&
-                (selectedTypeFilter == "ALL" ||
-                    (selectedTypeFilter == "ANIME" && item.mediaType == MediaType.ANIME) ||
-                    (selectedTypeFilter == "COMIC" && item.mediaType == MediaType.COMIC))
+                (selectedTypeFilter == "ALL" || item.mediaType.name == selectedTypeFilter)
         }
     }
 
@@ -113,8 +112,9 @@ fun ReleaseCalendarSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
-        contentColor = TextPrimary
+        containerColor = AmoledBlack,
+        contentColor = TextPrimary,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
@@ -137,7 +137,7 @@ fun ReleaseCalendarSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Live 7-day airing & comic pull list schedule",
+                        text = "14-day schedule across Anime, TV, Movies, Comics, Manga, Novels, Books & Games",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
@@ -163,57 +163,72 @@ fun ReleaseCalendarSheet(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Category Filter Chips: All / Anime / Comics
+            // Dynamic Category Filter Chips across all present MediaTypes
+            val categoryChips = remember(releases, onlyLibrary) {
+                val base = releases.filter { !onlyLibrary || it.localMediaId != null }
+                val presentTypes = listOf(
+                    MediaType.ANIME,
+                    MediaType.SHOW,
+                    MediaType.MOVIE,
+                    MediaType.COMIC,
+                    MediaType.MANGA,
+                    MediaType.NOVEL,
+                    MediaType.BOOK,
+                    MediaType.GAME,
+                    MediaType.VISUAL_NOVEL
+                )
+                val out = mutableListOf("ALL" to "All (${base.size})")
+                presentTypes.forEach { t ->
+                    val count = base.count { it.mediaType == t }
+                    if (count > 0 || selectedTypeFilter == t.name) {
+                        out.add(t.name to "${t.displayName} ($count)")
+                    }
+                }
+                out
+            }
+            // Category Underline Tabs (Option A)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                val animeCount = releases.count { it.mediaType == MediaType.ANIME && (!onlyLibrary || it.localMediaId != null) }
-                val comicCount = releases.count { it.mediaType == MediaType.COMIC && (!onlyLibrary || it.localMediaId != null) }
-                val allCount = animeCount + comicCount
-                listOf(
-                    "ALL" to "All ($allCount)",
-                    "ANIME" to "Anime ($animeCount)",
-                    "COMIC" to "Comics ($comicCount)"
-                ).forEach { (key, label) ->
+                categoryChips.forEach { (key, label) ->
                     val selected = selectedTypeFilter == key
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (selected) AccentGold else DarkSurfaceElevated)
-                            .border(
-                                width = 1.dp,
-                                color = if (selected) AccentGold else GlassBorder,
-                                shape = RoundedCornerShape(999.dp)
-                            )
+                            .width(IntrinsicSize.Max)
                             .clickable { selectedTypeFilter = key }
-                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                            .padding(top = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
                             text = label,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) AmoledBlack else TextSecondary
+                            color = if (selected) TextPrimary else TextMuted,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(if (selected) AccentGold else Color.Transparent)
                         )
                     }
                 }
             }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // My Library vs All Airing segmented toggle
+            // My Library vs All Airing underline tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 CalendarToggleTab(
                     label = "My Library (${releases.count { it.localMediaId != null }})",
@@ -228,33 +243,32 @@ fun ReleaseCalendarSheet(
                     modifier = Modifier.weight(1f)
                 )
             }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 7-Day Interactive Strip
+            // 14-Day Scrollable Strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                weekDays.forEach { day ->
+                windowDays.forEach { day ->
                     val isSelected = day == selectedDate
                     val isToday = day == today
                     val hasEvent = day in datesWithEvents
                     Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                            .border(
-                                width = 1.dp,
-                                color = when {
+                            .width(48.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when {
                                     isSelected -> AccentGold
-                                    isToday -> AccentGold.copy(alpha = 0.5f)
-                                    else -> GlassBorder
-                                },
-                                shape = RoundedCornerShape(12.dp)
+                                    isToday -> AccentGold.copy(alpha = 0.12f)
+                                    else -> Color.White.copy(alpha = 0.04f)
+                                }
                             )
                             .clickable { selectedDate = day }
                             .padding(vertical = 8.dp),
@@ -265,13 +279,13 @@ fun ReleaseCalendarSheet(
                             text = if (isToday) "TODAY" else day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US).uppercase(),
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSelected) AmoledBlack else TextSecondary
+                            color = if (isSelected) OnAccentColor else TextSecondary
                         )
                         Text(
                             text = day.dayOfMonth.toString(),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSelected) AmoledBlack else TextPrimary
+                            color = if (isSelected) OnAccentColor else TextPrimary
                         )
                         Box(
                             modifier = Modifier
@@ -279,9 +293,9 @@ fun ReleaseCalendarSheet(
                                 .clip(CircleShape)
                                 .background(
                                     when {
-                                        hasEvent && isSelected -> AmoledBlack
+                                        hasEvent && isSelected -> OnAccentColor
                                         hasEvent -> AccentGold
-                                        else -> DarkSurfaceElevated.copy(alpha = 0f)
+                                        else -> Color.Transparent
                                     }
                                 )
                         )
@@ -334,10 +348,10 @@ fun ReleaseCalendarSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 390.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
-                    items(dayReleases, key = { it.id }) { item ->
+                    itemsIndexed(dayReleases, key = { idx, it -> "${it.id}_$idx" }) { index, item ->
                         val localId = item.localMediaId
                         val localTime = remember(item.airingAtEpochSec) {
                             Instant.ofEpochSecond(item.airingAtEpochSec).atZone(zone).format(timeFormatter)
@@ -346,29 +360,27 @@ fun ReleaseCalendarSheet(
                             formatCountdown(item.airingAtEpochSec)
                         }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                .clickable {
-                                    if (localId != null) onOpenLocalMedia(localId) else onPreviewRelease(item)
-                                }
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            AsyncImage(
-                                model = item.coverUrl,
-                                contentDescription = item.title,
-                                contentScale = ContentScale.Crop,
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
                                 modifier = Modifier
-                                    .width(46.dp)
-                                    .aspectRatio(0.68f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurfaceCard)
-                            )
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (localId != null) onOpenLocalMedia(localId) else onPreviewRelease(item)
+                                    }
+                                    .padding(vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                AsyncImage(
+                                    model = item.coverUrl,
+                                    contentDescription = item.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .width(46.dp)
+                                        .aspectRatio(0.68f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(DarkSurfaceCard)
+                                )
 
                             Column(
                                 modifier = Modifier.weight(1f),
@@ -384,11 +396,19 @@ fun ReleaseCalendarSheet(
                                 )
                                 Text(
                                     text = buildString {
-                                        if (item.episodeNumber != null) {
-                                            append(if (item.mediaType == MediaType.COMIC) "Issue #${item.episodeNumber}" else "Ep ${item.episodeNumber}")
+                                        when {
+                                            item.mediaType == MediaType.SHOW && item.seasonNumber != null && item.episodeNumber != null ->
+                                                append("S%02dE%02d".format(item.seasonNumber, item.episodeNumber))
+                                            item.mediaType == MediaType.COMIC && item.episodeNumber != null ->
+                                                append("Issue #${item.episodeNumber}")
+                                            item.mediaType == MediaType.MANGA && !item.chapterLabel.isNullOrBlank() ->
+                                                append("Ch. ${item.chapterLabel}")
+                                            item.episodeNumber != null ->
+                                                append("Ep ${item.episodeNumber}")
+                                            else -> append(item.mediaType.displayName)
                                         }
                                         if (item.formatLabel.isNotBlank()) {
-                                            if (isNotEmpty()) append(" \u00B7 ")
+                                            append(" \u00B7 ")
                                             append(item.formatLabel)
                                         }
                                     },
@@ -396,47 +416,49 @@ fun ReleaseCalendarSheet(
                                     color = TextSecondary
                                 )
                                 Text(
-                                    text = "$localTime \u00B7 $countdown",
+                                    text = if (item.isDateOnly) countdown else "$localTime \u00B7 $countdown",
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = AccentGold
                                 )
                             }
 
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        if (localId != null) DarkSurfaceCard
-                                        else AccentGold
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (localId != null) GlassBorder else AccentGold,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        if (localId != null) onOpenLocalMedia(localId) else onAddRelease(item)
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (localId != null) Color.White.copy(alpha = 0.06f)
+                                            else AccentGold
+                                        )
+                                        .clickable {
+                                            if (localId != null) onOpenLocalMedia(localId) else onAddRelease(item)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = if (localId != null) Icons.Default.Check else Icons.Default.Add,
-                                        contentDescription = null,
-                                        tint = if (localId != null) AccentGold else AmoledBlack,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                    Text(
-                                        text = if (localId != null) "In Library" else "Add",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (localId != null) TextPrimary else AmoledBlack
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (localId != null) Icons.Default.Check else Icons.Default.Add,
+                                            contentDescription = null,
+                                            tint = if (localId != null) AccentGold else OnAccentColor,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = if (localId != null) "In Library" else "Add",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (localId != null) TextPrimary else OnAccentColor
+                                        )
+                                    }
                                 }
+                            }
+                            if (index < dayReleases.lastIndex) {
+                                HorizontalDivider(
+                                    color = Color.White.copy(alpha = 0.08f),
+                                    thickness = 0.6.dp
+                                )
                             }
                         }
                     }
@@ -453,21 +475,26 @@ private fun CalendarToggleTab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(
+    Column(
         modifier = modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) AccentGold else DarkSurfaceElevated)
             .clickable(onClick = onClick)
-            .padding(vertical = 7.dp),
-        contentAlignment = Alignment.Center
+            .padding(top = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = label,
-            fontSize = 12.sp,
+            fontSize = 12.5.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) AmoledBlack else TextSecondary,
+            color = if (selected) TextPrimary else TextMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(7.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .background(if (selected) AccentGold else Color.Transparent)
         )
     }
 }

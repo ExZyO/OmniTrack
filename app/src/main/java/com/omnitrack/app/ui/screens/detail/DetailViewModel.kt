@@ -45,8 +45,12 @@ import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.network.NetworkClient
+import com.omnitrack.app.data.sync.RemoteTrackerEntrySnapshot
+import com.omnitrack.app.data.sync.TrackerMetadataCodec
 import com.omnitrack.app.data.sync.TrackerSyncEngine
+import com.omnitrack.app.data.sync.TrackerSyncOutcome
 import com.omnitrack.app.data.sync.TrackerTokenManager
+import kotlinx.coroutines.Job
 import com.omnitrack.app.ui.components.Episode
 import com.omnitrack.app.ui.components.Season
 import com.omnitrack.app.util.AirDateUtils
@@ -5018,17 +5022,101 @@ class DetailViewModel(
         }
     }
 
-    fun updateRating(rating: Float?) {
-        viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            repository.updateMedia(item.copy(userRating = rating))
+    private var debouncedSyncJob: Job? = null
+
+    private fun scheduleDebouncedAutoPush(updated: MediaItemEntity) {
+        if (updated.id <= 0L) return
+        debouncedSyncJob?.cancel()
+        debouncedSyncJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(1500L)
+            trackerSyncEngine?.pushItemToTrackers(updated, null)
         }
     }
 
-    fun updateStatus(status: TrackingStatus) {
-        viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            repository.updateMedia(item.copy(status = status))
+    fun updateRating(rating: Float?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            val item = if (mediaId > 0L) {
+                repository.getMediaByIdOnce(mediaId)
+            } else null
+            val target = item ?: uiState.value.item ?: return@launch
+            val updated = target.copy(userRating = rating, lastUpdated = System.currentTimeMillis())
+            if (updated.id > 0L) {
+                repository.updateMedia(updated)
+                latestRoomItemCache[updated.id] = updated
+                scheduleDebouncedAutoPush(updated)
+            }
+            updatePreviewEntity { updated }
+        }
+    }
+
+    fun updateStatus(
+        status: TrackingStatus,
+        onSyncResult: ((List<TrackerSyncOutcome>) -> Unit)? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val mediaId = ensureLibraryMediaId()
+            val live = if (mediaId > 0L) repository.getMediaByIdOnce(mediaId) else null
+            val target = live ?: uiState.value.item ?: return@launch
+            val nextStarted = target.startedAtMs ?: if (status == TrackingStatus.IN_PROGRESS) now else null
+            val nextFinished = target.finishedAtMs ?: if (status == TrackingStatus.COMPLETED) now else null
+            val updated = target.copy(
+                status = status,
+                startedAtMs = nextStarted,
+                finishedAtMs = nextFinished,
+                lastUpdated = now
+            )
+            if (updated.id > 0L) {
+                repository.updateMedia(updated)
+                latestRoomItemCache[updated.id] = updated
+            }
+            updatePreviewEntity { updated }
+
+            // Push to unlocked trackers automatically
+            val engine = trackerSyncEngine
+            if (engine != null && updated.id > 0L) {
+                val outcomes = engine.pushItemToTrackers(updated, targetTrackerKey = null)
+                if (onSyncResult != null) {
+                    withContext(Dispatchers.Main) { onSyncResult(outcomes) }
+                }
+            }
+        }
+    }
+
+    fun updatePersonalLog(
+        notes: String?,
+        isFavorite: Boolean,
+        startedAtMs: Long?,
+        finishedAtMs: Long?,
+        rewatchCount: Int
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val mediaId = ensureLibraryMediaId()
+            val target = (if (mediaId > 0L) repository.getMediaByIdOnce(mediaId) else null)
+                ?: uiState.value.item ?: return@launch
+            val cleanNote = notes?.trim()?.takeIf { it.isNotEmpty() }
+            val updated = target.copy(
+                personalNotes = cleanNote,
+                anilistNotes = cleanNote?.take(2000),
+                malComments = cleanNote?.take(1000),
+                bangumiComment = cleanNote?.take(380),
+                simklMemo = cleanNote?.take(140),
+                isFavorite = isFavorite,
+                anilistFavorite = isFavorite,
+                startedAtMs = startedAtMs,
+                finishedAtMs = finishedAtMs,
+                rewatchCount = rewatchCount.coerceAtLeast(0),
+                malRewatches = rewatchCount.coerceAtLeast(0),
+                lastUpdated = now
+            )
+            if (updated.id > 0L) {
+                repository.updateMedia(updated)
+                latestRoomItemCache[updated.id] = updated
+                scheduleDebouncedAutoPush(updated)
+            }
+            updatePreviewEntity { updated }
         }
     }
 
@@ -5039,9 +5127,116 @@ class DetailViewModel(
         }
     }
 
-    fun updateMediaItem(item: MediaItemEntity) {
-        viewModelScope.launch {
-            repository.updateMedia(item)
+    fun updateMediaItem(item: MediaItemEntity, triggerAutoPush: Boolean = true) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val withTs = item.copy(lastUpdated = System.currentTimeMillis())
+            if (withTs.id > 0L) {
+                repository.updateMedia(withTs)
+                latestRoomItemCache[withTs.id] = withTs
+                if (triggerAutoPush) scheduleDebouncedAutoPush(withTs)
+            }
+            updatePreviewEntity { withTs }
+        }
+    }
+
+    fun pushToTracker(
+        itemOverride: MediaItemEntity? = null,
+        targetTrackerKey: String? = null,
+        onResult: (List<TrackerSyncOutcome>) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val base = itemOverride ?: uiState.value.item ?: return@launch
+            val saved = if (base.id > 0L) {
+                repository.updateMedia(base)
+                latestRoomItemCache[base.id] = base
+                base
+            } else {
+                base
+            }
+            val outcomes = trackerSyncEngine?.pushItemToTrackers(saved, targetTrackerKey)
+                ?: listOf(TrackerSyncOutcome("NONE", false, null, "Sync engine unavailable"))
+            withContext(Dispatchers.Main) { onResult(outcomes) }
+        }
+    }
+
+    fun pullFromTracker(
+        trackerKey: String,
+        itemOverride: MediaItemEntity? = null,
+        onResult: (MediaItemEntity?, TrackerSyncOutcome) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val base = itemOverride ?: uiState.value.item ?: return@launch
+            val (updated, outcome) = trackerSyncEngine?.pullFromTracker(trackerKey, base)
+                ?: (null to TrackerSyncOutcome(trackerKey, false, null, "Sync engine unavailable"))
+            if (updated != null && updated.id > 0L) {
+                latestRoomItemCache[updated.id] = updated
+                updatePreviewEntity { updated }
+            }
+            withContext(Dispatchers.Main) { onResult(updated, outcome) }
+        }
+    }
+
+    fun refreshTrackerSnapshots(
+        trackerKeys: List<String>,
+        itemOverride: MediaItemEntity? = null
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val base = itemOverride ?: uiState.value.item ?: return@launch
+            val engine = trackerSyncEngine ?: return@launch
+            val currentMap = TrackerMetadataCodec.decodeMatchedSnapshots(base.matchedTrackerMetaJson).toMutableMap()
+            var anyUpdated = false
+            coroutineScope {
+                trackerKeys.distinct().map { key ->
+                    async {
+                        val snap = engine.fetchMatchedTrackerSnapshot(key, base)
+                        if (snap != null) {
+                            currentMap[key.uppercase()] = snap
+                            anyUpdated = true
+                        }
+                    }
+                }.awaitAll()
+            }
+            if (anyUpdated) {
+                val latest = if (base.id > 0L) repository.getMediaByIdOnce(base.id) ?: base else base
+                val encoded = TrackerMetadataCodec.encodeMatchedSnapshots(currentMap)
+                val updated = latest.copy(matchedTrackerMetaJson = encoded)
+                if (updated.id > 0L) {
+                    repository.updateMedia(updated)
+                    latestRoomItemCache[updated.id] = updated
+                }
+                updatePreviewEntity { it.copy(matchedTrackerMetaJson = encoded) }
+            }
+        }
+    }
+
+    fun deleteFromRemoteTracker(
+        trackerKey: String,
+        alsoDeleteLocal: Boolean,
+        unlinkItem: MediaItemEntity,
+        onResult: (TrackerSyncOutcome, Boolean) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val engine = trackerSyncEngine ?: return@launch
+            val base = uiState.value.item ?: unlinkItem
+            val outcome = engine.deleteRemoteEntry(trackerKey, base)
+            if (alsoDeleteLocal && outcome.success) {
+                if (base.id > 0L) {
+                    latestRoomItemCache.remove(base.id)
+                    latestEpisodeProgressCache.remove(base.id)
+                    latestVnRoutesCache.remove(base.id)
+                    latestGameEntriesCache.remove(base.id)
+                    repository.deleteMediaById(base.id)
+                }
+                withContext(Dispatchers.Main) { onResult(outcome, true) }
+            } else {
+                // Unlink locally cleanly even if already removed upstream
+                if (unlinkItem.id > 0L) {
+                    repository.updateMedia(unlinkItem)
+                    latestRoomItemCache[unlinkItem.id] = unlinkItem
+                }
+                updatePreviewEntity { unlinkItem }
+                withContext(Dispatchers.Main) { onResult(outcome, false) }
+            }
         }
     }
 

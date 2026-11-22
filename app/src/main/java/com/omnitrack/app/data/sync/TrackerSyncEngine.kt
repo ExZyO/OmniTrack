@@ -1,15 +1,26 @@
 package com.omnitrack.app.data.sync
 
+import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
+import com.omnitrack.app.data.enrichment.HardcoverApiClient
+import com.omnitrack.app.data.enrichment.IgdbApiClient
+import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.network.NetworkPacer
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -17,8 +28,10 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -31,6 +44,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
@@ -47,6 +63,92 @@ data class TrackerImportResult(
     val error: String? = null
 )
 
+@Serializable
+data class TrackerSyncOutcome(
+    val trackerKey: String,
+    val success: Boolean,
+    val httpCode: Int? = null,
+    val message: String
+)
+
+@Serializable
+data class RemoteTrackerEntrySnapshot(
+    val trackerKey: String,
+    val remoteId: String,
+    val title: String,
+    val coverUrl: String? = null,
+    val format: String? = null,
+    val year: String? = null,
+    val remoteStatus: TrackingStatus? = null,
+    val remoteProgress: Double? = null,
+    val remoteTotal: Double? = null,
+    val remoteVolumes: Int? = null,
+    val remoteScore10: Float? = null,
+    val remoteNote: String? = null,
+    val isFavorite: Boolean? = null,
+    val rewatches: Int? = null,
+    val startedAtMs: Long? = null,
+    val finishedAtMs: Long? = null,
+    val lastSyncedMs: Long = System.currentTimeMillis()
+)
+
+@Serializable
+data class TrackerOverrideConfig(
+    val useCustomNote: Boolean = false,
+    val customNote: String? = null,
+    val episodeOffset: Int = 0
+)
+
+object TrackerMetadataCodec {
+    private val codecJson = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+
+    fun decodeMatchedSnapshots(raw: String?): Map<String, RemoteTrackerEntrySnapshot> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching { codecJson.decodeFromString<Map<String, RemoteTrackerEntrySnapshot>>(raw) }
+            .getOrDefault(emptyMap())
+    }
+
+    fun encodeMatchedSnapshots(map: Map<String, RemoteTrackerEntrySnapshot>): String? {
+        if (map.isEmpty()) return null
+        return runCatching { codecJson.encodeToString(map) }.getOrNull()
+    }
+
+    fun decodeOverrides(raw: String?): Map<String, TrackerOverrideConfig> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching { codecJson.decodeFromString<Map<String, TrackerOverrideConfig>>(raw) }
+            .getOrDefault(emptyMap())
+    }
+
+    fun encodeOverrides(map: Map<String, TrackerOverrideConfig>): String? {
+        val pruned = map.filterValues { it.useCustomNote || !it.customNote.isNullOrBlank() || it.episodeOffset != 0 }
+        if (pruned.isEmpty()) return null
+        return runCatching { codecJson.encodeToString(pruned) }.getOrNull()
+    }
+
+    fun resolveEffectiveNote(item: MediaItemEntity, trackerKey: String, maxChars: Int): String? {
+        val ov = decodeOverrides(item.trackerOverridesJson)[trackerKey.uppercase()]
+        val legacy = when (trackerKey.uppercase()) {
+            "ANILIST" -> item.anilistNotes
+            "MAL" -> item.malComments
+            "BANGUMI" -> item.bangumiComment
+            "SIMKL" -> item.simklMemo
+            else -> null
+        }
+        val raw = if (ov?.useCustomNote == true) {
+            ov.customNote?.takeIf { it.isNotBlank() } ?: legacy
+        } else {
+            item.personalNotes?.takeIf { it.isNotBlank() } ?: legacy
+        }?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return if (maxChars > 0) raw.take(maxChars) else raw
+    }
+
+    fun resolveEffectiveProgress(item: MediaItemEntity, trackerKey: String, overrideProgress: Double? = null): Int {
+        val base = overrideProgress ?: item.currentProgress
+        val offset = decodeOverrides(item.trackerOverridesJson)[trackerKey.uppercase()]?.episodeOffset ?: 0
+        return (base.toInt() + offset).coerceAtLeast(0)
+    }
+}
+
 /**
  * Background multi-tracker synchronization engine.
  * Drains the offline-first [SyncQueueDao] queue asynchronously through [NetworkPacer].
@@ -58,6 +160,7 @@ class TrackerSyncEngine(
     private val client: OkHttpClient = com.omnitrack.app.data.network.NetworkClient.sharedClient
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val pushMutex = Mutex()
 
     suspend fun enqueueProgressUpdate(
         item: MediaItemEntity,
@@ -75,132 +178,166 @@ class TrackerSyncEngine(
         ) {
             return@withContext
         }
-        // Enqueue tasks for each active remote tracker ID
-        if (item.anilistId != null) {
+
+        suspend fun enqueueCoalesced(trackerType: String) {
+            syncQueueDao.deletePendingFor(item.id, trackerType)
             syncQueueDao.enqueue(
                 SyncQueueEntity(
                     mediaId = item.id,
-                    trackerType = "ANILIST",
+                    trackerType = trackerType,
                     action = "PROGRESS",
                     progressValue = newProgress
                 )
             )
         }
-        if (item.malId != null) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "MAL",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
+
+        if (item.anilistId != null) enqueueCoalesced("ANILIST")
+        if (item.malId != null) enqueueCoalesced("MAL")
+        if (item.traktId != null || (item.tmdbId != null && (item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.SHOW))) {
+            enqueueCoalesced("TRAKT")
         }
-        if (item.traktId != null || (item.tmdbId != null && (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE || item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW))) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "TRAKT",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
-        if (item.simklId != null || item.tmdbId != null || item.malId != null) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "SIMKL",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
-        if (item.bangumiId != null) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "BANGUMI",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
-        if (item.vndbId != null) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "VNDB",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
-        if (item.tmdbId != null) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "TMDB",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
-        if (item.mediaType == com.omnitrack.app.data.model.MediaType.BOOK && !item.hardcoverId.isNullOrBlank()) {
-            syncQueueDao.enqueue(
-                SyncQueueEntity(
-                    mediaId = item.id,
-                    trackerType = "HARDCOVER",
-                    action = "PROGRESS",
-                    progressValue = newProgress
-                )
-            )
-        }
+        if (item.simklId != null || item.tmdbId != null || item.malId != null) enqueueCoalesced("SIMKL")
+        if (item.bangumiId != null) enqueueCoalesced("BANGUMI")
+        if (!item.vndbId.isNullOrBlank()) enqueueCoalesced("VNDB")
+        if (item.tmdbId != null) enqueueCoalesced("TMDB")
+        if (!item.hardcoverId.isNullOrBlank()) enqueueCoalesced("HARDCOVER")
     }
 
     suspend fun drainQueue() = withContext(Dispatchers.IO) {
-        val tasks = syncQueueDao.getPendingTasksSnapshot()
-        if (tasks.isEmpty()) return@withContext
+        pushMutex.withLock {
+            val tasks = syncQueueDao.getPendingTasksSnapshot()
+            if (tasks.isEmpty()) return@withLock
 
-        val tokens = tokenManager.tokens.firstOrNull() ?: return@withContext
+            val tokens = tokenManager.tokens.firstOrNull() ?: return@withLock
 
-        for (task in tasks) {
-            val mediaItem = repository.getMediaById(task.mediaId).firstOrNull()
-            if (mediaItem == null) {
-                syncQueueDao.deleteTask(task.id)
-                continue
-            }
+            for (task in tasks) {
+                val mediaItem = repository.getMediaById(task.mediaId).firstOrNull()
+                if (mediaItem == null) {
+                    syncQueueDao.deleteTask(task.id)
+                    continue
+                }
 
-            val success = when (task.trackerType) {
-                "ANILIST" -> syncAniList(task, mediaItem, tokens.anilistToken)
-                "MAL" -> syncMal(task, mediaItem, tokens.malToken)
-                "TRAKT" -> syncTrakt(task, mediaItem, tokens.traktToken)
-                "SIMKL" -> syncSimkl(task, mediaItem, tokens.simklToken)
-                "BANGUMI" -> syncBangumi(task, mediaItem, tokens.bangumiToken)
-                "VNDB" -> syncVndb(task, mediaItem, tokens.vndbToken)
-                "TMDB" -> syncTmdb(task, mediaItem, tokens.tmdbToken)
-                "HARDCOVER" -> syncHardcover(task, mediaItem, tokens.hardcoverToken)
-                else -> true
-            }
-
-            if (success) {
-                syncQueueDao.deleteTask(task.id)
+                val outcome = pushSingleTrackerInternal(
+                    trackerKey = task.trackerType,
+                    item = mediaItem,
+                    tokens = tokens,
+                    progressOverride = task.progressValue
+                )
+                if (outcome.success) {
+                    syncQueueDao.deleteTask(task.id)
+                }
             }
         }
     }
 
-    private suspend fun syncAniList(
-        task: SyncQueueEntity,
+    suspend fun pushItemToTrackers(
         item: MediaItemEntity,
-        token: String?
-    ): Boolean = NetworkPacer.withAniListPacing {
-        if (token.isNullOrBlank() || item.anilistId == null) return@withAniListPacing true
+        targetTrackerKey: String? = null
+    ): List<TrackerSyncOutcome> = withContext(Dispatchers.IO) {
+        pushMutex.withLock {
+            val tokens = tokenManager.tokens.firstOrNull() ?: TrackerTokens()
+            val targets: List<String> = if (!targetTrackerKey.isNullOrBlank()) {
+                listOf(targetTrackerKey.uppercase())
+            } else {
+                buildList {
+                    if (item.anilistId != null) add("ANILIST")
+                    if (item.malId != null) add("MAL")
+                    if (item.traktId != null || (item.tmdbId != null && (item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.SHOW))) add("TRAKT")
+                    if (item.simklId != null || item.tmdbId != null || item.malId != null) add("SIMKL")
+                    if (item.bangumiId != null) add("BANGUMI")
+                    if (!item.vndbId.isNullOrBlank()) add("VNDB")
+                    if (item.tmdbId != null && item.userRating != null) add("TMDB")
+                    if (!item.hardcoverId.isNullOrBlank()) add("HARDCOVER")
+                    if (!item.comickId.isNullOrBlank()) add("COMICK")
+                }
+            }
+            if (targets.isEmpty()) {
+                return@withLock listOf(TrackerSyncOutcome("NONE", false, null, "No remote trackers bound"))
+            }
+            targets.map { key ->
+                pushSingleTrackerInternal(key, item, tokens, null)
+            }
+        }
+    }
+
+    private suspend fun pushSingleTrackerInternal(
+        trackerKey: String,
+        item: MediaItemEntity,
+        tokens: TrackerTokens,
+        progressOverride: Double?
+    ): TrackerSyncOutcome = when (trackerKey.uppercase()) {
+        "ANILIST" -> pushAniList(item, tokens.anilistToken, progressOverride)
+        "MAL" -> pushMal(item, tokens.malToken, progressOverride)
+        "TRAKT" -> pushTrakt(item, tokens.traktToken)
+        "SIMKL" -> pushSimkl(item, tokens.simklToken)
+        "BANGUMI" -> pushBangumi(item, tokens.bangumiToken, progressOverride)
+        "VNDB" -> pushVndb(item, tokens.vndbToken)
+        "TMDB" -> pushTmdb(item, tokens.tmdbToken)
+        "HARDCOVER" -> pushHardcover(item, tokens.hardcoverToken)
+        "COMICK" -> if (tokens.comickToken.isNullOrBlank()) {
+            TrackerSyncOutcome("COMICK", false, null, "Comick not signed in")
+        } else {
+            TrackerSyncOutcome("COMICK", true, 200, "Comick linked (pull/read-only API)")
+        }
+        else -> TrackerSyncOutcome(trackerKey.uppercase(), false, null, "Unsupported tracker: $trackerKey")
+    }
+
+    private fun epochMsToYmd(ms: Long?): String? {
+        if (ms == null || ms <= 0L) return null
+        return runCatching {
+            Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+                .format(DateTimeFormatter.ISO_LOCAL_DATE)
+        }.getOrNull()
+    }
+
+    private fun epochMsToYmdTriple(ms: Long?): Triple<Int, Int, Int>? {
+        if (ms == null || ms <= 0L) return null
+        return runCatching {
+            val d = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+            Triple(d.year, d.monthValue, d.dayOfMonth)
+        }.getOrNull()
+    }
+
+    private suspend fun pushAniList(
+        item: MediaItemEntity,
+        token: String?,
+        progressOverride: Double?
+    ): TrackerSyncOutcome = NetworkPacer.withAniListPacing {
+        if (token.isNullOrBlank()) return@withAniListPacing TrackerSyncOutcome("ANILIST", false, null, "AniList not signed in")
+        val alId = item.anilistId ?: return@withAniListPacing TrackerSyncOutcome("ANILIST", false, null, "AniList ID not bound")
         try {
             val query = """
-                mutation (${'$'}mediaId: Int, ${'$'}progress: Int, ${'$'}status: MediaListStatus, ${'$'}scoreRaw: Int, ${'$'}notes: String, ${'$'}private: Boolean) {
-                    SaveMediaListEntry(mediaId: ${'$'}mediaId, progress: ${'$'}progress, status: ${'$'}status, scoreRaw: ${'$'}scoreRaw, notes: ${'$'}notes, private: ${'$'}private) {
+                mutation (
+                    ${'$'}mediaId: Int,
+                    ${'$'}progress: Int,
+                    ${'$'}progressVolumes: Int,
+                    ${'$'}status: MediaListStatus,
+                    ${'$'}scoreRaw: Int,
+                    ${'$'}repeat: Int,
+                    ${'$'}notes: String,
+                    ${'$'}private: Boolean,
+                    ${'$'}hiddenFromStatusLists: Boolean,
+                    ${'$'}startedAt: FuzzyDateInput,
+                    ${'$'}completedAt: FuzzyDateInput,
+                    ${'$'}customLists: [String]
+                ) {
+                    SaveMediaListEntry(
+                        mediaId: ${'$'}mediaId,
+                        progress: ${'$'}progress,
+                        progressVolumes: ${'$'}progressVolumes,
+                        status: ${'$'}status,
+                        scoreRaw: ${'$'}scoreRaw,
+                        repeat: ${'$'}repeat,
+                        notes: ${'$'}notes,
+                        private: ${'$'}private,
+                        hiddenFromStatusLists: ${'$'}hiddenFromStatusLists,
+                        startedAt: ${'$'}startedAt,
+                        completedAt: ${'$'}completedAt,
+                        customLists: ${'$'}customLists
+                    ) {
                         id
                         progress
+                        progressVolumes
                         status
                         score
                     }
@@ -209,25 +346,51 @@ class TrackerSyncEngine(
 
             val effectiveStatus = if (item.isAnilistStatusLocked && item.anilistStatus != null) item.anilistStatus else item.status
             val alStatus = when (effectiveStatus) {
-                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> "CURRENT"
-                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> "PLANNING"
-                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "COMPLETED"
-                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "PAUSED"
-                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "DROPPED"
+                TrackingStatus.IN_PROGRESS -> "CURRENT"
+                TrackingStatus.PLAN_TO_TRACK -> "PLANNING"
+                TrackingStatus.COMPLETED -> "COMPLETED"
+                TrackingStatus.ON_HOLD -> "PAUSED"
+                TrackingStatus.DROPPED -> "DROPPED"
                 else -> "CURRENT"
             }
-
-            val rawScore = item.userRating?.let { (it * 10f).toInt().coerceIn(0, 100) }
+            val effProg = TrackerMetadataCodec.resolveEffectiveProgress(item, "ANILIST", progressOverride)
+            val rawScore = item.userRating?.let { (it * 10f).roundToInt().coerceIn(0, 100) }
+            val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "ANILIST", 2000)
+            val startTriple = epochMsToYmdTriple(item.startedAtMs)
+            val endTriple = epochMsToYmdTriple(item.finishedAtMs)
+            val customLists = item.anilistCustomLists?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
 
             val payload = buildJsonObject {
                 put("query", query)
                 putJsonObject("variables") {
-                    put("mediaId", item.anilistId.toInt())
-                    put("progress", task.progressValue.toInt())
+                    put("mediaId", alId.toInt())
+                    put("progress", effProg)
+                    if (item.volumesProgress > 0 && item.mediaType != MediaType.ANIME) {
+                        put("progressVolumes", item.volumesProgress)
+                    }
                     put("status", alStatus)
                     if (rawScore != null) put("scoreRaw", rawScore)
-                    item.anilistNotes?.take(2000)?.let { put("notes", it) }
+                    put("repeat", item.rewatchCount.coerceAtLeast(0))
+                    if (effNote != null) put("notes", effNote) else put("notes", "")
                     put("private", item.anilistPrivate)
+                    put("hiddenFromStatusLists", item.anilistHiddenFromStatus)
+                    if (startTriple != null) {
+                        putJsonObject("startedAt") {
+                            put("year", startTriple.first)
+                            put("month", startTriple.second)
+                            put("day", startTriple.third)
+                        }
+                    }
+                    if (endTriple != null) {
+                        putJsonObject("completedAt") {
+                            put("year", endTriple.first)
+                            put("month", endTriple.second)
+                            put("day", endTriple.third)
+                        }
+                    }
+                    if (!customLists.isNullOrEmpty()) {
+                        put("customLists", buildJsonArray { customLists.forEach { add(JsonPrimitive(it)) } })
+                    }
                 }
             }
 
@@ -237,55 +400,90 @@ class TrackerSyncEngine(
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val mainOutcome = client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=ANILIST op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=ANILIST op=push http=$code")
+                    TrackerSyncOutcome("ANILIST", false, code, "AniList HTTP $code")
+                } else {
+                    TrackerSyncOutcome("ANILIST", true, code, "AniList synced")
                 }
-                response.isSuccessful
             }
+
+            // Best-effort favorite sync when enabled
+            if (mainOutcome.success && item.anilistFavorite) {
+                val idField = if (item.mediaType == MediaType.ANIME) "animeId" else "mangaId"
+                val favPayload = buildJsonObject {
+                    put("query", "mutation(${'$'}id: Int) { ToggleFavourite($idField: ${'$'}id) { anime { nodes { id } } } }")
+                    putJsonObject("variables") { put("id", alId.toInt()) }
+                }
+                val snap = TrackerMetadataCodec.decodeMatchedSnapshots(item.matchedTrackerMetaJson)["ANILIST"]
+                if (snap?.isFavorite != true) {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://graphql.anilist.co")
+                                .header("Authorization", "Bearer $token")
+                                .post(favPayload.toString().toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().close()
+                    }
+                }
+            }
+            mainOutcome
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=ANILIST op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("ANILIST", false, null, "AniList error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncMal(
-        task: SyncQueueEntity,
+    private suspend fun pushMal(
         item: MediaItemEntity,
-        token: String?
-    ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || item.malId == null) return@withGeneralPacing true
+        token: String?,
+        progressOverride: Double?
+    ): TrackerSyncOutcome = NetworkPacer.withGeneralPacing {
+        if (token.isNullOrBlank()) return@withGeneralPacing TrackerSyncOutcome("MAL", false, null, "MAL not signed in")
+        val malId = item.malId ?: return@withGeneralPacing TrackerSyncOutcome("MAL", false, null, "MAL ID not bound")
         try {
-            val isAnime = item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME
+            val isAnime = item.mediaType == MediaType.ANIME
             val endpoint = if (isAnime) "anime" else "manga"
             val progressField = if (isAnime) "num_watched_episodes" else "num_chapters_read"
+            val rewatchField = if (isAnime) "num_times_rewatched" else "num_times_reread"
+            val rewatchingFlagField = if (isAnime) "is_rewatching" else "is_rereading"
 
             val effectiveStatus = if (item.isMalStatusLocked && item.malStatus != null) item.malStatus else item.status
             val malStatus = when (effectiveStatus) {
-                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> if (isAnime) "watching" else "reading"
-                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> if (isAnime) "plan_to_watch" else "plan_to_read"
-                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> "completed"
-                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> "on_hold"
-                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> "dropped"
+                TrackingStatus.IN_PROGRESS -> if (isAnime) "watching" else "reading"
+                TrackingStatus.PLAN_TO_TRACK -> if (isAnime) "plan_to_watch" else "plan_to_read"
+                TrackingStatus.COMPLETED -> "completed"
+                TrackingStatus.ON_HOLD -> "on_hold"
+                TrackingStatus.DROPPED -> "dropped"
                 else -> if (isAnime) "watching" else "reading"
             }
 
-            val url = "https://api.myanimelist.net/v2/$endpoint/${item.malId}/my_list_status"
-            val bodyBuilder = okhttp3.FormBody.Builder()
-                .add(progressField, task.progressValue.toInt().toString())
-                .add("status", malStatus)
+            val effProg = TrackerMetadataCodec.resolveEffectiveProgress(item, "MAL", progressOverride)
+            val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "MAL", 1000)
 
+            val url = "https://api.myanimelist.net/v2/$endpoint/$malId/my_list_status"
+            val bodyBuilder = okhttp3.FormBody.Builder()
+                .add(progressField, effProg.toString())
+                .add("status", malStatus)
+                .add(rewatchingFlagField, item.malRewatching.toString())
+                .add("priority", item.malPriority.coerceIn(0, 2).toString())
+
+            if (!isAnime && item.volumesProgress > 0) {
+                bodyBuilder.add("num_volumes_read", item.volumesProgress.toString())
+            }
             item.userRating?.let {
-                val intScore = it.toInt().coerceIn(0, 10)
-                bodyBuilder.add("score", intScore.toString())
+                bodyBuilder.add("score", it.roundToInt().coerceIn(0, 10).toString())
             }
-            item.malComments?.take(1000)?.let {
-                bodyBuilder.add("comments", it)
-            }
-            if (item.malRewatches > 0) {
-                bodyBuilder.add("num_times_rewatched", item.malRewatches.toString())
-            }
+            effNote?.let { bodyBuilder.add("comments", it) }
+            val effRewatch = maxOf(item.malRewatches, item.rewatchCount)
+            if (effRewatch > 0) bodyBuilder.add(rewatchField, effRewatch.toString())
+            item.malTags?.takeIf { it.isNotBlank() }?.let { bodyBuilder.add("tags", it) }
+            epochMsToYmd(item.startedAtMs)?.let { bodyBuilder.add("start_date", it) }
+            epochMsToYmd(item.finishedAtMs)?.let { bodyBuilder.add("finish_date", it) }
 
             val request = Request.Builder()
                 .url(url)
@@ -295,42 +493,51 @@ class TrackerSyncEngine(
                 .build()
 
             client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=MAL op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=MAL op=push http=$code")
+                    TrackerSyncOutcome("MAL", false, code, "MAL HTTP $code")
+                } else {
+                    TrackerSyncOutcome("MAL", true, code, "MAL synced")
                 }
-                response.isSuccessful
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=MAL op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("MAL", false, null, "MAL error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncTrakt(
-        task: SyncQueueEntity,
+    private suspend fun pushTrakt(
         item: MediaItemEntity,
         token: String?
-    ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || (item.tmdbId == null && item.traktId == null && item.imdbId.isNullOrBlank())) {
-            return@withGeneralPacing true
+    ): TrackerSyncOutcome = NetworkPacer.withGeneralPacing {
+        if (token.isNullOrBlank()) return@withGeneralPacing TrackerSyncOutcome("TRAKT", false, null, "Trakt not signed in")
+        if (item.tmdbId == null && item.traktId == null && item.imdbId.isNullOrBlank()) {
+            return@withGeneralPacing TrackerSyncOutcome("TRAKT", false, null, "Trakt/TMDb/IMDb ID not bound")
         }
         try {
-            val arrayKey = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
+            val effectiveStatus = if (item.isTraktStatusLocked && item.traktStatus != null) item.traktStatus else item.status
+            val arrayKey = if (item.mediaType == MediaType.MOVIE) "movies" else "shows"
+            val idObj = buildJsonObject {
+                item.traktId?.let { put("trakt", it.toInt()) }
+                item.tmdbId?.let { put("tmdb", it.toInt()) }
+                item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
+            }
+            val endpointPath = when (effectiveStatus) {
+                TrackingStatus.PLAN_TO_TRACK -> "sync/watchlist"
+                else -> "sync/history"
+            }
             val payload = buildJsonObject {
-                put(arrayKey, kotlinx.serialization.json.buildJsonArray {
+                put(arrayKey, buildJsonArray {
                     add(buildJsonObject {
-                        putJsonObject("ids") {
-                            item.traktId?.let { put("trakt", it.toInt()) }
-                            item.tmdbId?.let { put("tmdb", it.toInt()) }
-                            item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
-                        }
+                        put("ids", idObj)
                     })
                 })
             }
 
             val request = Request.Builder()
-                .url("https://api.trakt.tv/sync/history")
+                .url("https://api.trakt.tv/$endpointPath")
                 .header("Authorization", "Bearer $token")
                 .header("trakt-api-version", "2")
                 .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
@@ -338,93 +545,170 @@ class TrackerSyncEngine(
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val mainOutcome = client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=TRAKT op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=TRAKT op=push http=$code")
+                    TrackerSyncOutcome("TRAKT", false, code, "Trakt HTTP $code")
+                } else {
+                    TrackerSyncOutcome("TRAKT", true, code, "Trakt synced")
                 }
-                response.isSuccessful
             }
+
+            // Also sync Trakt rating when rated
+            if (mainOutcome.success && item.userRating != null && item.userRating > 0f) {
+                val rPayload = buildJsonObject {
+                    put(arrayKey, buildJsonArray {
+                        add(buildJsonObject {
+                            put("ids", idObj)
+                            put("rating", item.userRating.roundToInt().coerceIn(1, 10))
+                        })
+                    })
+                }
+                runCatching {
+                    client.newCall(
+                        Request.Builder()
+                            .url("https://api.trakt.tv/sync/ratings")
+                            .header("Authorization", "Bearer $token")
+                            .header("trakt-api-version", "2")
+                            .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                            .header("User-Agent", "OmniTrack/1.0 (Android)")
+                            .post(rPayload.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().close()
+                }
+            }
+            mainOutcome
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=TRAKT op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("TRAKT", false, null, "Trakt error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncSimkl(
-        task: SyncQueueEntity,
+    private suspend fun pushSimkl(
         item: MediaItemEntity,
         token: String?
-    ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || (item.simklId == null && item.tmdbId == null && item.malId == null)) {
-            return@withGeneralPacing true
+    ): TrackerSyncOutcome = NetworkPacer.withGeneralPacing {
+        if (token.isNullOrBlank()) return@withGeneralPacing TrackerSyncOutcome("SIMKL", false, null, "SIMKL not signed in")
+        if (item.simklId == null && item.tmdbId == null && item.malId == null) {
+            return@withGeneralPacing TrackerSyncOutcome("SIMKL", false, null, "SIMKL/TMDb/MAL ID not bound")
         }
         try {
-            val arrayName = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
+            val arrayName = when (item.mediaType) {
+                MediaType.MOVIE -> "movies"
+                MediaType.ANIME -> "shows"
+                else -> "shows"
+            }
+            val effectiveStatus = if (item.isSimklStatusLocked && item.simklStatus != null) item.simklStatus else item.status
+            val simklTo = when (effectiveStatus) {
+                TrackingStatus.COMPLETED -> "completed"
+                TrackingStatus.IN_PROGRESS -> "watching"
+                TrackingStatus.ON_HOLD -> "hold"
+                TrackingStatus.DROPPED -> "dropped"
+                else -> "plantowatch"
+            }
             val idObj = buildJsonObject {
                 item.simklId?.let { put("simkl", it.toInt()) }
                 item.tmdbId?.let { put("tmdb", it.toInt()) }
                 item.malId?.let { put("mal", it.toInt()) }
             }
-
-            val payload = buildJsonObject {
-                put(arrayName, kotlinx.serialization.json.buildJsonArray {
+            val effMemo = TrackerMetadataCodec.resolveEffectiveNote(item, "SIMKL", 140)
+            val listPayload = buildJsonObject {
+                put(arrayName, buildJsonArray {
                     add(buildJsonObject {
+                        put("to", simklTo)
                         put("ids", idObj)
-                        item.simklMemo?.take(140)?.let { put("memo", it) }
+                        effMemo?.let { put("memo", it) }
                         put("private", item.simklPrivate)
                     })
                 })
             }
 
-            val request = Request.Builder()
-                .url("https://api.simkl.com/sync/history")
+            val reqList = Request.Builder()
+                .url("https://api.simkl.com/sync/add-to-list")
                 .header("Authorization", "Bearer $token")
                 .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
                 .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .header("Content-Type", "application/json")
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .post(listPayload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val mainOutcome = client.newCall(reqList).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=SIMKL op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=SIMKL op=push http=$code")
+                    TrackerSyncOutcome("SIMKL", false, code, "SIMKL HTTP $code")
+                } else {
+                    TrackerSyncOutcome("SIMKL", true, code, "SIMKL synced")
                 }
-                response.isSuccessful
             }
+
+            if (mainOutcome.success && item.userRating != null && item.userRating > 0f) {
+                val rPayload = buildJsonObject {
+                    put(arrayName, buildJsonArray {
+                        add(buildJsonObject {
+                            put("ids", idObj)
+                            put("rating", item.userRating.roundToInt().coerceIn(1, 10))
+                        })
+                    })
+                }
+                runCatching {
+                    client.newCall(
+                        Request.Builder()
+                            .url("https://api.simkl.com/sync/ratings")
+                            .header("Authorization", "Bearer $token")
+                            .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                            .header("User-Agent", "OmniTrack/1.0 (Android)")
+                            .header("Content-Type", "application/json")
+                            .post(rPayload.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().close()
+                }
+            }
+            mainOutcome
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=SIMKL op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("SIMKL", false, null, "SIMKL error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncBangumi(
-        task: SyncQueueEntity,
+    private suspend fun pushBangumi(
         item: MediaItemEntity,
-        token: String?
-    ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || item.bangumiId == null) return@withGeneralPacing true
+        token: String?,
+        progressOverride: Double?
+    ): TrackerSyncOutcome = NetworkPacer.withBangumiPacing {
+        if (token.isNullOrBlank()) return@withBangumiPacing TrackerSyncOutcome("BANGUMI", false, null, "Bangumi not signed in")
+        val bgmId = item.bangumiId ?: return@withBangumiPacing TrackerSyncOutcome("BANGUMI", false, null, "Bangumi ID not bound")
         try {
             val effectiveStatus = if (item.isBangumiStatusLocked && item.bangumiStatus != null) item.bangumiStatus else item.status
             val bgmType = when (effectiveStatus) {
-                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> 1
-                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> 2
-                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> 3
-                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> 4
-                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> 5
+                TrackingStatus.PLAN_TO_TRACK -> 1
+                TrackingStatus.COMPLETED -> 2
+                TrackingStatus.IN_PROGRESS -> 3
+                TrackingStatus.ON_HOLD -> 4
+                TrackingStatus.DROPPED -> 5
                 else -> 3
             }
+            val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "BANGUMI", 380)
+            val effProg = TrackerMetadataCodec.resolveEffectiveProgress(item, "BANGUMI", progressOverride)
+            val tagsList = item.bangumiTags?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
 
             val payload = buildJsonObject {
                 put("type", bgmType)
-                item.userRating?.let { put("rate", it.toInt().coerceIn(1, 10)) }
-                item.bangumiComment?.take(380)?.let { put("comment", it) }
+                item.userRating?.let { put("rate", it.roundToInt().coerceIn(1, 10)) }
+                effNote?.let { put("comment", it) }
                 put("private", item.bangumiPrivate)
+                put("ep_status", effProg)
+                if (item.volumesProgress > 0) put("vol_status", item.volumesProgress)
+                if (tagsList.isNotEmpty()) {
+                    put("tags", buildJsonArray { tagsList.forEach { add(JsonPrimitive(it)) } })
+                }
             }
 
             val request = Request.Builder()
-                .url("https://api.bgm.tv/v0/users/-/collections/${item.bangumiId}")
+                .url("https://api.bgm.tv/v0/users/-/collections/$bgmId")
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                 .header("Content-Type", "application/json")
@@ -432,103 +716,107 @@ class TrackerSyncEngine(
                 .build()
 
             client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=BANGUMI op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=BANGUMI op=push http=$code")
+                    TrackerSyncOutcome("BANGUMI", false, code, "Bangumi HTTP $code")
+                } else {
+                    TrackerSyncOutcome("BANGUMI", true, code, "Bangumi synced")
                 }
-                response.isSuccessful
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=BANGUMI op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("BANGUMI", false, null, "Bangumi error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncVndb(
-        task: SyncQueueEntity,
+    private suspend fun pushVndb(
         item: MediaItemEntity,
         token: String?
-    ): Boolean = NetworkPacer.withVndbPacing {
-        if (token.isNullOrBlank() || item.vndbId == null) return@withVndbPacing true
+    ): TrackerSyncOutcome = NetworkPacer.withVndbPacing {
+        if (token.isNullOrBlank()) return@withVndbPacing TrackerSyncOutcome("VNDB", false, null, "VNDB not signed in")
+        val vId = item.vndbId?.takeIf { it.isNotBlank() } ?: return@withVndbPacing TrackerSyncOutcome("VNDB", false, null, "VNDB ID not bound")
         try {
             val activeLabelId = when (item.status) {
-                com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS -> 1
-                com.omnitrack.app.data.model.TrackingStatus.COMPLETED -> 2
-                com.omnitrack.app.data.model.TrackingStatus.ON_HOLD -> 3
-                com.omnitrack.app.data.model.TrackingStatus.DROPPED -> 4
-                com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> 5
+                TrackingStatus.IN_PROGRESS -> 1
+                TrackingStatus.COMPLETED -> 2
+                TrackingStatus.ON_HOLD -> 3
+                TrackingStatus.DROPPED -> 4
+                TrackingStatus.PLAN_TO_TRACK -> 5
                 else -> null
             }
+            val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "VNDB", 2000)
             val payload = buildJsonObject {
                 if (activeLabelId != null) {
-                    put("labels_set", kotlinx.serialization.json.buildJsonArray {
-                        add(kotlinx.serialization.json.JsonPrimitive(activeLabelId))
-                    })
-                    put("labels_unset", kotlinx.serialization.json.buildJsonArray {
-                        listOf(1, 2, 3, 4, 5).filter { it != activeLabelId }.forEach {
-                            add(kotlinx.serialization.json.JsonPrimitive(it))
-                        }
+                    put("labels_set", buildJsonArray { add(JsonPrimitive(activeLabelId)) })
+                    put("labels_unset", buildJsonArray {
+                        listOf(1, 2, 3, 4, 5).filter { it != activeLabelId }.forEach { add(JsonPrimitive(it)) }
                     })
                 }
-                val vote = item.userRating?.let { (it * 10f).toInt().coerceIn(10, 100) }
+                val vote = item.userRating?.let { (it * 10f).roundToInt().coerceIn(10, 100) }
                 if (vote != null) put("vote", vote)
-                item.anilistNotes?.take(2000)?.let { put("notes", it) }
-                if (item.status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED) {
-                    val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-                    put("finished", today)
-                }
+                effNote?.let { put("notes", it) }
+                epochMsToYmd(item.startedAtMs)?.let { put("started", it) }
+                val finDate = epochMsToYmd(item.finishedAtMs)
+                    ?: if (item.status == TrackingStatus.COMPLETED) epochMsToYmd(System.currentTimeMillis()) else null
+                if (finDate != null) put("finished", finDate)
             }
             val request = Request.Builder()
-                .url("https://api.vndb.org/kana/ulist/${item.vndbId}")
+                .url("https://api.vndb.org/kana/ulist/$vId")
                 .header("Authorization", "token $token")
                 .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .patch(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=VNDB op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=VNDB op=push http=$code")
+                    TrackerSyncOutcome("VNDB", false, code, "VNDB HTTP $code")
+                } else {
+                    TrackerSyncOutcome("VNDB", true, code, "VNDB synced")
                 }
-                response.isSuccessful
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=VNDB op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("VNDB", false, null, "VNDB error: ${e.javaClass.simpleName}")
         }
     }
 
-    private suspend fun syncTmdb(
-        task: SyncQueueEntity,
+    private suspend fun pushTmdb(
         item: MediaItemEntity,
         token: String?
-    ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || item.tmdbId == null || item.userRating == null) return@withGeneralPacing true
+    ): TrackerSyncOutcome = NetworkPacer.withTmdbPacing {
+        if (token.isNullOrBlank()) return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "TMDb account token not connected")
+        val tId = item.tmdbId ?: return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "TMDb ID not bound")
+        val rating = item.userRating ?: return@withTmdbPacing TrackerSyncOutcome("TMDB", true, null, "TMDb linked (rate entry to push score)")
         try {
-            val type = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movie" else "tv"
-            val halfStarRating = ((item.userRating * 2f).toInt() / 2.0).coerceIn(0.5, 10.0)
-
-            val payload = buildJsonObject {
-                put("value", halfStarRating)
-            }
+            val type = if (item.mediaType == MediaType.MOVIE) "movie" else "tv"
+            val halfStarRating = ((rating * 2f).roundToInt() / 2.0).coerceIn(0.5, 10.0)
+            val payload = buildJsonObject { put("value", halfStarRating) }
 
             val request = Request.Builder()
-                .url("https://api.themoviedb.org/3/$type/${item.tmdbId}/rating")
+                .url("https://api.themoviedb.org/3/$type/$tId/rating")
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->
+                val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=TMDB op=push http=${response.code}")
+                    AppLogger.w("TrackerSync", "service=TMDB op=push http=$code")
+                    TrackerSyncOutcome("TMDB", false, code, "TMDb HTTP $code")
+                } else {
+                    TrackerSyncOutcome("TMDB", true, code, "TMDb rating synced")
                 }
-                response.isSuccessful
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=TMDB op=push ex=${e.javaClass.simpleName}")
-            false
+            TrackerSyncOutcome("TMDB", false, null, "TMDb error: ${e.javaClass.simpleName}")
         }
     }
 
@@ -600,16 +888,30 @@ class TrackerSyncEngine(
         totalImported
     }
 
-    private suspend fun syncHardcover(
-        task: SyncQueueEntity,
+    private suspend fun pushHardcover(
         item: MediaItemEntity,
         token: String?
-    ): Boolean {
+    ): TrackerSyncOutcome {
         val cleanToken = token?.trim().orEmpty()
+        if (cleanToken.isBlank()) return TrackerSyncOutcome("HARDCOVER", false, null, "Hardcover not signed in")
         val hcId = item.hardcoverId?.trim().orEmpty()
-        if (cleanToken.isBlank() || hcId.isBlank()) return true
-        return com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
-            .syncBookStatus(cleanToken, hcId, item.status, item.userRating)
+        if (hcId.isBlank()) return TrackerSyncOutcome("HARDCOVER", false, null, "Hardcover ID not bound")
+        val hcClient = HardcoverApiClient(client)
+        val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "HARDCOVER", 0)
+        val (ok, code) = hcClient.syncBookStatusDetailed(
+            token = cleanToken,
+            hardcoverId = hcId,
+            status = item.status,
+            rating10 = item.userRating,
+            currentPage = item.currentProgress.toInt().takeIf { it > 0 },
+            reviewNote = effNote,
+            isPrivate = item.anilistPrivate
+        )
+        return if (ok) {
+            TrackerSyncOutcome("HARDCOVER", true, code ?: 200, "Hardcover synced")
+        } else {
+            TrackerSyncOutcome("HARDCOVER", false, code, hcClient.lastError ?: "Hardcover sync failed")
+        }
     }
 
     suspend fun importHardcoverLibrary(
@@ -1628,5 +1930,1159 @@ class TrackerSyncEngine(
         }
         onStatus("VNDB: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)
+    }
+
+    /**
+     * Queries a single tracker directly via its native API so Search & Rebind
+     * shows real covers, formats, years, and genuine provider IDs (never cross-provider guesses).
+     */
+    suspend fun searchTrackerDirectly(
+        trackerKey: String,
+        query: String,
+        mediaType: MediaType
+    ): List<RemoteTrackerEntrySnapshot> = withContext(Dispatchers.IO) {
+        val cleanQ = query.trim()
+        if (cleanQ.length < 2) return@withContext emptyList()
+        val tokens = tokenManager.tokens.firstOrNull() ?: TrackerTokens()
+        when (trackerKey.uppercase()) {
+            "ANILIST" -> searchAniListDirect(cleanQ, mediaType)
+            "MAL" -> searchMalDirect(cleanQ, mediaType)
+            "BANGUMI" -> searchBangumiDirect(cleanQ, mediaType)
+            "TRAKT" -> searchTraktDirect(cleanQ, mediaType)
+            "SIMKL" -> searchSimklDirect(cleanQ, mediaType)
+            "TMDB" -> searchTmdbDirect(cleanQ, mediaType)
+            "HARDCOVER" -> {
+                val hcToken = tokens.hardcoverToken?.trim().orEmpty()
+                if (hcToken.isBlank()) emptyList()
+                else HardcoverApiClient(client).searchBooks(hcToken, cleanQ, limit = 12).mapNotNull { r ->
+                    val id = r.hardcoverId ?: return@mapNotNull null
+                    RemoteTrackerEntrySnapshot(
+                        trackerKey = "HARDCOVER",
+                        remoteId = id,
+                        title = r.title,
+                        coverUrl = r.coverUrl.takeIf { it.isNotBlank() },
+                        format = r.bookAuthor ?: "Book",
+                        year = r.releaseYear,
+                        remoteTotal = r.totalProgress,
+                        remoteScore10 = r.communityScore
+                    )
+                }
+            }
+            "VNDB" -> searchVndbDirect(cleanQ)
+            "COMICK" -> searchComickDirect(cleanQ)
+            "STEAM" -> searchSteamDirect(cleanQ)
+            "IGDB" -> {
+                val id = PreferenceManager.cachedIgdbClientId
+                val sec = PreferenceManager.cachedIgdbClientSecret
+                if (id.isBlank() || sec.isBlank()) emptyList()
+                else IgdbApiClient(client).searchGamesList(id, sec, cleanQ, limit = 12).mapNotNull { r ->
+                    val gId = r.igdbId?.toString() ?: return@mapNotNull null
+                    RemoteTrackerEntrySnapshot(
+                        trackerKey = "IGDB",
+                        remoteId = gId,
+                        title = r.title,
+                        coverUrl = r.coverUrl.takeIf { it.isNotBlank() },
+                        format = "Game",
+                        year = r.releaseYear,
+                        remoteScore10 = r.communityScore
+                    )
+                }
+            }
+            else -> emptyList()
+        }
+    }
+
+    private suspend fun searchAniListDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withAniListSearchPacing {
+            try {
+                val alType = when (mediaType) {
+                    MediaType.MANGA, MediaType.NOVEL, MediaType.COMIC, MediaType.BOOK -> "MANGA"
+                    else -> "ANIME"
+                }
+                val gql = """
+                    query (${'$'}q: String, ${'$'}type: MediaType) {
+                      Page(page: 1, perPage: 12) {
+                        media(search: ${'$'}q, type: ${'$'}type, sort: [SEARCH_MATCH]) {
+                          id
+                          format
+                          episodes
+                          chapters
+                          averageScore
+                          startDate { year }
+                          title { english romaji native }
+                          coverImage { extraLarge large }
+                        }
+                      }
+                    }
+                """.trimIndent()
+                val payload = buildJsonObject {
+                    put("query", gql)
+                    putJsonObject("variables") {
+                        put("q", query)
+                        put("type", alType)
+                    }
+                }.toString()
+                client.newCall(
+                    Request.Builder()
+                        .url("https://graphql.anilist.co")
+                        .post(payload.toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniListSearchPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("data").asSafeObj()?.get("Page").asSafeObj()?.get("media").asSafeArr()
+                        ?: return@withAniListSearchPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["id"].asSafeStr() ?: return@mapNotNull null
+                        val tObj = o["title"].asSafeObj()
+                        val title = tObj?.get("english").asSafeStr() ?: tObj?.get("romaji").asSafeStr()
+                            ?: tObj?.get("native").asSafeStr() ?: return@mapNotNull null
+                        val covObj = o["coverImage"].asSafeObj()
+                        val cov = (covObj?.get("extraLarge").asSafeStr() ?: covObj?.get("large").asSafeStr())
+                            ?.let { LosslessCoverMapper.toLosslessUrl(it) }
+                        val tot = (o["episodes"].asSafeInt() ?: o["chapters"].asSafeInt())?.toDouble()
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "ANILIST",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = cov,
+                            format = o["format"].asSafeStr(),
+                            year = o["startDate"].asSafeObj()?.get("year").asSafeStr(),
+                            remoteTotal = tot,
+                            remoteScore10 = o["averageScore"].asSafeInt()?.let { it / 10f }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchMalDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withJikanPacing {
+            try {
+                val seg = if (mediaType == MediaType.MANGA || mediaType == MediaType.NOVEL) "manga" else "anime"
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.jikan.moe/v4/$seg?q=$enc&limit=12")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withJikanPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("data").asSafeArr() ?: return@withJikanPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["mal_id"].asSafeStr() ?: return@mapNotNull null
+                        val title = o["title_english"].asSafeStr() ?: o["title"].asSafeStr() ?: return@mapNotNull null
+                        val imgObj = o["images"].asSafeObj()?.get("jpg").asSafeObj()
+                        val cov = (imgObj?.get("large_image_url").asSafeStr() ?: imgObj?.get("image_url").asSafeStr())
+                            ?.let { LosslessCoverMapper.toLosslessUrl(it) }
+                        val year = o["year"].asSafeStr()
+                            ?: o["aired"].asSafeObj()?.get("prop").asSafeObj()?.get("from").asSafeObj()?.get("year").asSafeStr()
+                        val tot = (o["episodes"].asSafeInt() ?: o["chapters"].asSafeInt())?.toDouble()
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "MAL",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = cov,
+                            format = o["type"].asSafeStr(),
+                            year = year,
+                            remoteTotal = tot,
+                            remoteScore10 = (o["score"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchBangumiDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withBangumiPacing {
+            try {
+                val bgmType = when (mediaType) {
+                    MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK -> 1
+                    MediaType.GAME, MediaType.VISUAL_NOVEL -> 4
+                    else -> 2
+                }
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.bgm.tv/search/subject/$enc?type=$bgmType&responseGroup=medium&max_results=10")
+                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withBangumiPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("list").asSafeArr() ?: return@withBangumiPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["id"].asSafeStr() ?: return@mapNotNull null
+                        val title = o["name_cn"].asSafeStr() ?: o["name"].asSafeStr() ?: return@mapNotNull null
+                        val imgObj = o["images"].asSafeObj()
+                        val cov = (imgObj?.get("large").asSafeStr() ?: imgObj?.get("common").asSafeStr())
+                            ?.let { LosslessCoverMapper.toLosslessUrl(it) }
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "BANGUMI",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = cov,
+                            format = when (o["type"].asSafeInt()) {
+                                1 -> "Book/Manga"
+                                4 -> "Game"
+                                2 -> "Anime"
+                                else -> "Subject"
+                            },
+                            year = o["air_date"].asSafeStr()?.take(4),
+                            remoteTotal = o["eps_count"].asSafeInt()?.toDouble(),
+                            remoteScore10 = o["rating"].asSafeObj()?.get("score")?.let {
+                                (it as? JsonPrimitive)?.takeIf { p -> p !is JsonNull }?.floatOrNull
+                            }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchTraktDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withGeneralPacing {
+            try {
+                val traktType = if (mediaType == MediaType.MOVIE) "movie" else "show"
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.trakt.tv/search/$traktType?query=$enc&limit=10")
+                        .header("trakt-api-version", "2")
+                        .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeArr()
+                        ?: return@withGeneralPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val wrapper = el.asSafeObj() ?: return@mapNotNull null
+                        val m = wrapper[traktType].asSafeObj() ?: return@mapNotNull null
+                        val ids = m["ids"].asSafeObj()
+                        val traktId = ids?.get("trakt").asSafeStr() ?: return@mapNotNull null
+                        val title = m["title"].asSafeStr() ?: return@mapNotNull null
+                        val tmdbId = ids["tmdb"].asSafeLong()
+                        val cov = fetchTmdbPosterCached(if (mediaType == MediaType.MOVIE) "movie" else "tv", tmdbId)
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "TRAKT",
+                            remoteId = traktId,
+                            title = title,
+                            coverUrl = cov,
+                            format = if (traktType == "movie") "Movie" else "Series",
+                            year = m["year"].asSafeStr()
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchSimklDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withGeneralPacing {
+            try {
+                val simklType = when (mediaType) {
+                    MediaType.MOVIE -> "movie"
+                    MediaType.ANIME -> "anime"
+                    else -> "tv"
+                }
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.simkl.com/search/$simklType?q=$enc&limit=10")
+                        .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeArr()
+                        ?: return@withGeneralPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["ids"].asSafeObj()?.get("simkl_id").asSafeStr()
+                            ?: o["ids"].asSafeObj()?.get("simkl").asSafeStr()
+                            ?: return@mapNotNull null
+                        val title = o["title"].asSafeStr() ?: return@mapNotNull null
+                        val poster = o["poster"].asSafeStr()?.let { "https://simkl.in/posters/${it}_m.jpg" }
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "SIMKL",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = poster,
+                            format = simklType.uppercase(),
+                            year = o["year"].asSafeStr(),
+                            remoteTotal = o["ep_count"].asSafeInt()?.toDouble()
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchTmdbDirect(query: String, mediaType: MediaType): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withTmdbPacing {
+            val key = PreferenceManager.cachedTmdbApiKey
+            if (key.isBlank()) return@withTmdbPacing emptyList()
+            try {
+                val seg = if (mediaType == MediaType.MOVIE) "movie" else "tv"
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.themoviedb.org/3/search/$seg?api_key=$key&query=$enc")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withTmdbPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("results").asSafeArr() ?: return@withTmdbPacing emptyList()
+                    arr.take(12).mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["id"].asSafeStr() ?: return@mapNotNull null
+                        val title = o["title"].asSafeStr() ?: o["name"].asSafeStr() ?: return@mapNotNull null
+                        val poster = o["poster_path"].asSafeStr()?.let {
+                            LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/w500$it")
+                        }
+                        val year = (o["release_date"].asSafeStr() ?: o["first_air_date"].asSafeStr())?.take(4)
+                        val score = (o["vote_average"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "TMDB",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = poster,
+                            format = if (seg == "movie") "Movie" else "TV Series",
+                            year = year,
+                            remoteScore10 = score
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchVndbDirect(query: String): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withVndbPacing {
+            try {
+                val payload = buildJsonObject {
+                    put("filters", buildJsonArray { add(JsonPrimitive("search")); add(JsonPrimitive("=")); add(JsonPrimitive(query)) })
+                    put("fields", "id,title,released,rating,image{url}")
+                    put("results", 12)
+                }.toString()
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.vndb.org/kana/vn")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .post(payload.toRequestBody("application/json".toMediaType()))
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withVndbPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("results").asSafeArr() ?: return@withVndbPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["id"].asSafeStr() ?: return@mapNotNull null
+                        val title = o["title"].asSafeStr() ?: return@mapNotNull null
+                        val cov = o["image"].asSafeObj()?.get("url").asSafeStr()
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "VNDB",
+                            remoteId = id,
+                            title = title,
+                            coverUrl = cov,
+                            format = "Visual Novel",
+                            year = o["released"].asSafeStr()?.take(4),
+                            remoteScore10 = o["rating"].asSafeInt()?.let { it / 10f }
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchComickDirect(query: String): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withGeneralPacing {
+            try {
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://api.comick.io/v1.0/search?q=$enc&limit=10")
+                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        .header("Referer", "https://comick.io")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeArr()
+                        ?: return@withGeneralPacing emptyList()
+                    arr.mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val slug = o["slug"].asSafeStr() ?: o["hid"].asSafeStr() ?: return@mapNotNull null
+                        val title = o["title"].asSafeStr() ?: return@mapNotNull null
+                        val b2key = o["md_covers"].asSafeArr()?.firstOrNull()?.asSafeObj()?.get("b2key").asSafeStr()
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "COMICK",
+                            remoteId = slug,
+                            title = title,
+                            coverUrl = b2key?.let { "https://meo.comick.picture/$it" },
+                            format = o["country"].asSafeStr()?.uppercase() ?: "Manga",
+                            year = o["year"].asSafeStr(),
+                            remoteTotal = o["last_chapter"].asSafeStr()?.toDoubleOrNull()
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private suspend fun searchSteamDirect(query: String): List<RemoteTrackerEntrySnapshot> =
+        NetworkPacer.withSteamPacing {
+            try {
+                val enc = URLEncoder.encode(query, "UTF-8")
+                client.newCall(
+                    Request.Builder()
+                        .url("https://store.steampowered.com/api/storesearch/?term=$enc&l=english&cc=US")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                ).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withSteamPacing emptyList()
+                    val arr = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        ?.get("items").asSafeArr() ?: return@withSteamPacing emptyList()
+                    arr.take(12).mapNotNull { el ->
+                        val o = el.asSafeObj() ?: return@mapNotNull null
+                        val id = o["id"].asSafeStr() ?: return@mapNotNull null
+                        val name = o["name"].asSafeStr() ?: return@mapNotNull null
+                        RemoteTrackerEntrySnapshot(
+                            trackerKey = "STEAM",
+                            remoteId = id,
+                            title = name,
+                            coverUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900_2x.jpg",
+                            format = "Steam Game"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+
+    private fun fetchTmdbPosterCached(seg: String, tmdbId: Long?): String? {
+        val key = PreferenceManager.cachedTmdbApiKey
+        if (key.isBlank() || tmdbId == null) return null
+        return runCatching {
+            client.newCall(
+                Request.Builder()
+                    .url("https://api.themoviedb.org/3/$seg/$tmdbId?api_key=$key")
+                    .get()
+                    .build()
+            ).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val p = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                    ?.get("poster_path").asSafeStr() ?: return@use null
+                LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/w500$p")
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Fetches the live remote entry metadata (matched poster art, title, format, year, remote progress/status/score/note)
+     * for displaying authentic per-tracker matched cards & detecting sync diffs.
+     */
+    suspend fun fetchMatchedTrackerSnapshot(
+        trackerKey: String,
+        item: MediaItemEntity
+    ): RemoteTrackerEntrySnapshot? = withContext(Dispatchers.IO) {
+        val tokens = tokenManager.tokens.firstOrNull() ?: TrackerTokens()
+        when (trackerKey.uppercase()) {
+            "ANILIST" -> {
+                val alId = item.anilistId ?: return@withContext null
+                val gql = """
+                    query (${'$'}id: Int) {
+                      Media(id: ${'$'}id) {
+                        id
+                        format
+                        episodes
+                        chapters
+                        isFavourite
+                        startDate { year }
+                        title { english romaji native }
+                        coverImage { extraLarge large }
+                        mediaListEntry {
+                          status
+                          progress
+                          progressVolumes
+                          score(format: POINT_10_DECIMAL)
+                          repeat
+                          notes
+                        }
+                      }
+                    }
+                """.trimIndent()
+                val payload = buildJsonObject {
+                    put("query", gql)
+                    putJsonObject("variables") { put("id", alId.toInt()) }
+                }.toString()
+                NetworkPacer.withAniListPacing {
+                    runCatching {
+                        val b = Request.Builder()
+                            .url("https://graphql.anilist.co")
+                            .post(payload.toRequestBody("application/json".toMediaType()))
+                        if (!tokens.anilistToken.isNullOrBlank()) {
+                            b.header("Authorization", "Bearer ${tokens.anilistToken}")
+                        }
+                        client.newCall(b.build()).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val m = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                                ?.get("data").asSafeObj()?.get("Media").asSafeObj() ?: return@use null
+                            val tObj = m["title"].asSafeObj()
+                            val title = tObj?.get("english").asSafeStr() ?: tObj?.get("romaji").asSafeStr()
+                                ?: tObj?.get("native").asSafeStr() ?: item.title
+                            val cov = (m["coverImage"].asSafeObj()?.get("extraLarge").asSafeStr()
+                                ?: m["coverImage"].asSafeObj()?.get("large").asSafeStr())
+                                ?.let { LosslessCoverMapper.toLosslessUrl(it) }
+                            val entry = m["mediaListEntry"].asSafeObj()
+                            val st = when (entry?.get("status").asSafeStr()) {
+                                "CURRENT" -> TrackingStatus.IN_PROGRESS
+                                "PLANNING" -> TrackingStatus.PLAN_TO_TRACK
+                                "COMPLETED" -> TrackingStatus.COMPLETED
+                                "PAUSED" -> TrackingStatus.ON_HOLD
+                                "DROPPED" -> TrackingStatus.DROPPED
+                                else -> null
+                            }
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "ANILIST",
+                                remoteId = alId.toString(),
+                                title = title,
+                                coverUrl = cov,
+                                format = m["format"].asSafeStr(),
+                                year = m["startDate"].asSafeObj()?.get("year").asSafeStr(),
+                                remoteStatus = st,
+                                remoteProgress = entry?.get("progress").asSafeInt()?.toDouble(),
+                                remoteTotal = (m["episodes"].asSafeInt() ?: m["chapters"].asSafeInt())?.toDouble(),
+                                remoteVolumes = entry?.get("progressVolumes").asSafeInt(),
+                                remoteScore10 = (entry?.get("score") as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull,
+                                remoteNote = entry?.get("notes").asSafeStr(),
+                                isFavorite = m["isFavourite"]?.jsonPrimitive?.booleanOrNull,
+                                rewatches = entry?.get("repeat").asSafeInt()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "MAL" -> {
+                val malId = item.malId ?: return@withContext null
+                val seg = if (item.mediaType == MediaType.ANIME) "anime" else "manga"
+                if (!tokens.malToken.isNullOrBlank()) {
+                    NetworkPacer.withGeneralPacing {
+                        runCatching {
+                            client.newCall(
+                                Request.Builder()
+                                    .url("https://api.myanimelist.net/v2/$seg/$malId?fields=id,title,main_picture,media_type,start_date,num_episodes,num_chapters,my_list_status{status,score,num_episodes_watched,num_chapters_read,num_volumes_read,num_times_rewatched,num_times_reread,comments}")
+                                    .header("Authorization", "Bearer ${tokens.malToken}")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .get()
+                                    .build()
+                            ).execute().use { resp ->
+                                if (!resp.isSuccessful) return@use null
+                                val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj() ?: return@use null
+                                val ls = o["my_list_status"].asSafeObj()
+                                val pic = o["main_picture"].asSafeObj()
+                                val cov = (pic?.get("large").asSafeStr() ?: pic?.get("medium").asSafeStr())
+                                    ?.let { LosslessCoverMapper.toLosslessUrl(it) }
+                                val st = when (ls?.get("status").asSafeStr()) {
+                                    "watching", "reading" -> TrackingStatus.IN_PROGRESS
+                                    "completed" -> TrackingStatus.COMPLETED
+                                    "on_hold" -> TrackingStatus.ON_HOLD
+                                    "dropped" -> TrackingStatus.DROPPED
+                                    "plan_to_watch", "plan_to_read" -> TrackingStatus.PLAN_TO_TRACK
+                                    else -> null
+                                }
+                                val prog = (ls?.get("num_episodes_watched") ?: ls?.get("num_chapters_read"))?.asSafeInt()?.toDouble()
+                                val tot = (o["num_episodes"] ?: o["num_chapters"])?.asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                                RemoteTrackerEntrySnapshot(
+                                    trackerKey = "MAL",
+                                    remoteId = malId.toString(),
+                                    title = o["title"].asSafeStr() ?: item.title,
+                                    coverUrl = cov,
+                                    format = o["media_type"].asSafeStr()?.uppercase(),
+                                    year = o["start_date"].asSafeStr()?.take(4),
+                                    remoteStatus = st,
+                                    remoteProgress = prog,
+                                    remoteTotal = tot,
+                                    remoteVolumes = ls?.get("num_volumes_read").asSafeInt(),
+                                    remoteScore10 = ls?.get("score").asSafeInt()?.takeIf { it > 0 }?.toFloat(),
+                                    remoteNote = ls?.get("comments").asSafeStr(),
+                                    rewatches = (ls?.get("num_times_rewatched") ?: ls?.get("num_times_reread"))?.asSafeInt()
+                                )
+                            }
+                        }.getOrNull()
+                    }
+                } else {
+                    NetworkPacer.withJikanPacing {
+                        runCatching {
+                            client.newCall(
+                                Request.Builder()
+                                    .url("https://api.jikan.moe/v4/$seg/$malId")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .get()
+                                    .build()
+                            ).execute().use { resp ->
+                                if (!resp.isSuccessful) return@use null
+                                val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                                    ?.get("data").asSafeObj() ?: return@use null
+                                val jpg = o["images"].asSafeObj()?.get("jpg").asSafeObj()
+                                RemoteTrackerEntrySnapshot(
+                                    trackerKey = "MAL",
+                                    remoteId = malId.toString(),
+                                    title = o["title_english"].asSafeStr() ?: o["title"].asSafeStr() ?: item.title,
+                                    coverUrl = (jpg?.get("large_image_url").asSafeStr() ?: jpg?.get("image_url").asSafeStr())
+                                        ?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                                    format = o["type"].asSafeStr(),
+                                    year = o["year"].asSafeStr(),
+                                    remoteTotal = (o["episodes"] ?: o["chapters"])?.asSafeInt()?.toDouble()
+                                )
+                            }
+                        }.getOrNull()
+                    }
+                }
+            }
+            "BANGUMI" -> {
+                val bgmId = item.bangumiId ?: return@withContext null
+                NetworkPacer.withBangumiPacing {
+                    runCatching {
+                        val b = Request.Builder()
+                            .url("https://api.bgm.tv/v0/subjects/$bgmId")
+                            .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        if (!tokens.bangumiToken.isNullOrBlank()) {
+                            b.header("Authorization", "Bearer ${tokens.bangumiToken}")
+                        }
+                        client.newCall(b.build()).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj() ?: return@use null
+                            val imgs = o["images"].asSafeObj()
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "BANGUMI",
+                                remoteId = bgmId.toString(),
+                                title = o["name_cn"].asSafeStr() ?: o["name"].asSafeStr() ?: item.title,
+                                coverUrl = (imgs?.get("large").asSafeStr() ?: imgs?.get("common").asSafeStr())
+                                    ?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                                format = "Bangumi",
+                                year = o["date"].asSafeStr()?.take(4),
+                                remoteTotal = o["eps"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "TMDB" -> {
+                val tId = item.tmdbId ?: return@withContext null
+                val seg = if (item.mediaType == MediaType.MOVIE) "movie" else "tv"
+                val key = PreferenceManager.cachedTmdbApiKey
+                if (key.isBlank()) return@withContext null
+                NetworkPacer.withTmdbPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.themoviedb.org/3/$seg/$tId?api_key=$key")
+                                .get()
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj() ?: return@use null
+                            val p = o["poster_path"].asSafeStr()?.let {
+                                LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/w500$it")
+                            }
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "TMDB",
+                                remoteId = tId.toString(),
+                                title = o["title"].asSafeStr() ?: o["name"].asSafeStr() ?: item.title,
+                                coverUrl = p,
+                                format = if (seg == "movie") "Movie" else "TV Series",
+                                year = (o["release_date"].asSafeStr() ?: o["first_air_date"].asSafeStr())?.take(4),
+                                remoteTotal = o["number_of_episodes"].asSafeInt()?.toDouble()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "TRAKT" -> {
+                val trId = item.traktId ?: return@withContext null
+                val seg = if (item.mediaType == MediaType.MOVIE) "movies" else "shows"
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.trakt.tv/$seg/$trId?extended=full")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                                .get()
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj() ?: return@use null
+                            val tmdbId = o["ids"].asSafeObj()?.get("tmdb").asSafeLong() ?: item.tmdbId
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "TRAKT",
+                                remoteId = trId.toString(),
+                                title = o["title"].asSafeStr() ?: item.title,
+                                coverUrl = fetchTmdbPosterCached(if (item.mediaType == MediaType.MOVIE) "movie" else "tv", tmdbId),
+                                format = if (seg == "movies") "Movie" else "TV Series",
+                                year = o["year"].asSafeStr(),
+                                remoteTotal = o["aired_episodes"].asSafeInt()?.toDouble()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "SIMKL" -> {
+                val sId = item.simklId ?: return@withContext null
+                val seg = when (item.mediaType) {
+                    MediaType.MOVIE -> "movies"
+                    MediaType.ANIME -> "anime"
+                    else -> "tv"
+                }
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.simkl.com/$seg/$sId?client_id=${TrackerAccountVerifier.SIMKL_CLIENT_ID}&extended=full")
+                                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                                .get()
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj() ?: return@use null
+                            val poster = o["poster"].asSafeStr()?.let { "https://simkl.in/posters/${it}_m.jpg" }
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "SIMKL",
+                                remoteId = sId.toString(),
+                                title = o["title"].asSafeStr() ?: item.title,
+                                coverUrl = poster,
+                                format = seg.uppercase(),
+                                year = o["year"].asSafeStr(),
+                                remoteTotal = o["total_episodes"].asSafeInt()?.toDouble()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "HARDCOVER" -> {
+                val hcId = item.hardcoverId?.takeIf { it.isNotBlank() } ?: return@withContext null
+                val hcToken = tokens.hardcoverToken?.trim().orEmpty()
+                if (hcToken.isBlank()) return@withContext null
+                val hc = HardcoverApiClient(client)
+                val userRec = hc.fetchUserBookEntry(hcToken, hcId)
+                if (userRec != null) {
+                    RemoteTrackerEntrySnapshot(
+                        trackerKey = "HARDCOVER",
+                        remoteId = hcId,
+                        title = userRec.title,
+                        coverUrl = userRec.coverUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        format = userRec.author ?: "Hardcover Book",
+                        year = userRec.releaseYear,
+                        remoteStatus = userRec.status,
+                        remoteProgress = userRec.currentPage,
+                        remoteTotal = userRec.pages?.toDouble(),
+                        remoteScore10 = userRec.userRating10
+                    )
+                } else {
+                    val details = hc.fetchBookDetails(hcToken, hcId, item.title, item.bookAuthor) ?: return@withContext null
+                    RemoteTrackerEntrySnapshot(
+                        trackerKey = "HARDCOVER",
+                        remoteId = details.hardcoverId,
+                        title = details.title,
+                        coverUrl = details.coverUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        format = details.authorName ?: "Book",
+                        year = details.releaseYear,
+                        remoteTotal = details.pages?.toDouble()
+                    )
+                }
+            }
+            "VNDB" -> {
+                val vId = item.vndbId?.takeIf { it.isNotBlank() } ?: return@withContext null
+                NetworkPacer.withVndbPacing {
+                    runCatching {
+                        val payload = buildJsonObject {
+                            put("filters", buildJsonArray { add(JsonPrimitive("id")); add(JsonPrimitive("=")); add(JsonPrimitive(vId)) })
+                            put("fields", "id,title,released,rating,image{url}")
+                            put("results", 1)
+                        }.toString()
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.vndb.org/kana/vn")
+                                .header("User-Agent", "OmniTrack/1.0")
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val o = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                                ?.get("results").asSafeArr()?.firstOrNull()?.asSafeObj() ?: return@use null
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "VNDB",
+                                remoteId = vId,
+                                title = o["title"].asSafeStr() ?: item.title,
+                                coverUrl = o["image"].asSafeObj()?.get("url").asSafeStr(),
+                                format = "Visual Novel",
+                                year = o["released"].asSafeStr()?.take(4),
+                                remoteScore10 = o["rating"].asSafeInt()?.let { it / 10f }
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "COMICK" -> {
+                val cid = item.comickId?.takeIf { it.isNotBlank() } ?: return@withContext null
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        val enc = URLEncoder.encode(cid, "UTF-8")
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.comick.io/comic/$enc")
+                                .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                                .header("Referer", "https://comick.io")
+                                .get()
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) return@use null
+                            val comic = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                                ?.get("comic").asSafeObj() ?: return@use null
+                            val b2 = comic["md_covers"].asSafeArr()?.firstOrNull()?.asSafeObj()?.get("b2key").asSafeStr()
+                            RemoteTrackerEntrySnapshot(
+                                trackerKey = "COMICK",
+                                remoteId = cid,
+                                title = comic["title"].asSafeStr() ?: item.title,
+                                coverUrl = b2?.let { "https://meo.comick.picture/$it" },
+                                format = comic["country"].asSafeStr()?.uppercase() ?: "Manga",
+                                year = comic["year"].asSafeStr(),
+                                remoteTotal = comic["last_chapter"].asSafeStr()?.toDoubleOrNull()
+                            )
+                        }
+                    }.getOrNull()
+                }
+            }
+            "STEAM" -> {
+                val sId = item.steamAppId ?: return@withContext null
+                RemoteTrackerEntrySnapshot(
+                    trackerKey = "STEAM",
+                    remoteId = sId.toString(),
+                    title = item.title,
+                    coverUrl = "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$sId/library_600x900_2x.jpg",
+                    format = "Steam Game",
+                    remoteProgress = item.playtimeHours
+                )
+            }
+            "IGDB" -> {
+                val igId = item.igdbId ?: return@withContext null
+                val cid = PreferenceManager.cachedIgdbClientId
+                val sec = PreferenceManager.cachedIgdbClientSecret
+                val g = if (cid.isNotBlank() && sec.isNotBlank()) {
+                    IgdbApiClient(client).searchGamesList(cid, sec, item.title, 5)
+                        .firstOrNull { it.igdbId == igId }
+                } else null
+                RemoteTrackerEntrySnapshot(
+                    trackerKey = "IGDB",
+                    remoteId = igId.toString(),
+                    title = g?.title ?: item.title,
+                    coverUrl = g?.coverUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl.takeIf { it.isNotBlank() },
+                    format = "IGDB Game",
+                    year = g?.releaseYear ?: item.releaseYear
+                )
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Pulls remote progress/status/score/note/cover snapshot from [trackerKey], persists updated
+     * snapshot metadata in [MediaItemEntity.matchedTrackerMetaJson], and merges remote progress/rating/notes.
+     */
+    suspend fun pullFromTracker(
+        trackerKey: String,
+        item: MediaItemEntity
+    ): Pair<MediaItemEntity?, TrackerSyncOutcome> = withContext(Dispatchers.IO) {
+        val key = trackerKey.uppercase()
+        val snap = fetchMatchedTrackerSnapshot(key, item)
+            ?: return@withContext null to TrackerSyncOutcome(key, false, null, "Could not fetch $key entry")
+        val nextSnaps = TrackerMetadataCodec.decodeMatchedSnapshots(item.matchedTrackerMetaJson).toMutableMap()
+        nextSnaps[key] = snap
+
+        var updated = item.copy(
+            matchedTrackerMetaJson = TrackerMetadataCodec.encodeMatchedSnapshots(nextSnaps),
+            totalProgress = item.totalProgress?.takeIf { it > 0.0 } ?: snap.remoteTotal,
+            currentProgress = snap.remoteProgress ?: item.currentProgress,
+            volumesProgress = snap.remoteVolumes ?: item.volumesProgress,
+            userRating = snap.remoteScore10?.takeIf { it > 0f } ?: item.userRating,
+            personalNotes = item.personalNotes?.takeIf { it.isNotBlank() } ?: snap.remoteNote,
+            rewatchCount = maxOf(item.rewatchCount, snap.rewatches ?: 0),
+            status = snap.remoteStatus ?: item.status
+        )
+        if (key == "ANILIST" && snap.isFavorite != null) {
+            updated = updated.copy(anilistFavorite = snap.isFavorite, isFavorite = item.isFavorite || snap.isFavorite)
+        }
+        if (item.id > 0L) {
+            repository.updateMedia(updated)
+        }
+        updated to TrackerSyncOutcome(key, true, 200, "Pulled latest state from $key")
+    }
+
+    /**
+     * Removes an entry from a remote tracker's cloud list.
+     * Supports AniList, MyAnimeList, Trakt, SIMKL, VNDB, TMDb rating, and Hardcover.
+     */
+    suspend fun deleteRemoteEntry(
+        trackerKey: String,
+        item: MediaItemEntity
+    ): TrackerSyncOutcome = withContext(Dispatchers.IO) {
+        val tokens = tokenManager.tokens.firstOrNull() ?: TrackerTokens()
+        when (val key = trackerKey.uppercase()) {
+            "ANILIST" -> {
+                val tok = tokens.anilistToken?.trim().orEmpty()
+                val alId = item.anilistId
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "AniList not signed in")
+                if (alId == null) return@withContext TrackerSyncOutcome(key, false, null, "AniList ID not bound")
+                NetworkPacer.withAniListPacing {
+                    runCatching {
+                        val findPayload = buildJsonObject {
+                            put("query", "query(${'$'}mId: Int) { Media(id: ${'$'}mId) { mediaListEntry { id } } }")
+                            putJsonObject("variables") { put("mId", alId.toInt()) }
+                        }.toString()
+                        val entryId = client.newCall(
+                            Request.Builder()
+                                .url("https://graphql.anilist.co")
+                                .header("Authorization", "Bearer $tok")
+                                .post(findPayload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { resp ->
+                            if (!resp.isSuccessful) {
+                                return@withAniListPacing TrackerSyncOutcome(key, false, resp.code, "AniList HTTP ${resp.code}")
+                            }
+                            json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                                ?.get("data").asSafeObj()?.get("Media").asSafeObj()
+                                ?.get("mediaListEntry").asSafeObj()?.get("id").asSafeInt()
+                        } ?: return@withAniListPacing TrackerSyncOutcome(key, true, 200, "Already removed from AniList")
+
+                        val delPayload = buildJsonObject {
+                            put("query", "mutation(${'$'}id: Int) { DeleteMediaListEntry(id: ${'$'}id) { deleted } }")
+                            putJsonObject("variables") { put("id", entryId) }
+                        }.toString()
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://graphql.anilist.co")
+                                .header("Authorization", "Bearer $tok")
+                                .post(delPayload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { resp ->
+                            val code = resp.code
+                            if (!resp.isSuccessful) {
+                                AppLogger.w("TrackerSync", "service=ANILIST op=delete http=$code")
+                                TrackerSyncOutcome(key, false, code, "AniList delete HTTP $code")
+                            } else {
+                                TrackerSyncOutcome(key, true, code, "Deleted from AniList")
+                            }
+                        }
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "AniList delete failed (${it.javaClass.simpleName})")
+                    }
+                }
+            }
+            "MAL" -> {
+                val tok = tokens.malToken?.trim().orEmpty()
+                val malId = item.malId
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "MAL not signed in")
+                if (malId == null) return@withContext TrackerSyncOutcome(key, false, null, "MAL ID not bound")
+                val seg = if (item.mediaType == MediaType.ANIME) "anime" else "manga"
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.myanimelist.net/v2/$seg/$malId/my_list_status")
+                                .header("Authorization", "Bearer $tok")
+                                .header("User-Agent", "OmniTrack/1.0")
+                                .delete()
+                                .build()
+                        ).execute().use { resp ->
+                            val code = resp.code
+                            if (resp.isSuccessful || code == 404) {
+                                TrackerSyncOutcome(key, true, code, "Deleted from MyAnimeList")
+                            } else {
+                                AppLogger.w("TrackerSync", "service=MAL op=delete http=$code")
+                                TrackerSyncOutcome(key, false, code, "MAL delete HTTP $code")
+                            }
+                        }
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "MAL delete failed (${it.javaClass.simpleName})")
+                    }
+                }
+            }
+            "TRAKT" -> {
+                val tok = tokens.traktToken?.trim().orEmpty()
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "Trakt not signed in")
+                if (item.traktId == null && item.tmdbId == null && item.imdbId.isNullOrBlank()) {
+                    return@withContext TrackerSyncOutcome(key, false, null, "No Trakt/TMDb ID bound")
+                }
+                val arrayKey = if (item.mediaType == MediaType.MOVIE) "movies" else "shows"
+                val payload = buildJsonObject {
+                    put(arrayKey, buildJsonArray {
+                        add(buildJsonObject {
+                            putJsonObject("ids") {
+                                item.traktId?.let { put("trakt", it.toInt()) }
+                                item.tmdbId?.let { put("tmdb", it.toInt()) }
+                                item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
+                            }
+                        })
+                    })
+                }.toString()
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        val r1 = client.newCall(
+                            Request.Builder()
+                                .url("https://api.trakt.tv/sync/watchlist/remove")
+                                .header("Authorization", "Bearer $tok")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { it.code }
+                        val r2 = client.newCall(
+                            Request.Builder()
+                                .url("https://api.trakt.tv/sync/history/remove")
+                                .header("Authorization", "Bearer $tok")
+                                .header("trakt-api-version", "2")
+                                .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { it.code }
+                        val ok = r1 in 200..299 || r2 in 200..299
+                        if (ok) TrackerSyncOutcome(key, true, r2, "Removed from Trakt")
+                        else TrackerSyncOutcome(key, false, r2, "Trakt remove HTTP $r2")
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "Trakt remove failed")
+                    }
+                }
+            }
+            "SIMKL" -> {
+                val tok = tokens.simklToken?.trim().orEmpty()
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "SIMKL not signed in")
+                val arrayName = if (item.mediaType == MediaType.MOVIE) "movies" else "shows"
+                val payload = buildJsonObject {
+                    put(arrayName, buildJsonArray {
+                        add(buildJsonObject {
+                            putJsonObject("ids") {
+                                item.simklId?.let { put("simkl", it.toInt()) }
+                                item.tmdbId?.let { put("tmdb", it.toInt()) }
+                                item.malId?.let { put("mal", it.toInt()) }
+                            }
+                        })
+                    })
+                }.toString()
+                NetworkPacer.withGeneralPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.simkl.com/sync/history/remove")
+                                .header("Authorization", "Bearer $tok")
+                                .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                                .header("Content-Type", "application/json")
+                                .post(payload.toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().use { resp ->
+                            if (resp.isSuccessful) TrackerSyncOutcome(key, true, resp.code, "Removed from SIMKL")
+                            else TrackerSyncOutcome(key, false, resp.code, "SIMKL remove HTTP ${resp.code}")
+                        }
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "SIMKL remove failed")
+                    }
+                }
+            }
+            "VNDB" -> {
+                val tok = tokens.vndbToken?.trim().orEmpty()
+                val vId = item.vndbId?.takeIf { it.isNotBlank() }
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "VNDB not signed in")
+                if (vId == null) return@withContext TrackerSyncOutcome(key, false, null, "VNDB ID not bound")
+                NetworkPacer.withVndbPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.vndb.org/kana/ulist/$vId")
+                                .header("Authorization", "token $tok")
+                                .header("User-Agent", "OmniTrack/1.0")
+                                .delete()
+                                .build()
+                        ).execute().use { resp ->
+                            if (resp.isSuccessful || resp.code == 404) TrackerSyncOutcome(key, true, resp.code, "Removed from VNDB")
+                            else TrackerSyncOutcome(key, false, resp.code, "VNDB delete HTTP ${resp.code}")
+                        }
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "VNDB remove failed")
+                    }
+                }
+            }
+            "TMDB" -> {
+                val tok = tokens.tmdbToken?.trim().orEmpty()
+                val tId = item.tmdbId
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "TMDb not signed in")
+                if (tId == null) return@withContext TrackerSyncOutcome(key, false, null, "TMDb ID not bound")
+                val seg = if (item.mediaType == MediaType.MOVIE) "movie" else "tv"
+                NetworkPacer.withTmdbPacing {
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.themoviedb.org/3/$seg/$tId/rating")
+                                .header("Authorization", "Bearer $tok")
+                                .delete()
+                                .build()
+                        ).execute().use { resp ->
+                            if (resp.isSuccessful || resp.code == 404) TrackerSyncOutcome(key, true, resp.code, "TMDb rating removed")
+                            else TrackerSyncOutcome(key, false, resp.code, "TMDb delete HTTP ${resp.code}")
+                        }
+                    }.getOrElse {
+                        if (it is CancellationException) throw it
+                        TrackerSyncOutcome(key, false, null, "TMDb remove failed")
+                    }
+                }
+            }
+            "HARDCOVER" -> {
+                val tok = tokens.hardcoverToken?.trim().orEmpty()
+                val hcId = item.hardcoverId?.takeIf { it.isNotBlank() }
+                if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "Hardcover not signed in")
+                if (hcId == null) return@withContext TrackerSyncOutcome(key, false, null, "Hardcover ID not bound")
+                val hcClient = HardcoverApiClient(client)
+                val (ok, code) = hcClient.deleteUserBook(tok, hcId)
+                if (ok) TrackerSyncOutcome(key, true, code ?: 200, "Removed from Hardcover")
+                else TrackerSyncOutcome(key, false, code, hcClient.lastError ?: "Hardcover remove failed")
+            }
+            else -> TrackerSyncOutcome(key, true, null, "$key unlinked locally (no remote delete endpoint)")
+        }
     }
 }

@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 enum class DetailSectionKey(val displayName: String, val description: String) {
+    PERSONAL_NOTES("Personal Notes & Log", "Unified note, favorite heart, dates & rewatch log synced to trackers"),
     AIRING_STATUS("Airing Schedule", "Live episode countdown and local broadcast time"),
     EPISODES("Seasons & Episodes", "Season selector and episode cards"),
     ACHIEVEMENTS("Achievements", "Steam & manual achievements progress and rarity"),
@@ -32,6 +33,7 @@ data class DetailSectionItem(
 
 object DetailsPageLayoutDefaults {
     val defaultSections: List<DetailSectionItem> = listOf(
+        DetailSectionItem(DetailSectionKey.PERSONAL_NOTES, isEnabled = true),
         DetailSectionItem(DetailSectionKey.AIRING_STATUS, isEnabled = true),
         DetailSectionItem(DetailSectionKey.EPISODES, isEnabled = true),
         DetailSectionItem(DetailSectionKey.ACHIEVEMENTS, isEnabled = true),

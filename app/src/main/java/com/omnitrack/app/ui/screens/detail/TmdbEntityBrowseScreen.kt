@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -511,7 +511,10 @@ fun TmdbEntityBrowseScreen(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(rail.items) { item ->
+                                itemsIndexed(
+                                    items = rail.items,
+                                    key = { idx, item -> "${rail.title}_${item.mediaType.name}_${item.tmdbId ?: 0}_${item.title}_$idx" }
+                                ) { _, item ->
                                     Column(
                                         modifier = Modifier
                                             .width(125.dp)

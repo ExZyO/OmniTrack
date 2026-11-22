@@ -69,6 +69,9 @@ class HardcoverApiClient(
     @Volatile
     var lastError: String? = null
 
+    @Volatile
+    var lastHttpCode: Int? = null
+
     private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
     private fun JsonElement?.arr(): JsonArray? = this as? JsonArray
     private fun JsonElement?.str(): String? =
@@ -85,6 +88,7 @@ class HardcoverApiClient(
         NetworkPacer.withHardcoverPacing {
             if (token.isBlank()) return@withHardcoverPacing null
             lastError = null
+            lastHttpCode = null
             try {
                 val payload = buildJsonObject {
                     put("query", query)
@@ -98,6 +102,7 @@ class HardcoverApiClient(
                     .post(payload.toString().toRequestBody("application/json".toMediaType()))
                     .build()
                 client.newCall(req).execute().use { resp ->
+                    lastHttpCode = resp.code
                     if (!resp.isSuccessful) {
                         lastError = "Hardcover HTTP ${resp.code}"
                         AppLogger.w("TrackerSync", "service=HARDCOVER op=graphql http=${resp.code}")
@@ -330,9 +335,30 @@ class HardcoverApiClient(
         token: String,
         hardcoverId: String,
         status: TrackingStatus,
-        rating10: Float?
-    ): Boolean = withContext(Dispatchers.IO) {
-        val bookIdInt = hardcoverId.trim().toIntOrNull() ?: return@withContext false
+        rating10: Float?,
+        currentPage: Int? = null,
+        reviewNote: String? = null,
+        isPrivate: Boolean = false
+    ): Boolean = syncBookStatusDetailed(
+        token = token,
+        hardcoverId = hardcoverId,
+        status = status,
+        rating10 = rating10,
+        currentPage = currentPage,
+        reviewNote = reviewNote,
+        isPrivate = isPrivate
+    ).first
+
+    suspend fun syncBookStatusDetailed(
+        token: String,
+        hardcoverId: String,
+        status: TrackingStatus,
+        rating10: Float?,
+        currentPage: Int? = null,
+        reviewNote: String? = null,
+        isPrivate: Boolean = false
+    ): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
+        val bookIdInt = hardcoverId.trim().toIntOrNull() ?: return@withContext false to null
         val statusId = when (status) {
             TrackingStatus.PLAN_TO_TRACK -> 1
             TrackingStatus.IN_PROGRESS -> 2
@@ -341,10 +367,14 @@ class HardcoverApiClient(
             TrackingStatus.DROPPED -> 5
             else -> 2
         }
+        val cleanNote = reviewNote?.trim()?.takeIf { it.isNotBlank() }
         val gql = """
-            mutation UpdateBook(${'$'}bookId: Int!, ${'$'}statusId: Int!, ${'$'}rating: numeric) {
-              insert_user_book(object: {book_id: ${'$'}bookId, status_id: ${'$'}statusId, rating: ${'$'}rating}) {
+            mutation UpdateBook(${'$'}bookId: Int!, ${'$'}statusId: Int!, ${'$'}rating: numeric, ${'$'}review: String, ${'$'}priv: Boolean) {
+              insert_user_book(object: {book_id: ${'$'}bookId, status_id: ${'$'}statusId, rating: ${'$'}rating, review_raw: ${'$'}review, privacy_setting_id: ${if (isPrivate) 3 else 1}}) {
                 id
+                user_book {
+                  id
+                }
               }
             }
         """.trimIndent()
@@ -354,7 +384,178 @@ class HardcoverApiClient(
             if (rating10 != null && rating10 > 0f) {
                 put("rating", (rating10 / 2f).coerceIn(0.5f, 5.0f))
             }
+            if (cleanNote != null) {
+                put("review", cleanNote)
+            }
+            put("priv", isPrivate)
         }
-        executeGraphQl(token, gql, vars) != null
+        val data = executeGraphQl(token, gql, vars)
+        if (data == null || !lastError.isNullOrBlank()) {
+            // Retry simpler insert_user_book signature if review_raw/privacy fields differ in schema
+            val fallbackGql = """
+                mutation UpdateBookBasic(${'$'}bookId: Int!, ${'$'}statusId: Int!, ${'$'}rating: numeric) {
+                  insert_user_book(object: {book_id: ${'$'}bookId, status_id: ${'$'}statusId, rating: ${'$'}rating}) {
+                    id
+                  }
+                }
+            """.trimIndent()
+            val fallbackVars = buildJsonObject {
+                put("bookId", bookIdInt)
+                put("statusId", statusId)
+                if (rating10 != null && rating10 > 0f) {
+                    put("rating", (rating10 / 2f).coerceIn(0.5f, 5.0f))
+                }
+            }
+            val retryData = executeGraphQl(token, fallbackGql, fallbackVars)
+            val userBookId = retryData?.get("insert_user_book").obj()?.get("id").intVal()
+            if (userBookId != null && currentPage != null && currentPage > 0) {
+                syncReadProgress(token, userBookId, currentPage)
+            }
+            return@withContext (retryData != null && lastError.isNullOrBlank()) to lastHttpCode
+        }
+        val inserted = data["insert_user_book"].obj()
+        val userBookId = inserted?.get("user_book").obj()?.get("id").intVal()
+            ?: inserted?.get("id").intVal()
+        if (userBookId != null && currentPage != null && currentPage > 0) {
+            syncReadProgress(token, userBookId, currentPage)
+        }
+        true to lastHttpCode
+    }
+
+    private suspend fun syncReadProgress(token: String, userBookId: Int, pagesRead: Int) {
+        val gql = """
+            mutation UpsertRead(${'$'}ubId: Int!, ${'$'}pages: Int!) {
+              insert_user_book_read(user_book_id: ${'$'}ubId, user_book_read: {progress_pages: ${'$'}pages}) {
+                id
+              }
+            }
+        """.trimIndent()
+        val vars = buildJsonObject {
+            put("ubId", userBookId)
+            put("pages", pagesRead.coerceAtLeast(0))
+        }
+        executeGraphQl(token, gql, vars)
+    }
+
+    suspend fun fetchUserBookEntry(token: String, hardcoverId: String): HardcoverUserBookRecord? = withContext(Dispatchers.IO) {
+        val bookIdInt = hardcoverId.trim().toIntOrNull() ?: return@withContext null
+        val gql = """
+            query SingleUserBook(${'$'}bookId: Int!) {
+              me {
+                user_books(where: {book_id: {_eq: ${'$'}bookId}}, limit: 1) {
+                  status_id
+                  rating
+                  review_raw
+                  book {
+                    id
+                    title
+                    pages
+                    release_year
+                    image { url }
+                    contributions(limit: 2) { author { name } }
+                  }
+                  user_book_reads(limit: 1, order_by: {started_at: desc}) {
+                    progress_pages
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+        val data = executeGraphQl(token, gql, buildJsonObject { put("bookId", bookIdInt) }) ?: return@withContext null
+        val meObj = data["me"].arr()?.firstOrNull().obj() ?: data["me"].obj() ?: return@withContext null
+        val ub = meObj["user_books"].arr()?.firstOrNull().obj() ?: return@withContext null
+        val b = ub["book"].obj() ?: return@withContext null
+        val hcId = b["id"].str() ?: hardcoverId
+        val title = b["title"].str() ?: return@withContext null
+        val author = b["contributions"].arr()?.mapNotNull {
+            it.obj()?.get("author").obj()?.get("name").str()
+        }?.distinct()?.joinToString(", ")
+        val statusId = ub["status_id"].intVal() ?: 1
+        val status = when (statusId) {
+            2 -> TrackingStatus.IN_PROGRESS
+            3 -> TrackingStatus.COMPLETED
+            4 -> TrackingStatus.ON_HOLD
+            5 -> TrackingStatus.DROPPED
+            else -> TrackingStatus.PLAN_TO_TRACK
+        }
+        val curPage = ub["user_book_reads"].arr()?.firstOrNull().obj()?.get("progress_pages")?.intVal()?.toDouble() ?: 0.0
+        val rating5 = ub["rating"].floatVal()
+        HardcoverUserBookRecord(
+            hardcoverId = hcId,
+            title = title,
+            author = author,
+            coverUrl = b["image"].obj()?.get("url").str(),
+            releaseYear = b["release_year"].str(),
+            pages = b["pages"].intVal(),
+            status = status,
+            userRating10 = rating5?.let { (it * 2f).coerceIn(1f, 10f) },
+            currentPage = curPage
+        )
+    }
+
+    suspend fun deleteUserBook(token: String, hardcoverId: String): Pair<Boolean, Int?> = withContext(Dispatchers.IO) {
+        val bookIdInt = hardcoverId.trim().toIntOrNull() ?: return@withContext false to null
+        val findGql = """
+            query FindUb(${'$'}bookId: Int!) {
+              me {
+                user_books(where: {book_id: {_eq: ${'$'}bookId}}, limit: 1) { id }
+              }
+            }
+        """.trimIndent()
+        val findData = executeGraphQl(token, findGql, buildJsonObject { put("bookId", bookIdInt) })
+            ?: return@withContext false to lastHttpCode
+        val meObj = findData["me"].arr()?.firstOrNull().obj() ?: findData["me"].obj()
+        val ubId = meObj?.get("user_books").arr()?.firstOrNull().obj()?.get("id").intVal()
+            ?: return@withContext true to lastHttpCode
+        val delGql = """
+            mutation DeleteUserBook(${'$'}id: Int!) {
+              delete_user_book(id: ${'$'}id) { id }
+            }
+        """.trimIndent()
+        val delRes = executeGraphQl(token, delGql, buildJsonObject { put("id", ubId) })
+        (delRes != null && lastError.isNullOrBlank()) to lastHttpCode
+    }
+
+    suspend fun fetchUpcomingBooks(token: String, startDateIso: String, endDateIso: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext emptyList()
+        val gql = """
+            query UpcomingBooks(${'$'}start: date!, ${'$'}end: date!) {
+              books(where: {release_date: {_gte: ${'$'}start, _lte: ${'$'}end}}, limit: 20, order_by: {users_read_count: desc}) {
+                id
+                title
+                pages
+                release_date
+                rating
+                image { url }
+                contributions(limit: 2) { author { name } }
+              }
+            }
+        """.trimIndent()
+        val vars = buildJsonObject {
+            put("start", startDateIso)
+            put("end", endDateIso)
+        }
+        val data = executeGraphQl(token, gql, vars) ?: return@withContext emptyList()
+        val arr = data["books"].arr() ?: return@withContext emptyList()
+        arr.mapNotNull { el ->
+            val o = el.obj() ?: return@mapNotNull null
+            val id = o["id"].str() ?: return@mapNotNull null
+            val title = o["title"].str() ?: return@mapNotNull null
+            val cover = o["image"].obj()?.get("url").str().orEmpty()
+            val author = o["contributions"].arr()?.mapNotNull {
+                it.obj()?.get("author").obj()?.get("name").str()
+            }?.distinct()?.joinToString(", ")
+            SearchResultItem(
+                title = title,
+                coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                mediaType = MediaType.BOOK,
+                releaseYear = o["release_date"].str(),
+                communityScore = o["rating"].floatVal()?.let { (it * 2f).coerceIn(0f, 10f) },
+                sourceProvider = "Hardcover",
+                hardcoverId = id,
+                bookAuthor = author,
+                totalProgress = o["pages"].intVal()?.toDouble()
+            )
+        }
     }
 }

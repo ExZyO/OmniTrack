@@ -1,15 +1,18 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,7 +43,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,13 +60,15 @@ import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.ComicTrackingMode
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlin.math.roundToInt
 
+/**
+ * Frameless Book-style Comics Tracking & Issue Checklist Section.
+ * Zero boxy cards or opaque colored borders — crisp underline tabs, large numeric readout,
+ * slim 3.dp bar, hairline spec strip, translucent actions, and hairline issue rows.
+ */
 @Composable
 fun DetailComicTrackingSection(
     item: MediaItemEntity,
@@ -76,6 +84,7 @@ fun DetailComicTrackingSection(
     onSeedIssues: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val activeFormat = remember(item.comicFormat) { ComicFormat.fromName(item.comicFormat) }
     val activeMode = remember(item.comicTrackingMode) { ComicTrackingMode.fromName(item.comicTrackingMode) }
     val unitSingular = when (activeMode) {
@@ -90,168 +99,245 @@ fun DetailComicTrackingSection(
     val cur = item.currentProgress.toInt().coerceAtLeast(0)
     val tot = (item.totalProgress?.toInt() ?: comicDetailMeta.issueCount)?.takeIf { it > 0 }
     val fraction = if (tot != null && tot > 0) (cur.toFloat() / tot.toFloat()).coerceIn(0f, 1f) else 0f
+    val pct = if (tot != null && tot > 0) ((cur.toDouble() / tot) * 100.0).roundToInt().coerceIn(0, 100) else null
+
+    val publisherText = comicDetailMeta.publisher ?: item.comicPublisher ?: "—"
+    val startYearText = comicDetailMeta.startYear?.takeIf { it.isNotBlank() }
+        ?: item.releaseDate?.take(4)?.takeIf { it.isNotBlank() }
+        ?: "—"
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            text = "Issues & Format Tracking",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary
-        )
-
-        // Format Selector
+        // 1. Borderless Mode Switcher (Issues | TPB / Volumes | Omnibus)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ComicFormat.entries.forEach { fmt ->
-                val selected = activeFormat == fmt
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (selected) AccentGold else DarkSurfaceElevated)
-                        .border(1.dp, if (selected) AccentGold else GlassBorder, RoundedCornerShape(10.dp))
-                        .clickable { onUpdateFormat(fmt) }
-                        .padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Text(
-                        text = fmt.label,
-                        fontSize = 12.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) AmoledBlack else TextSecondary
-                    )
-                }
-            }
-        }
-
-        // Tracking Mode Selector
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkSurface)
-                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             ComicTrackingMode.entries.forEach { mode ->
                 val selected = activeMode == mode
-                Box(
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(if (selected) AccentGold else DarkSurface)
-                        .clickable { onSwitchMode(mode) }
-                        .padding(vertical = 7.dp),
-                    contentAlignment = Alignment.Center
+                        .width(IntrinsicSize.Max)
+                        .clickable { onSwitchMode(mode) },
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = mode.label,
-                        fontSize = 11.5.sp,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (selected) AmoledBlack else TextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = if (selected) Color.White else TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) AccentGold else Color.Transparent)
                     )
                 }
             }
         }
 
-        // Progress Stepper Card
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(DarkSurface)
-                .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        // 2. Hero Numeric Readout & Typographic Steppers
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { showExactDialog = true }
             ) {
-                Column {
-                    Text(
-                        text = if (tot != null) "$unitSingular $cur / $tot" else "$unitSingular $cur",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    if (!comicDetailMeta.publisher.isNullOrBlank() || !item.comicPublisher.isNullOrBlank()) {
-                        Text(
-                            text = comicDetailMeta.publisher ?: item.comicPublisher.orEmpty(),
-                            fontSize = 12.sp,
-                            color = TextSecondary
-                        )
-                    }
+                val mainReadout = buildString {
+                    append("$cur")
+                    if (tot != null) append(" / $tot")
+                    append(" ${unitSingular}s")
+                    if (pct != null) append(" ($pct%)")
                 }
                 Text(
-                    text = "Edit Exact",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentGold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(AccentGold.copy(alpha = 0.14f))
-                        .clickable { showExactDialog = true }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                    text = mainReadout,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Tap to set exact progress",
+                    fontSize = 11.5.sp,
+                    color = TextSecondary
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(DarkSurfaceCard)
-            ) {
-                if (fraction > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(fraction)
-                            .height(5.dp)
-                            .background(AccentGold)
-                    )
-                }
-            }
-
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                listOf(-1 to "-1", 1 to "+1 $unitSingular", 5 to "+5").forEach { (delta, label) ->
-                    val isPrimary = delta == 1
-                    Box(
+                listOf(-1 to "−1", 1 to "+1", 5 to "+5").forEachIndexed { idx, (delta, label) ->
+                    Text(
+                        text = label,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = when {
+                            delta < 0 -> Color.White.copy(alpha = 0.72f)
+                            idx == 1 -> AccentGold
+                            else -> Color.White
+                        },
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isPrimary) AccentGold else DarkSurfaceElevated)
-                            .border(1.dp, if (isPrimary) AccentGold else GlassBorder, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable { onStepProgress(delta) }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isPrimary) AmoledBlack else TextPrimary
-                        )
-                    }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    )
                 }
             }
         }
 
-        // Issue / Volume Checklist Header
+        // 3. Slim 3.dp Progress Bar
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White.copy(alpha = 0.14f))
+        ) {
+            if (fraction > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(fraction)
+                        .fillMaxHeight()
+                        .background(AccentGold)
+                )
+            }
+        }
+
+        // 4. 3-Column Hairline Spec Strip (Publisher / Format / Era)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "PUBLISHER",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = publisherText,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(Color.White.copy(alpha = 0.10f))
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp)
+            ) {
+                Text(
+                    text = "FORMAT",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = activeFormat.label,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(Color.White.copy(alpha = 0.10f))
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 12.dp)
+            ) {
+                Text(
+                    text = if (tot != null) "TOTAL" else "LAUNCHED",
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = if (tot != null) "$tot $unitSingular" else startYearText,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // 5. Edition Format Underline Selector (Single Issue | TPB | Hardcover | Omnibus | Webcomic)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ComicFormat.entries.forEach { fmt ->
+                val selected = activeFormat == fmt
+                Column(
+                    modifier = Modifier
+                        .width(IntrinsicSize.Max)
+                        .clickable { onUpdateFormat(fmt) },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = fmt.label,
+                        color = if (selected) Color.White else TextSecondary,
+                        fontSize = 12.5.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) AccentGold else Color.Transparent)
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+        // 6. Issue / Volume Checklist Header (Frameless + League of Comic Geeks link)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -263,7 +349,37 @@ fun DetailComicTrackingSection(
                 fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable {
+                            runCatching {
+                                val url = "https://leagueofcomicgeeks.com/search?keyword=${Uri.encode(item.title)}"
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            }
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "LoCG",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                }
                 if (issues.isEmpty() && (tot ?: 0) > 0) {
                     Text(
                         text = "Seed 1..${(tot ?: 12).coerceAtMost(50)}",
@@ -271,18 +387,16 @@ fun DetailComicTrackingSection(
                         fontWeight = FontWeight.Bold,
                         color = AccentGold,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(AccentGold.copy(alpha = 0.14f))
                             .clickable { onSeedIssues((tot ?: 12).coerceAtMost(50)) }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
                         .clickable { showAddIssueDialog = true }
                         .padding(horizontal = 10.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -292,10 +406,10 @@ fun DetailComicTrackingSection(
                         imageVector = Icons.Default.Add,
                         contentDescription = null,
                         tint = AccentGold,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = "Add Issue",
+                        text = "Add",
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentGold
@@ -306,26 +420,20 @@ fun DetailComicTrackingSection(
 
         if (issues.isEmpty()) {
             Text(
-                text = "Tap + Add Issue or connect a Comic Vine / Metron key to auto-populate full issue runs & store release dates.",
+                text = "Tap + Add or Seed to start tracking issues, or connect Comic Vine / Metron for automatic run metadata.",
                 fontSize = 12.5.sp,
                 color = TextSecondary
             )
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 issues.forEachIndexed { idx, issue ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { onToggleIssueRead(issue) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                            .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         if (!issue.coverUrl.isNullOrBlank()) {
                             AsyncImage(
@@ -333,23 +441,23 @@ fun DetailComicTrackingSection(
                                 contentDescription = "#${issue.issueNumber}",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .width(36.dp)
+                                    .width(34.dp)
                                     .aspectRatio(0.68f)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(DarkSurfaceCard)
+                                    .background(Color.White.copy(alpha = 0.08f))
                             )
                         } else {
                             Box(
                                 modifier = Modifier
-                                    .width(36.dp)
+                                    .width(34.dp)
                                     .height(48.dp)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(DarkSurfaceElevated),
+                                    .background(Color.White.copy(alpha = 0.07f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "#${issue.issueNumber}",
-                                    fontSize = 11.sp,
+                                    fontSize = 10.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = AccentGold
                                 )
@@ -367,7 +475,7 @@ fun DetailComicTrackingSection(
                                 },
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary,
+                                color = if (issue.isRead) TextSecondary else TextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -393,17 +501,16 @@ fun DetailComicTrackingSection(
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Delete",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                                tint = TextSecondary.copy(alpha = 0.7f),
+                                modifier = Modifier.size(15.dp)
                             )
                         }
 
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(26.dp)
                                 .clip(CircleShape)
-                                .background(if (issue.isRead) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (issue.isRead) AccentGold else GlassBorder, CircleShape)
+                                .background(if (issue.isRead) AccentGold else Color.White.copy(alpha = 0.10f))
                                 .clickable { onToggleIssueRead(issue) },
                             contentAlignment = Alignment.Center
                         ) {
@@ -412,13 +519,13 @@ fun DetailComicTrackingSection(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Read",
                                     tint = AmoledBlack,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
                     }
                     if (idx < issues.lastIndex) {
-                        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.5.dp)
                     }
                 }
             }
@@ -430,7 +537,7 @@ fun DetailComicTrackingSection(
         var totText by remember(tot) { mutableStateOf(tot?.toString().orEmpty()) }
         AlertDialog(
             onDismissRequest = { showExactDialog = false },
-            containerColor = DarkSurface,
+            containerColor = AmoledBlack,
             title = { Text("Update Progress", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -442,7 +549,7 @@ fun DetailComicTrackingSection(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
@@ -455,7 +562,7 @@ fun DetailComicTrackingSection(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
@@ -488,7 +595,7 @@ fun DetailComicTrackingSection(
         var arc by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showAddIssueDialog = false },
-            containerColor = DarkSurface,
+            containerColor = AmoledBlack,
             title = { Text("Add Issue / Volume", color = TextPrimary, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -499,7 +606,7 @@ fun DetailComicTrackingSection(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
@@ -511,7 +618,7 @@ fun DetailComicTrackingSection(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )
@@ -523,7 +630,7 @@ fun DetailComicTrackingSection(
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGold,
-                            unfocusedBorderColor = GlassBorder,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.20f),
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary
                         )

@@ -129,6 +129,7 @@ import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomShee
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
+import com.omnitrack.app.ui.screens.detail.components.ComicCreatorCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailComicCreatorsCharactersSection
 import com.omnitrack.app.ui.screens.detail.components.DetailComicTrackingSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGeneralInfoSection
@@ -136,6 +137,7 @@ import com.omnitrack.app.ui.screens.detail.components.DetailExternalLinksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNamesSynonymsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
+import com.omnitrack.app.ui.screens.detail.components.DetailPersonalNotesSection
 import com.omnitrack.app.ui.screens.detail.components.DetailSeriesDialogs
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
@@ -222,6 +224,12 @@ sealed class DetailSheetTarget {
     data class GameEntry(val entryId: Long) : DetailSheetTarget()
     data class BookEntry(val entryId: Long) : DetailSheetTarget()
     data class BookAuthor(val profile: BookAuthorProfile) : DetailSheetTarget()
+    data class ComicCreatorOrCharacter(
+        val name: String,
+        val role: String,
+        val imageUrl: String?,
+        val description: String? = null
+    ) : DetailSheetTarget()
 }
 
 private sealed class DetailNavStep {
@@ -238,7 +246,9 @@ fun DetailScreen(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) {
+        (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager
+    }
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
     val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
@@ -798,6 +808,7 @@ fun DetailScreen(
                             DetailHeroHeaderSection(
                                 item = item,
                                 backdropTargetUrl = backdropTargetUrl,
+                                bannerSizing = presentationSettings.bannerSizing,
                                 englishTitle = uiState.englishTitle,
                                 romajiTitle = uiState.romajiTitle,
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
@@ -870,7 +881,7 @@ fun DetailScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                         } else {
-                            Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
+                            Spacer(modifier = Modifier.height(if (hasBackdrop) (-12).dp else 8.dp))
                         }
 
                         // 2. Overview (Seamless Synopsis with bidirectional overflow-aware toggle)
@@ -921,6 +932,18 @@ fun DetailScreen(
                 val enabledSections = uiState.sectionOrder.filter { it.isEnabled }
                 enabledSections.forEach { sectionItem ->
                     when (sectionItem.key) {
+                        DetailSectionKey.PERSONAL_NOTES -> {
+                            item(key = "section_personal_notes", contentType = "personal_notes") {
+                                DetailPersonalNotesSection(
+                                    item = item,
+                                    onUpdatePersonalLog = { notes, isFav, started, finished, rewatch ->
+                                        viewModel.updatePersonalLog(notes, isFav, started, finished, rewatch)
+                                    },
+                                    onOpenTrackingStudio = { showMultiTrackerSheet = true },
+                                    modifier = Modifier.padding(bottom = 18.dp)
+                                )
+                            }
+                        }
                         DetailSectionKey.AIRING_STATUS -> {
                             val airing = uiState.animeAiring
                             if (airing != null) {
@@ -1278,6 +1301,24 @@ fun DetailScreen(
                                         Column {
                                             DetailComicCreatorsCharactersSection(
                                                 comicDetailMeta = uiState.comicDetailMeta,
+                                                onCreatorClick = { name, role, avatarUrl ->
+                                                    pushSheet(
+                                                        DetailSheetTarget.ComicCreatorOrCharacter(
+                                                            name = name,
+                                                            role = role,
+                                                            imageUrl = avatarUrl
+                                                        )
+                                                    )
+                                                },
+                                                onCharacterClick = { name, role, avatarUrl ->
+                                                    pushSheet(
+                                                        DetailSheetTarget.ComicCreatorOrCharacter(
+                                                            name = name,
+                                                            role = role,
+                                                            imageUrl = avatarUrl
+                                                        )
+                                                    )
+                                                },
                                                 onSetAsCover = { url ->
                                                     viewModel.setComicCoverAsArtwork(url, asBanner = false)
                                                     Toast.makeText(context, "Cover updated", Toast.LENGTH_SHORT).show()
@@ -1867,7 +1908,11 @@ fun DetailScreen(
                     currentProgress = item.currentProgress,
                     totalProgress = item.totalProgress,
                     onProgressConfirmed = { viewModel.updateProgress(it) },
-                    onDismiss = { showProgressEditSheet = false }
+                    onDismiss = { showProgressEditSheet = false },
+                    unitLabel = item.mediaType.progressUnit,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner
                 )
             }
 
@@ -1926,8 +1971,24 @@ fun DetailScreen(
             if (showStatusPickerSheet) {
                 ChimanewStatusBottomSheet(
                     currentStatus = item.status,
-                    onStatusSelected = { viewModel.updateStatus(it) },
-                    onDismiss = { showStatusPickerSheet = false }
+                    onStatusSelected = { newStatus ->
+                        viewModel.updateStatus(newStatus) { outcomes ->
+                            val failed = outcomes.filter { !it.success }
+                            if (failed.isNotEmpty()) {
+                                val first = failed.first()
+                                Toast.makeText(
+                                    context,
+                                    "Saved locally; ${first.trackerKey} sync: ${first.message}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    },
+                    onDismiss = { showStatusPickerSheet = false },
+                    mediaType = item.mediaType,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner
                 )
             }
 
@@ -1936,7 +1997,10 @@ fun DetailScreen(
                 ScoreRatingSheet(
                     initialScore = item.userRating,
                     onDismiss = { showScoreRatingSheet = false },
-                    onScoreConfirmed = { viewModel.updateRating(it) }
+                    onScoreConfirmed = { viewModel.updateRating(it) },
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner
                 )
             }
 
@@ -1947,6 +2011,29 @@ fun DetailScreen(
                     onDismiss = { showMultiTrackerSheet = false },
                     onUpdateItem = { updatedItem ->
                         viewModel.updateMediaItem(updatedItem)
+                    },
+                    onDeleteLocalEntry = {
+                        showMultiTrackerSheet = false
+                        viewModel.deleteItem()
+                        onBack()
+                    },
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onPullFromTracker = { trackerKey, overrideItem, cb ->
+                        viewModel.pullFromTracker(trackerKey, overrideItem, cb)
+                    },
+                    onPushToTracker = { overrideItem, trackerKey, cb ->
+                        viewModel.pushToTracker(overrideItem, trackerKey, cb)
+                    },
+                    onDeleteFromRemote = { trackerKey, alsoDeleteLocal, unlinkedItem, cb ->
+                        viewModel.deleteFromRemoteTracker(trackerKey, alsoDeleteLocal, unlinkedItem) { outcome, removedLocal ->
+                            cb(outcome, removedLocal)
+                            if (removedLocal) {
+                                showMultiTrackerSheet = false
+                                onBack()
+                            }
+                        }
                     }
                 )
             }
@@ -2172,6 +2259,22 @@ fun DetailScreen(
                     onDismiss = { stepBackOneLevel() }
                 )
             }
+            is DetailSheetTarget.ComicCreatorOrCharacter -> {
+                ComicCreatorCharacterSheet(
+                    name = topSheet.name,
+                    role = topSheet.role,
+                    avatarUrl = topSheet.imageUrl,
+                    description = topSheet.description,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onSelectComic = { rec ->
+                        stepBackOneLevel()
+                        pushPreview(rec)
+                    },
+                    onDismiss = { stepBackOneLevel() }
+                )
+            }
             null -> {}
         }
 }
@@ -2274,6 +2377,7 @@ private fun SiblingDetailPreview(
                 DetailHeroHeaderSection(
                     item = displayItem,
                     backdropTargetUrl = backdropTargetUrl,
+                    bannerSizing = presentationSettings.bannerSizing,
                     englishTitle = cachedAux?.englishTitle,
                     romajiTitle = cachedAux?.romajiTitle,
                     heroClearLogoUrl = siblingClearLogo,
@@ -2322,7 +2426,7 @@ private fun SiblingDetailPreview(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
             } else {
-                Spacer(modifier = Modifier.height(if (hasBackdrop) (-36).dp else (-8).dp))
+                Spacer(modifier = Modifier.height(if (hasBackdrop) (-12).dp else 8.dp))
             }
 
             if (!displayItem.synopsis.isNullOrBlank()) {
@@ -2624,6 +2728,7 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
 private fun DetailHeroHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     backdropTargetUrl: String?,
+    bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
     englishTitle: String? = null,
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
@@ -2639,33 +2744,59 @@ private fun DetailHeroHeaderSection(
     onEditScore: () -> Unit,
     onOpenTrackers: () -> Unit
 ) {
+    val isCinemaShowcase = bannerSizing == BannerSizing.CINEMA_SHOWCASE
     if (backdropTargetUrl != null) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(350.dp)
-                .clipToBounds()
-        ) {
-            val heroContext = LocalContext.current
-            val bannerRequest = remember(backdropTargetUrl, heroContext) {
-                ImageRequest.Builder(heroContext)
-                    .data(backdropTargetUrl)
-                    .crossfade(false)
-                    .build()
-            }
-            AsyncImage(
-                model = bannerRequest,
-                contentDescription = item.title,
-                alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+        val heroContext = LocalContext.current
+        val bannerRequest = remember(backdropTargetUrl, heroContext) {
+            ImageRequest.Builder(heroContext)
+                .data(backdropTargetUrl)
+                .crossfade(false)
+                .build()
+        }
+        if (isCinemaShowcase) {
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
-                        scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
-                    )
-                    .featherArtwork(startYRatio = 0.50f),
-                contentScale = ContentScale.Crop
-            )
+                    .statusBarsPadding()
+                    .padding(top = 56.dp, start = 20.dp, end = 20.dp, bottom = 14.dp)
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+            ) {
+                AsyncImage(
+                    model = bannerRequest,
+                    contentDescription = item.title,
+                    alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
+                            scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
+                        ),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(350.dp)
+                    .clipToBounds()
+            ) {
+                AsyncImage(
+                    model = bannerRequest,
+                    contentDescription = item.title,
+                    alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(
+                            scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
+                            scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
+                        )
+                        .featherArtwork(startYRatio = 0.50f),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
     } else {
         Spacer(modifier = Modifier.height(72.dp))
@@ -2675,7 +2806,7 @@ private fun DetailHeroHeaderSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .offset(y = (-8).dp),
+            .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) },
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(
@@ -3277,6 +3408,7 @@ private fun DetailSynopsisSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
+            .padding(top = 8.dp)
             .animateContentSize()
     ) {
         Row(

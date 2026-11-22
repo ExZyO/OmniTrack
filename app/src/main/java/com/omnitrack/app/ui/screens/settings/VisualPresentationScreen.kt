@@ -31,10 +31,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -55,21 +54,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.preferences.BannerSizing
 import com.omnitrack.app.data.preferences.DetailsBackdropStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
-import com.omnitrack.app.data.preferences.EpisodeLayoutMode
+import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
-import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OmniThemeSettings
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 @Composable
 fun VisualPresentationScreen(
@@ -77,11 +75,11 @@ fun VisualPresentationScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) { (context.applicationContext as OmniTrackApplication).preferenceManager }
     val scope = rememberCoroutineScope()
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
-    val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = EpisodeLayoutMode.HORIZONTAL)
-    val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
+    val discoverLayoutStyle by prefManager.discoverLayoutStyle.collectAsState(initial = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT)
+    val themeSettings by prefManager.themeSettings.collectAsState(initial = OmniThemeSettings())
 
     Column(
         modifier = modifier
@@ -117,14 +115,14 @@ fun VisualPresentationScreen(
                     .padding(start = 6.dp)
             ) {
                 Text(
-                    text = "Visual Presentation",
+                    text = "Visual Presentation & Colors",
                     color = TextPrimary,
                     fontSize = 19.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.3).sp
                 )
                 Text(
-                    text = "Interactive layout styles & atmospheric canvas options",
+                    text = "Theme accents, layout styles & atmospheric canvas options",
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
@@ -140,6 +138,17 @@ fun VisualPresentationScreen(
         ) {
             // Live Interactive Preview Mockup Box
             LivePresentationMockup(settings = presentationSettings)
+
+            // App Theme & Custom HSV/Hex Accent Colors
+            PresentationSectionTitle("THEME & ACCENT COLORS")
+            ThemeColorPickerSection(
+                themeSettings = themeSettings,
+                onSelectTheme = { theme -> scope.launch { prefManager.updateAppTheme(theme) } },
+                onToggleAmoledBlack = { enabled -> scope.launch { prefManager.updateAmoledBlack(enabled) } },
+                onCustomFirstColorChange = { hex -> scope.launch { prefManager.updateCustomThemeFirstHex(hex) } },
+                onCustomSecondColorChange = { hex -> scope.launch { prefManager.updateCustomThemeSecondHex(hex) } }
+            )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             // Section 1: Details Page Presentation
             PresentationSectionTitle("DETAILS PAGE LAYOUT")
@@ -172,6 +181,24 @@ fun VisualPresentationScreen(
                         }
                     }
                 )
+            }
+
+            // Section 1B: Discover Tab Layout (Layout A / B / C)
+            PresentationSectionTitle("DISCOVER TAB LAYOUT")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DiscoverLayoutStyle.entries.forEach { style ->
+                    PresentationChoiceCard(
+                        title = style.displayName,
+                        description = style.description,
+                        isSelected = discoverLayoutStyle == style,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch {
+                                prefManager.updateDiscoverLayoutStyle(style)
+                            }
+                        }
+                    )
+                }
             }
 
             // Section 2: Banner Sizing
@@ -259,94 +286,7 @@ fun VisualPresentationScreen(
                 }
             }
 
-            // Section 5: Episode Layout & Sizing
-            PresentationSectionTitle("EPISODE LAYOUT & SIZING")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                PresentationChoiceCard(
-                    title = "Horizontal Carousel",
-                    description = "16:9 widescreen thumbnails you can swipe sideways like a filmstrip.",
-                    isSelected = episodeLayoutMode == EpisodeLayoutMode.HORIZONTAL,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.HORIZONTAL) }
-                    }
-                )
-
-                PresentationChoiceCard(
-                    title = "Compact List",
-                    description = "Clean vertical list with thumbnails on the left and titles/synopses on the right.",
-                    isSelected = episodeLayoutMode == EpisodeLayoutMode.LIST,
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.LIST) }
-                    }
-                )
-            }
-
-            PresentationChoiceCard(
-                title = "Vertical Hero Cards",
-                description = "Bigger vertical cards where episode title, description, and scores sit directly inside the card image.",
-                isSelected = episodeLayoutMode == EpisodeLayoutMode.VERTICAL_CARD,
-                modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    scope.launch { prefManager.updateEpisodeLayoutMode(EpisodeLayoutMode.VERTICAL_CARD) }
-                }
-            )
-
-            // Episode Resizing Slider (80% - 135%)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Episode Card Scale",
-                        color = TextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        text = "${(episodeLayoutScale * 100).roundToInt()}%",
-                        color = AccentGold,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Slider(
-                    value = episodeLayoutScale,
-                    onValueChange = { newScale ->
-                        scope.launch { prefManager.updateEpisodeLayoutScale(newScale) }
-                    },
-                    valueRange = 0.80f..1.35f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = AccentGold,
-                        activeTrackColor = AccentGold,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.15f)
-                    )
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("80% Compact", color = TextSecondary, fontSize = 11.sp)
-                    Text("100% Default", color = TextSecondary, fontSize = 11.sp)
-                    Text("135% Large", color = TextSecondary, fontSize = 11.sp)
-                }
-            }
-
-            // Section 6: Visual Novels (Spoilers & NSFW)
+            // Section 5: Visual Novels (Spoilers & NSFW)
             PresentationSectionTitle("VISUAL NOVELS (SPOILERS & NSFW)")
             val vnSpoilerLevel by prefManager.vnSpoilerLevel.collectAsState(initial = com.omnitrack.app.data.model.VnSpoilerLevel.MINOR)
             val vnNsfwMode by prefManager.vnNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
@@ -510,9 +450,9 @@ private fun LivePresentationMockup(
         modifier = modifier
             .fillMaxWidth()
             .height(240.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(containerBg)
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
+            .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
     ) {
         // Atmospheric Ambient Aura Backdrop (Toggles on in Cinematic Blur, completely gone in Minimalist OLED)
         if (!isSolidBlack) {
@@ -820,61 +760,64 @@ private fun PresentationChoiceCard(
     modifier: Modifier = Modifier
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated,
+        targetValue = if (isSelected) AccentGold.copy(alpha = 0.08f) else Color.Transparent,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "cardBg"
     )
-    val borderColor by animateColorAsState(
-        targetValue = if (isSelected) AccentGold else GlassBorder,
+    val lineColor by animateColorAsState(
+        targetValue = if (isSelected) AccentGold else Color.White.copy(alpha = 0.08f),
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "cardBorder"
+        label = "cardLine"
     )
 
-    Box(
+    Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(6.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(14.dp)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    color = if (isSelected) AccentGold else TextPrimary,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                if (isSelected) {
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(AccentGold),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
-                            tint = AmoledBlack,
-                            modifier = Modifier.size(11.dp)
-                        )
-                    }
+            Text(
+                text = title,
+                color = if (isSelected) AccentGold else TextPrimary,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(AccentGold),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Selected",
+                        tint = OnAccentColor,
+                        modifier = Modifier.size(11.dp)
+                    )
                 }
             }
-            Text(
-                text = description,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                lineHeight = 15.sp
-            )
         }
+        Text(
+            text = description,
+            color = TextSecondary,
+            fontSize = 11.5.sp,
+            lineHeight = 15.5.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (isSelected) 1.5.dp else 0.6.dp)
+                .background(lineColor)
+        )
     }
 }

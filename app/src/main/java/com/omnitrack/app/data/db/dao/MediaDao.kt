@@ -24,6 +24,12 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE id = :id LIMIT 1")
     fun getMediaById(id: Long): Flow<MediaItemEntity?>
 
+    @Query("SELECT * FROM media_items WHERE id = :id LIMIT 1")
+    suspend fun getMediaByIdOnce(id: Long): MediaItemEntity?
+
+    @Query("DELETE FROM media_items WHERE id = :id")
+    suspend fun deleteMediaById(id: Long)
+
     @Query("SELECT * FROM media_items WHERE mediaType = :type ORDER BY lastUpdated DESC")
     fun getMediaByType(type: MediaType): Flow<List<MediaItemEntity>>
 

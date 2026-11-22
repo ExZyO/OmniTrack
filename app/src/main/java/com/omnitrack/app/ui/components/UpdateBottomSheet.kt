@@ -1,5 +1,7 @@
 package com.omnitrack.app.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,16 +21,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -45,19 +53,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.updater.AppRelease
+import com.omnitrack.app.updater.AppUpdateChecker
 import com.omnitrack.app.updater.AppUpdateInstaller
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdateBottomSheet(
     release: AppRelease,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onUpdateStateChanged: (AppRelease) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -67,36 +78,61 @@ fun UpdateBottomSheet(
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // Auto-poll GitHub Actions every 15s while a new build is actively compiling
+    LaunchedEffect(release.isBuilding, release.version) {
+        if (!release.isBuilding) return@LaunchedEffect
+        val checker = AppUpdateChecker()
+        while (isActive) {
+            delay(15_000L)
+            val refreshed = checker.checkForUpdate(context)
+            if (refreshed != null && refreshed != release) {
+                onUpdateStateChanged(refreshed)
+                if (!refreshed.isBuilding) break
+            }
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
+        containerColor = AmoledBlack,
         dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(AmoledBlack)
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header: Title, Version, and Close Button
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.22f))
+                )
+            }
+
+            // Frameless Editorial Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(AccentGold.copy(alpha = 0.14f)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    if (release.isBuilding) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 2.4.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
                         Icon(
                             imageVector = Icons.Default.SystemUpdate,
                             contentDescription = null,
@@ -105,32 +141,37 @@ fun UpdateBottomSheet(
                         )
                     }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
-                            text = "Update Available",
+                            text = if (release.isBuilding) {
+                                "Update Compiling: v${release.version}"
+                            } else {
+                                "Update Ready"
+                            },
                             color = TextPrimary,
-                            fontSize = 19.sp,
+                            fontSize = 18.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Box(
+                            Text(
+                                text = "v${release.version}",
+                                color = AccentGold,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .clip(RoundedCornerShape(4.dp))
                                     .background(AccentGold.copy(alpha = 0.16f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    text = "v${release.version}",
-                                    color = AccentGold,
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            )
                             Text(
-                                text = "Ready to install",
+                                text = if (release.isBuilding) {
+                                    "GitHub Actions compiling (~2m) \u00B7 Auto-refreshing..."
+                                } else {
+                                    "Ready to install"
+                                },
                                 color = TextSecondary,
                                 fontSize = 11.5.sp
                             )
@@ -138,47 +179,56 @@ fun UpdateBottomSheet(
                     }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(DarkSurfaceElevated)
-                        .clickable { onDismiss() },
-                    contentAlignment = Alignment.Center
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
                         tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }
 
-            // Hairline divider
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(Color(0x14FFFFFF))
-            )
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-            // Release Notes (Edge-to-edge typography, smooth scroll without restrictive container box)
+            if (release.buildCommitMessage.isNotBlank() && release.isBuilding) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "INCOMING COMMIT",
+                        color = TextSecondary,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = release.buildCommitMessage,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp
+                    )
+                }
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+            }
+
+            // Release Notes (Edge-to-edge typography)
             if (release.releaseNotes.isNotBlank()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false)
                         .verticalScroll(rememberScrollState())
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "WHAT'S NEW",
                         color = TextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
+                        letterSpacing = 1.sp
                     )
                     MarkdownText(
                         markdown = release.releaseNotes,
@@ -215,15 +265,14 @@ fun UpdateBottomSheet(
                         progress = { downloadProgress },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp)),
                         color = AccentGold,
-                        trackColor = DarkSurfaceElevated
+                        trackColor = Color.White.copy(alpha = 0.14f)
                     )
                 }
             }
 
-            // Error display if download failed
             if (errorMessage != null) {
                 Text(
                     text = errorMessage ?: "",
@@ -232,42 +281,99 @@ fun UpdateBottomSheet(
                 )
             }
 
-            // One-Tap Update Action Button
-            Button(
-                onClick = {
-                    if (isDownloading) return@Button
-                    isDownloading = true
-                    errorMessage = null
-                    scope.launch {
-                        val result = AppUpdateInstaller.downloadAndInstall(
-                            context = context,
-                            apkUrl = release.apkDownloadUrl,
-                            onProgress = { downloadProgress = it }
+            // Action Buttons (Flat Option A 8dp corners)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (release.apkDownloadUrl.isNotBlank()) {
+                    Button(
+                        onClick = {
+                            if (isDownloading) return@Button
+                            isDownloading = true
+                            errorMessage = null
+                            scope.launch {
+                                val result = AppUpdateInstaller.downloadAndInstall(
+                                    context = context,
+                                    apkUrl = release.apkDownloadUrl,
+                                    onProgress = { downloadProgress = it }
+                                )
+                                isDownloading = false
+                                if (result.isFailure) {
+                                    errorMessage = "Download failed: ${result.exceptionOrNull()?.message}"
+                                }
+                            }
+                        },
+                        enabled = !isDownloading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGold,
+                            contentColor = OnAccentColor
                         )
-                        isDownloading = false
-                        if (result.isFailure) {
-                            errorMessage = "Download failed: ${result.exceptionOrNull()?.message}"
+                    ) {
+                        Text(
+                            text = if (isDownloading) "Downloading..." else "One-Tap Update Now",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.5.sp
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (release.isBuilding) {
+                        TextButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.actionsUrl)))
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInBrowser,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.size(6.dp))
+                            Text(
+                                text = "View Live Build",
+                                color = AccentGold,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
-                },
-                enabled = !isDownloading && release.apkDownloadUrl.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentGold,
-                    contentColor = AmoledBlack
-                )
-            ) {
-                Text(
-                    text = if (isDownloading) "Downloading..." else "One-Tap Update Now",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
-                )
-            }
 
-            Spacer(modifier = Modifier.height(4.dp))
+                    val browserUrl = release.releasePageUrl.ifBlank { release.apkDownloadUrl }
+                    if (browserUrl.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(browserUrl)))
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                        ) {
+                            Text(
+                                text = "Browser Download",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

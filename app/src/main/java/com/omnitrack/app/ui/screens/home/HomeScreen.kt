@@ -100,6 +100,7 @@ import com.omnitrack.app.ui.components.rememberOmniNavBarScrollState
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.screens.home.views.ActivityHeatmapSheet
+import com.omnitrack.app.ui.screens.home.views.DiscoverCustomizerSheet
 import com.omnitrack.app.ui.screens.home.views.DiscoverView
 import com.omnitrack.app.ui.screens.home.views.HistoryView
 import com.omnitrack.app.ui.screens.home.views.HomeCustomizerSheet
@@ -123,7 +124,10 @@ import com.omnitrack.app.updater.AppUpdateChecker
 import com.omnitrack.app.util.AppLogger
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import android.widget.Toast
+import com.omnitrack.app.BuildConfig
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -139,7 +143,7 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager }
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
     val uiState by viewModel.uiState.collectAsState()
@@ -153,6 +157,7 @@ fun HomeScreen(
     var availableUpdate by remember { mutableStateOf<AppRelease?>(null) }
     var showUpdateSheet by remember { mutableStateOf(false) }
     var showHomeCustomizerSheet by remember { mutableStateOf(false) }
+    var showDiscoverCustomizerSheet by remember { mutableStateOf(false) }
     var showReleaseCalendarSheet by remember { mutableStateOf(false) }
     var showActivityHeatmapSheet by remember { mutableStateOf(false) }
     var showLibraryFilterSheet by remember { mutableStateOf(false) }
@@ -199,12 +204,32 @@ fun HomeScreen(
     var selectedComicFormat by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
-    // Automatic background update check
+    // Automatic background update check (detects ready releases & active CI builds)
     LaunchedEffect(Unit) {
         val release = AppUpdateChecker().checkForUpdate(context)
         if (release != null) {
             availableUpdate = release
-            showUpdateSheet = true
+            if (!release.isBuilding) {
+                showUpdateSheet = true
+            }
+        }
+    }
+
+    // Background CI build auto-poller while GitHub Actions is compiling a newer APK
+    LaunchedEffect(availableUpdate?.isBuilding, availableUpdate?.version) {
+        val cur = availableUpdate
+        if (cur == null || !cur.isBuilding) return@LaunchedEffect
+        val checker = AppUpdateChecker()
+        while (isActive) {
+            delay(15_000L)
+            val updated = checker.checkForUpdate(context)
+            if (updated != null && updated != cur) {
+                availableUpdate = updated
+                if (!updated.isBuilding) {
+                    showUpdateSheet = true
+                    break
+                }
+            }
         }
     }
 
@@ -284,6 +309,9 @@ fun HomeScreen(
                         onRequestDiscoverShelf = { rowKey ->
                             viewModel.loadHomeDiscoverShelf(rowKey, tmdbKey)
                         },
+                        onLoadMoreDiscoverShelf = { rowKey ->
+                            viewModel.loadMoreHomeDiscoverShelf(rowKey, tmdbKey)
+                        },
                         onOpenCalendar = {
                             viewModel.loadReleaseCalendar()
                             showReleaseCalendarSheet = true
@@ -306,7 +334,8 @@ fun HomeScreen(
                             currentNavDestination = NavDestination.LIBRARY
                         },
                         onNavigateToDiscover = { currentNavDestination = NavDestination.DISCOVER },
-                        onNavigateToHistory = { currentNavDestination = NavDestination.HISTORY }
+                        onNavigateToHistory = { currentNavDestination = NavDestination.HISTORY },
+                        posterStyle = posterStyle
                     )
                 }
 
@@ -341,13 +370,14 @@ fun HomeScreen(
                             }
 
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                // Update Available Pill
-                                if (availableUpdate != null) {
+                                // Update Available Tag
+                                val upd = availableUpdate
+                                if (upd != null) {
                                     Box(
                                         modifier = Modifier
-                                            .height(38.dp)
-                                            .clip(RoundedCornerShape(19.dp))
-                                            .background(AccentGold.copy(alpha = 0.2f))
+                                            .height(36.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentGold.copy(alpha = 0.16f))
                                             .clickable { showUpdateSheet = true }
                                             .padding(horizontal = 10.dp),
                                         contentAlignment = Alignment.Center
@@ -363,7 +393,7 @@ fun HomeScreen(
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Text(
-                                                text = "v${availableUpdate?.version}",
+                                                text = if (upd.isBuilding) "Building b${upd.buildRunNumber}" else "v${upd.version}",
                                                 color = AccentGold,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold
@@ -741,6 +771,7 @@ fun HomeScreen(
                                                 items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
                                                     LibraryListRow(
                                                         item = item,
+                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards,
                                                         onClick = {
                                                             AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
                                                             com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
@@ -766,12 +797,12 @@ fun HomeScreen(
                                             val gridColumns = when {
                                                 posterStyle.isLandscape -> if (isPhoneScreen) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
                                                 libraryViewMode == "GRID_2" -> GridCells.Fixed(2)
-                                                else -> if (isPhoneScreen) GridCells.Fixed(3) else GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
+                                                else -> GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
                                             }
                                             val approxCols = when {
                                                 posterStyle.isLandscape -> if (isPhoneScreen) 1 else (maxWidth / 340.dp).toInt().coerceAtLeast(1)
                                                 libraryViewMode == "GRID_2" -> 2
-                                                else -> if (isPhoneScreen) 3 else (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(1)
+                                                else -> (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(2)
                                             }
                                             LazyVerticalGrid(
                                                 state = gridStates[pageIndex],
@@ -790,10 +821,12 @@ fun HomeScreen(
                                                         cornerRadiusDp = posterStyle.cornerRadiusDp,
                                                         isLandscape = posterStyle.isLandscape,
                                                         hideLabels = posterStyle.hideLabels,
-                                                        cardDepthEnabled = posterStyle.cardDepthEnabled,
+                                                        cardDepthEnabled = posterStyle.cardDepthEnabled && posterStyle.cardDepthPostersEnabled,
                                                         cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
                                                         cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
                                                         cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards,
+                                                        showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
                                                         onCardClick = {
                                                             AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
                                                             com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
@@ -830,6 +863,7 @@ fun HomeScreen(
                             customEntryInitType = suggestedType
                             showCustomEntrySheet = true
                         },
+                        onOpenCustomizer = { showDiscoverCustomizerSheet = true },
                         modifier = Modifier.statusBarsPadding(),
                         homeViewModel = viewModel
                     )
@@ -840,6 +874,10 @@ fun HomeScreen(
                         allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick,
                         onQuickProgress = { viewModel.incrementProgress(it) },
+                        onMarkCompleted = { viewModel.markCompleted(it) },
+                        onSetStatus = { summary, status -> viewModel.setMediaStatus(summary, status) },
+                        onRemoveFromHistory = { summary -> viewModel.removeFromHistory(summary.id) },
+                        onDeleteItem = { summary -> viewModel.deleteMediaItem(summary.id) },
                         watchedTimestamps90d = watchedTimestamps90d,
                         onOpenHeatmap = { showActivityHeatmapSheet = true }
                     )
@@ -850,10 +888,24 @@ fun HomeScreen(
                         allMedia = uiState.allMediaSummaries,
                         onCheckUpdate = {
                             coroutineScope.launch {
+                                Toast.makeText(context, "Checking for updates...", Toast.LENGTH_SHORT).show()
                                 val release = AppUpdateChecker().checkForUpdate(context)
                                 if (release != null) {
                                     availableUpdate = release
                                     showUpdateSheet = true
+                                    if (release.isBuilding) {
+                                        Toast.makeText(
+                                            context,
+                                            "Build v${release.version} is compiling on GitHub Actions...",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "You're on the latest version (v${BuildConfig.VERSION_NAME})",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         },
@@ -861,7 +913,8 @@ fun HomeScreen(
                         onNavigateToArtworkPriority = onNavigateToArtworkPriority,
                         onNavigateToVisualPresentation = onNavigateToVisualPresentation,
                         onNavigateToDetailsPageLayout = onNavigateToDetailsPageLayout,
-                        onOpenHomeCustomizer = { showHomeCustomizerSheet = true }
+                        onOpenHomeCustomizer = { showHomeCustomizerSheet = true },
+                        onOpenDiscoverCustomizer = { showDiscoverCustomizerSheet = true }
                     )
                 }
             }
@@ -956,7 +1009,8 @@ fun HomeScreen(
         if (showUpdateSheet && availableUpdate != null) {
             UpdateBottomSheet(
                 release = availableUpdate!!,
-                onDismiss = { showUpdateSheet = false }
+                onDismiss = { showUpdateSheet = false },
+                onUpdateStateChanged = { availableUpdate = it }
             )
         }
 
@@ -964,6 +1018,13 @@ fun HomeScreen(
             HomeCustomizerSheet(
                 preferenceManager = prefManager,
                 onDismiss = { showHomeCustomizerSheet = false }
+            )
+        }
+
+        if (showDiscoverCustomizerSheet) {
+            DiscoverCustomizerSheet(
+                preferenceManager = prefManager,
+                onDismiss = { showDiscoverCustomizerSheet = false }
             )
         }
 
@@ -982,9 +1043,16 @@ fun HomeScreen(
                         title = rel.title,
                         coverUrl = rel.coverUrl,
                         mediaType = rel.mediaType,
-                        sourceProvider = if (rel.mediaType == MediaType.COMIC) "Metron" else "AniList",
+                        sourceProvider = calendarSourceLabel(rel.mediaType),
                         anilistId = rel.anilistId,
                         malId = rel.malId,
+                        tmdbId = rel.tmdbId,
+                        imdbId = rel.imdbId,
+                        vndbId = rel.vndbId,
+                        steamAppId = rel.steamAppId,
+                        igdbId = rel.igdbId,
+                        hardcoverId = rel.hardcoverId,
+                        mangadexId = rel.mangadexId,
                         metronId = rel.metronId,
                         comicPublisher = if (rel.mediaType == MediaType.COMIC) rel.formatLabel else null
                     ).toMediaItemEntity()
@@ -996,9 +1064,16 @@ fun HomeScreen(
                             title = rel.title,
                             coverUrl = rel.coverUrl,
                             mediaType = rel.mediaType,
-                            sourceProvider = if (rel.mediaType == MediaType.COMIC) "Metron" else "AniList",
+                            sourceProvider = calendarSourceLabel(rel.mediaType),
                             anilistId = rel.anilistId,
                             malId = rel.malId,
+                            tmdbId = rel.tmdbId,
+                            imdbId = rel.imdbId,
+                            vndbId = rel.vndbId,
+                            steamAppId = rel.steamAppId,
+                            igdbId = rel.igdbId,
+                            hardcoverId = rel.hardcoverId,
+                            mangadexId = rel.mangadexId,
                             metronId = rel.metronId,
                             comicPublisher = if (rel.mediaType == MediaType.COMIC) rel.formatLabel else null
                         )
@@ -1060,6 +1135,7 @@ fun HomeScreen(
 @Composable
 private fun LibraryListRow(
     item: com.omnitrack.app.data.db.dto.MediaCardSummary,
+    showQuickProgressButton: Boolean = false,
     onClick: () -> Unit,
     onQuickProgress: () -> Unit
 ) {
@@ -1142,21 +1218,23 @@ private fun LibraryListRow(
             }
         }
 
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, CircleShape)
-                .clickable(onClick = onQuickProgress),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
-                contentDescription = "Quick Log",
-                tint = AccentGold,
-                modifier = Modifier.size(18.dp)
-            )
+        if (showQuickProgressButton) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, CircleShape)
+                    .clickable(onClick = onQuickProgress),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
+                    contentDescription = "Quick Log",
+                    tint = AccentGold,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -1395,4 +1473,16 @@ private fun UnderlineFilterGroup(
             }
         }
     }
+}
+
+private fun calendarSourceLabel(type: MediaType): String = when (type) {
+    MediaType.COMIC -> "Metron"
+    MediaType.SHOW -> "TVMaze"
+    MediaType.MOVIE -> "TMDb"
+    MediaType.MANGA -> "MangaDex"
+    MediaType.NOVEL -> "AniList"
+    MediaType.BOOK -> "Goodreads"
+    MediaType.GAME -> "Steam"
+    MediaType.VISUAL_NOVEL -> "VNDB"
+    else -> "AniList"
 }

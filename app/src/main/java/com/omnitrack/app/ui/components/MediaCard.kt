@@ -124,7 +124,9 @@ fun MediaCard(
     cardDepthSheenStrength: Float = 35f,
     cardDepthEdgeCoverage: Float = 100f,
     badgeText: String? = null,
-    badgeColor: Color = AccentGold
+    badgeColor: Color = AccentGold,
+    showQuickProgressButton: Boolean = false,
+    showLandscapeClearlogo: Boolean = true
 ) {
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
@@ -217,7 +219,7 @@ fun MediaCard(
             )
 
             // Landscape transparent title logo overlay (1:1 with Nuvio)
-            val hasClearart = isLandscape && !item.clearartUrl.isNullOrBlank()
+            val hasClearart = isLandscape && showLandscapeClearlogo && !item.clearartUrl.isNullOrBlank()
             if (hasClearart) {
                 Box(
                     modifier = Modifier
@@ -296,65 +298,67 @@ fun MediaCard(
             }
 
             // Tactile +1 / Add to Library Quick Action floating pill
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(pillBg)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {
-                            if (isDiscoverAdd) {
-                                isAddedToLibrary = true
-                            } else {
-                                showPlusOne = true
-                            }
-                            scope.launch {
-                                bounceScale.animateTo(
-                                    targetValue = 0.92f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
+            if (isDiscoverAdd || showQuickProgressButton) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(pillBg)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {
+                                if (isDiscoverAdd) {
+                                    isAddedToLibrary = true
+                                } else {
+                                    showPlusOne = true
+                                }
+                                scope.launch {
+                                    bounceScale.animateTo(
+                                        targetValue = 0.92f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessLow
+                                        )
                                     )
-                                )
-                                bounceScale.animateTo(
-                                    targetValue = 1f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
+                                    bounceScale.animateTo(
+                                        targetValue = 1f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessLow
+                                        )
                                     )
-                                )
+                                }
+                                onQuickProgress()
                             }
-                            onQuickProgress()
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedContent(
+                        targetState = isAddedToLibrary,
+                        transitionSpec = {
+                            (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith
+                                (scaleOut(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeOut())
+                        },
+                        label = "addOrCheckAnimation"
+                    ) { added ->
+                        if (added) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "In Library",
+                                tint = Color(0xFF00E054),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = if (isDiscoverAdd) "Add to Library" else "+1 Progress",
+                                tint = AccentJade,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                AnimatedContent(
-                    targetState = isAddedToLibrary,
-                    transitionSpec = {
-                        (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith
-                            (scaleOut(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeOut())
-                    },
-                    label = "addOrCheckAnimation"
-                ) { added ->
-                    if (added) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "In Library",
-                            tint = Color(0xFF00E054),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = if (isDiscoverAdd) "Add to Library" else "+1 Progress",
-                            tint = AccentJade,
-                            modifier = Modifier.size(16.dp)
-                        )
                     }
                 }
             }

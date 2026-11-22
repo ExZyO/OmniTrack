@@ -24,8 +24,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -62,6 +65,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -90,15 +94,16 @@ import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeHeroSource
 import com.omnitrack.app.data.preferences.HomeRowItem
 import com.omnitrack.app.data.preferences.HomeRowKey
+import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.components.glassCardDepth
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
@@ -140,6 +145,7 @@ fun HomeDashboardView(
     onSetStatus: (MediaCardSummary, TrackingStatus) -> Unit,
     onAddSearchItem: (SearchResultItem) -> Unit,
     onRequestDiscoverShelf: (HomeRowKey) -> Unit,
+    onLoadMoreDiscoverShelf: (HomeRowKey) -> Unit = {},
     onOpenCalendar: () -> Unit,
     onOpenCustomizer: () -> Unit,
     onOpenHeatmap: () -> Unit,
@@ -148,7 +154,8 @@ fun HomeDashboardView(
     onNavigateToLibraryCategory: (MediaType) -> Unit,
     onNavigateToDiscover: () -> Unit,
     onNavigateToHistory: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    posterStyle: PosterCardStyle = PosterCardStyle()
 ) {
     val haptic = LocalHapticFeedback.current
     var selectedCategory by remember { mutableStateOf(heroSettings.defaultCategory) }
@@ -158,7 +165,8 @@ fun HomeDashboardView(
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var actionSheetItem by remember { mutableStateOf<MediaCardSummary?>(null) }
 
-    val shelfLimit = heroSettings.shelfItemLimit.coerceIn(8, 24)
+    val isUnlimitedShelf = heroSettings.shelfItemLimit <= 0
+    val shelfLimit = if (isUnlimitedShelf) Int.MAX_VALUE else heroSettings.shelfItemLimit.coerceIn(8, 24)
     val posterWidthDp = heroSettings.shelfPosterSize.widthDp.dp
     val posterHeightDp = heroSettings.shelfPosterSize.heightDp.dp
 
@@ -189,31 +197,58 @@ fun HomeDashboardView(
             )
     }
 
-    val continueItems = remember(allContinueItems, shelfLimit) { allContinueItems.take(shelfLimit) }
-    val recentItems = remember(allRecentItems, shelfLimit) { allRecentItems.take(shelfLimit) }
-    val planItems = remember(allPlanItems, shelfLimit) { allPlanItems.take(shelfLimit) }
-    val favoriteItems = remember(allFavoriteItems, shelfLimit) { allFavoriteItems.take(shelfLimit) }
+    val continueItems = remember(allContinueItems, shelfLimit) {
+        if (shelfLimit == Int.MAX_VALUE) allContinueItems else allContinueItems.take(shelfLimit)
+    }
+    val recentItems = remember(allRecentItems, shelfLimit) {
+        if (shelfLimit == Int.MAX_VALUE) allRecentItems else allRecentItems.take(shelfLimit)
+    }
+    val planItems = remember(allPlanItems, shelfLimit) {
+        if (shelfLimit == Int.MAX_VALUE) allPlanItems else allPlanItems.take(shelfLimit)
+    }
+    val favoriteItems = remember(allFavoriteItems, shelfLimit) {
+        if (shelfLimit == Int.MAX_VALUE) allFavoriteItems else allFavoriteItems.take(shelfLimit)
+    }
 
     val upNextReleases = remember(calendarReleases, shelfLimit) {
         val nowSec = System.currentTimeMillis() / 1000L
         val upcoming = calendarReleases.filter { it.airingAtEpochSec >= nowSec - 3600L }
         val libFirst = upcoming.filter { it.localMediaId != null }
         val others = upcoming.filter { it.localMediaId == null }
-        (libFirst + others).take(shelfLimit)
+        val combined = libFirst + others
+        if (shelfLimit == Int.MAX_VALUE) combined else combined.take(shelfLimit)
     }
 
     val heroSlides: List<HomeHeroSlide> = remember(
         heroSettings.heroSource,
+        heroSettings.heroSources,
+        heroSettings.heroCategoryMode,
+        heroSettings.heroCategories,
+        heroSettings.slideCount,
+        heroSettings.slideOrder,
         heroSettings.strictMode,
         heroSettings.strictRequirements,
         heroSettings.statusFilters,
-        allContinueItems,
-        allFavoriteItems,
-        allPlanItems,
-        allRecentItems,
-        categoryTrending,
+        selectedCategory,
+        trendingItems,
         allMedia
     ) {
+        fun matchesHeroCategory(type: MediaType): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
+            "FOLLOW_HOME" -> selectedCategory == MediaType.ALL || type == selectedCategory
+            "CUSTOM" -> heroSettings.heroCategories.isEmpty() || type.name in heroSettings.heroCategories
+            else -> true // "ALL"
+        }
+
+        val scopedMedia = allMedia.filter { matchesHeroCategory(it.mediaType) }
+        val scopedTrending = trendingItems.filter { matchesHeroCategory(it.mediaType) }
+
+        val scopedContinue = scopedMedia.filter { it.status == TrackingStatus.IN_PROGRESS }.sortedByDescending { it.lastUpdated }
+        val scopedRecent = scopedMedia.sortedByDescending { it.lastUpdated }
+        val scopedPlan = scopedMedia.filter { it.status == TrackingStatus.PLAN_TO_TRACK }.sortedByDescending { it.lastUpdated }
+        val scopedFavorites = scopedMedia
+            .filter { (it.userRating ?: it.communityScore ?: 0f) > 0f }
+            .sortedWith(compareByDescending<MediaCardSummary> { it.userRating ?: 0f }.thenByDescending { it.communityScore ?: 0f })
+
         fun findLocalMatch(s: SearchResultItem): MediaCardSummary? = allMedia.firstOrNull { local ->
             local.mediaType == s.mediaType && (
                 (s.anilistId != null && local.anilistId == s.anilistId) ||
@@ -254,29 +289,63 @@ fun HomeDashboardView(
             return true
         }
 
-        val primary: List<HomeHeroSlide> = when (heroSettings.heroSource) {
-            HomeHeroSource.CONTINUE -> allContinueItems.map { HomeHeroSlide.LocalSlide(it) }
-            HomeHeroSource.FAVORITES -> allFavoriteItems.map { HomeHeroSlide.LocalSlide(it) }
-            HomeHeroSource.PLAN_TO_TRACK -> allPlanItems.map { HomeHeroSlide.LocalSlide(it) }
-            HomeHeroSource.TRENDING -> categoryTrending.map { HomeHeroSlide.TrendingSlide(it) }
+        fun poolForSourceKey(sourceKey: String): List<HomeHeroSlide> = when (sourceKey.uppercase()) {
+            "CONTINUE" -> scopedContinue.map { HomeHeroSlide.LocalSlide(it) }
+            "FAVORITES" -> scopedFavorites.map { HomeHeroSlide.LocalSlide(it) }
+            "PLAN_TO_TRACK" -> scopedPlan.map { HomeHeroSlide.LocalSlide(it) }
+            "RECENT" -> scopedRecent.map { HomeHeroSlide.LocalSlide(it) }
+            "TRENDING" -> scopedTrending.map { HomeHeroSlide.TrendingSlide(it) }
+            else -> emptyList()
         }
-        val filteredPrimary = primary.filter(::matchesFilters).distinctBy { it.slideKey() }
-        val resolved = if (filteredPrimary.isNotEmpty()) {
-            filteredPrimary
+
+        val activePools: List<List<HomeHeroSlide>> = if (heroSettings.heroSource == HomeHeroSource.ALL_MIXED) {
+            val enabledKeys = heroSettings.heroSources.ifEmpty { setOf("CONTINUE", "FAVORITES", "TRENDING") }
+            listOf("CONTINUE", "FAVORITES", "RECENT", "PLAN_TO_TRACK", "TRENDING")
+                .filter { it in enabledKeys }
+                .map { poolForSourceKey(it).filter(::matchesFilters) }
+                .filter { it.isNotEmpty() }
+        } else {
+            listOf(poolForSourceKey(heroSettings.heroSource.name).filter(::matchesFilters))
+        }
+
+        val mergedRaw: List<HomeHeroSlide> = if (heroSettings.slideOrder.equals("INTERLEAVED", ignoreCase = true) || heroSettings.heroSource == HomeHeroSource.ALL_MIXED) {
+            val out = mutableListOf<HomeHeroSlide>()
+            val maxLen = activePools.maxOfOrNull { it.size } ?: 0
+            for (i in 0 until maxLen) {
+                activePools.forEach { pool -> if (i < pool.size) out.add(pool[i]) }
+            }
+            out.distinctBy { it.slideKey() }
+        } else {
+            activePools.flatten().distinctBy { it.slideKey() }
+        }
+
+        val resolved = if (mergedRaw.isNotEmpty()) {
+            mergedRaw
         } else {
             listOf(
-                allContinueItems.map { HomeHeroSlide.LocalSlide(it) },
-                allRecentItems.map { HomeHeroSlide.LocalSlide(it) },
-                categoryTrending.map { HomeHeroSlide.TrendingSlide(it) },
-                allMedia.map { HomeHeroSlide.LocalSlide(it) }
+                scopedContinue.map { HomeHeroSlide.LocalSlide(it) },
+                scopedRecent.map { HomeHeroSlide.LocalSlide(it) },
+                scopedTrending.map { HomeHeroSlide.TrendingSlide(it) },
+                scopedMedia.map { HomeHeroSlide.LocalSlide(it) }
             ).firstOrNull { pool ->
                 pool.any(::matchesFilters)
             }?.filter(::matchesFilters)?.distinctBy { it.slideKey() }
                 ?: if (heroSettings.strictMode || heroSettings.statusFilters.isNotEmpty()) emptyList()
-                else primary.ifEmpty { allRecentItems.map { HomeHeroSlide.LocalSlide(it) } }
+                else scopedRecent.map { HomeHeroSlide.LocalSlide(it) }
         }
-        // Filter full candidate pool BEFORE capping to 8 slides
-        resolved.take(8)
+
+        val ordered = when (heroSettings.slideOrder.uppercase()) {
+            "TOP_RATED" -> resolved.sortedByDescending { slide ->
+                when (slide) {
+                    is HomeHeroSlide.LocalSlide -> slide.item.userRating ?: slide.item.communityScore ?: 0f
+                    is HomeHeroSlide.TrendingSlide -> slide.item.communityScore ?: 0f
+                }
+            }
+            "SHUFFLE" -> resolved.sortedBy { it.slideKey().hashCode() }
+            else -> resolved
+        }
+
+        if (heroSettings.slideCount <= 0) ordered else ordered.take(heroSettings.slideCount.coerceIn(1, 50))
     }
 
     val statsSnapshot = remember(allMedia, watchedTimestamps90d) {
@@ -334,10 +403,11 @@ fun HomeDashboardView(
                             }
                         }
 
-                        LaunchedEffect(pagerState, heroSlides.size, heroSettings.autoRotate) {
-                            if (!isLooping || !heroSettings.autoRotate) return@LaunchedEffect
+                        LaunchedEffect(pagerState, heroSlides.size, heroSettings.autoRotate, heroSettings.autoRotateSeconds) {
+                            val sec = heroSettings.autoRotateSeconds
+                            if (!isLooping || !heroSettings.autoRotate || sec <= 0) return@LaunchedEffect
                             while (isActive) {
-                                delay(6000L)
+                                delay(sec * 1000L)
                                 if (!pagerState.isScrollInProgress) {
                                     runCatching { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
                                 }
@@ -365,7 +435,6 @@ fun HomeDashboardView(
                                     is HomeHeroSlide.LocalSlide -> LocalMediaHeroCard(
                                         item = slide.item,
                                         heroSettings = heroSettings,
-                                        onQuickProgress = { onQuickProgress(slide.item) },
                                         onDetails = { onItemClick(slide.item.id) }
                                     )
                                     is HomeHeroSlide.TrendingSlide -> {
@@ -380,14 +449,12 @@ fun HomeDashboardView(
                                             LocalMediaHeroCard(
                                                 item = libMatch,
                                                 heroSettings = heroSettings,
-                                                onQuickProgress = { onQuickProgress(libMatch) },
                                                 onDetails = { onItemClick(libMatch.id) }
                                             )
                                         } else {
                                             TrendingMediaHeroCard(
                                                 item = slide.item,
                                                 heroSettings = heroSettings,
-                                                onAdd = { onAddSearchItem(slide.item) },
                                                 onDetails = { onPreviewSearchItem(slide.item) }
                                             )
                                         }
@@ -451,6 +518,8 @@ fun HomeDashboardView(
                                             ContinueTrackingCard(
                                                 item = item,
                                                 style = continueTrackingStyle,
+                                                posterStyle = posterStyle,
+                                                showQuickPlus = heroSettings.showQuickPlusOnContinue,
                                                 onClick = { onItemClick(item.id) },
                                                 onLongClick = {
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -467,39 +536,85 @@ fun HomeDashboardView(
 
                     HomeRowKey.UP_NEXT -> {
                         if (upNextReleases.isNotEmpty()) {
-                            item(key = "row_up_next") {
+                            item(key = "row_up_next_${heroSettings.homeDashboardStyle}") {
+                                val openRelease: (CalendarReleaseItem) -> Unit = { release ->
+                                    if (release.localMediaId != null) {
+                                        onItemClick(release.localMediaId)
+                                    } else {
+                                        val safeSource = when (release.mediaType) {
+                                            MediaType.COMIC -> "Metron"
+                                            MediaType.SHOW -> "TVMaze"
+                                            MediaType.MOVIE -> "TMDb"
+                                            MediaType.MANGA -> "MangaDex"
+                                            MediaType.NOVEL -> "RanobeDB"
+                                            MediaType.BOOK -> "Hardcover"
+                                            MediaType.GAME -> "Steam"
+                                            MediaType.VISUAL_NOVEL -> "VNDB"
+                                            else -> "AniList"
+                                        }
+                                        onPreviewSearchItem(
+                                            SearchResultItem(
+                                                title = release.title,
+                                                coverUrl = release.coverUrl,
+                                                mediaType = release.mediaType,
+                                                sourceProvider = safeSource,
+                                                anilistId = release.anilistId,
+                                                malId = release.malId,
+                                                tmdbId = release.tmdbId,
+                                                imdbId = release.imdbId,
+                                                vndbId = release.vndbId,
+                                                steamAppId = release.steamAppId,
+                                                igdbId = release.igdbId,
+                                                hardcoverId = release.hardcoverId,
+                                                mangadexId = release.mangadexId,
+                                                metronId = release.metronId,
+                                                comicPublisher = if (release.mediaType == MediaType.COMIC) {
+                                                    release.formatLabel.takeIf { it.isNotBlank() && it != "COMIC" }
+                                                } else null
+                                            )
+                                        )
+                                    }
+                                }
+
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     HomeShelfHeader(
                                         title = "Up Next & Airing",
                                         actionLabel = "Calendar",
                                         onActionClick = onOpenCalendar
                                     )
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 20.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        items(upNextReleases, key = { "up_${it.id}" }) { release ->
-                                            UpNextCalendarCard(
-                                                release = release,
-                                                onClick = {
-                                                    if (release.localMediaId != null) {
-                                                        onItemClick(release.localMediaId)
-                                                    } else {
-                                                        onPreviewSearchItem(
-                                                            SearchResultItem(
-                                                                title = release.title,
-                                                                coverUrl = release.coverUrl,
-                                                                mediaType = release.mediaType,
-                                                                sourceProvider = if (release.mediaType == MediaType.COMIC) "Metron" else "AniList",
-                                                                anilistId = release.anilistId,
-                                                                malId = release.malId,
-                                                                metronId = release.metronId,
-                                                                comicPublisher = if (release.mediaType == MediaType.COMIC) release.formatLabel.takeIf { it.isNotBlank() && it != "COMIC" } else null
-                                                            )
-                                                        )
-                                                    }
+                                    if (heroSettings.homeDashboardStyle.equals("COMPACT", ignoreCase = true)) {
+                                        // Option C — Dense Timeline vertical hairline guide
+                                        val compactSlice = remember(upNextReleases) { upNextReleases.take(5) }
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 20.dp)
+                                        ) {
+                                            compactSlice.forEachIndexed { idx, release ->
+                                                UpNextCompactRow(
+                                                    release = release,
+                                                    onClick = { openRelease(release) }
+                                                )
+                                                if (idx < compactSlice.lastIndex) {
+                                                    HorizontalDivider(
+                                                        color = Color.White.copy(alpha = 0.08f),
+                                                        thickness = 0.6.dp
+                                                    )
                                                 }
-                                            )
+                                            }
+                                        }
+                                    } else {
+                                        // Option A — Frameless Editorial horizontal shelf
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 20.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        ) {
+                                            items(upNextReleases, key = { "up_${it.id}" }) { release ->
+                                                UpNextCalendarCard(
+                                                    release = release,
+                                                    onClick = { openRelease(release) }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -508,59 +623,110 @@ fun HomeDashboardView(
                     }
 
                     HomeRowKey.STATS -> {
-                        item(key = "row_stats") {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item(key = "row_stats_${heroSettings.homeDashboardStyle}") {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 HomeShelfHeader(
                                     title = "Overview",
-                                    actionLabel = "History",
-                                    onActionClick = onNavigateToHistory
+                                    actionLabel = "90d Map",
+                                    onActionClick = onOpenHeatmap
                                 )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(DarkSurface)
-                                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                        .clickable(onClick = onOpenHeatmap)
-                                        .padding(horizontal = 14.dp, vertical = 14.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CompactStatCell(
-                                        value = "${statsSnapshot.first}",
-                                        label = "Active",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Box(modifier = Modifier.width(1.dp).height(26.dp).background(GlassBorder))
-                                    CompactStatCell(
-                                        value = "${statsSnapshot.second}d",
-                                        label = "Streak",
-                                        highlight = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Box(modifier = Modifier.width(1.dp).height(26.dp).background(GlassBorder))
-                                    CompactStatCell(
-                                        value = "${statsSnapshot.third}",
-                                        label = "Completed",
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                if (heroSettings.homeDashboardStyle.equals("COMPACT", ignoreCase = true)) {
+                                    // Option C — Dense inline strip
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp)
+                                            .clickable(onClick = onOpenHeatmap)
                                     ) {
-                                        Text(
-                                            text = "90d Map",
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = AccentGold
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Default.ChevronRight,
-                                            contentDescription = "Open Heatmap",
-                                            tint = AccentGold,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 11.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "${statsSnapshot.first} Active",
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TextPrimary
+                                                )
+                                                Text("\u00B7", fontSize = 12.sp, color = TextSecondary.copy(alpha = 0.45f))
+                                                Text(
+                                                    text = "${statsSnapshot.second}d Streak",
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = AccentGold
+                                                )
+                                                Text("\u00B7", fontSize = 12.sp, color = TextSecondary.copy(alpha = 0.45f))
+                                                Text(
+                                                    text = "${statsSnapshot.third} Done",
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = TextPrimary
+                                                )
+                                            }
+                                            Text(
+                                                text = "History \u203A",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = AccentGold,
+                                                modifier = Modifier.clickable(onClick = onNavigateToHistory)
+                                            )
+                                        }
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                                    }
+                                } else {
+                                    // Option A — Frameless 3-column typographic hairline strip
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp)
+                                            .clickable(onClick = onOpenHeatmap)
+                                    ) {
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 14.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            CompactStatCell(
+                                                value = "${statsSnapshot.first}",
+                                                label = "Active",
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(0.6.dp)
+                                                    .height(26.dp)
+                                                    .background(Color.White.copy(alpha = 0.08f))
+                                            )
+                                            CompactStatCell(
+                                                value = "${statsSnapshot.second}d",
+                                                label = "Streak",
+                                                highlight = true,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(0.6.dp)
+                                                    .height(26.dp)
+                                                    .background(Color.White.copy(alpha = 0.08f))
+                                            )
+                                            CompactStatCell(
+                                                value = "${statsSnapshot.third}",
+                                                label = "Completed",
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
                                     }
                                 }
                             }
@@ -616,7 +782,7 @@ fun HomeDashboardView(
                     }
 
                     HomeRowKey.TRENDING -> {
-                        val shownTrending = categoryTrending.take(shelfLimit)
+                        val shownTrending = if (shelfLimit == Int.MAX_VALUE) categoryTrending else categoryTrending.take(shelfLimit)
                         if (shownTrending.isNotEmpty()) {
                             item(key = "row_trending") {
                                 HomeDiscoverSearchShelf(
@@ -647,7 +813,8 @@ fun HomeDashboardView(
                             LaunchedEffect(row.key) {
                                 onRequestDiscoverShelf(row.key)
                             }
-                            val shelfItems = categoryDiscoverShelves[row.key].orEmpty().take(shelfLimit)
+                            val rawShelfItems = categoryDiscoverShelves[row.key].orEmpty()
+                            val shelfItems = if (shelfLimit == Int.MAX_VALUE) rawShelfItems else rawShelfItems.take(shelfLimit)
                             if (shelfItems.isEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     HomeShelfHeader(
@@ -655,21 +822,19 @@ fun HomeDashboardView(
                                         actionLabel = "Discover",
                                         onActionClick = onNavigateToDiscover
                                     )
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(110.dp)
-                                            .padding(horizontal = 20.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(DarkSurface)
-                                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp)),
-                                        contentAlignment = Alignment.Center
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 20.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        CircularProgressIndicator(
-                                            color = AccentGold,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(22.dp)
-                                        )
+                                        items(4, key = { "hskel_${row.key.name}_$it" }) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(posterWidthDp)
+                                                    .height(posterHeightDp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.White.copy(alpha = 0.06f))
+                                            )
+                                        }
                                     }
                                 }
                             } else {
@@ -682,7 +847,8 @@ fun HomeDashboardView(
                                     cardHeight = posterHeightDp,
                                     onActionClick = onNavigateToDiscover,
                                     onItemClick = onItemClick,
-                                    onPreviewSearchItem = onPreviewSearchItem
+                                    onPreviewSearchItem = onPreviewSearchItem,
+                                    onLoadMore = if (isUnlimitedShelf) ({ onLoadMoreDiscoverShelf(row.key) }) else null
                                 )
                             }
                         }
@@ -713,11 +879,10 @@ fun HomeDashboardView(
             Box {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(DarkSurface.copy(alpha = 0.88f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.48f))
                         .clickable { categoryMenuExpanded = true }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -738,7 +903,7 @@ fun HomeDashboardView(
                 DropdownMenu(
                     expanded = categoryMenuExpanded,
                     onDismissRequest = { categoryMenuExpanded = false },
-                    containerColor = DarkSurfaceElevated
+                    containerColor = AmoledBlack
                 ) {
                     MediaType.filterTabs.forEach { type ->
                         val selected = type == selectedCategory
@@ -808,15 +973,26 @@ fun HomeDashboardView(
             ModalBottomSheet(
                 onDismissRequest = { actionSheetItem = null },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = DarkSurface
+                containerColor = AmoledBlack,
+                dragHandle = null
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 26.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .background(AmoledBlack)
+                        .padding(horizontal = 20.dp, vertical = 14.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 38.dp, height = 4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.22f))
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -828,7 +1004,7 @@ fun HomeDashboardView(
                             modifier = Modifier
                                 .width(44.dp)
                                 .height(64.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(DarkSurfaceCard)
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -849,7 +1025,8 @@ fun HomeDashboardView(
                         }
                     }
 
-                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                     ContinueActionSheetRow(
                         icon = Icons.Default.Info,
@@ -859,6 +1036,7 @@ fun HomeDashboardView(
                             onItemClick(sheetTarget.id)
                         }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
                     ContinueActionSheetRow(
                         icon = Icons.Default.Add,
                         label = heroPrimaryCtaLabel(sheetTarget),
@@ -868,6 +1046,7 @@ fun HomeDashboardView(
                             onQuickProgress(sheetTarget)
                         }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
                     ContinueActionSheetRow(
                         icon = Icons.Default.Check,
                         label = "Mark Completed",
@@ -876,6 +1055,7 @@ fun HomeDashboardView(
                             onMarkCompleted(sheetTarget)
                         }
                     )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
                     ContinueActionSheetRow(
                         icon = Icons.Default.Pause,
                         label = "Move to On Hold",
@@ -900,11 +1080,9 @@ private fun ContinueActionSheetRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (accent) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated)
-            .border(1.dp, if (accent) AccentGold.copy(alpha = 0.45f) else GlassBorder, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 4.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -932,10 +1110,9 @@ private fun HeroHeaderIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(36.dp)
+            .size(34.dp)
             .clip(CircleShape)
-            .background(DarkSurface.copy(alpha = 0.85f))
-            .border(1.dp, GlassBorder, CircleShape)
+            .background(Color.Black.copy(alpha = 0.48f))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -963,7 +1140,6 @@ private fun heroPrimaryCtaLabel(item: MediaCardSummary): String = when (item.med
 private fun LocalMediaHeroCard(
     item: MediaCardSummary,
     heroSettings: HomeHeroSettings,
-    onQuickProgress: () -> Unit,
     onDetails: () -> Unit
 ) {
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
@@ -982,7 +1158,6 @@ private fun LocalMediaHeroCard(
         } else 0
     }
     val progressLabel = remember(item) { formatConciseProgress(item) }
-    val primaryCta = remember(item.mediaType, item.bookTrackingMode) { heroPrimaryCtaLabel(item) }
 
     ChimanewComboHeroCard(
         title = item.title,
@@ -996,9 +1171,7 @@ private fun LocalMediaHeroCard(
         communityScore = item.communityScore,
         progressLabel = progressLabel,
         remainingCount = remainingCount,
-        primaryCta = primaryCta,
         heroSettings = heroSettings,
-        onPrimaryClick = onQuickProgress,
         onDetailsClick = onDetails
     )
 }
@@ -1007,7 +1180,6 @@ private fun LocalMediaHeroCard(
 private fun TrendingMediaHeroCard(
     item: SearchResultItem,
     heroSettings: HomeHeroSettings,
-    onAdd: () -> Unit,
     onDetails: () -> Unit
 ) {
     val coverModel = remember(item.coverUrl) { LosslessCoverMapper.toLosslessUrl(item.coverUrl) }
@@ -1030,9 +1202,7 @@ private fun TrendingMediaHeroCard(
         communityScore = item.communityScore,
         progressLabel = progressHint,
         remainingCount = 0,
-        primaryCta = "+ Add",
         heroSettings = heroSettings,
-        onPrimaryClick = onAdd,
         onDetailsClick = onDetails
     )
 }
@@ -1050,22 +1220,21 @@ private fun ChimanewComboHeroCard(
     communityScore: Float?,
     progressLabel: String,
     remainingCount: Int,
-    primaryCta: String,
     heroSettings: HomeHeroSettings,
-    onPrimaryClick: () -> Unit,
     onDetailsClick: () -> Unit
 ) {
     val showUnread = heroSettings.showUnreadBadge && remainingCount > 0
-    val effectiveCta = if (heroSettings.metadataLayout == 3 && progressLabel.isNotBlank()) {
-        "$primaryCta \u2022 $progressLabel"
-    } else {
-        primaryCta
+
+    val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
+        "COMPACT" -> 336.dp
+        "TALL" -> 472.dp
+        else -> 404.dp
     }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(404.dp)
+            .height(heroHeightDp)
             .clipToBounds()
             .clickable(onClick = onDetailsClick)
     ) {
@@ -1185,23 +1354,21 @@ private fun ChimanewComboHeroCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(Color.Black.copy(alpha = 0.58f))
-                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(5.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = categoryBadge,
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            letterSpacing = 0.5.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    Text(
+                        text = categoryBadge,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        letterSpacing = 0.6.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(
+                            shadow = Shadow(
+                                color = Color.Black.copy(alpha = 0.85f),
+                                blurRadius = 4f
+                            )
                         )
-                    }
+                    )
                     if (heroSettings.metadataLayout == 0 && progressLabel.isNotBlank()) {
                         Text(
                             text = "\u2022 $progressLabel",
@@ -1288,48 +1455,24 @@ private fun ChimanewComboHeroCard(
                         if (heroSettings.showRatings) {
                             HeroRatingStrip(userRating, communityScore, heroSettings.ratingFormat)
                         }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(AccentGold)
-                            .clickable(onClick = onPrimaryClick)
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = effectiveCta,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AmoledBlack,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.White.copy(alpha = 0.14f))
-                            .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(20.dp))
-                            .clickable(onClick = onDetailsClick)
-                            .padding(horizontal = 13.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            text = "Details",
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
-                        )
-                    }
-                    if (heroSettings.metadataLayout == 3 && showUnread) {
-                        RemainingCountBadge(count = remainingCount)
+                        if (progressLabel.isNotBlank() || showUnread) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (progressLabel.isNotBlank()) {
+                                    Text(
+                                        text = progressLabel,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (showUnread) RemainingCountBadge(count = remainingCount)
+                            }
+                        }
                     }
                 }
             }
@@ -1341,10 +1484,9 @@ private fun ChimanewComboHeroCard(
 private fun RemainingCountBadge(count: Int) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(AccentGold.copy(alpha = 0.20f))
-            .border(1.dp, AccentGold.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(AccentGold.copy(alpha = 0.18f))
+            .padding(horizontal = 6.dp, vertical = 1.5.dp)
     ) {
         Text(
             text = "+$count",
@@ -1395,10 +1537,9 @@ private fun HeroRatingStrip(
 private fun HeroRatingPill(text: String) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(4.dp))
             .background(Color.Black.copy(alpha = 0.52f))
-            .border(1.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
-            .padding(horizontal = 7.dp, vertical = 2.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
     ) {
         Text(
             text = text,
@@ -1441,7 +1582,7 @@ private fun EmptyHomeHeroCard(onDiscoverClick: () -> Unit) {
         Spacer(modifier = Modifier.height(14.dp))
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(AccentGold)
                 .clickable(onClick = onDiscoverClick)
                 .padding(horizontal = 18.dp, vertical = 10.dp)
@@ -1450,50 +1591,7 @@ private fun EmptyHomeHeroCard(onDiscoverClick: () -> Unit) {
                 text = "Explore Discover",
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = AmoledBlack
-            )
-        }
-    }
-}
-
-@Composable
-private fun HeroActionButtonsRow(
-    primaryLabel: String,
-    onPrimaryClick: () -> Unit,
-    onDetailsClick: () -> Unit
-) {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(AccentGold)
-                .clickable(onClick = onPrimaryClick)
-                .padding(horizontal = 18.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = primaryLabel,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = AmoledBlack
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(DarkSurfaceElevated.copy(alpha = 0.88f))
-                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
-                .clickable(onClick = onDetailsClick)
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = "Details",
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
+                color = OnAccentColor
             )
         }
     }
@@ -1548,6 +1646,8 @@ private fun HomeShelfHeader(
 private fun ContinueTrackingCard(
     item: MediaCardSummary,
     style: ContinueTrackingStyle,
+    posterStyle: PosterCardStyle = PosterCardStyle(),
+    showQuickPlus: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onQuickProgress: () -> Unit
@@ -1564,253 +1664,262 @@ private fun ContinueTrackingCard(
     val progressLabel = remember(item) { formatConciseProgress(item) }
     val fraction = remember(item) { computeProgressFraction(item) }
     val badgeText = progressLabel.ifBlank { item.mediaType.displayName }
+    val applyDepth = posterStyle.cardDepthEnabled && posterStyle.cardDepthContinueWatchingEnabled
 
     when (style) {
         ContinueTrackingStyle.CARD -> {
-            // Nuvio 16:9 Full-Bleed Overlay Card
-            Box(
+            // Option A Frameless Editorial 16:9 Artwork + Clean Label Below
+            val artShape = RoundedCornerShape(8.dp)
+            Column(
                 modifier = Modifier
-                    .width(210.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurfaceCard)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                    .width(224.dp)
+                    .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                AsyncImage(
-                    model = bannerModel ?: coverModel,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    alignment = if (hasWideBanner) BiasAlignment(item.bannerFocalX, item.bannerFocalY) else Alignment.Center,
-                    modifier = Modifier.fillMaxSize()
-                )
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0.0f to Color.Transparent,
-                                0.42f to AmoledBlack.copy(alpha = 0.25f),
-                                0.78f to AmoledBlack.copy(alpha = 0.80f),
-                                1.0f to AmoledBlack.copy(alpha = 0.96f)
-                            )
-                        )
-                )
-
-                // Top-left status/type pill
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black.copy(alpha = 0.65f))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = item.mediaType.displayName.uppercase(),
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-
-                // Top-right quick +1 action
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(AccentGold)
-                        .clickable(onClick = onQuickProgress),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
-                        contentDescription = "Increment Progress",
-                        tint = AmoledBlack,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
+                        .aspectRatio(16f / 9f)
+                        .clip(artShape)
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .glassCardDepth(
+                            shape = artShape,
+                            edgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                            sheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                            edgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                            enabled = applyDepth
+                        )
+                        .then(
+                            if (!applyDepth) Modifier.border(0.5.dp, Color.White.copy(alpha = 0.08f), artShape) else Modifier
+                        )
                 ) {
+                    AsyncImage(
+                        model = bannerModel ?: coverModel,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        alignment = if (hasWideBanner) BiasAlignment(item.bannerFocalX, item.bannerFocalY) else Alignment.Center,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    if (showQuickPlus) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(7.dp)
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(AccentGold)
+                                .clickable(onClick = onQuickProgress),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
+                                contentDescription = "Increment Progress",
+                                tint = OnAccentColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+
+                    if (fraction > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(2.5.dp)
+                                .background(Color.White.copy(alpha = 0.22f))
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(fraction)
+                                    .fillMaxHeight()
+                                    .background(AccentGold)
+                            )
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(
                         text = item.title,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = TextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = badgeText,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 11.5.sp,
                         color = TextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-
-                if (fraction > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.16f))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(fraction)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(AccentGold)
-                        )
-                    }
-                }
             }
         }
 
         ContinueTrackingStyle.WIDE -> {
-            // Nuvio Wide Split Card
-            Row(
+            // Frameless Editorial Wide Split Row (zero outer container/border)
+            val posterShape = RoundedCornerShape(6.dp)
+            Column(
                 modifier = Modifier
-                    .width(308.dp)
-                    .height(112.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurface)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                    .width(286.dp)
                     .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             ) {
-                Box(
+                Row(
                     modifier = Modifier
-                        .width(76.dp)
-                        .fillMaxHeight()
-                        .background(DarkSurfaceCard)
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(
-                        model = coverModel,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .padding(11.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = item.title,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
+                    Box(
+                        modifier = Modifier
+                            .width(64.dp)
+                            .height(96.dp)
+                            .clip(posterShape)
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .glassCardDepth(
+                                shape = posterShape,
+                                edgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                                sheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                                edgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                                enabled = applyDepth
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(26.dp)
-                                    .clip(CircleShape)
-                                    .background(AccentGold)
-                                    .clickable(onClick = onQuickProgress),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
-                                    contentDescription = "Increment Progress",
-                                    tint = AmoledBlack,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = badgeText,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = AccentGold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        val meta = item.bookAuthor?.takeIf { it.isNotBlank() }
-                            ?: item.comicPublisher?.takeIf { it.isNotBlank() }
-                            ?: item.mediaType.displayName
-                        Text(
-                            text = meta,
-                            fontSize = 11.sp,
-                            color = TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    ) {
+                        AsyncImage(
+                            model = coverModel,
+                            contentDescription = item.title,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.TopCenter,
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(92.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = item.title,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (showQuickPlus) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(AccentGold)
+                                            .clickable(onClick = onQuickProgress),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
+                                            contentDescription = "Increment Progress",
+                                            tint = OnAccentColor,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = badgeText,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccentGold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val meta = item.bookAuthor?.takeIf { it.isNotBlank() }
+                                ?: item.comicPublisher?.takeIf { it.isNotBlank() }
+                                ?: item.mediaType.displayName
+                            Text(
+                                text = meta,
+                                fontSize = 11.sp,
+                                color = TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
-                    if (fraction > 0f) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(3.5.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color.White.copy(alpha = 0.14f))
+                        if (fraction > 0f) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(fraction)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .background(AccentGold)
+                                        .weight(1f)
+                                        .height(2.5.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(Color.White.copy(alpha = 0.14f))
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(fraction)
+                                            .fillMaxHeight()
+                                            .clip(RoundedCornerShape(2.dp))
+                                            .background(AccentGold)
+                                    )
+                                }
+                                Text(
+                                    text = "${(fraction * 100f).roundToInt()}%",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextSecondary
                                 )
                             }
-                            Text(
-                                text = "${(fraction * 100f).roundToInt()}%",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextSecondary
-                            )
                         }
                     }
                 }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.6.dp)
+                        .background(Color.White.copy(alpha = 0.08f))
+                )
             }
         }
 
         ContinueTrackingStyle.POSTER -> {
-            // Nuvio Vertical 2:3 Poster Card
+            // Frameless 2:3 Poster Card with Flush Bottom Progress Bar (no pill wrapper)
+            val posterShape = RoundedCornerShape(8.dp)
             Column(
-                modifier = Modifier.width(118.dp),
+                modifier = Modifier
+                    .width(118.dp)
+                    .combinedClickable(onClick = onClick, onLongClick = onLongClick),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkSurfaceCard)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                        .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                        .clip(posterShape)
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .glassCardDepth(
+                            shape = posterShape,
+                            edgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                            sheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                            edgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                            enabled = applyDepth
+                        )
+                        .then(
+                            if (!applyDepth) Modifier.border(0.5.dp, Color.White.copy(alpha = 0.08f), posterShape) else Modifier
+                        )
                 ) {
                     AsyncImage(
                         model = coverModel,
@@ -1820,48 +1929,40 @@ private fun ContinueTrackingCard(
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(AccentGold)
-                            .clickable(onClick = onQuickProgress),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
-                            contentDescription = "Increment Progress",
-                            tint = AmoledBlack,
-                            modifier = Modifier.size(15.dp)
-                        )
+                    if (showQuickPlus) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(AccentGold)
+                                .clickable(onClick = onQuickProgress),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
+                                contentDescription = "Increment Progress",
+                                tint = OnAccentColor,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
 
                     if (fraction > 0f) {
                         Box(
                             modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(horizontal = 8.dp, vertical = 8.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(DarkSurface.copy(alpha = 0.92f))
-                                .padding(horizontal = 6.dp, vertical = 5.dp)
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .height(2.5.dp)
+                                .background(Color.White.copy(alpha = 0.22f))
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .width(86.dp)
-                                    .height(3.5.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(Color.White.copy(alpha = 0.16f))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(fraction)
-                                        .fillMaxHeight()
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .background(AccentGold)
-                                )
-                            }
+                                    .fillMaxWidth(fraction)
+                                    .fillMaxHeight()
+                                    .background(AccentGold)
+                            )
                         }
                     }
                 }
@@ -1887,27 +1988,45 @@ private fun ContinueTrackingCard(
     }
 }
 
+private fun formatUpNextSubLabel(release: CalendarReleaseItem): String = when {
+    release.mediaType == MediaType.SHOW && release.seasonNumber != null && release.episodeNumber != null ->
+        "S%02dE%02d".format(release.seasonNumber, release.episodeNumber)
+    release.mediaType == MediaType.COMIC && release.episodeNumber != null ->
+        "Issue #${release.episodeNumber}"
+    release.mediaType == MediaType.MANGA && !release.chapterLabel.isNullOrBlank() ->
+        "Ch. ${release.chapterLabel}"
+    release.episodeNumber != null ->
+        "Episode ${release.episodeNumber}"
+    else -> release.formatLabel.ifBlank { release.mediaType.displayName }
+}
+
 @Composable
 private fun UpNextCalendarCard(
     release: CalendarReleaseItem,
     onClick: () -> Unit
 ) {
     val zone = remember { ZoneId.systemDefault() }
-    val dayTime = remember(release.airingAtEpochSec) {
+    val dayTime = remember(release.airingAtEpochSec, release.isDateOnly) {
         val dt = Instant.ofEpochSecond(release.airingAtEpochSec).atZone(zone)
-        val dayFmt = DateTimeFormatter.ofPattern("EEE h:mm a", Locale.US)
-        dt.format(dayFmt)
+        val pattern = if (release.isDateOnly) "EEE, MMM d" else "EEE h:mm a"
+        dt.format(DateTimeFormatter.ofPattern(pattern, Locale.US))
     }
+    val subLabel = remember(release) { formatUpNextSubLabel(release) }
 
     Row(
         modifier = Modifier
-            .width(214.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(DarkSurface)
-            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .width(220.dp)
             .clickable(onClick = onClick)
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .drawBehind {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.08f),
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 0.6.dp.toPx()
+                )
+            }
+            .padding(bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
@@ -1915,10 +2034,10 @@ private fun UpNextCalendarCard(
             contentDescription = release.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
-                .width(42.dp)
-                .aspectRatio(0.68f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(DarkSurfaceCard)
+                .width(46.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.White.copy(alpha = 0.06f))
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -1933,11 +2052,11 @@ private fun UpNextCalendarCard(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = if (release.episodeNumber != null) {
-                    if (release.mediaType == MediaType.COMIC) "Issue #${release.episodeNumber}" else "Episode ${release.episodeNumber}"
-                } else release.formatLabel,
+                text = subLabel,
                 fontSize = 11.5.sp,
-                color = TextSecondary
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = dayTime,
@@ -1946,6 +2065,66 @@ private fun UpNextCalendarCard(
                 color = AccentGold
             )
         }
+    }
+}
+
+@Composable
+private fun UpNextCompactRow(
+    release: CalendarReleaseItem,
+    onClick: () -> Unit
+) {
+    val zone = remember { ZoneId.systemDefault() }
+    val dayTime = remember(release.airingAtEpochSec, release.isDateOnly) {
+        val dt = Instant.ofEpochSecond(release.airingAtEpochSec).atZone(zone)
+        val pattern = if (release.isDateOnly) "EEE, MMM d" else "EEE h:mm a"
+        dt.format(DateTimeFormatter.ofPattern(pattern, Locale.US))
+    }
+    val subLabel = remember(release) { formatUpNextSubLabel(release) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = release.coverUrl,
+            contentDescription = release.title,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(34.dp)
+                .aspectRatio(2f / 3f)
+                .clip(RoundedCornerShape(5.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
+            Text(
+                text = release.title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subLabel,
+                fontSize = 11.sp,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            text = dayTime,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = AccentGold
+        )
     }
 }
 
@@ -1959,8 +2138,21 @@ private fun HomeDiscoverSearchShelf(
     cardHeight: Dp,
     onActionClick: () -> Unit,
     onItemClick: (Long) -> Unit,
-    onPreviewSearchItem: (SearchResultItem) -> Unit
+    onPreviewSearchItem: (SearchResultItem) -> Unit,
+    onLoadMore: (() -> Unit)? = null
 ) {
+    val rowState = rememberLazyListState()
+    LaunchedEffect(rowState, items.size, onLoadMore) {
+        if (onLoadMore == null || items.isEmpty()) return@LaunchedEffect
+        snapshotFlow {
+            rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        }.collect { lastVisible ->
+            if (lastVisible >= (items.lastIndex - 3).coerceAtLeast(0)) {
+                onLoadMore()
+            }
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         HomeShelfHeader(
             title = title,
@@ -1968,6 +2160,7 @@ private fun HomeDiscoverSearchShelf(
             onActionClick = onActionClick
         )
         LazyRow(
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {

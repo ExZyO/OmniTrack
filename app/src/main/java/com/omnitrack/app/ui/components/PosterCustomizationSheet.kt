@@ -34,6 +34,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -71,9 +72,7 @@ import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -121,7 +120,7 @@ fun PosterCustomizationSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
+        containerColor = AmoledBlack,
         dragHandle = null
     ) {
         Column(
@@ -143,8 +142,8 @@ fun PosterCustomizationSheet(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .background(AccentGold.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
@@ -152,7 +151,7 @@ fun PosterCustomizationSheet(
                             imageVector = Icons.Default.ViewModule,
                             contentDescription = null,
                             tint = AccentGold,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     Column {
@@ -188,9 +187,9 @@ fun PosterCustomizationSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.02f))
+                    .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
                     .padding(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -300,9 +299,11 @@ fun PosterCustomizationSheet(
                         val isSelected = style.widthDp == preset.value
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
                                 .clickable {
                                     scope.launch { preferenceManager.updatePosterWidthDp(preset.value) }
                                 }
@@ -312,7 +313,7 @@ fun PosterCustomizationSheet(
                                 text = preset.label,
                                 fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) AmoledBlack else TextSecondary
+                                color = if (isSelected) AccentGold else TextSecondary
                             )
                         }
                     }
@@ -325,7 +326,7 @@ fun PosterCustomizationSheet(
                     colors = SliderDefaults.colors(
                         thumbColor = AccentGold,
                         activeTrackColor = AccentGold,
-                        inactiveTrackColor = DarkSurfaceElevated
+                        inactiveTrackColor = Color.White.copy(alpha = 0.12f)
                     )
                 )
             }
@@ -359,9 +360,11 @@ fun PosterCustomizationSheet(
                         val isSelected = style.cornerRadiusDp == preset.value
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
                                 .clickable {
                                     scope.launch { preferenceManager.updatePosterCornerRadiusDp(preset.value) }
                                 }
@@ -371,7 +374,7 @@ fun PosterCustomizationSheet(
                                 text = preset.label,
                                 fontSize = 11.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) AmoledBlack else TextSecondary
+                                color = if (isSelected) AccentGold else TextSecondary
                             )
                         }
                     }
@@ -384,20 +387,17 @@ fun PosterCustomizationSheet(
                     colors = SliderDefaults.colors(
                         thumbColor = AccentGold,
                         activeTrackColor = AccentGold,
-                        inactiveTrackColor = DarkSurfaceElevated
+                        inactiveTrackColor = Color.White.copy(alpha = 0.12f)
                     )
                 )
             }
 
-            // Section 3: Layout Options Toggles
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+            // Section 3: Layout Options Toggles (Option A hairline list)
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Landscape mode toggle
                 Row(
@@ -422,18 +422,13 @@ fun PosterCustomizationSheet(
                         checked = style.isLandscape,
                         onCheckedChange = { scope.launch { preferenceManager.updatePosterLandscape(it) } },
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = AmoledBlack,
+                            checkedThumbColor = OnAccentColor,
                             checkedTrackColor = AccentGold
                         )
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(Color.White.copy(alpha = 0.08f))
-                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 // Hide labels toggle
                 Row(
@@ -458,18 +453,13 @@ fun PosterCustomizationSheet(
                         checked = style.hideLabels,
                         onCheckedChange = { scope.launch { preferenceManager.updatePosterHideLabels(it) } },
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = AmoledBlack,
+                            checkedThumbColor = OnAccentColor,
                             checkedTrackColor = AccentGold
                         )
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(Color.White.copy(alpha = 0.08f))
-                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 // Always Backdrop with Logo in Landscape
                 Row(
@@ -494,18 +484,44 @@ fun PosterCustomizationSheet(
                         checked = style.alwaysShowLandscapeClearlogo,
                         onCheckedChange = { scope.launch { preferenceManager.updateAlwaysShowLandscapeClearlogo(it) } },
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = AmoledBlack,
+                            checkedThumbColor = OnAccentColor,
                             checkedTrackColor = AccentGold
                         )
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(Color.White.copy(alpha = 0.08f))
-                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                // Quick +1 Button on Library Posters
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Show Quick +1 Button on Posters",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Off by default for cleaner posters; toggle on to increment directly from Library cards",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    Switch(
+                        checked = style.showQuickProgressOnCards,
+                        onCheckedChange = { scope.launch { preferenceManager.updatePosterShowQuickProgress(it) } },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = OnAccentColor,
+                            checkedTrackColor = AccentGold
+                        )
+                    )
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 // Card Depth Effect
                 Row(
@@ -530,7 +546,7 @@ fun PosterCustomizationSheet(
                         checked = style.cardDepthEnabled,
                         onCheckedChange = { scope.launch { preferenceManager.updateCardDepthEnabled(it) } },
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = AmoledBlack,
+                            checkedThumbColor = OnAccentColor,
                             checkedTrackColor = AccentGold
                         )
                     )
@@ -593,12 +609,10 @@ fun PosterCustomizationSheet(
                                 val isSelected = draftEdge.roundToInt() == values.first && draftSheen.roundToInt() == values.second
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) AccentGold else GlassBorder,
-                                            RoundedCornerShape(8.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                            else Color.White.copy(alpha = 0.05f)
                                         )
                                         .clickable {
                                             draftEdge = values.first.toFloat()
@@ -619,12 +633,7 @@ fun PosterCustomizationSheet(
                             }
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(Color.White.copy(alpha = 0.08f))
-                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                         // Section: Edge Light Coverage
                         Row(
@@ -657,12 +666,10 @@ fun PosterCustomizationSheet(
                                 val isSelected = draftCoverage.roundToInt() == value
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                                        .border(
-                                            1.dp,
-                                            if (isSelected) AccentGold else GlassBorder,
-                                            RoundedCornerShape(8.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) AccentGold.copy(alpha = 0.16f)
+                                            else Color.White.copy(alpha = 0.05f)
                                         )
                                         .clickable {
                                             draftCoverage = value.toFloat()
@@ -690,16 +697,11 @@ fun PosterCustomizationSheet(
                             colors = SliderDefaults.colors(
                                 thumbColor = AccentGold,
                                 activeTrackColor = AccentGold,
-                                inactiveTrackColor = DarkSurfaceElevated
+                                inactiveTrackColor = Color.White.copy(alpha = 0.12f)
                             )
                         )
 
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(Color.White.copy(alpha = 0.08f))
-                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                         // Section: Apply Card Depth To (Surfaces)
                         Text(
@@ -711,10 +713,7 @@ fun PosterCustomizationSheet(
 
                         listOf(
                             "Posters & Grid Cards" to ("posters" to style.cardDepthPostersEnabled),
-                            "Continue Watching Rails" to ("continue_watching" to style.cardDepthContinueWatchingEnabled),
-                            "Episode Cards & Rows" to ("episodes" to style.cardDepthEpisodesEnabled),
-                            "Cast & Crew Avatars" to ("cast" to style.cardDepthCastEnabled),
-                            "Trailers & Videos" to ("trailers" to style.cardDepthTrailersEnabled)
+                            "Continue Tracking Cards" to ("continue_watching" to style.cardDepthContinueWatchingEnabled)
                         ).forEach { (title, pair) ->
                             val (surfaceKey, isEnabled) = pair
                             Row(
@@ -735,7 +734,7 @@ fun PosterCustomizationSheet(
                                         }
                                     },
                                     colors = SwitchDefaults.colors(
-                                        checkedThumbColor = AmoledBlack,
+                                        checkedThumbColor = OnAccentColor,
                                         checkedTrackColor = AccentGold
                                     )
                                 )
@@ -748,10 +747,9 @@ fun PosterCustomizationSheet(
             // ----------------------------------------------------
             // 1:1 NUVIO CUSTOM POSTER URL ENGINE
             // ----------------------------------------------------
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
@@ -801,11 +799,11 @@ fun PosterCustomizationSheet(
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGold,
-                        unfocusedBorderColor = GlassBorder,
-                        focusedContainerColor = DarkSurfaceElevated,
-                        unfocusedContainerColor = DarkSurfaceElevated
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
+                        focusedContainerColor = Color.White.copy(alpha = 0.04f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.04f)
                     ),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(8.dp),
                     minLines = 2,
                     maxLines = 4
                 )
@@ -824,8 +822,7 @@ fun PosterCustomizationSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .border(0.5.dp, GlassBorder, RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
                                 .clickable {
                                     editingPattern += token
                                 }
@@ -854,9 +851,9 @@ fun PosterCustomizationSheet(
                         enabled = editingPattern.trim() != currentCustomPosterPattern,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGold,
-                            contentColor = AmoledBlack
+                            contentColor = OnAccentColor
                         ),
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
@@ -926,9 +923,9 @@ fun CardDepthTuningPad(
         modifier = modifier
             .fillMaxWidth()
             .height(170.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF090D14))
-            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+            .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
             .onSizeChanged {
                 padWidth = it.width.toFloat().coerceAtLeast(1f)
                 padHeight = it.height.toFloat().coerceAtLeast(1f)

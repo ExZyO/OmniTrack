@@ -116,7 +116,28 @@ class ArtworkWaterfallRepository(
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val clean = cleanTitle(title)
-        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}:${openLibraryId.orEmpty()}:${bookAuthor.orEmpty()}"
+        val userPriority = preferenceManager?.getArtSourcePriority(mediaType)?.firstOrNull().orEmpty()
+        val userDisabled = preferenceManager?.getDisabledArtSources(mediaType)?.firstOrNull().orEmpty()
+        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}:${openLibraryId.orEmpty()}:${bookAuthor.orEmpty()}:${userPriority.joinToString(",").hashCode()}:${userDisabled.sorted().joinToString(",").hashCode()}"
+
+        fun normalizeSource(name: String): String = name.trim().lowercase()
+            .removeSuffix(" graphql")
+            .removeSuffix(" api")
+            .removeSuffix(" kana")
+            .trim()
+
+        fun matchesArtSourceSetting(candidateSource: String, settingSource: String): Boolean {
+            val src = normalizeSource(candidateSource)
+            val cfg = normalizeSource(settingSource)
+            if (src.isEmpty() || cfg.isEmpty()) return false
+            return src == cfg || src.startsWith("$cfg ") || (cfg == "steam" && src.startsWith("steam"))
+        }
+
+        fun userPriorityIndex(candidateSource: String): Int {
+            if (userPriority.isEmpty()) return Int.MAX_VALUE
+            val idx = userPriority.indexOfFirst { matchesArtSourceSetting(candidateSource, it) }
+            return if (idx >= 0) idx else userPriority.size + 10
+        }
 
         fun cleanArtBannerRank(candidate: ArtworkCandidate): Int {
             if (!candidate.isBanner) return 0
@@ -140,19 +161,24 @@ class ArtworkWaterfallRepository(
         fun sortForType(list: List<ArtworkCandidate>): List<ArtworkCandidate> {
             return when (mediaType) {
                 MediaType.MANGA, MediaType.NOVEL -> list.sortedWith(
-                    compareBy { candidate ->
-                        if (candidate.isBanner) {
-                            MANGA_BANNER_PRIORITY[candidate.sourceName] ?: 99
-                        } else {
-                            MANGA_COVER_PRIORITY[candidate.sourceName] ?: 99
+                    compareBy<ArtworkCandidate> { userPriorityIndex(it.sourceName) }
+                        .thenBy { candidate ->
+                            if (candidate.isBanner) {
+                                MANGA_BANNER_PRIORITY[candidate.sourceName] ?: 99
+                            } else {
+                                MANGA_COVER_PRIORITY[candidate.sourceName] ?: 99
+                            }
                         }
-                    }
                 )
                 MediaType.VISUAL_NOVEL, MediaType.GAME, MediaType.BOOK, MediaType.COMIC -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
+                        .thenBy { userPriorityIndex(it.sourceName) }
                         .thenBy { cleanArtBannerRank(it) }
                 )
-                else -> list
+                else -> list.sortedWith(
+                    compareBy<ArtworkCandidate> { it.isBanner }
+                        .thenBy { userPriorityIndex(it.sourceName) }
+                )
             }
         }
 
@@ -162,7 +188,12 @@ class ArtworkWaterfallRepository(
         fun mergeAndEmit(batch: List<ArtworkCandidate>): List<ArtworkCandidate> {
             val cleaned = batch
                 .map { it.copy(url = LosslessCoverMapper.toLosslessUrl(it.url)) }
-                .filter { it.url.isNotBlank() }
+                .filter { cand ->
+                    cand.url.isNotBlank() && (
+                        cand.sourceName.equals("Default", ignoreCase = true) ||
+                            userDisabled.none { matchesArtSourceSetting(cand.sourceName, it) }
+                        )
+                }
             if (cleaned.isEmpty()) return synchronized(lock) { sortForType(accumulated.values.toList()) }
             val snapshot = synchronized(lock) {
                 for (cand in cleaned) {

@@ -19,6 +19,9 @@ interface SyncQueueDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun enqueue(task: SyncQueueEntity): Long
 
+    @Query("DELETE FROM sync_queue WHERE mediaId = :mediaId AND trackerType = :trackerType")
+    suspend fun deletePendingFor(mediaId: Long, trackerType: String)
+
     @Query("DELETE FROM sync_queue WHERE id = :id")
     suspend fun deleteTask(id: Long)
 

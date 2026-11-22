@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -54,7 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -74,9 +76,8 @@ import com.omnitrack.app.data.preferences.HomeShelfPosterSize
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -127,21 +128,32 @@ fun HomeCustomizerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
-        contentColor = TextPrimary
+        containerColor = AmoledBlack,
+        contentColor = TextPrimary,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.88f)
+                .background(AmoledBlack)
                 .navigationBarsPadding()
-                .padding(bottom = 12.dp)
+                .padding(top = 12.dp, bottom = 12.dp)
         ) {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.22f))
+                )
+            }
+
             // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -152,7 +164,7 @@ fun HomeCustomizerSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Configure shelves, Trending feeds, card styles & hero banner",
+                        text = "Configure layout, shelves, card styles & hero banner",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
@@ -165,45 +177,63 @@ fun HomeCustomizerSheet(
                         coroutineScope.launch {
                             preferenceManager.resetHomeAndHeroDefaults()
                         }
-                    }
+                    },
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Reset Defaults",
-                        tint = AccentGold,
-                        modifier = Modifier.size(21.dp)
+                        tint = TextSecondary,
+                        modifier = Modifier.size(19.dp)
                     )
                 }
+
+                Text(
+                    text = "Done",
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentGold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onDismiss)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
             }
 
-            // Tab Strip
+            // Option A Underline Tab Strip
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 listOf("Shelves & Display", "Hero Banner").forEachIndexed { idx, label ->
                     val selected = selectedTab == idx
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selected) AccentGold else DarkSurfaceElevated)
-                            .border(1.dp, if (selected) AccentGold else GlassBorder, RoundedCornerShape(12.dp))
-                            .clickable { selectedTab = idx }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
+                            .width(IntrinsicSize.Max)
+                            .clickable { selectedTab = idx },
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
                             text = label,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) AmoledBlack else TextPrimary
+                            color = if (selected) TextPrimary else TextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(if (selected) AccentGold else Color.Transparent)
                         )
                     }
                 }
             }
+
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             if (selectedTab == 0) {
                 LazyColumn(
@@ -211,19 +241,38 @@ fun HomeCustomizerSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     item(key = "home_display_controls") {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                .padding(14.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            CustomizerSectionLabel("HOME LAYOUT STYLE")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "EDITORIAL" to "Editorial (Option A)",
+                                    "COMPACT" to "Dense Timeline (Option C)"
+                                ).forEach { (styleKey, label) ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        CustomizerChoiceChip(
+                                            label = label,
+                                            selected = heroSettings.homeDashboardStyle.equals(styleKey, ignoreCase = true),
+                                            fullWidth = true,
+                                            onClick = {
+                                                coroutineScope.launch { preferenceManager.setHomeDashboardStyle(styleKey) }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
                             CustomizerSectionLabel("CONTINUE TRACKING STYLE")
                             FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
@@ -241,7 +290,16 @@ fun HomeCustomizerSheet(
                                 }
                             }
 
-                            HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                            CustomizerSwitchRow(
+                                title = "Show Quick +1 on Continue Cards",
+                                subtitle = "Quickly log next episode, chapter, issue, or completion from Home cards",
+                                checked = heroSettings.showQuickPlusOnContinue,
+                                onCheckedChange = { v ->
+                                    coroutineScope.launch { preferenceManager.setHomeContinueQuickPlus(v) }
+                                }
+                            )
+
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                             CustomizerSectionLabel("SHELF POSTER SIZE")
                             Row(
@@ -263,21 +321,19 @@ fun HomeCustomizerSheet(
                             }
 
                             CustomizerSectionLabel("ITEMS PER SHELF")
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf(8, 12, 20).forEach { limit ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        CustomizerChoiceChip(
-                                            label = "$limit Items",
-                                            selected = heroSettings.shelfItemLimit == limit,
-                                            fullWidth = true,
-                                            onClick = {
-                                                coroutineScope.launch { preferenceManager.setHomeShelfItemLimit(limit) }
-                                            }
-                                        )
-                                    }
+                                listOf(0 to "\u221E Unlimited", 8 to "8 Items", 12 to "12 Items", 20 to "20 Items").forEach { (limit, label) ->
+                                    CustomizerChoiceChip(
+                                        label = label,
+                                        selected = heroSettings.shelfItemLimit == limit,
+                                        onClick = {
+                                            coroutineScope.launch { preferenceManager.setHomeShelfItemLimit(limit) }
+                                        }
+                                    )
                                 }
                             }
 
@@ -298,17 +354,19 @@ fun HomeCustomizerSheet(
                                     )
                                 }
                             }
+
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
                         }
                     }
 
                     item(key = "home_shelves_section_header") {
                         Text(
-                            text = "SHELVES & DISCOVER FEEDS (DRAG \u2261 TO REORDER · TOGGLE EYE)",
-                            fontSize = 11.sp,
+                            text = "SHELVES & DISCOVER FEEDS (DRAG \u2261 TO REORDER \u00B7 TOGGLE EYE)",
+                            fontSize = 10.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextSecondary,
                             letterSpacing = 0.8.sp,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                         )
                     }
 
@@ -322,40 +380,40 @@ fun HomeCustomizerSheet(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .zIndex(if (isBeingDragged) 10f else 1f)
-                                    .then(
-                                        if (isBeingDragged) {
-                                            Modifier
-                                                .shadow(12.dp, RoundedCornerShape(14.dp))
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(DarkSurfaceElevated)
-                                                .border(1.5.dp, AccentGold, RoundedCornerShape(14.dp))
-                                        } else {
-                                            Modifier
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (item.isEnabled) DarkSurfaceElevated
-                                                    else Color.White.copy(alpha = 0.03f)
-                                                )
-                                                .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                        }
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isBeingDragged) DarkSurfaceElevated else Color.Transparent)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isBeingDragged) AccentGold.copy(alpha = 0.65f) else Color.Transparent,
+                                        shape = RoundedCornerShape(8.dp)
                                     )
-                                    .padding(horizontal = 12.dp, vertical = 11.dp),
+                                    .drawBehind {
+                                        if (!isBeingDragged) {
+                                            drawLine(
+                                                color = Color.White.copy(alpha = 0.08f),
+                                                start = Offset(0f, size.height),
+                                                end = Offset(size.width, size.height),
+                                                strokeWidth = 0.6.dp.toPx()
+                                            )
+                                        }
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 11.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
+                                        .clip(RoundedCornerShape(6.dp))
                                         .background(
                                             if (item.isEnabled) AccentGold.copy(alpha = 0.16f)
-                                            else Color.White.copy(alpha = 0.06f)
-                                        ),
+                                            else Color.White.copy(alpha = 0.05f)
+                                        )
+                                        .padding(horizontal = 7.dp, vertical = 3.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "${index + 1}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
+                                        text = if (item.isEnabled) "#${index + 1}" else "OFF",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Black,
                                         color = if (item.isEnabled) AccentGold else TextSecondary
                                     )
                                 }
@@ -374,7 +432,7 @@ fun HomeCustomizerSheet(
                                             text = item.key.displayName,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = if (item.isEnabled) TextPrimary else TextSecondary,
+                                            color = if (item.isEnabled) TextPrimary else TextSecondary.copy(alpha = 0.6f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -397,7 +455,7 @@ fun HomeCustomizerSheet(
                                     Text(
                                         text = item.key.description,
                                         fontSize = 11.5.sp,
-                                        color = TextSecondary,
+                                        color = TextSecondary.copy(alpha = if (item.isEnabled) 0.78f else 0.45f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -417,7 +475,7 @@ fun HomeCustomizerSheet(
                                     Icon(
                                         imageVector = if (item.isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                         contentDescription = if (item.isEnabled) "Hide Row" else "Show Row",
-                                        tint = if (item.isEnabled) AccentGold else TextSecondary.copy(alpha = 0.6f),
+                                        tint = if (item.isEnabled) AccentGold else TextSecondary.copy(alpha = 0.55f),
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -427,7 +485,7 @@ fun HomeCustomizerSheet(
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(6.dp))
                                         .draggableHandle(
                                             onDragStarted = {
                                                 isDraggingAny = true
@@ -454,194 +512,320 @@ fun HomeCustomizerSheet(
                     }
                 }
             } else {
-                // Hero Banner Customization Tab
+                // Hero Banner Customization Tab (Frameless Option A)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    CustomizerSectionLabel("HERO CAROUSEL SOURCE")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CustomizerSectionLabel("HERO CAROUSEL SOURCE")
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            HomeHeroSource.entries.forEach { source ->
-                                CustomizerChoiceChip(
-                                    label = source.displayName,
-                                    selected = heroSettings.heroSource == source,
-                                    onClick = {
-                                        coroutineScope.launch { preferenceManager.setHomeHeroSource(source) }
-                                    }
-                                )
-                            }
+                        HomeHeroSource.entries.forEach { source ->
+                            CustomizerChoiceChip(
+                                label = source.displayName,
+                                selected = heroSettings.heroSource == source,
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroSource(source) }
+                                }
+                            )
                         }
+                    }
 
-                        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
-
-                        CustomizerSwitchRow(
-                            title = "Show Hero Carousel",
-                            subtitle = "Display featured dual-artwork hero showcase at top of Home",
-                            checked = heroSettings.showHero,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroEnabled(v) } }
-                        )
-                        CustomizerSwitchRow(
-                            title = "Auto-Rotate Slides (6s)",
-                            subtitle = "Smoothly advances through featured slides automatically",
-                            checked = heroSettings.autoRotate,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroAutoRotate(v) } }
-                        )
-                        CustomizerSwitchRow(
-                            title = "Dim Backdrop Layer",
-                            subtitle = "Improves foreground poster and typography contrast",
-                            checked = heroSettings.dimBanner,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroDimBanner(v) } }
-                        )
-                        CustomizerSwitchRow(
-                            title = "Allow Cropped Cover Fallback",
-                            subtitle = "If wide banner is missing, blur portrait cover instead of Ambient Glow",
-                            checked = heroSettings.allowCroppedFallback,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroAllowCroppedFallback(v) } }
-                        )
-                        CustomizerSwitchRow(
-                            title = "Strict Mode Filter",
-                            subtitle = "Filter full candidate pool to require authentic artwork before display",
-                            checked = heroSettings.strictMode,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroStrictMode(v) } }
-                        )
-
-                        AnimatedVisibility(visible = heroSettings.strictMode) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                CustomizerSectionLabel("STRICT REQUIREMENTS")
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    listOf("banner" to "Require Wide Banner", "cover" to "Require Cover").forEach { (key, label) ->
-                                        val selected = key in heroSettings.strictRequirements
-                                        CustomizerChoiceChip(
-                                            label = label,
-                                            selected = selected,
-                                            onClick = {
-                                                val next = heroSettings.strictRequirements.toMutableSet()
-                                                if (selected) next.remove(key) else next.add(key)
-                                                coroutineScope.launch { preferenceManager.setHomeHeroStrictRequirements(next) }
-                                            }
-                                        )
-                                    }
+                    AnimatedVisibility(visible = heroSettings.heroSource == HomeHeroSource.ALL_MIXED) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CustomizerSectionLabel("MIXED POOLS TO INCLUDE")
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    "CONTINUE" to "Continue",
+                                    "FAVORITES" to "Favorites",
+                                    "RECENT" to "Recent",
+                                    "PLAN_TO_TRACK" to "Plan to Track",
+                                    "TRENDING" to "Trending"
+                                ).forEach { (key, label) ->
+                                    val checked = key in heroSettings.heroSources
+                                    CustomizerChoiceChip(
+                                        label = label,
+                                        selected = checked,
+                                        onClick = {
+                                            val next = heroSettings.heroSources.toMutableSet()
+                                            if (checked && next.size > 1) next.remove(key) else next.add(key)
+                                            coroutineScope.launch { preferenceManager.setHomeHeroSources(next) }
+                                        }
+                                    )
                                 }
                             }
                         }
                     }
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                            .padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    CustomizerSectionLabel("HERO CATEGORY SCOPE")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        CustomizerSectionLabel("HERO METADATA LAYOUT")
+                        listOf(
+                            "ALL" to "All Verticals",
+                            "FOLLOW_HOME" to "Follow Home Filter",
+                            "CUSTOM" to "Pick Categories"
+                        ).forEach { (mode, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = heroSettings.heroCategoryMode.equals(mode, ignoreCase = true),
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroCategoryMode(mode) }
+                                }
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(visible = heroSettings.heroCategoryMode.equals("CUSTOM", ignoreCase = true)) {
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf(
-                                0 to "Clean Separation",
-                                1 to "Stacked Rows",
-                                2 to "Compact Single-Line",
-                                3 to "Button-Integrated"
-                            ).forEach { (idx, label) ->
+                            MediaType.filterTabs.filter { it != MediaType.ALL }.forEach { type ->
+                                val active = type.name in heroSettings.heroCategories
                                 CustomizerChoiceChip(
-                                    label = label,
-                                    selected = heroSettings.metadataLayout == idx,
+                                    label = type.displayName,
+                                    selected = active,
                                     onClick = {
-                                        coroutineScope.launch { preferenceManager.setHomeHeroMetadataLayout(idx) }
+                                        val next = heroSettings.heroCategories.toMutableSet()
+                                        if (active) next.remove(type.name) else next.add(type.name)
+                                        coroutineScope.launch { preferenceManager.setHomeHeroCategories(next) }
                                     }
                                 )
                             }
                         }
+                    }
 
-                        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-                        CustomizerSwitchRow(
-                            title = "Show Hero Ratings",
-                            subtitle = "Display personal or community score pill on hero card",
-                            checked = heroSettings.showRatings,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroShowRatings(v) } }
-                        )
+                    CustomizerSectionLabel("SLIDE COUNT & ORDER")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(5 to "5", 8 to "8", 12 to "12", 20 to "20", 0 to "\u221E All").forEach { (cnt, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = heroSettings.slideCount == cnt,
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroSlideCount(cnt) }
+                                }
+                            )
+                        }
+                    }
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "RECENT" to "Recent",
+                            "INTERLEAVED" to "Interleaved",
+                            "TOP_RATED" to "Top Rated",
+                            "SHUFFLE" to "Shuffle"
+                        ).forEach { (ord, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = heroSettings.slideOrder.equals(ord, ignoreCase = true),
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroSlideOrder(ord) }
+                                }
+                            )
+                        }
+                    }
 
-                        AnimatedVisibility(visible = heroSettings.showRatings) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                CustomizerSectionLabel("RATING FORMAT")
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    listOf(
-                                        0 to "Golden Star (\u2605)",
-                                        1 to "Percentage (%)",
-                                        2 to "Star + Source",
-                                        3 to "Multi-Source"
-                                    ).forEach { (idx, label) ->
-                                        CustomizerChoiceChip(
-                                            label = label,
-                                            selected = heroSettings.ratingFormat == idx,
-                                            onClick = {
-                                                coroutineScope.launch { preferenceManager.setHomeHeroRatingFormat(idx) }
-                                            }
-                                        )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    CustomizerSectionLabel("HERO HEIGHT & AUTO-ROTATE TIMER")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("COMPACT" to "Compact", "STANDARD" to "Standard", "TALL" to "Tall").forEach { (h, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = heroSettings.heroHeightPreset.equals(h, ignoreCase = true),
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroHeightPreset(h) }
+                                }
+                            )
+                        }
+                    }
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(0 to "Off", 4 to "4s", 6 to "6s", 9 to "9s", 12 to "12s").forEach { (sec, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = if (!heroSettings.autoRotate || heroSettings.autoRotateSeconds <= 0) sec == 0 else heroSettings.autoRotateSeconds == sec,
+                                onClick = {
+                                    coroutineScope.launch {
+                                        preferenceManager.setHomeHeroRotateSeconds(sec)
+                                        preferenceManager.setHomeHeroAutoRotate(sec > 0)
                                     }
+                                }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    CustomizerSwitchRow(
+                        title = "Show Hero Carousel",
+                        subtitle = "Display featured dual-artwork hero showcase at top of Home",
+                        checked = heroSettings.showHero,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroEnabled(v) } }
+                    )
+                    CustomizerSwitchRow(
+                        title = "Dim Backdrop Layer",
+                        subtitle = "Improves foreground poster and typography contrast",
+                        checked = heroSettings.dimBanner,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroDimBanner(v) } }
+                    )
+                    CustomizerSwitchRow(
+                        title = "Allow Cropped Cover Fallback",
+                        subtitle = "If wide banner is missing, blur portrait cover instead of Ambient Glow",
+                        checked = heroSettings.allowCroppedFallback,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroAllowCroppedFallback(v) } }
+                    )
+                    CustomizerSwitchRow(
+                        title = "Strict Mode Filter",
+                        subtitle = "Filter full candidate pool to require authentic artwork before display",
+                        checked = heroSettings.strictMode,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroStrictMode(v) } }
+                    )
+
+                    AnimatedVisibility(visible = heroSettings.strictMode) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CustomizerSectionLabel("STRICT REQUIREMENTS")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("banner" to "Require Wide Banner", "cover" to "Require Cover").forEach { (key, label) ->
+                                    val selected = key in heroSettings.strictRequirements
+                                    CustomizerChoiceChip(
+                                        label = label,
+                                        selected = selected,
+                                        onClick = {
+                                            val next = heroSettings.strictRequirements.toMutableSet()
+                                            if (selected) next.remove(key) else next.add(key)
+                                            coroutineScope.launch { preferenceManager.setHomeHeroStrictRequirements(next) }
+                                        }
+                                    )
                                 }
                             }
                         }
+                    }
 
-                        CustomizerSwitchRow(
-                            title = "Show Remaining Count Badge",
-                            subtitle = "Show +N remaining episodes/chapters/pages badge",
-                            checked = heroSettings.showUnreadBadge,
-                            onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroShowUnreadBadge(v) } }
-                        )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-                        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    CustomizerSectionLabel("HERO METADATA LAYOUT")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            0 to "Clean Separation",
+                            1 to "Stacked Rows",
+                            2 to "Compact Single-Line",
+                            3 to "Minimal Inline"
+                        ).forEach { (idx, label) ->
+                            CustomizerChoiceChip(
+                                label = label,
+                                selected = heroSettings.metadataLayout == idx,
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.setHomeHeroMetadataLayout(idx) }
+                                }
+                            )
+                        }
+                    }
 
-                        CustomizerSectionLabel("STATUS FILTERS (EMPTY = ALL)")
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                TrackingStatus.IN_PROGRESS,
-                                TrackingStatus.PLAN_TO_TRACK,
-                                TrackingStatus.COMPLETED,
-                                TrackingStatus.ON_HOLD,
-                                TrackingStatus.DROPPED
-                            ).forEach { st ->
-                                val active = st.name in heroSettings.statusFilters
-                                CustomizerChoiceChip(
-                                    label = st.displayName,
-                                    selected = active,
-                                    onClick = {
-                                        val next = heroSettings.statusFilters.toMutableSet()
-                                        if (active) next.remove(st.name) else next.add(st.name)
-                                        coroutineScope.launch { preferenceManager.setHomeHeroStatusFilters(next) }
-                                    }
-                                )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    CustomizerSwitchRow(
+                        title = "Show Hero Ratings",
+                        subtitle = "Display personal or community score tag on hero card",
+                        checked = heroSettings.showRatings,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroShowRatings(v) } }
+                    )
+
+                    AnimatedVisibility(visible = heroSettings.showRatings) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CustomizerSectionLabel("RATING FORMAT")
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    0 to "Golden Star (\u2605)",
+                                    1 to "Percentage (%)",
+                                    2 to "Star + Source",
+                                    3 to "Multi-Source"
+                                ).forEach { (idx, label) ->
+                                    CustomizerChoiceChip(
+                                        label = label,
+                                        selected = heroSettings.ratingFormat == idx,
+                                        onClick = {
+                                            coroutineScope.launch { preferenceManager.setHomeHeroRatingFormat(idx) }
+                                        }
+                                    )
+                                }
                             }
+                        }
+                    }
+
+                    CustomizerSwitchRow(
+                        title = "Show Remaining Count Badge",
+                        subtitle = "Show +N remaining episodes/chapters/pages tag",
+                        checked = heroSettings.showUnreadBadge,
+                        onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroShowUnreadBadge(v) } }
+                    )
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    CustomizerSectionLabel("STATUS FILTERS (EMPTY = ALL)")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            TrackingStatus.IN_PROGRESS,
+                            TrackingStatus.PLAN_TO_TRACK,
+                            TrackingStatus.COMPLETED,
+                            TrackingStatus.ON_HOLD,
+                            TrackingStatus.DROPPED
+                        ).forEach { st ->
+                            val active = st.name in heroSettings.statusFilters
+                            CustomizerChoiceChip(
+                                label = st.displayName,
+                                selected = active,
+                                onClick = {
+                                    val next = heroSettings.statusFilters.toMutableSet()
+                                    if (active) next.remove(st.name) else next.add(st.name)
+                                    coroutineScope.launch { preferenceManager.setHomeHeroStatusFilters(next) }
+                                }
+                            )
                         }
                     }
 
@@ -656,7 +840,7 @@ fun HomeCustomizerSheet(
 private fun CustomizerSectionLabel(text: String) {
     Text(
         text = text,
-        fontSize = 11.sp,
+        fontSize = 10.5.sp,
         fontWeight = FontWeight.Bold,
         color = TextSecondary,
         letterSpacing = 0.9.sp
@@ -673,9 +857,8 @@ private fun CustomizerChoiceChip(
     Box(
         modifier = Modifier
             .then(if (fullWidth) Modifier.fillMaxWidth() else Modifier)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) AccentGold else DarkSurface)
-            .border(1.dp, if (selected) AccentGold else GlassBorder, RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (selected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
@@ -684,7 +867,7 @@ private fun CustomizerChoiceChip(
             text = label,
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) AmoledBlack else TextPrimary,
+            color = if (selected) AccentGold else TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -702,7 +885,7 @@ private fun CustomizerSwitchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 2.dp),
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -723,11 +906,10 @@ private fun CustomizerSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = AmoledBlack,
+                checkedThumbColor = OnAccentColor,
                 checkedTrackColor = AccentGold,
                 uncheckedThumbColor = TextSecondary,
-                uncheckedTrackColor = DarkSurface,
-                uncheckedBorderColor = GlassBorder
+                uncheckedTrackColor = Color.White.copy(alpha = 0.12f)
             )
         )
     }

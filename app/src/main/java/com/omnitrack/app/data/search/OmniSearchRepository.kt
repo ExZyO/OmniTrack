@@ -1098,13 +1098,16 @@ class OmniSearchRepository(
         return com.omnitrack.app.data.enrichment.IgdbApiClient(client).searchGames(id, secret, query, limit = 16)
     }
 
-    suspend fun fetchDiscoverGamesShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiscoverGamesShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val safePage = page.coerceAtLeast(1)
         val id = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientId
         val secret = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientSecret
         if (id.isNotBlank() && secret.isNotBlank()) {
-            val igdbItems = com.omnitrack.app.data.enrichment.IgdbApiClient(client).fetchDiscoverGames(id, secret, shelf, limit = 14)
+            val igdbItems = com.omnitrack.app.data.enrichment.IgdbApiClient(client)
+                .fetchDiscoverGames(id, secret, shelf, limit = 16, offset = (safePage - 1) * 16)
             if (igdbItems.isNotEmpty()) return@withContext igdbItems
         }
+        if (safePage > 1) return@withContext emptyList()
         // Keyless Steam Featured Categories fallback
         NetworkPacer.withSteamPacing {
             try {
@@ -1135,7 +1138,7 @@ class OmniSearchRepository(
                             steamAppId = appId,
                             platform = "PC"
                         )
-                    }.distinctBy { it.steamAppId }.take(14)
+                    }.distinctBy { it.steamAppId }.take(16)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -1144,14 +1147,15 @@ class OmniSearchRepository(
         }
     }
 
-    suspend fun fetchDiscoverBooksShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiscoverBooksShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val safePage = page.coerceAtLeast(1)
         suspend fun queryOpenLibrarySearch(q: String, subject: String? = null): List<SearchResultItem> =
             NetworkPacer.withOpenLibraryPacing {
                 try {
                     val subjectPart = subject?.let { "&subject=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
                     val qPart = if (q.isNotBlank()) "q=${URLEncoder.encode(q, "UTF-8")}" else "q=*"
                     val fields = "key,title,author_name,first_publish_year,number_of_pages_median,ratings_average,cover_i,isbn"
-                    val url = "https://openlibrary.org/search.json?$qPart$subjectPart&sort=rating&limit=16&fields=$fields"
+                    val url = "https://openlibrary.org/search.json?$qPart$subjectPart&sort=rating&limit=16&page=$safePage&fields=$fields"
                     val req = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) return@withOpenLibraryPacing emptyList()
@@ -1181,7 +1185,7 @@ class OmniSearchRepository(
                                 bookAuthor = author,
                                 bookFormat = "HARDCOVER"
                             )
-                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(14)
+                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(16)
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -1192,8 +1196,9 @@ class OmniSearchRepository(
         when (shelf.lowercase()) {
             "audiobooks" -> NetworkPacer.withGeneralPacing {
                 try {
+                    val reqLimit = (safePage * 16).coerceAtMost(128)
                     val req = Request.Builder()
-                        .url("https://itunes.apple.com/search?term=bestseller+fiction&media=audiobook&limit=16")
+                        .url("https://itunes.apple.com/search?term=bestseller+fiction&media=audiobook&limit=$reqLimit")
                         .header("User-Agent", "OmniTrack/1.0")
                         .get()
                         .build()
@@ -1219,7 +1224,7 @@ class OmniSearchRepository(
                                 bookAuthor = o["artistName"].cleanString(),
                                 bookFormat = "AUDIOBOOK"
                             )
-                        }.take(14)
+                        }.drop((safePage - 1) * 16).take(16)
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -1232,7 +1237,7 @@ class OmniSearchRepository(
             else -> NetworkPacer.withOpenLibraryPacing {
                 try {
                     val req = Request.Builder()
-                        .url("https://openlibrary.org/trending/weekly.json?limit=18")
+                        .url("https://openlibrary.org/trending/weekly.json?limit=16&page=$safePage")
                         .header("User-Agent", "OmniTrack/1.0")
                         .get()
                         .build()
@@ -1258,7 +1263,7 @@ class OmniSearchRepository(
                                 bookAuthor = author,
                                 bookFormat = "HARDCOVER"
                             )
-                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(14)
+                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(16)
                     }
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -2057,9 +2062,12 @@ class OmniSearchRepository(
         targetType: MediaType,
         formatFilter: String? = null,
         formatNotFilter: String? = null,
-        countryOfOrigin: String? = null
+        countryOfOrigin: String? = null,
+        page: Int = 1
     ): List<SearchResultItem> {
-        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
+        val safePage = page.coerceAtLeast(1)
+        val pagedCacheKey = "${cacheKey}_p$safePage"
+        discoverShelfCache[pagedCacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
         val args = buildList {
             add("type: $aniType")
@@ -2071,7 +2079,7 @@ class OmniSearchRepository(
         }.joinToString(", ")
         val gql = """
             query {
-                Page(page: 1, perPage: 16) {
+                Page(page: $safePage, perPage: 16) {
                     media($args) {
                         id
                         idMal
@@ -2149,7 +2157,7 @@ class OmniSearchRepository(
                             platform = novelPlatform
                         )
                     }
-                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    if (parsed.isNotEmpty()) discoverShelfCache[pagedCacheKey] = parsed
                     parsed
                 }
             } catch (e: Exception) {
@@ -2159,16 +2167,16 @@ class OmniSearchRepository(
         }
     }
 
-    suspend fun fetchDiscoverAnimeShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiscoverAnimeShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val sort = when (shelf.lowercase()) {
             "top_rated" -> "SCORE_DESC"
             "popular" -> "POPULARITY_DESC"
             else -> "TRENDING_DESC"
         }
-        fetchAniListDiscoverShelf("anime:$sort", "ANIME", sort, MediaType.ANIME)
+        fetchAniListDiscoverShelf("anime:$sort", "ANIME", sort, MediaType.ANIME, page = page)
     }
 
-    suspend fun fetchDiscoverMangaShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiscoverMangaShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
         when (shelf.lowercase()) {
             "manhwa" -> fetchAniListDiscoverShelf(
                 cacheKey = "manga:manhwa",
@@ -2176,67 +2184,109 @@ class OmniSearchRepository(
                 sort = "POPULARITY_DESC",
                 targetType = MediaType.MANGA,
                 formatNotFilter = "NOVEL",
-                countryOfOrigin = "KR"
+                countryOfOrigin = "KR",
+                page = page
             )
             "top_rated" -> fetchAniListDiscoverShelf(
                 cacheKey = "manga:top_rated",
                 aniType = "MANGA",
                 sort = "SCORE_DESC",
                 targetType = MediaType.MANGA,
-                formatNotFilter = "NOVEL"
+                formatNotFilter = "NOVEL",
+                page = page
             )
             else -> fetchAniListDiscoverShelf(
                 cacheKey = "manga:trending",
                 aniType = "MANGA",
                 sort = "TRENDING_DESC",
                 targetType = MediaType.MANGA,
-                formatNotFilter = "NOVEL"
+                formatNotFilter = "NOVEL",
+                page = page
             )
         }
     }
 
-    suspend fun fetchDiscoverNovelsShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    private suspend fun fetchGoodreadsWebFictionShelf(shelfSlug: String, page: Int): List<SearchResultItem> =
+        NetworkPacer.withGeneralPacing {
+            val safePage = page.coerceAtLeast(1)
+            val cacheKey = "novel:gr_${shelfSlug}_p$safePage"
+            discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withGeneralPacing it }
+            try {
+                val req = Request.Builder()
+                    .url("https://www.goodreads.com/shelf/show/$shelfSlug?page=$safePage")
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36")
+                    .header("Accept", "text/html")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val html = resp.body?.string().orEmpty()
+                    val blocks = html.split("class=\"elementList\"").drop(1)
+                    if (blocks.isEmpty()) return@withGeneralPacing emptyList()
+                    val imgRegex = Regex("""<img[^>]+src="([^"]+)"""")
+                    val titleRegex = Regex("""<a class="bookTitle"[^>]*>(.*?)</a>""", RegexOption.DOT_MATCHES_ALL)
+                    val authorRegex = Regex("""class="authorName"[^>]*><span[^>]*>(.*?)</span>""", RegexOption.DOT_MATCHES_ALL)
+                    val ratingRegex = Regex("""avg rating\s+([0-9.]+)""")
+                    val yearRegex = Regex("""published\s+(\d{4})""")
+                    val coverSizeRegex = Regex("""\._(?:S[XY]|U[XY]|CR[\d,]+)\d*_""")
+                    fun unescapeHtml(raw: String): String =
+                        android.text.Html.fromHtml(raw, android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim()
+
+                    val parsed = blocks.take(50).mapNotNull { rawBlock ->
+                        val block = rawBlock.substringBefore("<div class=\"right\"")
+                        val rawTitle = titleRegex.find(block)?.groupValues?.getOrNull(1)?.let(::unescapeHtml)
+                            ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                        val rawImg = imgRegex.find(block)?.groupValues?.getOrNull(1).orEmpty()
+                        if (rawImg.isBlank() || "nophoto" in rawImg) return@mapNotNull null
+                        val hdCover = coverSizeRegex.replace(rawImg, "")
+                        val author = authorRegex.find(block)?.groupValues?.getOrNull(1)?.let(::unescapeHtml)
+                        val r5 = ratingRegex.find(block)?.groupValues?.getOrNull(1)?.toFloatOrNull()
+                        val year = yearRegex.find(block)?.groupValues?.getOrNull(1)
+                        SearchResultItem(
+                            title = rawTitle,
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(hdCover),
+                            mediaType = MediaType.NOVEL,
+                            releaseYear = year,
+                            communityScore = r5?.let { it * 2f },
+                            sourceProvider = "Goodreads",
+                            bookAuthor = author,
+                            platform = "WEB_NOVEL"
+                        )
+                    }.distinctBy { it.title.trim().lowercase() }
+                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    parsed
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                AppLogger.w("OmniSearchRepository", "Goodreads shelf ($shelfSlug p$safePage) error: ${e.message}")
+                emptyList()
+            }
+        }
+
+    suspend fun fetchDiscoverNovelsShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val safePage = page.coerceAtLeast(1)
         when (shelf.lowercase()) {
             "top_webnovels" -> {
-                val cacheKey = "novel:top_webnovels"
-                discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
-                val curated = listOf(
-                    "The Hundred Reigns",
-                    "Shadow Slave",
-                    "Lord of the Mysteries",
-                    "The Perfect Run",
-                    "Mother of Learning",
-                    "Worm Wildbow",
-                    "Super Supportive",
-                    "Omniscient Reader's Viewpoint",
-                    "Reverend Insanity",
-                    "The Wandering Inn",
-                    "The Primal Hunter",
-                    "He Who Fights with Monsters"
-                )
-                val items = coroutineScope {
-                    curated.map { title ->
-                        async {
-                            searchGoodreads(title, MediaType.NOVEL).firstOrNull()
-                        }
-                    }.awaitAll().filterNotNull().distinctBy { it.title.trim().lowercase() }
-                }
-                if (items.isNotEmpty()) discoverShelfCache[cacheKey] = items
-                items
+                val live = fetchGoodreadsWebFictionShelf("web-fiction", safePage)
+                if (live.isNotEmpty() || safePage > 1) live
+                else fetchGoodreadsWebFictionShelf("web-novels", 1)
             }
+            "progression_webnovels" -> fetchGoodreadsWebFictionShelf("progression-fantasy", safePage)
             "top_rated_ln" -> fetchAniListDiscoverShelf(
                 cacheKey = "novel:top_rated_ln",
                 aniType = "MANGA",
                 sort = "SCORE_DESC",
                 targetType = MediaType.NOVEL,
-                formatFilter = "NOVEL"
+                formatFilter = "NOVEL",
+                page = safePage
             )
             else -> fetchAniListDiscoverShelf(
                 cacheKey = "novel:trending_ln",
                 aniType = "MANGA",
                 sort = "TRENDING_DESC",
                 targetType = MediaType.NOVEL,
-                formatFilter = "NOVEL"
+                formatFilter = "NOVEL",
+                page = safePage
             )
         }
     }
@@ -2245,9 +2295,12 @@ class OmniSearchRepository(
         cacheKey: String,
         targetType: MediaType,
         shelf: String,
-        tmdbApiKey: String?
+        tmdbApiKey: String?,
+        page: Int = 1
     ): List<SearchResultItem> = withContext(Dispatchers.IO) {
-        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val safePage = page.coerceAtLeast(1)
+        val pagedCacheKey = "${cacheKey}_p$safePage"
+        discoverShelfCache[pagedCacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         val isMovie = targetType == MediaType.MOVIE
         val key = tmdbApiKey?.trim().orEmpty()
         if (key.isNotBlank()) {
@@ -2255,16 +2308,16 @@ class OmniSearchRepository(
                 try {
                     val seg = if (isMovie) "movie" else "tv"
                     val url = when (shelf.lowercase()) {
-                        "top_rated" -> "https://api.themoviedb.org/3/$seg/top_rated?api_key=$key"
-                        "popular" -> "https://api.themoviedb.org/3/$seg/popular?api_key=$key"
-                        else -> "https://api.themoviedb.org/3/trending/$seg/week?api_key=$key"
+                        "top_rated" -> "https://api.themoviedb.org/3/$seg/top_rated?api_key=$key&page=$safePage"
+                        "popular" -> "https://api.themoviedb.org/3/$seg/popular?api_key=$key&page=$safePage"
+                        else -> "https://api.themoviedb.org/3/trending/$seg/week?api_key=$key&page=$safePage"
                     }
                     val req = Request.Builder().url(url).get().build()
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) return@withTmdbPacing emptyList()
                         val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
                             ?.get("results") as? JsonArray ?: return@withTmdbPacing emptyList()
-                        results.take(16).mapNotNull { el ->
+                        results.take(20).mapNotNull { el ->
                             val o = el as? JsonObject ?: return@mapNotNull null
                             val title = o["name"].cleanString() ?: o["title"].cleanString() ?: return@mapNotNull null
                             val posterPath = o["poster_path"].cleanString() ?: return@mapNotNull null
@@ -2290,24 +2343,30 @@ class OmniSearchRepository(
                 }
             }
             if (tmdbItems.isNotEmpty()) {
-                discoverShelfCache[cacheKey] = tmdbItems
+                discoverShelfCache[pagedCacheKey] = tmdbItems
                 return@withContext tmdbItems
             }
         }
-        // Keyless Cinemeta fallback
+        // Keyless Cinemeta fallback (supports skip= pagination)
         NetworkPacer.withGeneralPacing {
             try {
                 val cType = if (isMovie) "movie" else "series"
                 val catalog = if (shelf.equals("top_rated", ignoreCase = true)) "imdbRating" else "top"
+                val skip = (safePage - 1) * 20
+                val cinUrl = if (skip > 0) {
+                    "https://v3-cinemeta.strem.io/catalog/$cType/$catalog/skip=$skip.json"
+                } else {
+                    "https://v3-cinemeta.strem.io/catalog/$cType/$catalog.json"
+                }
                 val req = Request.Builder()
-                    .url("https://v3-cinemeta.strem.io/catalog/$cType/$catalog.json")
+                    .url(cinUrl)
                     .get()
                     .build()
                 client.newCall(req).execute().use { resp ->
                     if (!resp.isSuccessful) return@withGeneralPacing emptyList()
                     val metas = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
                         ?.get("metas") as? JsonArray ?: return@withGeneralPacing emptyList()
-                    val parsed = metas.take(16).mapNotNull { el ->
+                    val parsed = metas.take(20).mapNotNull { el ->
                         val o = el as? JsonObject ?: return@mapNotNull null
                         val title = o["name"].cleanString() ?: return@mapNotNull null
                         val rawPoster = o["poster"].cleanString() ?: return@mapNotNull null
@@ -2320,10 +2379,11 @@ class OmniSearchRepository(
                             mediaType = targetType,
                             releaseYear = o["releaseInfo"].cleanString() ?: o["year"].cleanString(),
                             communityScore = (o["imdbRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toFloatOrNull(),
-                            sourceProvider = "Cinemeta"
+                            sourceProvider = "Cinemeta",
+                            imdbId = o["imdb_id"].cleanString() ?: o["id"].cleanString()?.takeIf { it.startsWith("tt") }
                         )
                     }
-                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    if (parsed.isNotEmpty()) discoverShelfCache[pagedCacheKey] = parsed
                     parsed
                 }
             } catch (e: Exception) {
@@ -2333,14 +2393,15 @@ class OmniSearchRepository(
         }
     }
 
-    suspend fun fetchDiscoverShowsShelves(shelf: String, tmdbApiKey: String? = null): List<SearchResultItem> =
-        fetchTmdbOrCinemetaShelf("show:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.SHOW, shelf, tmdbApiKey)
+    suspend fun fetchDiscoverShowsShelves(shelf: String, tmdbApiKey: String? = null, page: Int = 1): List<SearchResultItem> =
+        fetchTmdbOrCinemetaShelf("show:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.SHOW, shelf, tmdbApiKey, page)
 
-    suspend fun fetchDiscoverMoviesShelves(shelf: String, tmdbApiKey: String? = null): List<SearchResultItem> =
-        fetchTmdbOrCinemetaShelf("movie:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.MOVIE, shelf, tmdbApiKey)
+    suspend fun fetchDiscoverMoviesShelves(shelf: String, tmdbApiKey: String? = null, page: Int = 1): List<SearchResultItem> =
+        fetchTmdbOrCinemetaShelf("movie:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.MOVIE, shelf, tmdbApiKey, page)
 
-    suspend fun fetchDiscoverVisualNovelsShelves(shelf: String): List<SearchResultItem> {
-        val cacheKey = "vn:${shelf.lowercase()}"
+    suspend fun fetchDiscoverVisualNovelsShelves(shelf: String, page: Int = 1): List<SearchResultItem> {
+        val safePage = page.coerceAtLeast(1)
+        val cacheKey = "vn:${shelf.lowercase()}_p$safePage"
         discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
         val hideNsfw = com.omnitrack.app.data.preferences.PreferenceManager.cachedVnNsfwFilterMode ==
             com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
@@ -2353,6 +2414,7 @@ class OmniSearchRepository(
                     put("sort", if (shelf.equals("top_rated", ignoreCase = true)) "rating" else "votecount")
                     put("reverse", true)
                     put("results", 16)
+                    put("page", safePage)
                 }
                 val req = Request.Builder()
                     .url("https://api.vndb.org/kana/vn")
@@ -2423,8 +2485,8 @@ class OmniSearchRepository(
         }
     }
 
-    suspend fun fetchDiscoverComicsShelves(shelf: String): List<SearchResultItem> =
-        com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).fetchDiscoverComicsShelves(shelf)
+    suspend fun fetchDiscoverComicsShelves(shelf: String, page: Int = 1): List<SearchResultItem> =
+        com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).fetchDiscoverComicsShelves(shelf, page)
 
     private suspend fun searchComics(query: String): List<SearchResultItem> =
         com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).searchComics(query)

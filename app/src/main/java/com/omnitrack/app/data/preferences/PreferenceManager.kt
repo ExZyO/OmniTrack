@@ -14,8 +14,11 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnNsfwFilterMode
 import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.ui.theme.OmniAppTheme
+import com.omnitrack.app.ui.theme.OmniThemeSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -58,7 +61,104 @@ data class PosterCardStyle(
     val cardDepthContinueWatchingEnabled: Boolean = true,
     val cardDepthEpisodesEnabled: Boolean = true,
     val cardDepthCastEnabled: Boolean = true,
-    val cardDepthTrailersEnabled: Boolean = true
+    val cardDepthTrailersEnabled: Boolean = true,
+    val showQuickProgressOnCards: Boolean = false
+)
+
+enum class DiscoverLayoutStyle(val displayName: String, val description: String) {
+    EDITORIAL_SPOTLIGHT("Layout A · Editorial Spotlight", "Clean header, #1 Trending dual-artwork spotlight & infinite 2:3 shelves"),
+    HERO_CAROUSEL("Layout B · Full Hero Carousel", "Swipeable multi-slide hero banner at top of Discover above infinite shelves"),
+    MINIMAL_RAILS("Layout C · Minimal Search-First", "No top banner — instant search bar, category chips & max visible shelves");
+
+    companion object {
+        fun fromName(name: String?): DiscoverLayoutStyle = when (name?.uppercase()) {
+            "HERO_CAROUSEL" -> HERO_CAROUSEL
+            "MINIMAL_RAILS" -> MINIMAL_RAILS
+            else -> EDITORIAL_SPOTLIGHT
+        }
+    }
+}
+
+data class DiscoverShelfDef(
+    val id: String,
+    val category: MediaType,
+    val shelfKey: String,
+    val title: String
+)
+
+object DiscoverShelfCatalog {
+    val allShelves: List<DiscoverShelfDef> = listOf(
+        // MediaType.ALL overview shelves
+        DiscoverShelfDef("ALL:anime_trending", MediaType.ALL, "anime_trending", "Trending Anime"),
+        DiscoverShelfDef("ALL:manga_trending", MediaType.ALL, "manga_trending", "Trending Manga"),
+        DiscoverShelfDef("ALL:comic_trending", MediaType.ALL, "comic_trending", "Trending Comics"),
+        DiscoverShelfDef("ALL:novel_webnovels", MediaType.ALL, "novel_webnovels", "Popular Web Novels"),
+        DiscoverShelfDef("ALL:show_trending", MediaType.ALL, "show_trending", "Trending TV Shows"),
+        DiscoverShelfDef("ALL:movie_trending", MediaType.ALL, "movie_trending", "Trending Movies"),
+        DiscoverShelfDef("ALL:book_trending", MediaType.ALL, "book_trending", "Trending Books"),
+        DiscoverShelfDef("ALL:game_trending", MediaType.ALL, "game_trending", "Trending Games"),
+        DiscoverShelfDef("ALL:vn_popular", MediaType.ALL, "vn_popular", "Popular Visual Novels"),
+
+        // Anime
+        DiscoverShelfDef("ANIME:trending", MediaType.ANIME, "trending", "Trending Anime Now"),
+        DiscoverShelfDef("ANIME:popular", MediaType.ANIME, "popular", "All-Time Popular Anime"),
+        DiscoverShelfDef("ANIME:top_rated", MediaType.ANIME, "top_rated", "Top Rated Anime"),
+
+        // Manga
+        DiscoverShelfDef("MANGA:trending", MediaType.MANGA, "trending", "Trending Manga"),
+        DiscoverShelfDef("MANGA:manhwa", MediaType.MANGA, "manhwa", "Popular Manhwa (Korea)"),
+        DiscoverShelfDef("MANGA:top_rated", MediaType.MANGA, "top_rated", "Top Rated Manga"),
+
+        // Comics
+        DiscoverShelfDef("COMIC:superhero", MediaType.COMIC, "superhero", "Trending & Acclaimed Runs"),
+        DiscoverShelfDef("COMIC:pull_list", MediaType.COMIC, "pull_list", "New This Week (Pull List)"),
+        DiscoverShelfDef("COMIC:indie", MediaType.COMIC, "indie", "Iconic Graphic Novels"),
+
+        // Novels
+        DiscoverShelfDef("NOVEL:top_webnovels", MediaType.NOVEL, "top_webnovels", "Popular Web Novels"),
+        DiscoverShelfDef("NOVEL:progression_webnovels", MediaType.NOVEL, "progression_webnovels", "Progression & LitRPG Web Novels"),
+        DiscoverShelfDef("NOVEL:trending_ln", MediaType.NOVEL, "trending_ln", "Trending Light Novels"),
+        DiscoverShelfDef("NOVEL:top_rated_ln", MediaType.NOVEL, "top_rated_ln", "Top Rated Light Novels"),
+
+        // Books
+        DiscoverShelfDef("BOOK:trending", MediaType.BOOK, "trending", "Trending This Week"),
+        DiscoverShelfDef("BOOK:classics_poetry", MediaType.BOOK, "classics_poetry", "Classics & Epic Poetry"),
+        DiscoverShelfDef("BOOK:scifi_fantasy", MediaType.BOOK, "scifi_fantasy", "Sci-Fi & Fantasy"),
+        DiscoverShelfDef("BOOK:philosophy_nonfiction", MediaType.BOOK, "philosophy_nonfiction", "Philosophy & Non-Fiction"),
+        DiscoverShelfDef("BOOK:audiobooks", MediaType.BOOK, "audiobooks", "Audiobooks"),
+
+        // TV Shows
+        DiscoverShelfDef("SHOW:trending", MediaType.SHOW, "trending", "Trending TV Shows"),
+        DiscoverShelfDef("SHOW:top_rated", MediaType.SHOW, "top_rated", "Top Rated Series"),
+
+        // Movies
+        DiscoverShelfDef("MOVIE:trending", MediaType.MOVIE, "trending", "Trending Movies"),
+        DiscoverShelfDef("MOVIE:top_rated", MediaType.MOVIE, "top_rated", "Top Rated Movies"),
+
+        // Games
+        DiscoverShelfDef("GAME:trending", MediaType.GAME, "trending", "Trending Now"),
+        DiscoverShelfDef("GAME:top_rated", MediaType.GAME, "top_rated", "Top Critically Acclaimed"),
+        DiscoverShelfDef("GAME:upcoming", MediaType.GAME, "upcoming", "Upcoming Releases"),
+
+        // Visual Novels
+        DiscoverShelfDef("VISUAL_NOVEL:popular", MediaType.VISUAL_NOVEL, "popular", "Popular Visual Novels"),
+        DiscoverShelfDef("VISUAL_NOVEL:top_rated", MediaType.VISUAL_NOVEL, "top_rated", "Highest Rated Visual Novels")
+    )
+
+    fun shelvesForCategory(category: MediaType): List<DiscoverShelfDef> =
+        allShelves.filter { it.category == category }
+}
+
+data class DiscoverCustomizationSettings(
+    val layoutStyle: DiscoverLayoutStyle = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT,
+    val showSpotlightBanner: Boolean = true,
+    val showQuickSearchChips: Boolean = true,
+    val showSubFilters: Boolean = true,
+    val showInYourLibraryShelf: Boolean = true,
+    val showCustomEntryCard: Boolean = true,
+    val showAiToggle: Boolean = true,
+    val disabledCategories: Set<String> = emptySet(),
+    val disabledShelves: Set<String> = emptySet()
 )
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
@@ -153,15 +253,19 @@ enum class HomeShelfPosterSize(val displayName: String, val widthDp: Int, val he
 }
 
 enum class HomeHeroSource(val displayName: String) {
+    ALL_MIXED("All Sources Mixed"),
     CONTINUE("Continue Tracking"),
     FAVORITES("Favorites"),
     PLAN_TO_TRACK("Plan to Track"),
+    RECENT("Recently Updated"),
     TRENDING("Trending");
 
     companion object {
         fun fromName(name: String?): HomeHeroSource = when (name?.uppercase()) {
+            "ALL_MIXED" -> ALL_MIXED
             "FAVORITES" -> FAVORITES
             "PLAN_TO_TRACK" -> PLAN_TO_TRACK
+            "RECENT" -> RECENT
             "TRENDING" -> TRENDING
             else -> CONTINUE
         }
@@ -185,7 +289,14 @@ enum class ContinueTrackingStyle(val displayName: String, val description: Strin
 data class HomeHeroSettings(
     val showHero: Boolean = true,
     val heroSource: HomeHeroSource = HomeHeroSource.CONTINUE,
+    val heroSources: Set<String> = setOf("CONTINUE", "FAVORITES", "TRENDING"),
+    val heroCategoryMode: String = "ALL", // "ALL", "FOLLOW_HOME", "CUSTOM"
+    val heroCategories: Set<String> = emptySet(),
+    val slideCount: Int = 10, // 5, 8, 12, 15, 20, 0 = Unlimited
+    val slideOrder: String = "RECENT", // "RECENT", "SHUFFLE", "TOP_RATED", "INTERLEAVED"
     val autoRotate: Boolean = true,
+    val autoRotateSeconds: Int = 6, // 0 = Off, 4, 6, 9, 12
+    val heroHeightPreset: String = "STANDARD", // "COMPACT", "STANDARD", "TALL"
     val dimBanner: Boolean = true,
     val allowCroppedFallback: Boolean = false,
     val strictMode: Boolean = false,
@@ -196,8 +307,10 @@ data class HomeHeroSettings(
     val showUnreadBadge: Boolean = true,
     val statusFilters: Set<String> = emptySet(),
     val continueTrackingStyle: ContinueTrackingStyle = ContinueTrackingStyle.CARD,
+    val homeDashboardStyle: String = "EDITORIAL", // "EDITORIAL" (Option A) or "COMPACT" (Option C)
+    val showQuickPlusOnContinue: Boolean = true,
     val shelfPosterSize: HomeShelfPosterSize = HomeShelfPosterSize.STANDARD,
-    val shelfItemLimit: Int = 12,
+    val shelfItemLimit: Int = 0, // 0 = Unlimited (Infinite), or 8 / 12 / 20
     val defaultCategory: MediaType = MediaType.ALL
 )
 
@@ -209,7 +322,7 @@ enum class PreferredTitleLanguage(val displayName: String, val description: Stri
 
 data class PresentationSettings(
     val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
-    val bannerSizing: BannerSizing = BannerSizing.CINEMA_SHOWCASE,
+    val bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
     val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
     val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR
 )
@@ -217,13 +330,33 @@ data class PresentationSettings(
 class PreferenceManager(private val context: Context) {
 
     private object PreferencesKeys {
+        val APP_THEME = stringPreferencesKey("app_theme")
+        val APP_AMOLED_BLACK = booleanPreferencesKey("app_amoled_black")
+        val APP_CUSTOM_FIRST_HEX = stringPreferencesKey("app_custom_first_hex")
+        val APP_CUSTOM_SECOND_HEX = stringPreferencesKey("app_custom_second_hex")
         val DETAILS_PAGE_PRESENTATION = stringPreferencesKey("details_page_presentation")
         val BANNER_SIZING = stringPreferencesKey("banner_sizing")
         val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
+        val DISCOVER_LAYOUT_STYLE = stringPreferencesKey("discover_layout_style")
+        val DISCOVER_SHOW_SPOTLIGHT = booleanPreferencesKey("discover_show_spotlight")
+        val DISCOVER_SHOW_QUICK_CHIPS = booleanPreferencesKey("discover_show_quick_chips")
+        val DISCOVER_SHOW_SUB_FILTERS = booleanPreferencesKey("discover_show_sub_filters")
+        val DISCOVER_SHOW_IN_LIBRARY = booleanPreferencesKey("discover_show_in_library")
+        val DISCOVER_SHOW_CUSTOM_ENTRY = booleanPreferencesKey("discover_show_custom_entry")
+        val DISCOVER_SHOW_AI_TOGGLE = booleanPreferencesKey("discover_show_ai_toggle")
+        val DISCOVER_DISABLED_CATEGORIES = stringSetPreferencesKey("discover_disabled_categories")
+        val DISCOVER_DISABLED_SHELVES = stringSetPreferencesKey("discover_disabled_shelves")
         val HOME_ROW_ORDER = stringPreferencesKey("home_row_order")
         val HOME_HERO_SOURCE = stringPreferencesKey("home_hero_source")
+        val HOME_HERO_SOURCES = stringSetPreferencesKey("home_hero_sources")
+        val HOME_HERO_CATEGORY_MODE = stringPreferencesKey("home_hero_category_mode")
+        val HOME_HERO_CATEGORIES = stringSetPreferencesKey("home_hero_categories")
+        val HOME_HERO_SLIDE_COUNT = intPreferencesKey("home_hero_slide_count")
+        val HOME_HERO_SLIDE_ORDER = stringPreferencesKey("home_hero_slide_order")
+        val HOME_HERO_ROTATE_SECONDS = intPreferencesKey("home_hero_rotate_seconds")
+        val HOME_HERO_HEIGHT_PRESET = stringPreferencesKey("home_hero_height_preset")
         val HOME_HERO_ENABLED = booleanPreferencesKey("home_hero_enabled")
         val HOME_HERO_AUTO_ROTATE = booleanPreferencesKey("home_hero_auto_rotate")
         val HOME_HERO_DIM_BANNER = booleanPreferencesKey("home_hero_dim_banner")
@@ -236,6 +369,8 @@ class PreferenceManager(private val context: Context) {
         val HOME_HERO_SHOW_UNREAD_BADGE = booleanPreferencesKey("home_hero_show_unread_badge")
         val HOME_HERO_STATUS_FILTERS = stringSetPreferencesKey("home_hero_status_filters")
         val HOME_CONTINUE_STYLE = stringPreferencesKey("home_continue_style")
+        val HOME_DASHBOARD_STYLE = stringPreferencesKey("home_dashboard_style")
+        val HOME_CONTINUE_QUICK_PLUS = booleanPreferencesKey("home_continue_quick_plus")
         val HOME_SHELF_POSTER_SIZE = stringPreferencesKey("home_shelf_poster_size")
         val HOME_SHELF_ITEM_LIMIT = intPreferencesKey("home_shelf_item_limit")
         val HOME_DEFAULT_CATEGORY = stringPreferencesKey("home_default_category")
@@ -278,6 +413,7 @@ class PreferenceManager(private val context: Context) {
         val POSTER_CARD_DEPTH_EPISODES = booleanPreferencesKey("poster_card_depth_episodes")
         val POSTER_CARD_DEPTH_CAST = booleanPreferencesKey("poster_card_depth_cast")
         val POSTER_CARD_DEPTH_TRAILERS = booleanPreferencesKey("poster_card_depth_trailers")
+        val POSTER_SHOW_QUICK_PROGRESS = booleanPreferencesKey("poster_show_quick_progress")
 
         val EPISODE_LAYOUT_MODE = stringPreferencesKey("episode_layout_mode")
         val EPISODE_LAYOUT_SCALE = floatPreferencesKey("episode_layout_scale")
@@ -306,7 +442,7 @@ class PreferenceManager(private val context: Context) {
                 } ?: DetailsPagePresentation.HERO,
                 bannerSizing = prefs[PreferencesKeys.BANNER_SIZING]?.let {
                     runCatching { BannerSizing.valueOf(it) }.getOrNull()
-                } ?: BannerSizing.CINEMA_SHOWCASE,
+                } ?: BannerSizing.FULL_BLEED,
                 detailsBackdropStyle = prefs[PreferencesKeys.DETAILS_BACKDROP_STYLE]?.let {
                     runCatching { DetailsBackdropStyle.valueOf(it) }.getOrNull()
                 } ?: DetailsBackdropStyle.CINEMATIC_FADE,
@@ -315,6 +451,134 @@ class PreferenceManager(private val context: Context) {
                 } ?: FallbackBackgroundStyle.CINEMATIC_BLUR
             )
         }
+        .distinctUntilChanged()
+
+    val themeSettings: Flow<OmniThemeSettings> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException || exception is ClassCastException) emit(emptyPreferences()) else throw exception
+        }
+        .map { prefs ->
+            OmniThemeSettings(
+                theme = OmniAppTheme.fromName(prefs[PreferencesKeys.APP_THEME]),
+                amoledBlack = prefs[PreferencesKeys.APP_AMOLED_BLACK] ?: true,
+                customFirstHex = prefs[PreferencesKeys.APP_CUSTOM_FIRST_HEX] ?: "#E8C26A",
+                customSecondHex = prefs[PreferencesKeys.APP_CUSTOM_SECOND_HEX] ?: "#35D6E8"
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun updateAppTheme(theme: OmniAppTheme) {
+        context.dataStore.edit { it[PreferencesKeys.APP_THEME] = theme.name }
+    }
+
+    suspend fun updateAmoledBlack(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.APP_AMOLED_BLACK] = enabled }
+    }
+
+    suspend fun updateCustomThemeFirstHex(hex: String) {
+        context.dataStore.edit { it[PreferencesKeys.APP_CUSTOM_FIRST_HEX] = hex.trim().uppercase() }
+    }
+
+    suspend fun updateCustomThemeSecondHex(hex: String) {
+        context.dataStore.edit { it[PreferencesKeys.APP_CUSTOM_SECOND_HEX] = hex.trim().uppercase() }
+    }
+
+    val discoverLayoutStyle: Flow<DiscoverLayoutStyle> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> DiscoverLayoutStyle.fromName(prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE]) }
+        .distinctUntilChanged()
+
+    suspend fun updateDiscoverLayoutStyle(style: DiscoverLayoutStyle) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE] = style.name
+        }
+    }
+
+    val discoverCustomizationSettings: Flow<DiscoverCustomizationSettings> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            DiscoverCustomizationSettings(
+                layoutStyle = DiscoverLayoutStyle.fromName(prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE]),
+                showSpotlightBanner = prefs[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] ?: true,
+                showQuickSearchChips = prefs[PreferencesKeys.DISCOVER_SHOW_QUICK_CHIPS] ?: true,
+                showSubFilters = prefs[PreferencesKeys.DISCOVER_SHOW_SUB_FILTERS] ?: true,
+                showInYourLibraryShelf = prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] ?: true,
+                showCustomEntryCard = prefs[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] ?: true,
+                showAiToggle = prefs[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] ?: true,
+                disabledCategories = prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] ?: emptySet(),
+                disabledShelves = prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet()
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun setDiscoverShowSpotlight(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] = enabled }
+    }
+
+    suspend fun setDiscoverShowQuickChips(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_QUICK_CHIPS] = enabled }
+    }
+
+    suspend fun setDiscoverShowSubFilters(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_SUB_FILTERS] = enabled }
+    }
+
+    suspend fun setDiscoverShowInLibrary(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] = enabled }
+    }
+
+    suspend fun setDiscoverShowCustomEntry(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] = enabled }
+    }
+
+    suspend fun setDiscoverShowAiToggle(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] = enabled }
+    }
+
+    suspend fun setDiscoverCategoryEnabled(category: MediaType, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = (prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] ?: emptySet()).toMutableSet()
+            if (enabled) current.remove(category.name) else current.add(category.name)
+            prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] = current
+        }
+    }
+
+    suspend fun setDiscoverAllCategoriesEnabled() {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] = emptySet()
+        }
+    }
+
+    suspend fun setDiscoverShelfEnabled(shelfId: String, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = (prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet()).toMutableSet()
+            if (enabled) current.remove(shelfId) else current.add(shelfId)
+            prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] = current
+        }
+    }
+
+    suspend fun setDiscoverVerticalShelvesEnabled(category: MediaType, enabled: Boolean) {
+        val ids = DiscoverShelfCatalog.shelvesForCategory(category).map { it.id }
+        context.dataStore.edit { prefs ->
+            val current = (prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet()).toMutableSet()
+            if (enabled) current.removeAll(ids.toSet()) else current.addAll(ids)
+            prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] = current
+        }
+    }
+
+    suspend fun resetDiscoverDefaults() {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE] = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT.name
+            prefs[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_QUICK_CHIPS] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_SUB_FILTERS] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] = true
+            prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] = emptySet()
+            prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] = emptySet()
+        }
+    }
 
     suspend fun updateDetailsPagePresentation(presentation: DetailsPagePresentation) {
         context.dataStore.edit { prefs ->
@@ -551,12 +815,18 @@ class PreferenceManager(private val context: Context) {
                     cardDepthContinueWatchingEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_CONTINUE_WATCHING] ?: true,
                     cardDepthEpisodesEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EPISODES] ?: true,
                     cardDepthCastEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_CAST] ?: true,
-                    cardDepthTrailersEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS] ?: true
+                    cardDepthTrailersEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS] ?: true,
+                    showQuickProgressOnCards = prefs[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] ?: false
                 )
             } catch (_: Exception) {
                 PosterCardStyle()
             }
         }
+        .distinctUntilChanged()
+
+    suspend fun updatePosterShowQuickProgress(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] = enabled }
+    }
 
     suspend fun updatePosterWidthDp(width: Int) {
         context.dataStore.edit { it[PreferencesKeys.POSTER_WIDTH_DP] = width }
@@ -623,6 +893,7 @@ class PreferenceManager(private val context: Context) {
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_EPISODES)
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_CAST)
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS)
+            it.remove(PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS)
         }
     }
 
@@ -721,13 +992,17 @@ class PreferenceManager(private val context: Context) {
                 try {
                     val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<DetailSectionItem>>(raw)
                     val existingKeys = parsed.map { it.key }.toSet()
-                    val missing = DetailsPageLayoutDefaults.defaultSections.filter { it.key !in existingKeys }
-                    parsed + missing
+                    val missingTop = DetailsPageLayoutDefaults.defaultSections
+                        .filter { it.key == DetailSectionKey.PERSONAL_NOTES && it.key !in existingKeys }
+                    val missingTail = DetailsPageLayoutDefaults.defaultSections
+                        .filter { it.key != DetailSectionKey.PERSONAL_NOTES && it.key !in existingKeys }
+                    missingTop + parsed + missingTail
                 } catch (_: Exception) {
                     DetailsPageLayoutDefaults.defaultSections
                 }
             }
         }
+        .distinctUntilChanged()
 
     suspend fun setDetailsPageSectionOrder(items: List<DetailSectionItem>) {
         context.dataStore.edit { prefs ->
@@ -752,6 +1027,7 @@ class PreferenceManager(private val context: Context) {
                 }
             }
         }
+        .distinctUntilChanged()
 
     suspend fun setHomeRowOrder(items: List<HomeRowItem>) {
         context.dataStore.edit { prefs ->
@@ -782,10 +1058,22 @@ class PreferenceManager(private val context: Context) {
     val homeHeroSettings: Flow<HomeHeroSettings> = context.dataStore.data
         .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
+            val autoRotateBool = prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] ?: true
+            val rawRotateSecs = prefs[PreferencesKeys.HOME_HERO_ROTATE_SECONDS]
+                ?: if (autoRotateBool) 6 else 0
             HomeHeroSettings(
                 showHero = prefs[PreferencesKeys.HOME_HERO_ENABLED] ?: true,
                 heroSource = HomeHeroSource.fromName(prefs[PreferencesKeys.HOME_HERO_SOURCE]),
-                autoRotate = prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] ?: true,
+                heroSources = prefs[PreferencesKeys.HOME_HERO_SOURCES] ?: setOf("CONTINUE", "FAVORITES", "TRENDING"),
+                heroCategoryMode = prefs[PreferencesKeys.HOME_HERO_CATEGORY_MODE] ?: "ALL",
+                heroCategories = prefs[PreferencesKeys.HOME_HERO_CATEGORIES] ?: emptySet(),
+                slideCount = (prefs[PreferencesKeys.HOME_HERO_SLIDE_COUNT] ?: 10).let {
+                    if (it in listOf(0, 5, 8, 10, 12, 15, 20)) it else 10
+                },
+                slideOrder = prefs[PreferencesKeys.HOME_HERO_SLIDE_ORDER] ?: "RECENT",
+                autoRotate = rawRotateSecs > 0,
+                autoRotateSeconds = if (rawRotateSecs in listOf(0, 4, 6, 9, 12)) rawRotateSecs else 6,
+                heroHeightPreset = prefs[PreferencesKeys.HOME_HERO_HEIGHT_PRESET] ?: "STANDARD",
                 dimBanner = prefs[PreferencesKeys.HOME_HERO_DIM_BANNER] ?: true,
                 allowCroppedFallback = prefs[PreferencesKeys.HOME_HERO_ALLOW_CROPPED_FALLBACK] ?: false,
                 strictMode = prefs[PreferencesKeys.HOME_HERO_STRICT_MODE] ?: false,
@@ -796,22 +1084,69 @@ class PreferenceManager(private val context: Context) {
                 showUnreadBadge = prefs[PreferencesKeys.HOME_HERO_SHOW_UNREAD_BADGE] ?: true,
                 statusFilters = prefs[PreferencesKeys.HOME_HERO_STATUS_FILTERS] ?: emptySet(),
                 continueTrackingStyle = ContinueTrackingStyle.fromName(prefs[PreferencesKeys.HOME_CONTINUE_STYLE]),
+                homeDashboardStyle = prefs[PreferencesKeys.HOME_DASHBOARD_STYLE] ?: "EDITORIAL",
+                showQuickPlusOnContinue = prefs[PreferencesKeys.HOME_CONTINUE_QUICK_PLUS] ?: true,
                 shelfPosterSize = HomeShelfPosterSize.fromName(prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE]),
-                shelfItemLimit = (prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] ?: 12).let {
-                    if (it in listOf(8, 12, 20)) it else 12
+                shelfItemLimit = (prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] ?: 0).let {
+                    if (it in listOf(0, 8, 12, 20)) it else 0
                 },
                 defaultCategory = runCatching {
                     prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY]?.let { MediaType.valueOf(it) } ?: MediaType.ALL
                 }.getOrDefault(MediaType.ALL)
             )
         }
+        .distinctUntilChanged()
 
     suspend fun setHomeHeroEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.HOME_HERO_ENABLED] = enabled }
     }
 
+    suspend fun setHomeHeroSources(sources: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_SOURCES] = sources }
+    }
+
+    suspend fun setHomeHeroCategoryMode(mode: String) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_CATEGORY_MODE] = mode }
+    }
+
+    suspend fun setHomeHeroCategories(categories: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_CATEGORIES] = categories }
+    }
+
+    suspend fun setHomeHeroSlideCount(count: Int) {
+        val safe = if (count in listOf(0, 5, 8, 10, 12, 15, 20)) count else 10
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_SLIDE_COUNT] = safe }
+    }
+
+    suspend fun setHomeHeroSlideOrder(order: String) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_SLIDE_ORDER] = order }
+    }
+
+    suspend fun setHomeHeroRotateSeconds(seconds: Int) {
+        val safe = if (seconds in listOf(0, 4, 6, 9, 12)) seconds else 6
+        context.dataStore.edit {
+            it[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = safe
+            it[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = safe > 0
+        }
+    }
+
+    suspend fun setHomeHeroHeightPreset(preset: String) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_HEIGHT_PRESET] = preset }
+    }
+
+    suspend fun setHomeContinueQuickPlus(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_CONTINUE_QUICK_PLUS] = enabled }
+    }
+
+    suspend fun setHomeDashboardStyle(style: String) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_DASHBOARD_STYLE] = style.uppercase() }
+    }
+
     suspend fun setHomeHeroAutoRotate(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = enabled }
+        context.dataStore.edit {
+            it[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = enabled
+            it[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = if (enabled) 6 else 0
+        }
     }
 
     suspend fun setHomeHeroDimBanner(enabled: Boolean) {
@@ -855,7 +1190,7 @@ class PreferenceManager(private val context: Context) {
     }
 
     suspend fun setHomeShelfItemLimit(limit: Int) {
-        val safe = if (limit in listOf(8, 12, 20)) limit else 12
+        val safe = if (limit in listOf(0, 8, 12, 20)) limit else 0
         context.dataStore.edit { it[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = safe }
     }
 
@@ -867,6 +1202,13 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.HOME_ROW_ORDER] = Json.encodeToString(HomeLayoutDefaults.defaultRows)
             prefs[PreferencesKeys.HOME_HERO_SOURCE] = HomeHeroSource.CONTINUE.name
+            prefs[PreferencesKeys.HOME_HERO_SOURCES] = setOf("CONTINUE", "FAVORITES", "TRENDING")
+            prefs[PreferencesKeys.HOME_HERO_CATEGORY_MODE] = "ALL"
+            prefs[PreferencesKeys.HOME_HERO_CATEGORIES] = emptySet()
+            prefs[PreferencesKeys.HOME_HERO_SLIDE_COUNT] = 10
+            prefs[PreferencesKeys.HOME_HERO_SLIDE_ORDER] = "RECENT"
+            prefs[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = 6
+            prefs[PreferencesKeys.HOME_HERO_HEIGHT_PRESET] = "STANDARD"
             prefs[PreferencesKeys.HOME_HERO_ENABLED] = true
             prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = true
             prefs[PreferencesKeys.HOME_HERO_DIM_BANNER] = true
@@ -879,8 +1221,10 @@ class PreferenceManager(private val context: Context) {
             prefs[PreferencesKeys.HOME_HERO_SHOW_UNREAD_BADGE] = true
             prefs[PreferencesKeys.HOME_HERO_STATUS_FILTERS] = emptySet()
             prefs[PreferencesKeys.HOME_CONTINUE_STYLE] = ContinueTrackingStyle.CARD.name
+            prefs[PreferencesKeys.HOME_DASHBOARD_STYLE] = "EDITORIAL"
+            prefs[PreferencesKeys.HOME_CONTINUE_QUICK_PLUS] = true
             prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = HomeShelfPosterSize.STANDARD.name
-            prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = 12
+            prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = 0
             prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY] = MediaType.ALL.name
         }
     }

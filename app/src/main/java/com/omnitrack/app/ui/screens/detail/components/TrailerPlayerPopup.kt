@@ -7,8 +7,10 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
+import android.os.Build
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -49,21 +51,21 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCompositionContext
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -83,7 +85,7 @@ import com.omnitrack.app.data.trailer.YoutubeChunkedDataSourceFactory
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 
 /**
@@ -134,18 +136,6 @@ fun TrailerPlayerPopup(
         customVideoView = null
         customVideoCallback = null
         isFullscreen = false
-    }
-
-    DisposableEffect(isFullscreen) {
-        val activity = context.findActivity()
-        activity?.requestedOrientation = if (isFullscreen) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
-        onDispose {
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
     }
 
     val subtitle = buildList {
@@ -315,6 +305,9 @@ fun TrailerPlayerPopup(
                                 useController = true
                                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                                 setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                                setFullscreenButtonClickListener { _ ->
+                                    isFullscreen = !isFullscreen
+                                }
                                 player = exoPlayer
                                 layoutParams = ViewGroup.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -325,6 +318,11 @@ fun TrailerPlayerPopup(
                         update = { pv ->
                             if (pv.player !== exoPlayer) {
                                 pv.player = exoPlayer
+                            }
+                        },
+                        onRelease = { pv ->
+                            if (pv.player === exoPlayer) {
+                                pv.player = null
                             }
                         }
                     )
@@ -371,7 +369,7 @@ fun TrailerPlayerPopup(
                     ) {
                         Text(
                             text = "Open in YouTube App",
-                            color = AmoledBlack,
+                            color = OnAccentColor,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -381,129 +379,165 @@ fun TrailerPlayerPopup(
         }
     }
 
-    if (isFullscreen) {
-        Dialog(
-            onDismissRequest = exitFullscreen,
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
-            )
-        ) {
-            BackHandler { exitFullscreen() }
+    BackHandler(enabled = isFullscreen) { exitFullscreen() }
 
-            val view = LocalView.current
-            val dialogWindow = (view.parent as? DialogWindowProvider)?.window ?: context.findActivity()?.window
+    val parentComposition = rememberCompositionContext()
+    val currentTrailerType by rememberUpdatedState(trailerType)
+    val currentSubtitle by rememberUpdatedState(subtitle)
+    val currentOpenInYouTubeApp by rememberUpdatedState(openInYouTubeApp)
+    val currentExitFullscreen by rememberUpdatedState(exitFullscreen)
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
 
-            DisposableEffect(dialogWindow) {
-                dialogWindow?.let { win ->
-                    win.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        win.attributes = win.attributes.apply {
-                            layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                        }
-                    }
-                    win.setBackgroundDrawableResource(android.R.color.black)
-                    win.decorView.setPadding(0, 0, 0, 0)
-                    val controller = WindowCompat.getInsetsController(win, win.decorView)
-                    controller.hide(WindowInsetsCompat.Type.systemBars())
-                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                }
-                onDispose {
-                    dialogWindow?.let { win ->
-                        val controller = WindowCompat.getInsetsController(win, win.decorView)
-                        controller.show(WindowInsetsCompat.Type.systemBars())
-                    }
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                PlayerViewportContent()
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 18.dp)
-                        .align(Alignment.TopCenter),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = trailerType.ifBlank { "Trailer" },
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (subtitle.isNotBlank()) {
-                            Text(
-                                text = subtitle,
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(
-                            onClick = openInYouTubeApp,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.65f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = "Open in YouTube",
-                                tint = Color.Red,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = exitFullscreen,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.65f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FullscreenExit,
-                                contentDescription = "Exit Fullscreen",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = {
-                                exitFullscreen()
-                                onDismiss()
-                            },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.65f))
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-            }
+    DisposableEffect(isFullscreen) {
+        if (!isFullscreen) {
+            return@DisposableEffect onDispose {}
         }
-    } else {
+
+        val activity = context.findActivity()
+        val contentRoot = activity?.findViewById<ViewGroup>(android.R.id.content)
+        val window = activity?.window
+        val prevCutoutMode = if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes.layoutInDisplayCutoutMode
+        } else {
+            0
+        }
+
+        if (activity != null && window != null) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes = window.attributes.apply {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+            }
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+
+        val fullscreenView = if (activity != null && contentRoot != null) {
+            ComposeView(activity).apply {
+                setParentCompositionContext(parentComposition)
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setContent {
+                    BackHandler { currentExitFullscreen() }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black)
+                    ) {
+                        PlayerViewportContent()
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 18.dp)
+                                .align(Alignment.TopCenter),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = currentTrailerType.ifBlank { "Trailer" },
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (currentSubtitle.isNotBlank()) {
+                                    Text(
+                                        text = currentSubtitle,
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                IconButton(
+                                    onClick = { currentOpenInYouTubeApp() },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.65f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Open in YouTube",
+                                        tint = Color.Red,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = { currentExitFullscreen() },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.65f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FullscreenExit,
+                                        contentDescription = "Exit Fullscreen",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        currentExitFullscreen()
+                                        currentOnDismiss()
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.65f))
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }.also { view ->
+                contentRoot.addView(view)
+            }
+        } else {
+            null
+        }
+
+        onDispose {
+            fullscreenView?.let { view ->
+                view.disposeComposition()
+                (view.parent as? ViewGroup)?.removeView(view)
+            }
+            if (window != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    window.attributes = window.attributes.apply {
+                        layoutInDisplayCutoutMode = prevCutoutMode
+                    }
+                }
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    if (!isFullscreen) {
         ModalBottomSheet(
             onDismissRequest = {
                 exitFullscreen()
@@ -587,9 +621,9 @@ fun TrailerPlayerPopup(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(18.dp)),
+                        .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     PlayerViewportContent()

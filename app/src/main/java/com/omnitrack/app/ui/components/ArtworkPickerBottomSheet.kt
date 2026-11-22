@@ -966,7 +966,7 @@ fun ArtworkPickerBottomSheet(
                                         )
                                     }
 
-                                    // Quick snaps + Apply
+                                    // Quick snaps
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -979,7 +979,7 @@ fun ArtworkPickerBottomSheet(
                                             "Center" to Triple(0f, 0f, draftZoom),
                                             "Right" to Triple(1f, draftFocalY, draftZoom),
                                             "Top" to Triple(draftFocalX, -1f, draftZoom),
-                                            "Reset" to Triple(0f, 0f, 1f)
+                                            "Bottom" to Triple(draftFocalX, 1f, draftZoom)
                                         ).forEach { (lbl, target) ->
                                             OutlinedButton(
                                                 onClick = {
@@ -989,22 +989,45 @@ fun ArtworkPickerBottomSheet(
                                                 },
                                                 shape = RoundedCornerShape(8.dp),
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
                                             ) {
                                                 Text(lbl, fontSize = 11.sp, color = TextPrimary)
                                             }
                                         }
-                                        Spacer(modifier = Modifier.weight(1f, fill = false))
+                                    }
+
+                                    // Fixed Reset & Apply Framing row (always immediately reachable)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                draftFocalX = 0f
+                                                draftFocalY = 0f
+                                                draftZoom = 1f
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Reset", fontSize = 12.sp, color = TextPrimary)
+                                        }
                                         Button(
                                             onClick = {
                                                 onBannerFramingChanged(draftFocalX, draftFocalY, draftZoom)
                                                 showFramingEditor = false
                                             },
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack)
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                                            modifier = Modifier.weight(1.6f)
                                         ) {
-                                            Text("Apply Framing", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                            Text("Apply Framing", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }

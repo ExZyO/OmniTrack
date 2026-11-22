@@ -208,6 +208,14 @@ class MediaRepository(
 
     fun getMediaById(id: Long): Flow<MediaItemEntity?> = mediaDao.getMediaById(id).distinctUntilChanged()
 
+    suspend fun getMediaByIdOnce(id: Long): MediaItemEntity? = mediaDao.getMediaByIdOnce(id)
+
+    suspend fun deleteMediaById(id: Long) = mediaDao.deleteMediaById(id)
+
+    suspend fun deletePendingSyncTasksFor(mediaId: Long, trackerType: String) {
+        syncQueueDao?.deletePendingFor(mediaId, trackerType)
+    }
+
     fun getFilteredMedia(type: MediaType, status: TrackingStatus): Flow<List<MediaItemEntity>> =
         (if (type == MediaType.ALL && status == TrackingStatus.ALL) {
             mediaDao.getAllMedia()

@@ -305,38 +305,66 @@ class ComicEnrichmentSource(
         if (first.isNotEmpty()) first else runOl("graphic novels")
     }
 
-    suspend fun fetchDiscoverComicsShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+    suspend fun fetchDiscoverComicsShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val safePage = page.coerceAtLeast(1)
         when (shelf.lowercase()) {
             "pull_list" -> {
                 val mUser = PreferenceManager.cachedMetronUsername
                 val mPass = PreferenceManager.cachedMetronPassword
                 if (mUser.isNotBlank() && mPass.isNotBlank()) {
-                    val metItems = fetchMetronWeeklyIssuesAsSearch(mUser, mPass)
+                    val metItems = fetchMetronWeeklyIssuesAsSearch(mUser, mPass, page = safePage)
                     if (metItems.isNotEmpty()) return@withContext metItems
                 }
-                searchAppleComics("new comic graphic novel 2025 2026", strictComicFilter = true).ifEmpty {
-                    searchOpenLibraryComics("batman spider-man x-men")
-                }.take(14)
+                val terms = listOf(
+                    "new comic graphic novel 2025 2026",
+                    "marvel dc comic 2025",
+                    "image comics graphic novel",
+                    "batman superman graphic novel"
+                )
+                val q = terms[(safePage - 1) % terms.size]
+                if (safePage <= 1) {
+                    searchAppleComics(q, strictComicFilter = true).ifEmpty {
+                        searchOpenLibraryComics("batman spider-man x-men")
+                    }.take(16)
+                } else {
+                    searchOpenLibraryComics(q).ifEmpty {
+                        searchAppleComics(q, strictComicFilter = true)
+                    }.take(16)
+                }
             }
             "superhero", "trending" -> {
-                val a = searchAppleComics("batman spider-man watchmen x-men invincible", strictComicFilter = true)
-                val b = searchOpenLibraryComics("watchmen batman dark knight")
-                (a + b).distinctBy { it.title.lowercase() }.take(14)
+                val queries = listOf(
+                    "watchmen batman dark knight",
+                    "spider-man x-men invincible",
+                    "superman justice league",
+                    "daredevil punisher wolverine"
+                )
+                val q = queries[(safePage - 1) % queries.size]
+                val a = if (safePage == 1) searchAppleComics(q, strictComicFilter = true) else emptyList()
+                val b = searchOpenLibraryComics(q)
+                (a + b).distinctBy { it.title.lowercase() }.take(16)
             }
             else -> {
-                val a = searchAppleComics("saga hellboy walking dead monstress descender", strictComicFilter = true)
-                val b = searchOpenLibraryComics("saga hellboy sandman")
-                (a + b).distinctBy { it.title.lowercase() }.take(14)
+                val queries = listOf(
+                    "saga hellboy sandman",
+                    "walking dead monstress descender",
+                    "maus persepolis akira",
+                    "east of west y the last man"
+                )
+                val q = queries[(safePage - 1) % queries.size]
+                val a = if (safePage == 1) searchAppleComics(q, strictComicFilter = true) else emptyList()
+                val b = searchOpenLibraryComics(q)
+                (a + b).distinctBy { it.title.lowercase() }.take(16)
             }
         }
     }
 
-    private suspend fun fetchMetronWeeklyIssuesRaw(username: String, password: String): List<JsonObject> = NetworkPacer.withGeneralPacing {
+    private suspend fun fetchMetronWeeklyIssuesRaw(username: String, password: String, page: Int = 1): List<JsonObject> = NetworkPacer.withGeneralPacing {
         try {
             val today = LocalDate.now(ZoneId.systemDefault())
             val start = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
             val end = start.plusDays(6)
-            val url = "https://metron.cloud/api/issue/?store_date_range_after=$start&store_date_range_before=$end"
+            val url = "https://metron.cloud/api/issue/?store_date_range_after=$start&store_date_range_before=$end&page=${page.coerceAtLeast(1)}"
             val req = Request.Builder()
                 .url(url)
                 .header("User-Agent", COMIC_UA)
@@ -355,8 +383,8 @@ class ComicEnrichmentSource(
         }
     }
 
-    private suspend fun fetchMetronWeeklyIssuesAsSearch(username: String, password: String): List<SearchResultItem> {
-        return fetchMetronWeeklyIssuesRaw(username, password)
+    private suspend fun fetchMetronWeeklyIssuesAsSearch(username: String, password: String, page: Int = 1): List<SearchResultItem> {
+        return fetchMetronWeeklyIssuesRaw(username, password, page)
             .mapNotNull { o ->
                 val seriesObj = o["series"] as? JsonObject ?: return@mapNotNull null
                 val name = seriesObj["name"].cleanString() ?: return@mapNotNull null
@@ -378,7 +406,7 @@ class ComicEnrichmentSource(
                 )
             }
             .distinctBy { it.title.lowercase() }
-            .take(14)
+            .take(18)
     }
 
     suspend fun fetchWeeklyComicReleases(force: Boolean = false): List<CalendarReleaseItem> = withContext(Dispatchers.IO) {

@@ -42,6 +42,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,7 +71,9 @@ import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -606,9 +609,17 @@ fun BackupRestoreSheet(
                 }
 
                 // Local Device Backups List
-                val backupsDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "backups")
-                val existingBackups = remember(backupsDir) {
-                    backupsDir.listFiles()?.filter { it.extension == "omnibk" }?.sortedByDescending { it.lastModified() } ?: emptyList()
+                val backupsDir = remember(context) {
+                    File(context.getExternalFilesDir(null) ?: context.filesDir, "backups")
+                }
+                var existingBackups by remember { mutableStateOf<List<File>>(emptyList()) }
+                LaunchedEffect(backupsDir, statusMessage) {
+                    existingBackups = withContext(Dispatchers.IO) {
+                        backupsDir.listFiles()
+                            ?.filter { it.extension == "omnibk" }
+                            ?.sortedByDescending { it.lastModified() }
+                            ?: emptyList()
+                    }
                 }
 
                 if (existingBackups.isNotEmpty()) {

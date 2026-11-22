@@ -17,7 +17,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -29,17 +28,14 @@ import coil3.compose.AsyncImage
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.ui.theme.TextSecondary
 
 /**
- * Unified 1:1 Nuvio rail poster card used across:
- * - RecommendationsSection ("More Like This")
- * - PersonDetailScreen ("Filmography" & "Known For")
- * - TmdbEntityBrowseScreen ("Network & Studio Catalog")
- * 
- * Standard base dimensions: 135.dp x 202.dp (2:3 aspect ratio).
+ * Unified crisp rail poster card used across Home, Discover, Recommendations,
+ * Person filmography, and Network/Studio browse rails.
+ * Defaults to a crisp 2:3 aspect ratio derived from [cardWidth] when [cardHeight] is unspecified,
+ * and cleanly supports 1:1 square artwork (e.g. Audiobooks) when [cardHeight] == [cardWidth].
  */
 @Composable
 fun NuvioRailPosterCard(
@@ -50,23 +46,26 @@ fun NuvioRailPosterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     cardWidth: Dp = 135.dp,
-    cardHeight: Dp = 202.dp,
-    cornerRadius: Dp = 16.dp
+    cardHeight: Dp = Dp.Unspecified,
+    cornerRadius: Dp = 14.dp,
+    inLibraryBadge: Boolean = false
 ) {
+    val resolvedHeight = if (cardHeight == Dp.Unspecified) cardWidth * 1.5f else cardHeight
+
     Column(
         modifier = modifier
             .width(cardWidth)
             .clickable(onClick = onClick),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
         Box(
             modifier = Modifier
                 .width(cardWidth)
-                .height(cardHeight)
-                .shadow(12.dp, RoundedCornerShape(cornerRadius))
+                .height(resolvedHeight)
+                .shadow(10.dp, RoundedCornerShape(cornerRadius))
                 .clip(RoundedCornerShape(cornerRadius))
                 .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, RoundedCornerShape(cornerRadius))
+                .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(cornerRadius))
         ) {
             if (!coverUrl.isNullOrBlank()) {
                 AsyncImage(
@@ -77,6 +76,24 @@ fun NuvioRailPosterCard(
                 )
             }
 
+            if (inLibraryBadge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(AmoledBlack.copy(alpha = 0.85f))
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "LIB",
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = AccentGold,
+                        letterSpacing = 0.4.sp
+                    )
+                }
+            }
 
             // Rating badge overlay
             if (rating != null && rating > 0f) {
@@ -84,12 +101,12 @@ fun NuvioRailPosterCard(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .clip(RoundedCornerShape(999.dp))
+                        .clip(RoundedCornerShape(4.dp))
                         .background(AmoledBlack.copy(alpha = 0.85f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 5.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "★ ${com.omnitrack.app.ui.screens.detail.components.formatSmartRating(rating.toDouble())}",
+                        text = "\u2605 ${com.omnitrack.app.ui.screens.detail.components.formatSmartRating(rating.toDouble())}",
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentGold
@@ -98,10 +115,10 @@ fun NuvioRailPosterCard(
             }
         }
 
-        // Title and Year/Role
+        // Title and Subtitle
         Text(
             text = title,
-            fontSize = 13.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = TextPrimary,
             maxLines = 1,
@@ -111,8 +128,8 @@ fun NuvioRailPosterCard(
         if (!subtitle.isNullOrBlank()) {
             Text(
                 text = subtitle,
-                fontSize = 11.5.sp,
-                color = Color.White,
+                fontSize = 11.sp,
+                color = TextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

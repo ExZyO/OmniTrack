@@ -1,7 +1,6 @@
 package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,15 +23,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
@@ -53,8 +50,9 @@ fun LibraryFilterSortSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = DarkSurface,
-        contentColor = TextPrimary
+        containerColor = AmoledBlack,
+        contentColor = TextPrimary,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
@@ -111,7 +109,7 @@ fun LibraryFilterSortSheet(
                 }
             }
 
-            HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             // Sort Mode
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -141,7 +139,7 @@ fun LibraryFilterSortSheet(
                 }
             }
 
-            HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             // View Mode
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -157,7 +155,7 @@ fun LibraryFilterSortSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     listOf(
-                        "GRID_3" to "3-Col Grid",
+                        "GRID_3" to "Auto Grid",
                         "GRID_2" to "2-Col Grid",
                         "LIST" to "Compact List"
                     ).forEach { (key, label) ->
@@ -184,12 +182,10 @@ private fun FilterOptionChip(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) AccentGold else DarkSurfaceElevated)
-            .border(
-                width = 1.dp,
-                color = if (selected) AccentGold else GlassBorder,
-                shape = RoundedCornerShape(10.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (selected) AccentGold.copy(alpha = 0.16f)
+                else Color.White.copy(alpha = 0.05f)
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -199,7 +195,7 @@ private fun FilterOptionChip(
             text = label,
             fontSize = 12.5.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) AmoledBlack else TextSecondary
+            color = if (selected) AccentGold else TextSecondary
         )
     }
 }

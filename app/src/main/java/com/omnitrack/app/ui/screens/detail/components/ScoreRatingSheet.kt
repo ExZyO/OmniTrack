@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -44,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.TextMuted
@@ -69,7 +74,10 @@ import kotlin.math.roundToInt
 fun ScoreRatingSheet(
     initialScore: Float?,
     onDismiss: () -> Unit,
-    onScoreConfirmed: (Float?) -> Unit
+    onScoreConfirmed: (Float?) -> Unit,
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // 0.9f = Unrated (< 0.95f), 1.0f..10.0f = 0.1 steps (uniform 90 discrete steps -> zero dead zone)
@@ -97,11 +105,20 @@ fun ScoreRatingSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = AmoledBlack,
-        dragHandle = null
+        dragHandle = null,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
     ) {
+        BackHandler { onDismiss() }
+        DetailSheetBackdrop(
+            presentationSettings = presentationSettings,
+            backdropBitmap = backdropBitmap,
+            backdropTargetUrl = backdropTargetUrl,
+            modifier = Modifier.fillMaxWidth()
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
@@ -398,6 +415,7 @@ fun ScoreRatingSheet(
                     Text(text = "Save Score", color = AmoledBlack, fontWeight = FontWeight.Bold)
                 }
             }
+        }
         }
     }
 }

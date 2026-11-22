@@ -112,5 +112,18 @@ data class MediaItemEntity(
     val bannerFocalX: Float = 0f,
     val bannerFocalY: Float = 0f,
     val bannerZoom: Float = 1f,
+    val personalNotes: String? = null,
+    val startedAtMs: Long? = null,
+    val finishedAtMs: Long? = null,
+    val volumesProgress: Int = 0,
+    val rewatchCount: Int = 0,
+    val anilistCustomLists: String? = null,
+    val anilistHiddenFromStatus: Boolean = false,
+    val malPriority: Int = 0,
+    val malTags: String? = null,
+    val malRewatching: Boolean = false,
+    val bangumiTags: String? = null,
+    val matchedTrackerMetaJson: String? = null,
+    val trackerOverridesJson: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

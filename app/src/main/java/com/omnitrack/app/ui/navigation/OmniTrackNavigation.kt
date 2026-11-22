@@ -5,8 +5,12 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -14,7 +18,7 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
-import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.ui.screens.detail.DetailScreen
 import com.omnitrack.app.ui.screens.detail.DetailViewModel
@@ -39,6 +43,17 @@ fun OmniTrackNavigation(
     navController: NavHostController,
     repository: MediaRepository
 ) {
+    var lastNavTimeMs by remember { mutableLongStateOf(0L) }
+    val navigateDebounced: (String) -> Unit = { route ->
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastNavTimeMs >= 500L) {
+            lastNavTimeMs = now
+            navController.navigate(route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = Routes.HOME
@@ -71,16 +86,16 @@ fun OmniTrackNavigation(
             HomeScreen(
                 viewModel = homeViewModel,
                 onItemClick = { mediaId ->
-                    navController.navigate(Routes.detail(mediaId))
+                    navigateDebounced(Routes.detail(mediaId))
                 },
                 onNavigateToArtworkPriority = {
-                    navController.navigate(Routes.ARTWORK_PRIORITY)
+                    navigateDebounced(Routes.ARTWORK_PRIORITY)
                 },
                 onNavigateToVisualPresentation = {
-                    navController.navigate(Routes.VISUAL_PRESENTATION)
+                    navigateDebounced(Routes.VISUAL_PRESENTATION)
                 },
                 onNavigateToDetailsPageLayout = {
-                    navController.navigate(Routes.DETAILS_PAGE_LAYOUT)
+                    navigateDebounced(Routes.DETAILS_PAGE_LAYOUT)
                 }
             )
         }
@@ -107,8 +122,8 @@ fun OmniTrackNavigation(
         ) { backStackEntry ->
             val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: return@composable
             val context = LocalContext.current
-            val prefManager = remember { PreferenceManager(context) }
-            val app = context.applicationContext as com.omnitrack.app.OmniTrackApplication
+            val app = context.applicationContext as OmniTrackApplication
+            val prefManager = remember(context) { app.preferenceManager }
 
             val detailViewModel: DetailViewModel = viewModel(
                 factory = DetailViewModel.factory(

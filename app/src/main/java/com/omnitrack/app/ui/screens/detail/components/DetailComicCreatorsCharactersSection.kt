@@ -1,7 +1,6 @@
 package com.omnitrack.app.ui.screens.detail.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,25 +9,22 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -38,17 +34,20 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.model.ComicDetailMeta
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 
+/**
+ * Frameless circular Creative Team, Characters, Story Arcs, and Variant Covers for Comics.
+ * Matches DetailCastSection / Book author styling — tapping any creator or character opens
+ * ComicCreatorCharacterSheet.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailComicCreatorsCharactersSection(
     comicDetailMeta: ComicDetailMeta,
+    onCreatorClick: (name: String, role: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    onCharacterClick: (name: String, role: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onSetAsCover: (String) -> Unit,
     onSetAsBanner: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -74,47 +73,53 @@ fun DetailComicCreatorsCharactersSection(
                 )
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(comicDetailMeta.creators, key = { "${it.name}_${it.role}" }) { creator ->
-                        Row(
+                    itemsIndexed(
+                        items = comicDetailMeta.creators,
+                        key = { idx, c -> "${c.name}_${c.role}_$idx" }
+                    ) { _, creator ->
+                        Column(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(DarkSurface)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .width(78.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onCreatorClick(creator.name, creator.role, null) }
+                                .padding(vertical = 2.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(30.dp)
+                                    .size(64.dp)
                                     .clip(CircleShape)
-                                    .background(DarkSurfaceElevated),
+                                    .background(Color.White.copy(alpha = 0.08f)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = AccentGold,
-                                    modifier = Modifier.size(16.dp)
+                                Text(
+                                    text = creator.name.trim().take(1).uppercase().ifEmpty { "?" },
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentGold
                                 )
                             }
-                            Column {
-                                Text(
-                                    text = creator.name,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = TextPrimary,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = creator.role,
-                                    fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    maxLines = 1
-                                )
-                            }
+                            Text(
+                                text = creator.name,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextPrimary,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                lineHeight = 14.sp,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = creator.role,
+                                fontSize = 10.5.sp,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
@@ -132,40 +137,41 @@ fun DetailComicCreatorsCharactersSection(
                 )
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(comicDetailMeta.characters, key = { it.name }) { character ->
+                    itemsIndexed(
+                        items = comicDetailMeta.characters,
+                        key = { idx, ch -> "${ch.name}_$idx" }
+                    ) { _, character ->
                         Column(
                             modifier = Modifier
-                                .width(84.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(DarkSurface)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                                .padding(10.dp),
+                                .width(78.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onCharacterClick(character.name, "Character", character.imageUrl)
+                                }
+                                .padding(vertical = 2.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            if (!character.imageUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = character.imageUrl,
-                                    contentDescription = character.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(DarkSurfaceCard)
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(DarkSurfaceElevated),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!character.imageUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = character.imageUrl,
+                                        contentDescription = character.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
                                     Text(
-                                        text = character.name.take(1).uppercase(),
-                                        fontSize = 17.sp,
+                                        text = character.name.trim().take(1).uppercase().ifEmpty { "?" },
+                                        fontSize = 22.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = AccentGold
                                     )
@@ -173,11 +179,12 @@ fun DetailComicCreatorsCharactersSection(
                             }
                             Text(
                                 text = character.name,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = TextPrimary,
                                 textAlign = TextAlign.Center,
                                 maxLines = 2,
+                                lineHeight = 14.sp,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -206,10 +213,9 @@ fun DetailComicCreatorsCharactersSection(
                     comicDetailMeta.storyArcs.forEach { arc ->
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = arc,
@@ -236,7 +242,10 @@ fun DetailComicCreatorsCharactersSection(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(comicDetailMeta.variantCovers, key = { it.url }) { variant ->
+                    itemsIndexed(
+                        items = comicDetailMeta.variantCovers,
+                        key = { idx, v -> "${v.url}_$idx" }
+                    ) { _, variant ->
                         Column(
                             modifier = Modifier.width(106.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -249,8 +258,7 @@ fun DetailComicCreatorsCharactersSection(
                                     .fillMaxWidth()
                                     .aspectRatio(0.67f)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(DarkSurfaceCard)
-                                    .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
                                     .clickable { onSetAsCover(variant.url) }
                             )
                             Text(

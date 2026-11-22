@@ -10,32 +10,31 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = AccentArctic,
-    secondary = AccentArcticVariant,
-    tertiary = AccentViolet,
-    background = AmoledBlack,
-    surface = DarkSurface,
-    surfaceVariant = DarkSurfaceElevated,
-    onPrimary = AmoledBlack,
-    onSecondary = TextPrimary,
-    onBackground = TextPrimary,
-    onSurface = TextPrimary,
-    onSurfaceVariant = TextSecondary,
-)
-
 @Composable
 fun OmniTrackTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
-    val colorScheme = DarkColorScheme
+    val bgColor = AmoledBlack
+    val colorScheme = darkColorScheme(
+        primary = AccentGold,
+        secondary = AccentGoldVariant,
+        tertiary = AccentViolet,
+        background = bgColor,
+        surface = DarkSurface,
+        surfaceVariant = DarkSurfaceElevated,
+        onPrimary = OnAccentColor,
+        onSecondary = OnAccentColor,
+        onBackground = TextPrimary,
+        onSurface = TextPrimary,
+        onSurfaceVariant = TextSecondary,
+    )
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
-            window.statusBarColor = AmoledBlack.toArgb()
-            window.navigationBarColor = AmoledBlack.toArgb()
+            window.statusBarColor = bgColor.toArgb()
+            window.navigationBarColor = bgColor.toArgb()
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = false
             controller.isAppearanceLightNavigationBars = false

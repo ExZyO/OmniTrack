@@ -2,18 +2,19 @@ package com.omnitrack.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val AmoledBlack = Color(0xFF000000)
-val DarkSurface = Color(0xFF12110E)
-val DarkSurfaceElevated = Color(0xFF1A1813)
-val DarkSurfaceCard = Color(0xFF221F19)
-val SurfaceCard = DarkSurfaceCard
+val AmoledBlack: Color get() = OmniThemeState.canvas
+val DarkSurface: Color get() = OmniThemeState.surface
+val DarkSurfaceElevated: Color get() = OmniThemeState.surfaceElevated
+val DarkSurfaceCard: Color get() = OmniThemeState.surfaceCard
+val SurfaceCard: Color get() = OmniThemeState.surfaceCard
 
-val GlassSurface = Color(0xCC12110E)
+val GlassSurface: Color get() = OmniThemeState.glassSurface
 val GlassSurfaceHighlight = Color(0x1AFFFFFF)
-val GlassBorder = Color(0xFF28241D)
+val GlassBorder: Color get() = OmniThemeState.glassBorder
 
-val AccentGold = Color(0xFFE8C26A)
-val AccentGoldVariant = Color(0xFFCFA54B)
+val AccentGold: Color get() = OmniThemeState.accent
+val AccentGoldVariant: Color get() = OmniThemeState.accentVariant
+val OnAccentColor: Color get() = OmniThemeState.onAccent
 
 val AccentJade = Color(0xFF22D37C)
 val AccentJadeVariant = Color(0xFF0BBF9A)

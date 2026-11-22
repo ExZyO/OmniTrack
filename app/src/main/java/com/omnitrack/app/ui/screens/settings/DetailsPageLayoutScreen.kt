@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,6 +27,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -53,13 +53,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.preferences.DetailSectionItem
 import com.omnitrack.app.data.preferences.DetailsPageLayoutDefaults
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -77,7 +77,9 @@ fun DetailsPageLayoutScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) {
+        (context.applicationContext as OmniTrackApplication).preferenceManager
+    }
     val coroutineScope = rememberCoroutineScope()
     val hapticFeedback = LocalHapticFeedback.current
 
@@ -203,8 +205,8 @@ fun DetailsPageLayoutScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             itemsIndexed(
                 items = currentSections,
@@ -212,114 +214,130 @@ fun DetailsPageLayoutScreen(
             ) { index, item ->
                 val sectionKey = item.key.name
                 ReorderableItem(reorderableState, key = sectionKey) { isBeingDragged ->
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .zIndex(if (isBeingDragged) 10f else 1f)
                             .then(
                                 if (isBeingDragged) {
                                     Modifier
-                                        .shadow(12.dp, RoundedCornerShape(14.dp))
-                                        .clip(RoundedCornerShape(14.dp))
+                                        .shadow(12.dp, RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(DarkSurfaceElevated)
-                                        .border(1.5.dp, AccentGold, RoundedCornerShape(14.dp))
+                                        .border(1.5.dp, AccentGold, RoundedCornerShape(8.dp))
                                 } else {
-                                    Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(if (item.isEnabled) DarkSurfaceElevated else Color.White.copy(alpha = 0.03f))
-                                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                                    Modifier.background(AmoledBlack)
                                 }
                             )
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Order Badge
-                        Box(
+                        Row(
                             modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(if (item.isEnabled) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${index + 1}",
-                                color = if (item.isEnabled) AccentGold else TextSecondary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        // Title & Description
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = item.key.displayName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (item.isEnabled) TextPrimary else TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = item.key.description,
-                                fontSize = 11.5.sp,
-                                color = TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        // Eye Visibility Toggle
-                        IconButton(
-                            onClick = {
-                                val updated = item.copy(isEnabled = !item.isEnabled)
-                                currentSections[index] = updated
-                                coroutineScope.launch {
-                                    prefManager.setDetailsPageSectionOrder(currentSections.toList())
-                                }
-                            },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (item.isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (item.isEnabled) "Hide Section" else "Show Section",
-                                tint = if (item.isEnabled) AccentGold else TextMuted.copy(alpha = 0.5f),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(4.dp))
-
-                        // Fluid Drag Handle (≡)
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .draggableHandle(
-                                    onDragStarted = {
-                                        isDraggingAny = true
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    },
-                                    onDragStopped = {
-                                        isDraggingAny = false
-                                        coroutineScope.launch {
-                                            prefManager.setDetailsPageSectionOrder(currentSections.toList())
-                                        }
-                                    }
+                                .fillMaxWidth()
+                                .padding(
+                                    horizontal = if (isBeingDragged) 12.dp else 0.dp,
+                                    vertical = 13.dp
                                 ),
-                            contentAlignment = Alignment.Center
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.DragHandle,
-                                contentDescription = "Drag to reorder",
-                                tint = if (isBeingDragged) AccentGold else TextSecondary,
-                                modifier = Modifier.size(22.dp)
+                            // Flat 6dp Rank Tag
+                            Box(
+                                modifier = Modifier
+                                    .width(34.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        if (item.isEnabled) AccentGold.copy(alpha = 0.14f)
+                                        else Color.White.copy(alpha = 0.05f)
+                                    )
+                                    .padding(vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "#${index + 1}",
+                                    color = if (item.isEnabled) AccentGold else TextMuted,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(12.dp))
+
+                            // Title & Description
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = item.key.displayName,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (item.isEnabled) TextPrimary else TextMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.key.description,
+                                    fontSize = 11.5.sp,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            // Eye Visibility Toggle
+                            IconButton(
+                                onClick = {
+                                    val updated = item.copy(isEnabled = !item.isEnabled)
+                                    currentSections[index] = updated
+                                    coroutineScope.launch {
+                                        prefManager.setDetailsPageSectionOrder(currentSections.toList())
+                                    }
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (item.isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (item.isEnabled) "Hide Section" else "Show Section",
+                                    tint = if (item.isEnabled) AccentGold else TextMuted.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            // Fluid Drag Handle (≡)
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .draggableHandle(
+                                        onDragStarted = {
+                                            isDraggingAny = true
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        },
+                                        onDragStopped = {
+                                            isDraggingAny = false
+                                            coroutineScope.launch {
+                                                prefManager.setDetailsPageSectionOrder(currentSections.toList())
+                                            }
+                                        }
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DragHandle,
+                                    contentDescription = "Drag to reorder",
+                                    tint = if (isBeingDragged) AccentGold else TextSecondary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        if (!isBeingDragged && index < currentSections.lastIndex) {
+                            HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.08f),
+                                thickness = 0.6.dp
                             )
                         }
                     }

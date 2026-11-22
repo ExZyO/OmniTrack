@@ -1,5 +1,11 @@
 package com.omnitrack.app.ui.screens.home.views
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,17 +27,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items as lazyRowItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.verticalScroll
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import androidx.compose.foundation.lazy.itemsIndexed as lazyRowItemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,14 +45,17 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -58,9 +68,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -71,31 +85,36 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.ai.AiQueryEngine
-import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
-import com.omnitrack.app.data.preferences.DEFAULT_GEMINI_MODELS
+import com.omnitrack.app.data.preferences.DiscoverCustomizationSettings
+import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
+import com.omnitrack.app.data.preferences.DiscoverShelfCatalog
+import com.omnitrack.app.data.preferences.DiscoverShelfDef
 import com.omnitrack.app.data.preferences.PosterCardStyle
-import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.GeminiModelSelectorSection
 import com.omnitrack.app.ui.components.MediaCard
+import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
+import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
+import com.omnitrack.app.ui.screens.home.DiscoverShelfState
 import com.omnitrack.app.ui.screens.home.HomeViewModel
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -104,13 +123,16 @@ fun DiscoverView(
     onItemClick: (Long) -> Unit,
     onAddMedia: (SearchResultItem) -> Unit,
     onCreateCustomEntry: (String, MediaType) -> Unit = { _, _ -> },
+    onOpenCustomizer: () -> Unit = {},
     modifier: Modifier = Modifier,
     homeViewModel: HomeViewModel? = null,
     searchRepository: OmniSearchRepository = remember { OmniSearchRepository() },
     aiEngine: AiQueryEngine = remember { AiQueryEngine() }
 ) {
     val context = LocalContext.current
-    val prefManager = remember { PreferenceManager(context) }
+    val prefManager = remember(context) {
+        (context.applicationContext as OmniTrackApplication).preferenceManager
+    }
     val scope = rememberCoroutineScope()
 
     val geminiKey by prefManager.geminiApiKey.collectAsState(initial = "")
@@ -123,6 +145,9 @@ fun DiscoverView(
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
     val aiSearchSetting by prefManager.aiSemanticSearchEnabled.collectAsState(initial = false)
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
+    val discoverSettings by prefManager.discoverCustomizationSettings.collectAsState(
+        initial = DiscoverCustomizationSettings()
+    )
 
     val queryFlow = remember(homeViewModel) { homeViewModel?.discoverSearchQuery ?: MutableStateFlow("") }
     val filterFlow = remember(homeViewModel) { homeViewModel?.discoverSelectedFilter ?: MutableStateFlow(MediaType.ALL) }
@@ -130,6 +155,9 @@ fun DiscoverView(
     val resultsFlow = remember(homeViewModel) { homeViewModel?.discoverSearchResults ?: MutableStateFlow<List<SearchResultItem>>(emptyList()) }
     val bannerFlow = remember(homeViewModel) { homeViewModel?.discoverAiResolutionBanner ?: MutableStateFlow<String?>(null) }
     val useAiFlow = remember(homeViewModel) { homeViewModel?.discoverUseAiSearch ?: MutableStateFlow<Boolean?>(null) }
+    val shelvesFlow = remember(homeViewModel) {
+        homeViewModel?.discoverShelves ?: MutableStateFlow<Map<String, DiscoverShelfState>>(emptyMap())
+    }
 
     val searchQuery by queryFlow.collectAsState()
     val selectedFilter by filterFlow.collectAsState()
@@ -137,11 +165,35 @@ fun DiscoverView(
     val searchResults by resultsFlow.collectAsState()
     val aiResolutionBanner by bannerFlow.collectAsState()
     val storedUseAi by useAiFlow.collectAsState()
+    val discoverShelves by shelvesFlow.collectAsState()
     val useAiSearch = storedUseAi ?: aiSearchSetting
 
     LaunchedEffect(aiSearchSetting) {
         if (useAiFlow.value == null) {
             useAiFlow.value = aiSearchSetting
+        }
+    }
+
+    val allCategories = remember {
+        listOf(
+            MediaType.ALL,
+            MediaType.ANIME,
+            MediaType.MANGA,
+            MediaType.COMIC,
+            MediaType.NOVEL,
+            MediaType.BOOK,
+            MediaType.SHOW,
+            MediaType.MOVIE,
+            MediaType.GAME,
+            MediaType.VISUAL_NOVEL
+        )
+    }
+    val visibleCategories = remember(allCategories, discoverSettings.disabledCategories) {
+        allCategories.filter { it.name !in discoverSettings.disabledCategories }.ifEmpty { listOf(MediaType.ALL) }
+    }
+    LaunchedEffect(visibleCategories, selectedFilter) {
+        if (selectedFilter !in visibleCategories) {
+            filterFlow.value = visibleCategories.first()
         }
     }
 
@@ -152,180 +204,31 @@ fun DiscoverView(
     var localLastExecutedModel by remember { mutableStateOf<String?>(null) }
     var localLastEffectiveQuery by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveQuery) }
     var localLastEffectiveFilter by remember { mutableStateOf(homeViewModel?.discoverLastEffectiveFilter) }
-    var searchGen by remember { mutableStateOf(0L) }
+    val searchGenRef = remember { AtomicLong(0L) }
+
     var selectedMangaSubFilter by remember { mutableStateOf("ALL") }
     var selectedNovelSubFilter by remember { mutableStateOf("ALL") }
     var selectedVnOriginSubFilter by remember { mutableStateOf("ALL") }
     var selectedVnLengthSubFilter by remember { mutableStateOf("ALL") }
     var selectedGamePlatformSubFilter by remember { mutableStateOf("ALL") }
-    var gameShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var isLoadingGameShelves by remember { mutableStateOf(false) }
     var selectedBookFormatSubFilter by remember { mutableStateOf("ALL") }
     var selectedBookCategorySubFilter by remember { mutableStateOf<String?>(null) }
-    var bookShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var isLoadingBookShelves by remember { mutableStateOf(false) }
     var selectedComicPublisherSubFilter by remember { mutableStateOf("ALL") }
     var selectedComicFormatSubFilter by remember { mutableStateOf("ALL") }
-    var comicShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var isLoadingComicShelves by remember { mutableStateOf(false) }
-    var animeShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var mangaShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var novelShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var showShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var movieShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var vnShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var allVerticalShelves by remember { mutableStateOf<Map<String, List<SearchResultItem>>>(emptyMap()) }
-    var isLoadingCategoryShelves by remember { mutableStateOf(false) }
 
-    LaunchedEffect(selectedFilter, tmdbKey) {
-        if (selectedFilter == MediaType.GAME && gameShelves.isEmpty() && !isLoadingGameShelves) {
-            isLoadingGameShelves = true
-            try {
-                val trending = searchRepository.fetchDiscoverGamesShelves("trending")
-                val topRated = searchRepository.fetchDiscoverGamesShelves("top_rated")
-                val upcoming = searchRepository.fetchDiscoverGamesShelves("upcoming")
-                gameShelves = mapOf(
-                    "Trending Now" to trending,
-                    "Top Critically Acclaimed" to topRated,
-                    "Upcoming Releases" to upcoming
-                ).filterValues { it.isNotEmpty() }
-            } catch (_: Exception) {
-            } finally {
-                isLoadingGameShelves = false
-            }
-        }
-        if (selectedFilter == MediaType.BOOK && bookShelves.isEmpty() && !isLoadingBookShelves) {
-            isLoadingBookShelves = true
-            try {
-                val trending = searchRepository.fetchDiscoverBooksShelves("trending")
-                val classics = searchRepository.fetchDiscoverBooksShelves("classics_poetry")
-                val scifi = searchRepository.fetchDiscoverBooksShelves("scifi_fantasy")
-                val philosophy = searchRepository.fetchDiscoverBooksShelves("philosophy_nonfiction")
-                val audiobooks = searchRepository.fetchDiscoverBooksShelves("audiobooks")
-                bookShelves = mapOf(
-                    "Trending This Week" to trending,
-                    "Classics & Epic Poetry" to classics,
-                    "Sci-Fi & Fantasy" to scifi,
-                    "Philosophy & Non-Fiction" to philosophy,
-                    "Audiobooks" to audiobooks
-                ).filterValues { it.isNotEmpty() }
-            } catch (_: Exception) {
-            } finally {
-                isLoadingBookShelves = false
-            }
-        }
-        if (selectedFilter == MediaType.COMIC && comicShelves.isEmpty() && !isLoadingComicShelves) {
-            isLoadingComicShelves = true
-            try {
-                val comicSrc = com.omnitrack.app.data.enrichment.ComicEnrichmentSource()
-                val trendingRuns = comicSrc.fetchDiscoverComicsShelves("superhero")
-                val pullList = comicSrc.fetchDiscoverComicsShelves("pull_list")
-                val iconicGns = comicSrc.fetchDiscoverComicsShelves("indie")
-                comicShelves = mapOf(
-                    "Trending & Acclaimed Runs" to trendingRuns,
-                    "New This Week (Pull List)" to pullList,
-                    "Iconic Graphic Novels" to iconicGns
-                ).filterValues { it.isNotEmpty() }
-            } catch (_: Exception) {
-            } finally {
-                isLoadingComicShelves = false
-            }
-        }
-        val needsCategoryLoad = when (selectedFilter) {
-            MediaType.ANIME -> animeShelves.isEmpty()
-            MediaType.MANGA -> mangaShelves.isEmpty()
-            MediaType.NOVEL -> novelShelves.isEmpty()
-            MediaType.SHOW -> showShelves.isEmpty()
-            MediaType.MOVIE -> movieShelves.isEmpty()
-            MediaType.VISUAL_NOVEL -> vnShelves.isEmpty()
-            MediaType.ALL -> allVerticalShelves.isEmpty()
-            else -> false
-        }
-        if (needsCategoryLoad && !isLoadingCategoryShelves) {
-            isLoadingCategoryShelves = true
-            try {
-                coroutineScope {
-                    when (selectedFilter) {
-                        MediaType.ANIME -> {
-                            val a = async { searchRepository.fetchDiscoverAnimeShelves("trending") }
-                            val b = async { searchRepository.fetchDiscoverAnimeShelves("popular") }
-                            val c = async { searchRepository.fetchDiscoverAnimeShelves("top_rated") }
-                            animeShelves = mapOf(
-                                "Trending Anime Now" to a.await(),
-                                "All-Time Popular" to b.await(),
-                                "Top Rated Anime" to c.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.MANGA -> {
-                            val a = async { searchRepository.fetchDiscoverMangaShelves("trending") }
-                            val b = async { searchRepository.fetchDiscoverMangaShelves("manhwa") }
-                            val c = async { searchRepository.fetchDiscoverMangaShelves("top_rated") }
-                            mangaShelves = mapOf(
-                                "Trending Manga" to a.await(),
-                                "Popular Manhwa (Korea)" to b.await(),
-                                "Top Rated Manga" to c.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.NOVEL -> {
-                            val lnT = async { searchRepository.fetchDiscoverNovelsShelves("trending_ln") }
-                            val wn = async { searchRepository.fetchDiscoverNovelsShelves("top_webnovels") }
-                            val lnTop = async { searchRepository.fetchDiscoverNovelsShelves("top_rated_ln") }
-                            novelShelves = mapOf(
-                                "Popular Web Novels" to wn.await(),
-                                "Trending Light Novels" to lnT.await(),
-                                "Top Rated Light Novels" to lnTop.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.SHOW -> {
-                            val t = async { searchRepository.fetchDiscoverShowsShelves("trending", tmdbKey) }
-                            val r = async { searchRepository.fetchDiscoverShowsShelves("top_rated", tmdbKey) }
-                            showShelves = mapOf(
-                                "Trending TV Shows" to t.await(),
-                                "Top Rated Series" to r.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.MOVIE -> {
-                            val t = async { searchRepository.fetchDiscoverMoviesShelves("trending", tmdbKey) }
-                            val r = async { searchRepository.fetchDiscoverMoviesShelves("top_rated", tmdbKey) }
-                            movieShelves = mapOf(
-                                "Trending Movies" to t.await(),
-                                "Top Rated Movies" to r.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.VISUAL_NOVEL -> {
-                            val p = async { searchRepository.fetchDiscoverVisualNovelsShelves("popular") }
-                            val r = async { searchRepository.fetchDiscoverVisualNovelsShelves("top_rated") }
-                            vnShelves = mapOf(
-                                "Popular Visual Novels" to p.await(),
-                                "Highest Rated Visual Novels" to r.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        MediaType.ALL -> {
-                            val ani = async { searchRepository.fetchDiscoverAnimeShelves("trending").take(12) }
-                            val man = async { searchRepository.fetchDiscoverMangaShelves("trending").take(12) }
-                            val nov = async { searchRepository.fetchDiscoverNovelsShelves("top_webnovels").take(12) }
-                            val sho = async { searchRepository.fetchDiscoverShowsShelves("trending", tmdbKey).take(12) }
-                            val mov = async { searchRepository.fetchDiscoverMoviesShelves("trending", tmdbKey).take(12) }
-                            val bk = async { searchRepository.fetchDiscoverBooksShelves("trending").take(12) }
-                            val gm = async { searchRepository.fetchDiscoverGamesShelves("trending").take(12) }
-                            allVerticalShelves = mapOf(
-                                "Trending Anime" to ani.await(),
-                                "Trending Manga" to man.await(),
-                                "Popular Web Novels" to nov.await(),
-                                "Trending Shows" to sho.await(),
-                                "Trending Movies" to mov.await(),
-                                "Trending Books" to bk.await(),
-                                "Trending Games" to gm.await()
-                            ).filterValues { it.isNotEmpty() }
-                        }
-                        else -> Unit
-                    }
-                }
-            } catch (_: Exception) {
-            } finally {
-                isLoadingCategoryShelves = false
-            }
-        }
+    // Hoisted parallel Discover category shelf loading (skips disabled shelves/categories)
+    LaunchedEffect(
+        selectedFilter,
+        tmdbKey,
+        discoverSettings.disabledCategories,
+        discoverSettings.disabledShelves
+    ) {
+        homeViewModel?.loadDiscoverCategoryShelves(
+            filter = selectedFilter,
+            tmdbApiKey = tmdbKey,
+            disabledCategories = discoverSettings.disabledCategories,
+            disabledShelves = discoverSettings.disabledShelves
+        )
     }
 
     val gridState = rememberLazyGridState(
@@ -340,9 +243,9 @@ fun DiscoverView(
         }
     }
 
-    // Multi-Vertical OmniSearch Trigger
+    // Multi-Vertical OmniSearch Trigger (strictly guarded by monotonic searchGenRef)
     LaunchedEffect(searchQuery, selectedFilter, useAiSearch, activeGeminiModel) {
-        val myGen = ++searchGen
+        val myGen = searchGenRef.incrementAndGet()
         val trimmed = searchQuery.trim()
         val prevQuery = homeViewModel?.discoverLastExecutedQuery ?: localLastExecutedQuery
         val prevFilter = homeViewModel?.discoverLastExecutedFilter ?: localLastExecutedFilter
@@ -352,13 +255,13 @@ fun DiscoverView(
         if (trimmed.length >= 2) {
             val modelChanged = useAiSearch && localLastExecutedModel != null && localLastExecutedModel != activeGeminiModel
             if (!modelChanged && resultsFlow.value.isNotEmpty() && trimmed == prevQuery && selectedFilter == prevFilter && useAiSearch == prevAi) {
-                // Preserved search results restored from previous navigation! Don't re-trigger.
                 return@LaunchedEffect
             }
             localLastExecutedModel = activeGeminiModel
             val filterChanged = prevFilter != null && selectedFilter != prevFilter
             if (!filterChanged && !modelChanged && trimmed != prevDebounceQuery) {
-                delay(400)
+                delay(380)
+                if (searchGenRef.get() != myGen) return@LaunchedEffect
                 localLastDebounceQuery = trimmed
                 homeViewModel?.discoverLastDebounceQuery = trimmed
             } else if (trimmed != prevDebounceQuery) {
@@ -377,11 +280,12 @@ fun DiscoverView(
                     openRouterApiKey = openRouterKey.ifBlank { null },
                     geminiModel = activeGeminiModel
                 )
+                if (searchGenRef.get() != myGen) return@LaunchedEffect
                 if (aiResult.isAiResolved) {
                     queryToRun = aiResult.resolvedTitle
                     resolvedBanner = "AI [$activeGeminiModel]: \"${aiResult.resolvedTitle}\"" +
                         (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
-                        (aiResult.explanation?.let { " • $it" } ?: "")
+                        (aiResult.explanation?.let { " \u2022 $it" } ?: "")
                     if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
                         filterToRun = aiResult.detectedType
                     }
@@ -392,16 +296,16 @@ fun DiscoverView(
                     if (selectedFilter == MediaType.ALL && aiResult.detectedType != null) {
                         filterToRun = aiResult.detectedType
                     }
-                    if (geminiKey.isBlank() && openRouterKey.isBlank()) {
-                        resolvedBanner = if (aiResult.resolvedTitle != trimmed || aiResult.detectedType != null) {
+                    resolvedBanner = if (geminiKey.isBlank() && openRouterKey.isBlank()) {
+                        if (aiResult.resolvedTitle != trimmed || aiResult.detectedType != null) {
                             "Smart Match: \"${aiResult.resolvedTitle}\"" +
                                 (aiResult.detectedType?.let { " (${it.displayName})" } ?: "") +
-                                " • Add a Gemini/OpenRouter key in Settings for full AI"
+                                " \u2022 Add a Gemini/OpenRouter key in Settings for full AI"
                         } else {
-                            "AI Smart Mode (No API key in Settings) — Try natural phrases like 'anime about alchemy', or add a Gemini key."
+                            "AI Smart Mode (No API key in Settings) \u2014 Try natural phrases or add a Gemini key."
                         }
                     } else {
-                        resolvedBanner = "AI Mode [$activeGeminiModel]: searching exact title \"$queryToRun\""
+                        "AI Mode [$activeGeminiModel]: searching \"$queryToRun\""
                     }
                 }
             }
@@ -444,21 +348,21 @@ fun DiscoverView(
                     filter = filterToRun,
                     tmdbApiKey = tmdbKey.ifBlank { null },
                     onPartialResults = { partial ->
-                        if (myGen == searchGen && filterFlow.value == selectedFilter) {
+                        if (myGen == searchGenRef.get() && filterFlow.value == selectedFilter) {
                             resultsFlow.value = if (filterToRun == MediaType.ALL) partial else partial.filter { it.mediaType == filterToRun }
                         }
                     }
                 )
-                if (myGen == searchGen && filterFlow.value == selectedFilter) {
+                if (myGen == searchGenRef.get() && filterFlow.value == selectedFilter) {
                     resultsFlow.value = if (filterToRun == MediaType.ALL) results else results.filter { it.mediaType == filterToRun }
                 }
             } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                if (myGen == searchGen) {
+                if (e is CancellationException) throw e
+                if (myGen == searchGenRef.get()) {
                     resultsFlow.value = emptyList()
                 }
             } finally {
-                if (myGen == searchGen) {
+                if (myGen == searchGenRef.get()) {
                     isSearchingFlow.value = false
                 }
             }
@@ -483,41 +387,98 @@ fun DiscoverView(
         }
     }
 
+    fun filterBySubfilters(items: List<SearchResultItem>, targetType: MediaType): List<SearchResultItem> {
+        return when {
+            targetType == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> items.filter {
+                com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == selectedMangaSubFilter
+            }
+            targetType == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> items.filter {
+                com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                    it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
+                ) == selectedNovelSubFilter
+            }
+            targetType == MediaType.VISUAL_NOVEL -> items.filter {
+                (selectedVnOriginSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(it.originCountry, it.nativeTitle) == selectedVnOriginSubFilter) &&
+                    (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
+            }
+            targetType == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> items.filter {
+                val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(it.platform, null)
+                groups.isEmpty() || selectedGamePlatformSubFilter in groups
+            }
+            targetType == MediaType.BOOK -> items.filter { item ->
+                val fmtOk = selectedBookFormatSubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
+                val catOk = selectedBookCategorySubFilter == null ||
+                    selectedBookCategorySubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
+                fmtOk && catOk
+            }
+            targetType == MediaType.COMIC -> items.filter { item ->
+                val pubOk = selectedComicPublisherSubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisherSubFilter
+                val fmtOk = selectedComicFormatSubFilter == "ALL" ||
+                    com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormatSubFilter
+                pubOk && fmtOk
+            }
+            else -> items
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
-            .padding(horizontal = 18.dp, vertical = 12.dp)
     ) {
-        // Header
-        Column(modifier = Modifier.padding(bottom = 12.dp)) {
-            Text(
-                text = "Universal OmniSearch",
-                fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
-                color = TextPrimary
-            )
-            Text(
-                text = "Live parallel search across AniList, MangaDex, Bangumi, TMDb, Steam & VNDB",
-                fontSize = 12.sp,
-                color = TextMuted
-            )
-        }
-
-        // Search Input Bar
+        // Editorial Header + Customize button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(DarkSurfaceElevated)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Discover",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 24.sp,
+                    color = TextPrimary,
+                    letterSpacing = (-0.5).sp
+                )
+                Text(
+                    text = "Live search & curated rails across all 9 verticals",
+                    fontSize = 11.5.sp,
+                    color = TextSecondary
+                )
+            }
+            IconButton(
+                onClick = onOpenCustomizer,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = "Customize Discover",
+                    tint = AccentGold,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+        }
+
+        // Clean Flat Search Bar (Option A)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.05f))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = null,
-                tint = if (useAiSearch) AccentGold else TextMuted,
+                tint = if (useAiSearch) AccentGold else TextSecondary,
                 modifier = Modifier.size(20.dp)
             )
             BasicTextField(
@@ -530,77 +491,80 @@ fun DiscoverView(
                 decorationBox = { innerTextField ->
                     if (searchQuery.isEmpty()) {
                         Text(
-                            text = if (useAiSearch) "Ask AI or describe (e.g. 'anime with slime')" else "Search anime, manga, novels, games, shows...",
-                            color = TextMuted,
-                            fontSize = 13.sp
+                            text = if (useAiSearch && discoverSettings.showAiToggle) {
+                                "Ask AI or describe (e.g. 'dark fantasy web novel')"
+                            } else {
+                                "Search anime, comics, web novels, games, books..."
+                            },
+                            color = TextSecondary.copy(alpha = 0.72f),
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     innerTextField()
                 }
             )
 
-            // Inline AI Toggle & Quick Model Picker Pill
-            val shortModelLabel = remember(activeGeminiModel) {
-                activeGeminiModel
-                    .removePrefix("gemini-")
-                    .replace("-preview", "")
-                    .replace("flash-lite", "FL")
-                    .replace("flash", "F")
-                    .take(12)
-            }
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (useAiSearch) AccentGold.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
-                    .combinedClickable(
-                        onClick = {
-                            val nextAi = !useAiSearch
-                            useAiFlow.value = nextAi
-                            scope.launch { prefManager.updateAiSemanticSearchEnabled(nextAi) }
-                            if (nextAi) {
-                                if (geminiKey.isBlank() && openRouterKey.isBlank()) {
-                                    bannerFlow.value = "AI Smart Mode enabled (Local heuristics) — Describe what you're looking for, or add a Gemini / OpenRouter key in Settings for full AI search."
-                                }
-                            } else {
-                                bannerFlow.value = null
-                            }
-                        },
-                        onLongClick = {
-                            showModelPickerSheet = true
-                        }
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = "AI Mode",
-                    tint = if (useAiSearch) AccentGold else TextMuted,
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = if (useAiSearch) "AI · $shortModelLabel" else "AI",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (useAiSearch) AccentGold else TextMuted
-                )
-                Icon(
-                    imageVector = Icons.Default.ExpandMore,
-                    contentDescription = "Select AI Model",
-                    tint = if (useAiSearch) AccentGold else TextMuted,
+            if (discoverSettings.showAiToggle) {
+                val shortModelLabel = remember(activeGeminiModel) {
+                    activeGeminiModel
+                        .removePrefix("gemini-")
+                        .replace("-preview", "")
+                        .replace("flash-lite", "FL")
+                        .replace("flash", "F")
+                        .take(12)
+                }
+                Row(
                     modifier = Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .clickable { showModelPickerSheet = true }
-                )
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (useAiSearch) AccentGold.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
+                        .combinedClickable(
+                            onClick = {
+                                val nextAi = !useAiSearch
+                                useAiFlow.value = nextAi
+                                scope.launch { prefManager.updateAiSemanticSearchEnabled(nextAi) }
+                                if (nextAi && geminiKey.isBlank() && openRouterKey.isBlank()) {
+                                    bannerFlow.value = "AI Smart Mode (Local) \u2014 Add a Gemini or OpenRouter key in Settings for full AI"
+                                } else if (!nextAi) {
+                                    bannerFlow.value = null
+                                }
+                            },
+                            onLongClick = { showModelPickerSheet = true }
+                        )
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = "AI Mode",
+                        tint = if (useAiSearch) AccentGold else TextSecondary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = if (useAiSearch) "AI \u00B7 $shortModelLabel" else "AI",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (useAiSearch) AccentGold else TextSecondary
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = "Select AI Model",
+                        tint = if (useAiSearch) AccentGold else TextSecondary,
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .clickable { showModelPickerSheet = true }
+                    )
+                }
             }
 
             if (searchQuery.isNotEmpty()) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Clear",
-                    tint = TextMuted,
+                    tint = TextSecondary,
                     modifier = Modifier
                         .size(16.dp)
                         .clickable { queryFlow.value = "" }
@@ -608,161 +572,162 @@ fun DiscoverView(
             }
         }
 
-        // Category Filter Chips
-        Row(
+        // Option A Underline Category Tabs (respects disabledCategories)
+        LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(top = 12.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val categories = listOf(
-                MediaType.ALL,
-                MediaType.ANIME,
-                MediaType.MANGA,
-                MediaType.COMIC,
-                MediaType.NOVEL,
-                MediaType.BOOK,
-                MediaType.SHOW,
-                MediaType.MOVIE,
-                MediaType.GAME,
-                MediaType.VISUAL_NOVEL
-            )
-            categories.forEach { type ->
+            lazyRowItemsIndexed(visibleCategories, key = { _, t -> "dcat_${t.name}" }) { _, type ->
                 val isSelected = selectedFilter == type
-                Box(
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (isSelected) AccentGold else DarkSurfaceElevated)
-                        .clickable { filterFlow.value = type }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .width(IntrinsicSize.Max)
+                        .clickable { filterFlow.value = type },
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = if (type == MediaType.ALL) "All Verticals" else type.displayName,
-                        fontSize = 11.5.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) AmoledBlack else TextSecondary
+                        fontSize = 13.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) TextPrimary else TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (isSelected) AccentGold else Color.Transparent)
                     )
                 }
             }
         }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-        if (selectedFilter == MediaType.MANGA) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (key, label) ->
-                    val isSubSelected = selectedMangaSubFilter == key
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isSubSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
-                            .border(
-                                width = 1.dp,
-                                color = if (isSubSelected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
-                                shape = RoundedCornerShape(999.dp)
+        // Optional Sub-Filter Bars (respects showSubFilters)
+        if (discoverSettings.showSubFilters) {
+            if (selectedFilter == MediaType.MANGA) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (key, label) ->
+                        val isSubSelected = selectedMangaSubFilter == key
+                        Column(
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .clickable { selectedMangaSubFilter = key },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSubSelected) AccentGold else TextSecondary
                             )
-                            .clickable { selectedMangaSubFilter = key }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSubSelected) Color.White else Color.White.copy(alpha = 0.60f)
-                        )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.5.dp)
+                                    .background(if (isSubSelected) AccentGold else Color.Transparent)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        if (selectedFilter == MediaType.NOVEL) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (key, label) ->
-                    val isSubSelected = selectedNovelSubFilter == key
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isSubSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
-                            .border(
-                                width = 1.dp,
-                                color = if (isSubSelected) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f),
-                                shape = RoundedCornerShape(999.dp)
+            if (selectedFilter == MediaType.NOVEL) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (key, label) ->
+                        val isSubSelected = selectedNovelSubFilter == key
+                        Column(
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .clickable { selectedNovelSubFilter = key },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSubSelected) AccentGold else TextSecondary
                             )
-                            .clickable { selectedNovelSubFilter = key }
-                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSubSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSubSelected) Color.White else Color.White.copy(alpha = 0.60f)
-                        )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.5.dp)
+                                    .background(if (isSubSelected) AccentGold else Color.Transparent)
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        if (selectedFilter == MediaType.VISUAL_NOVEL) {
-            com.omnitrack.app.ui.screens.home.VnUnderlineFilterBar(
-                selectedOrigin = selectedVnOriginSubFilter,
-                selectedLength = selectedVnLengthSubFilter,
-                onOriginSelected = { selectedVnOriginSubFilter = it },
-                onLengthSelected = { selectedVnLengthSubFilter = it },
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
+            if (selectedFilter == MediaType.VISUAL_NOVEL) {
+                com.omnitrack.app.ui.screens.home.VnUnderlineFilterBar(
+                    selectedOrigin = selectedVnOriginSubFilter,
+                    selectedLength = selectedVnLengthSubFilter,
+                    onOriginSelected = { selectedVnOriginSubFilter = it },
+                    onLengthSelected = { selectedVnLengthSubFilter = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
 
-        if (selectedFilter == MediaType.GAME) {
-            com.omnitrack.app.ui.screens.home.GameUnderlineFilterBar(
-                selectedPlatform = selectedGamePlatformSubFilter,
-                selectedCompletion = null,
-                onPlatformSelected = { selectedGamePlatformSubFilter = it },
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
+            if (selectedFilter == MediaType.GAME) {
+                com.omnitrack.app.ui.screens.home.GameUnderlineFilterBar(
+                    selectedPlatform = selectedGamePlatformSubFilter,
+                    selectedCompletion = null,
+                    onPlatformSelected = { selectedGamePlatformSubFilter = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
 
-        if (selectedFilter == MediaType.BOOK) {
-            com.omnitrack.app.ui.screens.home.BookUnderlineFilterBar(
-                selectedFormat = selectedBookFormatSubFilter,
-                selectedCategory = selectedBookCategorySubFilter,
-                onFormatSelected = { selectedBookFormatSubFilter = it },
-                onCategorySelected = { selectedBookCategorySubFilter = it },
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
+            if (selectedFilter == MediaType.BOOK) {
+                com.omnitrack.app.ui.screens.home.BookUnderlineFilterBar(
+                    selectedFormat = selectedBookFormatSubFilter,
+                    selectedCategory = selectedBookCategorySubFilter,
+                    onFormatSelected = { selectedBookFormatSubFilter = it },
+                    onCategorySelected = { selectedBookCategorySubFilter = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
 
-        if (selectedFilter == MediaType.COMIC) {
-            com.omnitrack.app.ui.screens.home.ComicUnderlineFilterBar(
-                selectedPublisher = selectedComicPublisherSubFilter,
-                selectedFormat = selectedComicFormatSubFilter,
-                onPublisherSelected = { selectedComicPublisherSubFilter = it },
-                onFormatSelected = { selectedComicFormatSubFilter = it },
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            if (selectedFilter == MediaType.COMIC) {
+                com.omnitrack.app.ui.screens.home.ComicUnderlineFilterBar(
+                    selectedPublisher = selectedComicPublisherSubFilter,
+                    selectedFormat = selectedComicFormatSubFilter,
+                    onPublisherSelected = { selectedComicPublisherSubFilter = it },
+                    onFormatSelected = { selectedComicFormatSubFilter = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
         }
 
         // AI Resolution Banner
-        if (aiResolutionBanner != null) {
-            Spacer(modifier = Modifier.height(10.dp))
+        if (aiResolutionBanner != null && discoverSettings.showAiToggle) {
+            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(AccentGold.copy(alpha = 0.12f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -786,478 +751,202 @@ fun DiscoverView(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
 
-        val visibleResults = remember(searchResults, selectedFilter, selectedMangaSubFilter, selectedNovelSubFilter, selectedVnOriginSubFilter, selectedVnLengthSubFilter, selectedGamePlatformSubFilter, selectedBookFormatSubFilter, selectedBookCategorySubFilter, selectedComicPublisherSubFilter, selectedComicFormatSubFilter) {
+        val visibleResults = remember(
+            searchResults,
+            selectedFilter,
+            selectedMangaSubFilter,
+            selectedNovelSubFilter,
+            selectedVnOriginSubFilter,
+            selectedVnLengthSubFilter,
+            selectedGamePlatformSubFilter,
+            selectedBookFormatSubFilter,
+            selectedBookCategorySubFilter,
+            selectedComicPublisherSubFilter,
+            selectedComicFormatSubFilter
+        ) {
             val base = if (selectedFilter == MediaType.ALL) searchResults else searchResults.filter { it.mediaType == selectedFilter }
-            when {
-                selectedFilter == MediaType.MANGA && selectedMangaSubFilter != "ALL" -> base.filter {
-                    com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == selectedMangaSubFilter
-                }
-                selectedFilter == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> base.filter {
-                    com.omnitrack.app.ui.screens.home.inferNovelSubtype(
-                        it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
-                    ) == selectedNovelSubFilter
-                }
-                selectedFilter == MediaType.VISUAL_NOVEL -> base.filter {
-                    (selectedVnOriginSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(it.originCountry, it.nativeTitle) == selectedVnOriginSubFilter) &&
-                        (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
-                }
-                selectedFilter == MediaType.GAME && selectedGamePlatformSubFilter != "ALL" -> base.filter {
-                    val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(it.platform, null)
-                    groups.isEmpty() || selectedGamePlatformSubFilter in groups
-                }
-                selectedFilter == MediaType.BOOK -> base.filter { item ->
-                    val fmtOk = selectedBookFormatSubFilter == "ALL" ||
-                        com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
-                    val catOk = selectedBookCategorySubFilter == null ||
-                        selectedBookCategorySubFilter == "ALL" ||
-                        com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
-                    fmtOk && catOk
-                }
-                selectedFilter == MediaType.COMIC -> base.filter { item ->
-                    val pubOk = selectedComicPublisherSubFilter == "ALL" ||
-                        com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisherSubFilter
-                    val fmtOk = selectedComicFormatSubFilter == "ALL" ||
-                        com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormatSubFilter
-                    pubOk && fmtOk
-                }
-                else -> base
-            }
+            filterBySubfilters(base, selectedFilter)
         }
 
-        if (isSearching && visibleResults.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
-            }
-        } else if (visibleResults.isNotEmpty()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(bottom = 8.dp)
-            ) {
-                Text(
-                    text = "Results (${visibleResults.size})",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextMuted
-                )
-                if (isSearching) {
-                    CircularProgressIndicator(
-                        color = AccentGold,
-                        strokeWidth = 1.8.dp,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
-            }
-
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val isPhone = maxWidth < 600.dp
-                val discoverColumns = if (posterStyle.isLandscape) {
-                    if (isPhone) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
-                } else {
-                    GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
-                }
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = discoverColumns,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = PaddingValues(bottom = 110.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(visibleResults, key = { "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: it.openLibraryId ?: it.hardcoverId ?: it.comicVineId ?: it.metronId ?: 0L}" }) { item ->
-                    val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
-                        com.omnitrack.app.ui.screens.home.inferNovelSubtype(
-                            item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
-                        )
-                    } else null
-
-                    val existingInLibrary = allMedia.firstOrNull { summary ->
-                        summary.mediaType == item.mediaType && (
-                            (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
-                            (item.metronId != null && summary.metronId == item.metronId) ||
-                            (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
-                            summary.title.equals(item.title, ignoreCase = true) ||
-                            (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
-                        ) && (
-                            itemNovelSub == null ||
-                            com.omnitrack.app.ui.screens.home.inferNovelSubtype(
-                                summary.platform, summary.originCountry, summary.anilistId, summary.malId, summary.totalProgress, summary.title
-                            ) == itemNovelSub
-                        )
-                    }
-
-                    val summary = existingInLibrary ?: MediaCardSummary(
-                        id = 0L,
-                        title = item.title,
-                        nativeTitle = item.nativeTitle,
-                        coverUrl = item.coverUrl,
-                        bannerUrl = item.bannerUrl,
-                        mediaType = item.mediaType,
-                        status = TrackingStatus.PLAN_TO_TRACK,
-                        currentProgress = 0.0,
-                        totalProgress = item.totalProgress?.toDouble(),
-                        userRating = item.communityScore,
-                        customCoverPath = null,
-                        customBannerPath = null,
-                        artworkRole = "DEFAULT",
-                        originCountry = item.originCountry,
-                        platform = item.platform,
-                        runtimeMinutes = item.runtimeMinutes,
-                        openLibraryId = item.openLibraryId,
-                        bookAuthor = item.bookAuthor,
-                        bookFormat = item.bookFormat,
-                        comicVineId = item.comicVineId,
-                        metronId = item.metronId,
-                        comicPublisher = item.comicPublisher,
-                        comicFormat = item.comicFormat,
-                        lastUpdated = System.currentTimeMillis()
-                    )
-
-                    val cardBadgeText = if (existingInLibrary != null) {
-                        "IN LIBRARY"
-                    } else if (itemNovelSub != null) {
-                        val tag = if (itemNovelSub == "LIGHT_NOVEL") "LN" else "WN"
-                        "$tag · ${item.sourceProvider}"
-                    } else {
-                        item.sourceProvider
-                    }
-
-                    MediaCard(
-                        item = summary,
-                        cornerRadiusDp = posterStyle.cornerRadiusDp,
-                        isLandscape = posterStyle.isLandscape,
-                        hideLabels = posterStyle.hideLabels,
-                        badgeText = cardBadgeText,
-                        badgeColor = AccentGold,
-                        onCardClick = {
-                            if (existingInLibrary != null) {
-                                onItemClick(existingInLibrary.id)
-                            } else {
-                                EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
-                                onItemClick(-1L)
-                            }
-                        },
-                        onQuickProgress = {
-                            if (existingInLibrary != null) {
-                                onItemClick(existingInLibrary.id)
-                            } else {
-                                onAddMedia(item)
-                            }
-                        }
-                    )
-                }
-                item(
-                    key = "discover_custom_entry_footer",
-                    span = { GridItemSpan(maxLineSpan) }
-                ) {
-                    DiscoverCustomEntryCard(
-                        query = searchQuery.trim(),
-                        suggestedType = if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter,
-                        onClick = {
-                            onCreateCustomEntry(
-                                searchQuery.trim(),
-                                if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter
-                            )
-                        }
-                    )
-                }
-            }
-            }
-        } else if (searchQuery.length >= 2) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    modifier = Modifier.padding(horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "No media found matching \"$searchQuery\"",
-                        fontSize = 13.5.sp,
-                        color = TextPrimary
-                    )
-                    DiscoverCustomEntryCard(
-                        query = searchQuery.trim(),
-                        suggestedType = if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter,
-                        onClick = {
-                            onCreateCustomEntry(
-                                searchQuery.trim(),
-                                if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter
-                            )
-                        }
-                    )
-                }
-            }
-        } else if (selectedFilter == MediaType.GAME) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                if (isLoadingGameShelves && gameShelves.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+        if (searchQuery.trim().length >= 2) {
+            when {
+                isSearching && visibleResults.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
                     }
                 }
-                gameShelves.forEach { (shelfTitle, shelfItems) ->
-                    val filteredShelf = if (selectedGamePlatformSubFilter == "ALL") shelfItems else shelfItems.filter { item ->
-                        val groups = com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platform, null)
-                        groups.isEmpty() || selectedGamePlatformSubFilter in groups
-                    }
-                    if (filteredShelf.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = shelfTitle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
+                visibleResults.isNotEmpty() -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Results (${visibleResults.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextSecondary
+                        )
+                        if (isSearching) {
+                            CircularProgressIndicator(
+                                color = AccentGold,
+                                strokeWidth = 1.8.dp,
+                                modifier = Modifier.size(13.dp)
                             )
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                lazyRowItems(
-                                    items = filteredShelf,
-                                    key = { "${shelfTitle}_${it.igdbId ?: it.steamAppId ?: it.title}" }
-                                ) { game ->
-                                    val inLib = allMedia.firstOrNull { summary ->
-                                        summary.mediaType == MediaType.GAME && (
-                                            (game.igdbId != null && summary.title.equals(game.title, true)) ||
-                                                (game.steamAppId != null && summary.steamAppId == game.steamAppId) ||
-                                                summary.title.equals(game.title, ignoreCase = true)
-                                            )
-                                    }
-                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                        title = game.title,
-                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: game.coverUrl,
-                                        subtitle = game.releaseYear ?: game.platform,
-                                        rating = game.communityScore,
-                                        onClick = {
-                                            if (inLib != null) {
-                                                onItemClick(inLib.id)
-                                            } else {
-                                                EphemeralPreviewHolder.previewItem = game.toMediaItemEntity()
-                                                onItemClick(-1L)
-                                            }
-                                        },
-                                        cardWidth = 112.dp
-                                    )
-                                }
-                            }
                         }
                     }
-                }
-                val gameSpotlight = allMedia.filter { it.mediaType == MediaType.GAME }.take(12)
-                if (gameSpotlight.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "In Your Games Library",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            lazyRowItems(gameSpotlight, key = { "lib_game_${it.id}" }) { summary ->
-                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                    title = summary.title,
-                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
-                                    subtitle = com.omnitrack.app.data.model.formatGameCardBadge(summary.platforms, summary.platform, summary.playtimeHours, summary.runtimeMinutes),
-                                    rating = summary.userRating ?: summary.communityScore,
-                                    onClick = { onItemClick(summary.id) },
-                                    cardWidth = 112.dp
+
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val isPhone = maxWidth < 600.dp
+                        val discoverColumns = if (posterStyle.isLandscape) {
+                            if (isPhone) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
+                        } else {
+                            GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
+                        }
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = discoverColumns,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 110.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(
+                                visibleResults,
+                                key = {
+                                    "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: it.openLibraryId ?: it.hardcoverId ?: it.comicVineId ?: it.metronId ?: 0L}"
+                                }
+                            ) { item ->
+                                val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
+                                    com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                                        item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                                    )
+                                } else null
+
+                                val existingInLibrary = allMedia.firstOrNull { summary ->
+                                    summary.mediaType == item.mediaType && (
+                                        (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
+                                            (item.metronId != null && summary.metronId == item.metronId) ||
+                                            (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
+                                            summary.title.equals(item.title, ignoreCase = true) ||
+                                            (item.nativeTitle != null && summary.nativeTitle.equals(item.nativeTitle, ignoreCase = true))
+                                        ) && (
+                                        itemNovelSub == null ||
+                                            com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                                                summary.platform, summary.originCountry, summary.anilistId, summary.malId, summary.totalProgress, summary.title
+                                            ) == itemNovelSub
+                                        )
+                                }
+
+                                val summary = existingInLibrary ?: MediaCardSummary(
+                                    id = 0L,
+                                    title = item.title,
+                                    nativeTitle = item.nativeTitle,
+                                    coverUrl = item.coverUrl,
+                                    bannerUrl = item.bannerUrl,
+                                    mediaType = item.mediaType,
+                                    status = TrackingStatus.PLAN_TO_TRACK,
+                                    currentProgress = 0.0,
+                                    totalProgress = item.totalProgress?.toDouble(),
+                                    userRating = item.communityScore,
+                                    customCoverPath = null,
+                                    customBannerPath = null,
+                                    artworkRole = "DEFAULT",
+                                    originCountry = item.originCountry,
+                                    platform = item.platform,
+                                    runtimeMinutes = item.runtimeMinutes,
+                                    openLibraryId = item.openLibraryId,
+                                    bookAuthor = item.bookAuthor,
+                                    bookFormat = item.bookFormat,
+                                    comicVineId = item.comicVineId,
+                                    metronId = item.metronId,
+                                    comicPublisher = item.comicPublisher,
+                                    comicFormat = item.comicFormat,
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+
+                                val cardBadgeText = when {
+                                    existingInLibrary != null -> "IN LIBRARY"
+                                    itemNovelSub != null -> {
+                                        val tag = if (itemNovelSub == "LIGHT_NOVEL") "LN" else "WN"
+                                        "$tag \u00B7 ${item.sourceProvider}"
+                                    }
+                                    else -> item.sourceProvider
+                                }
+
+                                MediaCard(
+                                    item = summary,
+                                    cornerRadiusDp = posterStyle.cornerRadiusDp,
+                                    isLandscape = posterStyle.isLandscape,
+                                    hideLabels = posterStyle.hideLabels,
+                                    cardDepthEnabled = posterStyle.cardDepthEnabled && posterStyle.cardDepthPostersEnabled,
+                                    cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                                    cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                                    cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                                    badgeText = cardBadgeText,
+                                    badgeColor = AccentGold,
+                                    showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
+                                    onCardClick = {
+                                        if (existingInLibrary != null) {
+                                            onItemClick(existingInLibrary.id)
+                                        } else {
+                                            EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                                            onItemClick(-1L)
+                                        }
+                                    },
+                                    onQuickProgress = {
+                                        if (existingInLibrary != null) {
+                                            onItemClick(existingInLibrary.id)
+                                        } else {
+                                            onAddMedia(item)
+                                        }
+                                    }
                                 )
                             }
-                        }
-                    }
-                }
-            }
-        } else if (selectedFilter == MediaType.BOOK) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                if (isLoadingBookShelves && bookShelves.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
-                    }
-                }
-                bookShelves.forEach { (shelfTitle, shelfItems) ->
-                    val filteredShelf = shelfItems.filter { item ->
-                        val fmtOk = selectedBookFormatSubFilter == "ALL" ||
-                            com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormatSubFilter
-                        val catOk = selectedBookCategorySubFilter == null ||
-                            selectedBookCategorySubFilter == "ALL" ||
-                            com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, item.synopsis) == selectedBookCategorySubFilter
-                        fmtOk && catOk
-                    }
-                    if (filteredShelf.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = shelfTitle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                lazyRowItems(
-                                    items = filteredShelf,
-                                    key = { "${shelfTitle}_${it.openLibraryId ?: it.hardcoverId ?: it.title}_${it.bookAuthor ?: ""}" }
-                                ) { book ->
-                                    val inLib = allMedia.firstOrNull { summary ->
-                                        summary.mediaType == MediaType.BOOK && (
-                                            (book.openLibraryId != null && summary.openLibraryId == book.openLibraryId) ||
-                                                summary.title.equals(book.title, ignoreCase = true)
-                                            )
-                                    }
-                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                        title = book.title,
-                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: book.coverUrl,
-                                        subtitle = book.bookAuthor ?: book.releaseYear,
-                                        rating = book.communityScore,
+                            if (discoverSettings.showCustomEntryCard) {
+                                item(
+                                    key = "discover_custom_entry_footer",
+                                    span = { GridItemSpan(maxLineSpan) }
+                                ) {
+                                    DiscoverCustomEntryCard(
+                                        query = searchQuery.trim(),
+                                        suggestedType = if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter,
                                         onClick = {
-                                            if (inLib != null) {
-                                                onItemClick(inLib.id)
-                                            } else {
-                                                EphemeralPreviewHolder.previewItem = book.toMediaItemEntity()
-                                                onItemClick(-1L)
-                                            }
-                                        },
-                                        cardWidth = 112.dp
+                                            onCreateCustomEntry(
+                                                searchQuery.trim(),
+                                                if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter
+                                            )
+                                        }
                                     )
                                 }
                             }
                         }
                     }
                 }
-                val bookSpotlight = allMedia.filter { it.mediaType == MediaType.BOOK }.take(12)
-                if (bookSpotlight.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "In Your Books Library",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            lazyRowItems(bookSpotlight, key = { "lib_book_${it.id}" }) { summary ->
-                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                    title = summary.title,
-                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
-                                    subtitle = com.omnitrack.app.data.model.formatBookCardBadge(
-                                        currentProgress = summary.currentProgress,
-                                        totalProgress = summary.totalProgress,
-                                        trackingMode = summary.bookTrackingMode,
-                                        audioMinutes = summary.bookAudioMinutes,
-                                        totalAudioMinutes = summary.bookTotalAudioMinutes,
-                                        bookFormat = summary.bookFormat,
-                                        author = summary.bookAuthor
-                                    ),
-                                    rating = summary.userRating ?: summary.communityScore,
-                                    onClick = { onItemClick(summary.id) },
-                                    cardWidth = 112.dp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (selectedFilter == MediaType.COMIC) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                if (isLoadingComicShelves && comicShelves.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
-                    }
-                }
-                comicShelves.forEach { (shelfTitle, shelfItems) ->
-                    val filteredShelf = shelfItems.filter { item ->
-                        val pubOk = selectedComicPublisherSubFilter == "ALL" ||
-                            com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisherSubFilter
-                        val fmtOk = selectedComicFormatSubFilter == "ALL" ||
-                            com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormatSubFilter
-                        pubOk && fmtOk
-                    }
-                    if (filteredShelf.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
                             Text(
-                                text = shelfTitle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "No media found matching \"${searchQuery.trim()}\"",
+                                fontSize = 13.5.sp,
                                 color = TextPrimary
                             )
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                lazyRowItems(
-                                    items = filteredShelf,
-                                    key = { "${shelfTitle}_${it.comicVineId ?: it.metronId ?: it.openLibraryId ?: it.title}" }
-                                ) { comic ->
-                                    val inLib = allMedia.firstOrNull { summary ->
-                                        summary.mediaType == MediaType.COMIC && (
-                                            (comic.comicVineId != null && summary.comicVineId == comic.comicVineId) ||
-                                                (comic.metronId != null && summary.metronId == comic.metronId) ||
-                                                summary.title.equals(comic.title, ignoreCase = true)
-                                            )
+                            if (discoverSettings.showCustomEntryCard) {
+                                DiscoverCustomEntryCard(
+                                    query = searchQuery.trim(),
+                                    suggestedType = if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter,
+                                    onClick = {
+                                        onCreateCustomEntry(
+                                            searchQuery.trim(),
+                                            if (selectedFilter == MediaType.ALL) MediaType.NOVEL else selectedFilter
+                                        )
                                     }
-                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                        title = comic.title,
-                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: comic.coverUrl,
-                                        subtitle = comic.comicPublisher ?: comic.releaseYear,
-                                        rating = comic.communityScore,
-                                        onClick = {
-                                            if (inLib != null) {
-                                                onItemClick(inLib.id)
-                                            } else {
-                                                EphemeralPreviewHolder.previewItem = comic.toMediaItemEntity()
-                                                onItemClick(-1L)
-                                            }
-                                        },
-                                        cardWidth = 112.dp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                val comicSpotlight = allMedia.filter { it.mediaType == MediaType.COMIC }.take(12)
-                if (comicSpotlight.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "In Your Comics Library",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            lazyRowItems(comicSpotlight, key = { "lib_comic_${it.id}" }) { summary ->
-                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                    title = summary.title,
-                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
-                                    subtitle = com.omnitrack.app.data.model.formatComicCardBadge(
-                                        publisher = summary.comicPublisher,
-                                        format = summary.comicFormat,
-                                        currentProgress = summary.currentProgress,
-                                        totalProgress = summary.totalProgress,
-                                        trackingMode = summary.comicTrackingMode
-                                    ),
-                                    rating = summary.userRating ?: summary.communityScore,
-                                    onClick = { onItemClick(summary.id) },
-                                    cardWidth = 112.dp
                                 )
                             }
                         }
@@ -1265,33 +954,52 @@ fun DiscoverView(
                 }
             }
         } else {
-            // Live per-category Discover shelves + strictly filtered Library Spotlight (Friend Bug #1 fixed!)
-            val activeShelves: Map<String, List<SearchResultItem>> = when (selectedFilter) {
-                MediaType.ANIME -> animeShelves
-                MediaType.MANGA -> when (selectedMangaSubFilter) {
-                    "MANHWA" -> mangaShelves.filterKeys { it.contains("Manhwa", ignoreCase = true) || it.contains("Trending", ignoreCase = true) }
-                        .mapValues { (k, list) ->
-                            if (k.contains("Manhwa", ignoreCase = true)) list
-                            else list.filter { com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == "MANHWA" }
+            // Polished Browse Mode with Layout A / B / C, Infinite Shelves & Customize Filtering
+            val activeDefs: List<DiscoverShelfDef> = remember(
+                selectedFilter,
+                discoverSettings.disabledCategories,
+                discoverSettings.disabledShelves,
+                selectedMangaSubFilter,
+                selectedNovelSubFilter
+            ) {
+                DiscoverShelfCatalog.shelvesForCategory(selectedFilter).filter { def ->
+                    if (def.id in discoverSettings.disabledShelves) return@filter false
+                    if (selectedFilter == MediaType.ALL) {
+                        val mappedCat = when (def.id) {
+                            "ALL:anime_trending" -> MediaType.ANIME
+                            "ALL:manga_trending" -> MediaType.MANGA
+                            "ALL:comic_trending" -> MediaType.COMIC
+                            "ALL:novel_webnovels" -> MediaType.NOVEL
+                            "ALL:show_trending" -> MediaType.SHOW
+                            "ALL:movie_trending" -> MediaType.MOVIE
+                            "ALL:book_trending" -> MediaType.BOOK
+                            "ALL:game_trending" -> MediaType.GAME
+                            "ALL:vn_popular" -> MediaType.VISUAL_NOVEL
+                            else -> null
                         }
-                    "MANHUA" -> mangaShelves.mapValues { (_, list) ->
-                        list.filter { com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == "MANHUA" }
+                        if (mappedCat != null && mappedCat.name in discoverSettings.disabledCategories) {
+                            return@filter false
+                        }
                     }
-                    "MANGA" -> mangaShelves.mapValues { (_, list) ->
-                        list.filter { com.omnitrack.app.ui.screens.home.inferMangaSubtype(it.originCountry, it.nativeTitle) == "MANGA" }
+                    if (selectedFilter == MediaType.MANGA && selectedMangaSubFilter == "MANHWA" && def.id == "MANGA:top_rated") {
+                        return@filter false
                     }
-                    else -> mangaShelves
+                    if (selectedFilter == MediaType.NOVEL) {
+                        when (selectedNovelSubFilter) {
+                            "WEB_NOVEL" -> if (def.id !in setOf("NOVEL:top_webnovels", "NOVEL:progression_webnovels")) return@filter false
+                            "LIGHT_NOVEL" -> if (def.id !in setOf("NOVEL:trending_ln", "NOVEL:top_rated_ln")) return@filter false
+                        }
+                    }
+                    true
                 }
-                MediaType.NOVEL -> when (selectedNovelSubFilter) {
-                    "WEB_NOVEL" -> novelShelves.filterKeys { it.contains("Web", ignoreCase = true) }
-                    "LIGHT_NOVEL" -> novelShelves.filterKeys { it.contains("Light", ignoreCase = true) }
-                    else -> novelShelves
-                }
-                MediaType.SHOW -> showShelves
-                MediaType.MOVIE -> movieShelves
-                MediaType.VISUAL_NOVEL -> vnShelves
-                else -> allVerticalShelves
             }
+
+            val heroPool = remember(activeDefs, discoverShelves) {
+                activeDefs.flatMap { def ->
+                    discoverShelves[def.id]?.items?.take(2).orEmpty()
+                }.distinctBy { "${it.mediaType}_${it.title.lowercase()}" }.take(6)
+            }
+
             val categorySpotlight = remember(
                 allMedia,
                 selectedFilter,
@@ -1319,96 +1027,81 @@ fun DiscoverView(
                             (selectedVnLengthSubFilter == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(it.runtimeMinutes) == selectedVnLengthSubFilter)
                     }
                     else -> byType
-                }.take(12)
+                }.take(16)
             }
+
             val quickChips = when (selectedFilter) {
                 MediaType.ANIME -> listOf("Frieren", "Dandadan", "Bleach", "Solo Leveling", "Steins;Gate")
                 MediaType.MANGA -> listOf("Berserk", "Vagabond", "One Piece", "Omniscient Reader", "Kagurabachi")
-                MediaType.NOVEL -> listOf("The Hundred Reigns", "Shadow Slave", "Lord of the Mysteries", "The Perfect Run", "86", "Re:Zero")
+                MediaType.COMIC -> listOf("Batman", "Invincible", "Saga", "Ultimate Spider-Man", "Hellboy")
+                MediaType.NOVEL -> listOf("The Hundred Reigns", "Shadow Slave", "Lord of the Mysteries", "The Perfect Run", "Mother of Learning", "86")
+                MediaType.BOOK -> listOf("Dune", "The Iliad", "Meditations", "Project Hail Mary", "The Hobbit")
                 MediaType.SHOW -> listOf("Severance", "Andor", "Breaking Bad", "Arcane", "Shogun")
                 MediaType.MOVIE -> listOf("Dune", "Oppenheimer", "Interstellar", "Spider-Verse", "Parasite")
+                MediaType.GAME -> listOf("Elden Ring", "Baldur's Gate 3", "Hades II", "Hollow Knight", "Disco Elysium")
                 MediaType.VISUAL_NOVEL -> listOf("Steins;Gate", "Clannad", "The House in Fata Morgana", "Umineko", "Muv-Luv")
                 else -> listOf("The Hundred Reigns", "Audiobook", "Invincible", "Dune", "Frieren", "Elden Ring")
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(bottom = 110.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 114.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Top Spotlight or Hero Carousel based on Layout A / B / C setting
+                if (discoverSettings.showSpotlightBanner &&
+                    discoverSettings.layoutStyle != DiscoverLayoutStyle.MINIMAL_RAILS &&
+                    heroPool.isNotEmpty()
                 ) {
-                    quickChips.forEach { chip ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
-                                .clickable { queryFlow.value = chip }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = chip,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = TextPrimary
-                            )
+                    item(key = "discover_top_showcase_${discoverSettings.layoutStyle.name}") {
+                        when (discoverSettings.layoutStyle) {
+                            DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> {
+                                val topItem = heroPool.first()
+                                DiscoverSpotlightBanner(
+                                    item = topItem,
+                                    onDetails = {
+                                        val match = findLibraryMatch(allMedia, topItem)
+                                        if (match != null) onItemClick(match.id) else {
+                                            EphemeralPreviewHolder.previewItem = topItem.toMediaItemEntity()
+                                            onItemClick(-1L)
+                                        }
+                                    },
+                                    onAdd = { onAddMedia(topItem) }
+                                )
+                            }
+                            DiscoverLayoutStyle.HERO_CAROUSEL -> {
+                                DiscoverHeroCarousel(
+                                    items = heroPool,
+                                    allMedia = allMedia,
+                                    onItemClick = onItemClick,
+                                    onAddMedia = onAddMedia
+                                )
+                            }
+                            DiscoverLayoutStyle.MINIMAL_RAILS -> Unit
                         }
                     }
                 }
 
-                if (isLoadingCategoryShelves && activeShelves.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
-                    }
-                }
-
-                activeShelves.forEach { (shelfTitle, shelfItems) ->
-                    if (shelfItems.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(
-                                text = shelfTitle,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                lazyRowItems(
-                                    items = shelfItems,
-                                    key = { "${shelfTitle}_${it.mediaType}_${it.sourceProvider}_${it.anilistId ?: it.vndbId ?: it.tmdbId ?: it.steamAppId ?: it.openLibraryId ?: it.title}" }
-                                ) { item ->
-                                    val inLib = allMedia.firstOrNull { summary ->
-                                        summary.mediaType == item.mediaType && (
-                                            (item.anilistId != null && summary.anilistId == item.anilistId) ||
-                                                (item.tmdbId != null && summary.tmdbId == item.tmdbId) ||
-                                                (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
-                                                summary.title.equals(item.title, ignoreCase = true)
-                                            )
-                                    }
-                                    com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                        title = item.title,
-                                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
-                                        subtitle = item.bookAuthor ?: item.releaseYear ?: item.mediaType.displayName,
-                                        rating = item.communityScore,
-                                        onClick = {
-                                            if (inLib != null) {
-                                                onItemClick(inLib.id)
-                                            } else {
-                                                EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
-                                                onItemClick(-1L)
-                                            }
-                                        },
-                                        cardWidth = 112.dp
+                // Quick-Search Chips (Option A flat 6dp)
+                if (discoverSettings.showQuickSearchChips) {
+                    item(key = "discover_quick_chips") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            lazyRowItemsIndexed(quickChips, key = { idx, ch -> "qchip_${idx}_$ch" }) { _, chip ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.White.copy(alpha = 0.05f))
+                                        .clickable { queryFlow.value = chip }
+                                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = chip,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = TextPrimary
                                     )
                                 }
                             }
@@ -1416,31 +1109,176 @@ fun DiscoverView(
                     }
                 }
 
-                if (categorySpotlight.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = if (selectedFilter == MediaType.ALL) {
-                                "In Your Library"
-                            } else {
-                                "In Your ${selectedFilter.displayName} Library"
-                            },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            lazyRowItems(categorySpotlight, key = { "lib_spot_${it.id}" }) { summary ->
-                                com.omnitrack.app.ui.components.NuvioRailPosterCard(
-                                    title = summary.title,
-                                    coverUrl = summary.customCoverPath ?: summary.coverUrl,
-                                    subtitle = summary.bookAuthor ?: summary.mediaType.displayName,
-                                    rating = summary.userRating ?: summary.communityScore,
-                                    onClick = {
-                                        com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(categorySpotlight.map { it.id })
-                                        onItemClick(summary.id)
-                                    },
-                                    cardWidth = 112.dp
-                                )
+                if (activeDefs.isEmpty()) {
+                    item(key = "discover_all_disabled") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 32.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "All shelves are hidden in this category.",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Customize Discover",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentGold.copy(alpha = 0.14f))
+                                    .clickable(onClick = onOpenCustomizer)
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Curated & Infinitely Paginated Horizontal Poster Rails
+                activeDefs.forEach { def ->
+                    val state = discoverShelves[def.id]
+                    val rawItems = state?.items.orEmpty()
+                    val filteredItems = filterBySubfilters(rawItems, if (def.category == MediaType.ALL) selectedFilter else def.category)
+                    val isAudiobooks = def.id == "BOOK:audiobooks"
+
+                    if (state == null || (state.isLoading && rawItems.isEmpty())) {
+                        item(key = "skel_${def.id}") {
+                            DiscoverShelfSkeletonRow(
+                                title = def.title,
+                                isSquare = isAudiobooks,
+                                onHideShelf = {
+                                    scope.launch { prefManager.setDiscoverShelfEnabled(def.id, false) }
+                                }
+                            )
+                        }
+                    } else if (filteredItems.isNotEmpty()) {
+                        item(key = "shelf_${def.id}") {
+                            val rowState = rememberLazyListState()
+                            LaunchedEffect(rowState, filteredItems.size, state.hasMore, state.isLoading) {
+                                snapshotFlow {
+                                    rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                }.collect { lastIdx ->
+                                    if (state.hasMore && !state.isLoading && lastIdx >= (filteredItems.lastIndex - 3).coerceAtLeast(0)) {
+                                        homeViewModel?.loadMoreDiscoverShelf(def.id, tmdbKey)
+                                    }
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = def.title,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.VisibilityOff,
+                                        contentDescription = "Hide Shelf",
+                                        tint = TextSecondary.copy(alpha = 0.55f),
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable {
+                                                scope.launch { prefManager.setDiscoverShelfEnabled(def.id, false) }
+                                            }
+                                    )
+                                }
+
+                                LazyRow(
+                                    state = rowState,
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    lazyRowItemsIndexed(
+                                        items = filteredItems,
+                                        key = { idx, item ->
+                                            "${def.id}_${idx}_${item.mediaType}_${item.sourceProvider}_${item.anilistId ?: item.vndbId ?: item.tmdbId ?: item.steamAppId ?: item.openLibraryId ?: item.comicVineId ?: item.metronId ?: item.title}"
+                                        }
+                                    ) { _, item ->
+                                        val inLib = findLibraryMatch(allMedia, item)
+                                        NuvioRailPosterCard(
+                                            title = item.title,
+                                            coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
+                                            subtitle = item.bookAuthor ?: item.comicPublisher ?: item.releaseYear ?: item.mediaType.displayName,
+                                            rating = item.communityScore,
+                                            inLibraryBadge = inLib != null,
+                                            onClick = {
+                                                if (inLib != null) {
+                                                    onItemClick(inLib.id)
+                                                } else {
+                                                    EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                                                    onItemClick(-1L)
+                                                }
+                                            },
+                                            cardWidth = 114.dp,
+                                            cardHeight = if (isAudiobooks) 114.dp else androidx.compose.ui.unit.Dp.Unspecified
+                                        )
+                                    }
+
+                                    if (state.isLoading) {
+                                        item(key = "tail_load_${def.id}") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(48.dp)
+                                                    .height(if (isAudiobooks) 114.dp else 171.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    color = AccentGold,
+                                                    strokeWidth = 2.dp,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // "In Your Library" Rail (respects showInYourLibraryShelf)
+                if (discoverSettings.showInYourLibraryShelf && categorySpotlight.isNotEmpty()) {
+                    item(key = "discover_lib_spotlight") {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = if (selectedFilter == MediaType.ALL) "In Your Library" else "In Your ${selectedFilter.displayName} Library",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                modifier = Modifier.padding(horizontal = 16.dp)
+                            )
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                lazyRowItemsIndexed(categorySpotlight, key = { idx, s -> "lib_spot_${idx}_${s.id}" }) { _, summary ->
+                                    NuvioRailPosterCard(
+                                        title = summary.title,
+                                        coverUrl = summary.customCoverPath ?: summary.coverUrl,
+                                        subtitle = summary.bookAuthor ?: summary.comicPublisher ?: summary.mediaType.displayName,
+                                        rating = summary.userRating ?: summary.communityScore,
+                                        onClick = {
+                                            ActiveSiblingHolder.setSiblings(categorySpotlight.map { it.id })
+                                            onItemClick(summary.id)
+                                        },
+                                        cardWidth = 114.dp
+                                    )
+                                }
                             }
                         }
                     }
@@ -1488,17 +1326,254 @@ fun DiscoverView(
                             }
                         },
                         onSelectCustomMode = {
-                            scope.launch {
-                                prefManager.updateUseCustomGeminiModel(true)
-                            }
+                            scope.launch { prefManager.updateUseCustomGeminiModel(true) }
                         },
                         onCustomModelChange = { valTrim ->
-                            scope.launch {
-                                prefManager.updateCustomGeminiModel(valTrim)
-                            }
+                            scope.launch { prefManager.updateCustomGeminiModel(valTrim) }
                         }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        }
+    }
+}
+
+private fun findLibraryMatch(allMedia: List<MediaCardSummary>, item: SearchResultItem): MediaCardSummary? =
+    allMedia.firstOrNull { summary ->
+        summary.mediaType == item.mediaType && (
+            (item.anilistId != null && summary.anilistId == item.anilistId) ||
+                (item.tmdbId != null && summary.tmdbId == item.tmdbId) ||
+                (item.steamAppId != null && summary.steamAppId == item.steamAppId) ||
+                (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
+                (item.metronId != null && summary.metronId == item.metronId) ||
+                (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
+                summary.title.equals(item.title, ignoreCase = true)
+            )
+    }
+
+@Composable
+private fun DiscoverSpotlightBanner(
+    item: SearchResultItem,
+    onDetails: () -> Unit,
+    onAdd: () -> Unit
+) {
+    val bgModel = item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(186.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .clickable(onClick = onDetails)
+    ) {
+        if (bgModel.isNotBlank()) {
+            AsyncImage(
+                model = bgModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(18.dp)
+                    .alpha(0.38f)
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            AmoledBlack.copy(alpha = 0.90f),
+                            AmoledBlack.copy(alpha = 0.62f),
+                            AmoledBlack.copy(alpha = 0.80f)
+                        )
+                    )
+                )
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(96.dp)
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+            ) {
+                AsyncImage(
+                    model = item.coverUrl,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "TRENDING SPOTLIGHT \u00B7 ${item.mediaType.displayName.uppercase()}",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentGold,
+                    letterSpacing = 0.9.sp
+                )
+                Text(
+                    text = item.title,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = TextPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val meta = listOfNotNull(
+                    item.releaseYear,
+                    item.communityScore?.takeIf { it > 0f }?.let { "\u2605 ${formatSmartRating(it.toDouble())}" },
+                    item.sourceProvider
+                ).joinToString(" \u00B7 ")
+                if (meta.isNotBlank()) {
+                    Text(
+                        text = meta,
+                        fontSize = 11.5.sp,
+                        color = TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Row(
+                    modifier = Modifier.padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "+ Library",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(AccentGold.copy(alpha = 0.18f))
+                            .clickable(onClick = onAdd)
+                            .padding(horizontal = 11.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoverHeroCarousel(
+    items: List<SearchResultItem>,
+    allMedia: List<MediaCardSummary>,
+    onItemClick: (Long) -> Unit,
+    onAddMedia: (SearchResultItem) -> Unit
+) {
+    val pagerState = rememberPagerState(pageCount = { items.size })
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxWidth()
+        ) { page ->
+            val item = items[page]
+            DiscoverSpotlightBanner(
+                item = item,
+                onDetails = {
+                    val match = findLibraryMatch(allMedia, item)
+                    if (match != null) onItemClick(match.id) else {
+                        EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                        onItemClick(-1L)
+                    }
+                },
+                onAdd = { onAddMedia(item) }
+            )
+        }
+        if (items.size > 1) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(items.size) { idx ->
+                    val active = pagerState.currentPage == idx
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 3.dp)
+                            .width(if (active) 16.dp else 5.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(if (active) AccentGold else Color.White.copy(alpha = 0.28f))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DiscoverShelfSkeletonRow(
+    title: String,
+    isSquare: Boolean,
+    onHideShelf: () -> Unit
+) {
+    val pulse = rememberInfiniteTransition(label = "discover_skeleton")
+    val alpha by pulse.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "skeleton_alpha"
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Icon(
+                imageVector = Icons.Default.VisibilityOff,
+                contentDescription = "Hide Shelf",
+                tint = TextSecondary.copy(alpha = 0.55f),
+                modifier = Modifier
+                    .size(16.dp)
+                    .clickable(onClick = onHideShelf)
+            )
+        }
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(5) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .width(114.dp)
+                            .height(if (isSquare) 114.dp else 171.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = alpha))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(86.dp)
+                            .height(10.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color.White.copy(alpha = alpha))
+                    )
                 }
             }
         }
@@ -1511,51 +1586,53 @@ private fun DiscoverCustomEntryCard(
     suggestedType: MediaType,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(AccentGold.copy(alpha = 0.16f)),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.04f))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = null,
-                tint = AccentGold,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AccentGold.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = if (query.isNotBlank()) "Can't find \"$query\"?" else "Create Custom Entry",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Add manually as ${suggestedType.displayName} with custom cover, synopsis & progress",
+                    fontSize = 12.sp,
+                    color = TextSecondary
+                )
+            }
             Text(
-                text = if (query.isNotBlank()) "Can't find \"$query\"?" else "Create Custom Entry",
-                fontSize = 14.sp,
+                text = "Create",
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Add manually as ${suggestedType.displayName} with custom cover, synopsis & progress",
-                fontSize = 12.sp,
-                color = TextSecondary
+                color = AccentGold
             )
         }
-        Text(
-            text = "Create",
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Bold,
-            color = AccentGold
-        )
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
     }
 }

@@ -72,10 +72,8 @@ fun DetailBookAuthorSection(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.09f))
-                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
                 .clickable { onOpenAuthorProfile() }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {

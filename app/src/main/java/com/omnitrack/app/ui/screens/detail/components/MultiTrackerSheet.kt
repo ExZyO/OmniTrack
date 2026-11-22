@@ -3,82 +3,78 @@ package com.omnitrack.app.ui.screens.detail.components
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.spring
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.firstOrNull
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.OpenInBrowser
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,11 +83,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -100,31 +99,45 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
+import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
-import com.omnitrack.app.data.search.SearchResultItem
-import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.data.sync.RemoteTrackerEntrySnapshot
+import com.omnitrack.app.data.sync.TrackerMetadataCodec
+import com.omnitrack.app.data.sync.TrackerOverrideConfig
+import com.omnitrack.app.data.sync.TrackerSyncEngine
+import com.omnitrack.app.data.sync.TrackerSyncOutcome
+import com.omnitrack.app.data.sync.TrackerTokens
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.roundToInt
 
 data class TrackerDef(
     val key: String,
     val name: String,
-    val accentColor: Color,
     val boundId: String?,
     val scoreFormat: String,
+    val noteCap: Int,
+    val supportsStatusLock: Boolean,
+    val supportsPush: Boolean,
+    val isSignedIn: Boolean,
     val browserUrlTemplate: ((String) -> String)? = null,
-    val onUpdateBoundId: (String?) -> Unit
+    val onUpdateBoundId: (String?) -> MediaItemEntity
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -132,1950 +145,1755 @@ data class TrackerDef(
 fun MultiTrackerSheet(
     item: MediaItemEntity,
     onDismiss: () -> Unit,
-    onUpdateItem: (MediaItemEntity) -> Unit
+    onUpdateItem: (MediaItemEntity) -> Unit,
+    onDeleteLocalEntry: () -> Unit = {},
+    presentationSettings: PresentationSettings? = null,
+    backdropBitmap: ImageBitmap? = null,
+    backdropTargetUrl: String? = null,
+    onPullFromTracker: ((String, MediaItemEntity, (MediaItemEntity?, TrackerSyncOutcome) -> Unit) -> Unit)? = null,
+    onPushToTracker: ((MediaItemEntity, String?, (List<TrackerSyncOutcome>) -> Unit) -> Unit)? = null,
+    onDeleteFromRemote: ((String, Boolean, MediaItemEntity, (TrackerSyncOutcome, Boolean) -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val focusManager = LocalFocusManager.current
     val app = context.applicationContext as OmniTrackApplication
     val tokenManager = app.trackerTokenManager
     val syncEngine = app.trackerSyncEngine
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val tokens by tokenManager.tokens.collectAsState(initial = com.omnitrack.app.data.sync.TrackerTokens())
-    var isSyncingNow by remember { mutableStateOf(false) }
+    val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
+    var localItem by remember(item.id, item.lastUpdated, item.matchedTrackerMetaJson) { mutableStateOf(item) }
+    LaunchedEffect(item) { localItem = item }
 
-    // 1. Auto Status Switching (Nuvio-style)
-    var autoStatusEnabled by remember { mutableStateOf(true) }
+    var showAllTrackers by remember { mutableStateOf(false) }
+    var isSyncingAll by remember { mutableStateOf(false) }
+    var isRefreshingMeta by remember { mutableStateOf(false) }
+    var syncStatusBanner by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var rebindTargetTracker by remember { mutableStateOf<TrackerDef?>(null) }
+    var deleteDialogTracker by remember { mutableStateOf<TrackerDef?>(null) }
+    var pullPromptAfterBind by remember { mutableStateOf<String?>(null) }
+    var datePickTarget by remember { mutableStateOf<String?>(null) }
 
-    // 2. Category Switcher & Anime Movie Bridge
-    val isProbableAnimeMovie = remember(item) {
-        item.mediaType == MediaType.MOVIE && (
-            item.synopsis?.contains("anime", ignoreCase = true) == true ||
-            item.title.contains("Movie", ignoreCase = true) ||
-            item.anilistId != null ||
-            item.malId != null
+    val matchedSnapshots = remember(localItem.matchedTrackerMetaJson) {
+        TrackerMetadataCodec.decodeMatchedSnapshots(localItem.matchedTrackerMetaJson)
+    }
+    val overridesMap = remember(localItem.trackerOverridesJson) {
+        TrackerMetadataCodec.decodeOverrides(localItem.trackerOverridesJson)
+    }
+
+    val primaryKeys = remember(localItem.mediaType, localItem.anilistId, localItem.malId) {
+        val isAnimeMovie = localItem.mediaType == MediaType.MOVIE &&
+            (localItem.anilistId != null || localItem.malId != null || localItem.synopsis?.contains("anime", true) == true)
+        when {
+            isAnimeMovie -> listOf("ANILIST", "MAL", "SIMKL", "BANGUMI", "TRAKT", "TMDB")
+            localItem.mediaType == MediaType.ANIME -> listOf("ANILIST", "MAL", "BANGUMI", "SIMKL", "TRAKT", "TMDB")
+            localItem.mediaType == MediaType.MANGA -> listOf("ANILIST", "MAL", "BANGUMI", "COMICK")
+            localItem.mediaType == MediaType.NOVEL -> listOf("ANILIST", "MAL", "BANGUMI", "HARDCOVER", "COMICK")
+            localItem.mediaType == MediaType.BOOK -> listOf("HARDCOVER")
+            localItem.mediaType == MediaType.COMIC -> listOf("HARDCOVER")
+            localItem.mediaType == MediaType.SHOW || localItem.mediaType == MediaType.MOVIE -> listOf("TRAKT", "SIMKL", "TMDB")
+            localItem.mediaType == MediaType.GAME -> listOf("STEAM", "IGDB")
+            localItem.mediaType == MediaType.VISUAL_NOVEL -> listOf("VNDB", "BANGUMI")
+            else -> listOf("ANILIST", "MAL", "SIMKL", "TRAKT", "TMDB")
+        }
+    }
+
+    val allOrderedKeys = remember(primaryKeys) {
+        val everything = listOf("ANILIST", "MAL", "BANGUMI", "SIMKL", "TRAKT", "TMDB", "HARDCOVER", "VNDB", "COMICK", "STEAM", "IGDB")
+        (primaryKeys + everything).distinct()
+    }
+
+    fun buildTrackerDef(key: String, src: MediaItemEntity): TrackerDef = when (key) {
+        "ANILIST" -> TrackerDef(
+            key = "ANILIST",
+            name = "AniList",
+            boundId = src.anilistId?.toString(),
+            scoreFormat = "100-Point",
+            noteCap = 2000,
+            supportsStatusLock = true,
+            supportsPush = true,
+            isSignedIn = !tokens.anilistToken.isNullOrBlank(),
+            browserUrlTemplate = { id ->
+                val seg = if (src.mediaType == MediaType.MANGA || src.mediaType == MediaType.NOVEL || src.mediaType == MediaType.COMIC) "manga" else "anime"
+                "https://anilist.co/$seg/$id"
+            },
+            onUpdateBoundId = { id -> src.copy(anilistId = id?.toLongOrNull()) }
+        )
+        "MAL" -> TrackerDef(
+            key = "MAL",
+            name = "MyAnimeList",
+            boundId = src.malId?.toString(),
+            scoreFormat = "10-Point Int",
+            noteCap = 1000,
+            supportsStatusLock = true,
+            supportsPush = true,
+            isSignedIn = !tokens.malToken.isNullOrBlank(),
+            browserUrlTemplate = { id ->
+                val seg = if (src.mediaType == MediaType.MANGA || src.mediaType == MediaType.NOVEL) "manga" else "anime"
+                "https://myanimelist.net/$seg/$id"
+            },
+            onUpdateBoundId = { id -> src.copy(malId = id?.toLongOrNull()) }
+        )
+        "BANGUMI" -> TrackerDef(
+            key = "BANGUMI",
+            name = "Bangumi",
+            boundId = src.bangumiId?.toString(),
+            scoreFormat = "10-Point Int",
+            noteCap = 380,
+            supportsStatusLock = true,
+            supportsPush = true,
+            isSignedIn = !tokens.bangumiToken.isNullOrBlank(),
+            browserUrlTemplate = { id -> "https://bgm.tv/subject/$id" },
+            onUpdateBoundId = { id -> src.copy(bangumiId = id?.toLongOrNull()) }
+        )
+        "SIMKL" -> TrackerDef(
+            key = "SIMKL",
+            name = "SIMKL",
+            boundId = src.simklId?.toString(),
+            scoreFormat = "10-Point Int",
+            noteCap = 140,
+            supportsStatusLock = true,
+            supportsPush = true,
+            isSignedIn = !tokens.simklToken.isNullOrBlank(),
+            browserUrlTemplate = { id ->
+                val seg = when (src.mediaType) {
+                    MediaType.MOVIE -> "movies"
+                    MediaType.ANIME -> "anime"
+                    else -> "tv"
+                }
+                "https://simkl.com/$seg/$id"
+            },
+            onUpdateBoundId = { id -> src.copy(simklId = id?.toLongOrNull()) }
+        )
+        "TRAKT" -> TrackerDef(
+            key = "TRAKT",
+            name = "Trakt",
+            boundId = src.traktId?.toString(),
+            scoreFormat = "10-Point Int",
+            noteCap = 0,
+            supportsStatusLock = true,
+            supportsPush = true,
+            isSignedIn = !tokens.traktToken.isNullOrBlank(),
+            browserUrlTemplate = { id ->
+                val t = if (src.mediaType == MediaType.MOVIE) "movie" else "show"
+                "https://trakt.tv/search/trakt/$id?id_type=$t"
+            },
+            onUpdateBoundId = { id -> src.copy(traktId = id?.toLongOrNull()) }
+        )
+        "TMDB" -> TrackerDef(
+            key = "TMDB",
+            name = "TMDb",
+            boundId = src.tmdbId?.toString(),
+            scoreFormat = "Half-Star (0.5..10)",
+            noteCap = 0,
+            supportsStatusLock = false,
+            supportsPush = true,
+            isSignedIn = !tokens.tmdbToken.isNullOrBlank(),
+            browserUrlTemplate = { id ->
+                val seg = if (src.mediaType == MediaType.MOVIE) "movie" else "tv"
+                "https://www.themoviedb.org/$seg/$id"
+            },
+            onUpdateBoundId = { id -> src.copy(tmdbId = id?.toLongOrNull()) }
+        )
+        "HARDCOVER" -> TrackerDef(
+            key = "HARDCOVER",
+            name = "Hardcover",
+            boundId = src.hardcoverId,
+            scoreFormat = "5-Star (0.5 Step)",
+            noteCap = 0,
+            supportsStatusLock = false,
+            supportsPush = true,
+            isSignedIn = !tokens.hardcoverToken.isNullOrBlank(),
+            browserUrlTemplate = { id -> "https://hardcover.app/books/$id" },
+            onUpdateBoundId = { id -> src.copy(hardcoverId = id) }
+        )
+        "VNDB" -> TrackerDef(
+            key = "VNDB",
+            name = "VNDB",
+            boundId = src.vndbId,
+            scoreFormat = "100-Point (1.0..10)",
+            noteCap = 2000,
+            supportsStatusLock = false,
+            supportsPush = true,
+            isSignedIn = !tokens.vndbToken.isNullOrBlank(),
+            browserUrlTemplate = { id -> "https://vndb.org/$id" },
+            onUpdateBoundId = { id -> src.copy(vndbId = id) }
+        )
+        "COMICK" -> TrackerDef(
+            key = "COMICK",
+            name = "Comick",
+            boundId = src.comickId,
+            scoreFormat = "Chapters",
+            noteCap = 0,
+            supportsStatusLock = true,
+            supportsPush = false,
+            isSignedIn = !tokens.comickToken.isNullOrBlank(),
+            browserUrlTemplate = { id -> "https://comick.io/comic/$id" },
+            onUpdateBoundId = { id -> src.copy(comickId = id) }
+        )
+        "STEAM" -> TrackerDef(
+            key = "STEAM",
+            name = "Steam",
+            boundId = src.steamAppId?.toString(),
+            scoreFormat = "Playtime & Achievements",
+            noteCap = 0,
+            supportsStatusLock = false,
+            supportsPush = false,
+            isSignedIn = !tokens.steamApiKey.isNullOrBlank() && !tokens.steamId64.isNullOrBlank(),
+            browserUrlTemplate = { id -> "https://store.steampowered.com/app/$id" },
+            onUpdateBoundId = { id ->
+                src.copy(
+                    steamAppId = id?.toLongOrNull(),
+                    platform = src.platform ?: if (id != null) "PC" else null
+                )
+            }
+        )
+        else -> TrackerDef(
+            key = "IGDB",
+            name = "IGDB",
+            boundId = src.igdbId?.toString(),
+            scoreFormat = "100-Point",
+            noteCap = 0,
+            supportsStatusLock = false,
+            supportsPush = false,
+            isSignedIn = com.omnitrack.app.data.preferences.PreferenceManager.cachedIgdbClientId.isNotBlank(),
+            browserUrlTemplate = { _ -> "https://www.igdb.com/search?q=${Uri.encode(src.title)}" },
+            onUpdateBoundId = { id -> src.copy(igdbId = id?.toLongOrNull()) }
         )
     }
 
-    val categoryOptions = listOf(
-        "Anime Series",
-        "Anime Movie (Bridge)",
-        "Shows & Movies",
-        "Manga & Novels",
-        "Games",
-        "Visual Novels"
-    )
+    val displayedKeys = remember(primaryKeys, allOrderedKeys, showAllTrackers, localItem) {
+        if (showAllTrackers) {
+            allOrderedKeys
+        } else {
+            val alsoBoundCross = allOrderedKeys.filter { key ->
+                key !in primaryKeys && buildTrackerDef(key, localItem).boundId != null
+            }
+            (primaryKeys + alsoBoundCross).distinct()
+        }
+    }
 
-    var selectedCategory by remember {
+    val trackers = remember(displayedKeys, localItem, tokens) {
+        displayedKeys.map { buildTrackerDef(it, localItem) }
+    }
+
+    var selectedTrackerKey by remember(item.id) {
         mutableStateOf(
+            trackers.firstOrNull { it.boundId != null && it.isSignedIn }?.key
+                ?: trackers.firstOrNull { it.boundId != null }?.key
+                ?: trackers.firstOrNull()?.key
+                ?: "ANILIST"
+        )
+    }
+    val activeTracker = trackers.firstOrNull { it.key == selectedTrackerKey }
+        ?: trackers.first()
+
+    // Live-refresh matched remote posters & diff snapshots for bound trackers
+    LaunchedEffect(localItem.id, displayedKeys, localItem.anilistId, localItem.malId, localItem.hardcoverId, localItem.tmdbId, localItem.traktId, localItem.simklId, localItem.bangumiId, localItem.vndbId) {
+        val boundKeys = displayedKeys.filter { buildTrackerDef(it, localItem).boundId != null }
+        if (boundKeys.isEmpty()) return@LaunchedEffect
+        val missingOrStale = boundKeys.filter { key ->
+            val snap = matchedSnapshots[key]
+            snap == null || (System.currentTimeMillis() - snap.lastSyncedMs) > 120_000L
+        }
+        if (missingOrStale.isNotEmpty() && !isRefreshingMeta) {
+            isRefreshingMeta = true
+            try {
+                val updatedMap = matchedSnapshots.toMutableMap()
+                var changed = false
+                coroutineScope {
+                    missingOrStale.map { k ->
+                        async {
+                            val snap = syncEngine.fetchMatchedTrackerSnapshot(k, localItem)
+                            if (snap != null) {
+                                updatedMap[k] = snap
+                                changed = true
+                            }
+                        }
+                    }.awaitAll()
+                }
+                if (changed) {
+                    val nextJson = TrackerMetadataCodec.encodeMatchedSnapshots(updatedMap)
+                    val next = localItem.copy(matchedTrackerMetaJson = nextJson)
+                    localItem = next
+                    onUpdateItem(next)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            } finally {
+                isRefreshingMeta = false
+            }
+        }
+    }
+
+    fun commitLocalUpdate(next: MediaItemEntity) {
+        localItem = next
+        onUpdateItem(next)
+    }
+
+    fun triggerPush(targetKey: String?, itemToPush: MediaItemEntity = localItem) {
+        if (isSyncingAll) return
+        isSyncingAll = true
+        val runner: (MediaItemEntity, String?, (List<TrackerSyncOutcome>) -> Unit) -> Unit =
+            onPushToTracker ?: { itm, k, cb ->
+                scope.launch {
+                    val res = syncEngine.pushItemToTrackers(itm, k)
+                    cb(res)
+                }
+            }
+        runner(itemToPush, targetKey) { outcomes ->
+            isSyncingAll = false
+            val failed = outcomes.filter { !it.success }
+            val ok = outcomes.filter { it.success }
+            syncStatusBanner = if (failed.isEmpty()) {
+                true to if (ok.size == 1) ok.first().message else "Synced ${ok.size} tracker(s) successfully"
+            } else {
+                false to failed.joinToString(" · ") { it.message }
+            }
+        }
+    }
+
+    fun triggerPull(targetKey: String) {
+        if (isSyncingAll) return
+        isSyncingAll = true
+        val runner: (String, MediaItemEntity, (MediaItemEntity?, TrackerSyncOutcome) -> Unit) -> Unit =
+            onPullFromTracker ?: { k, itm, cb ->
+                scope.launch {
+                    val (updated, out) = syncEngine.pullFromTracker(k, itm)
+                    cb(updated, out)
+                }
+            }
+        runner(targetKey, localItem) { updated, outcome ->
+            isSyncingAll = false
+            if (updated != null) localItem = updated
+            syncStatusBanner = outcome.success to outcome.message
+        }
+    }
+
+    val linkedCount = remember(trackers) { trackers.count { it.boundId != null } }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = AmoledBlack,
+        dragHandle = null,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
+    ) {
+        BackHandler {
             when {
-                isProbableAnimeMovie -> "Anime Movie (Bridge)"
-                item.mediaType == MediaType.ANIME -> "Anime Series"
-                item.mediaType == MediaType.SHOW || item.mediaType == MediaType.MOVIE -> "Shows & Movies"
-                item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL -> "Manga & Novels"
-                item.mediaType == MediaType.GAME -> "Games"
-                item.mediaType == MediaType.VISUAL_NOVEL -> "Visual Novels"
-                else -> "Anime Movie (Bridge)"
-            }
-        )
-    }
-
-    // 3. Build Active Trackers for Selected Category
-    val availableTrackers = remember(item, selectedCategory) {
-        val list = mutableListOf<TrackerDef>()
-
-        fun addAnilist() = list.add(
-            TrackerDef("ANILIST", "AniList", Color(0xFF02A9FF), item.anilistId?.toString(), "100-Point",
-                browserUrlTemplate = { "https://anilist.co/anime/$it" }) {
-                onUpdateItem(item.copy(anilistId = it?.toLongOrNull()))
-            }
-        )
-        fun addMal() = list.add(
-            TrackerDef("MAL", "MyAnimeList", Color(0xFF2E51A2), item.malId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://myanimelist.net/anime/$it" }) {
-                onUpdateItem(item.copy(malId = it?.toLongOrNull()))
-            }
-        )
-        fun addSimkl(isAnime: Boolean = true) = list.add(
-            TrackerDef("SIMKL", "SIMKL", Color(0xFF00E676), item.simklId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://simkl.com/${if (isAnime) "anime" else if (item.mediaType == MediaType.SHOW) "tv" else "movies"}/$it" }) {
-                onUpdateItem(item.copy(simklId = it?.toLongOrNull()))
-            }
-        )
-        fun addBangumi() = list.add(
-            TrackerDef("BANGUMI", "Bangumi", Color(0xFFF09199), item.bangumiId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://bgm.tv/subject/$it" }) {
-                onUpdateItem(item.copy(bangumiId = it?.toLongOrNull()))
-            }
-        )
-        fun addTrakt() = list.add(
-            TrackerDef("TRAKT", "Trakt.tv", Color(0xFFED1C24), item.traktId?.toString(), "10-Point",
-                browserUrlTemplate = { "https://trakt.tv/search/trakt/$it?id_type=${if (item.mediaType == MediaType.SHOW) "show" else "movie"}" }) {
-                onUpdateItem(item.copy(traktId = it?.toLongOrNull()))
-            }
-        )
-        fun addTmdb() = list.add(
-            TrackerDef("TMDB", "TMDb", Color(0xFF01D277), item.tmdbId?.toString(), "10-Point (Half-Star)",
-                browserUrlTemplate = { "https://www.themoviedb.org/${if (item.mediaType == MediaType.SHOW) "tv" else "movie"}/$it" }) {
-                onUpdateItem(item.copy(tmdbId = it?.toLongOrNull()))
-            }
-        )
-        fun addComick() = list.add(
-            TrackerDef("COMICK", "Comick", Color(0xFFF43F5E), item.comickId, "Chapters",
-                browserUrlTemplate = {
-                    val trimmed = it.trim()
-                    if (trimmed.contains(" ") || !trimmed.contains("-")) {
-                        val slug = trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
-                        if (slug.isNotBlank()) "https://comick.io/comic/$slug" else "https://comick.io/search?q=${Uri.encode(trimmed)}"
-                    } else {
-                        "https://comick.io/comic/$trimmed"
-                    }
-                }) {
-                onUpdateItem(item.copy(comickId = it))
-            }
-        )
-        fun addSteam() = list.add(
-            TrackerDef("STEAM", "Steam", Color(0xFF66C0F4), item.steamAchievementsTotal?.let { "Synced" } ?: item.platform, "Playtime Sync",
-                browserUrlTemplate = {
-                    if (it.all { c -> c.isDigit() }) {
-                        "https://store.steampowered.com/app/$it"
-                    } else {
-                        "https://store.steampowered.com/search/?term=${Uri.encode(item.title)}"
-                    }
-                }) {
-                onUpdateItem(item.copy(platform = it))
-            }
-        )
-        fun addIgdb() = list.add(
-            TrackerDef("IGDB", "IGDB", Color(0xFF9146FF), item.igdbId?.toString(), "100-Point",
-                browserUrlTemplate = {
-                    if (it.all { c -> c.isDigit() }) {
-                        "https://www.igdb.com/search?q=${Uri.encode(item.title)}"
-                    } else {
-                        "https://www.igdb.com/games/$it"
-                    }
-                }) {
-                onUpdateItem(item.copy(igdbId = it?.toLongOrNull()))
-            }
-        )
-        fun addVndb() = list.add(
-            TrackerDef("VNDB", "VNDB", Color(0xFF3B82F6), item.vndbId, "10-100 Votes",
-                browserUrlTemplate = { "https://vndb.org/$it" }) {
-                onUpdateItem(item.copy(vndbId = it))
-            }
-        )
-
-        when (selectedCategory) {
-            "Anime Movie (Bridge)" -> {
-                addAnilist(); addMal(); addBangumi(); addSimkl(isAnime = true); addTrakt(); addTmdb()
-            }
-            "Anime Series" -> {
-                addAnilist(); addMal(); addSimkl(isAnime = true); addBangumi()
-            }
-            "Shows & Movies" -> {
-                addTrakt(); addSimkl(isAnime = false); addTmdb()
-            }
-            "Manga & Novels" -> {
-                addAnilist(); addMal(); addBangumi(); addComick()
-            }
-            "Games" -> {
-                addSteam(); addIgdb()
-            }
-            "Visual Novels" -> {
-                addVndb(); addBangumi(); addAnilist()
+                rebindTargetTracker != null -> rebindTargetTracker = null
+                deleteDialogTracker != null -> deleteDialogTracker = null
+                else -> onDismiss()
             }
         }
-        list
-    }
 
-    // 4. Tab Navigation (ALL + Individual Trackers)
-    val tabOptions = remember(availableTrackers) {
-        listOf("ALL") + availableTrackers.map { it.name }
-    }
-    var activeTab by remember { mutableStateOf("ALL") }
+        DetailSheetBackdrop(
+            presentationSettings = presentationSettings,
+            backdropBitmap = backdropBitmap,
+            backdropTargetUrl = backdropTargetUrl,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+            ) {
+                // Drag Pill
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 36.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.22f))
+                    )
+                }
 
-    // If current tab is not in options, reset to ALL
-    LaunchedEffect(tabOptions) {
-        if (activeTab !in tabOptions) {
-            activeTab = "ALL"
-        }
-    }
+                // 1. Borderless Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(34.dp)) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = TextPrimary
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = localItem.title,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "$linkedCount Linked · ${if (localItem.autoStatusEnabled) "Auto-Sync On" else "Manual Sync"}",
+                            fontSize = 11.5.sp,
+                            color = AccentGold
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(AccentGold)
+                            .clickable(enabled = !isSyncingAll) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                triggerPush(null)
+                            }
+                            .padding(horizontal = 13.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (isSyncingAll) {
+                            CircularProgressIndicator(
+                                color = AmoledBlack,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                tint = AmoledBlack,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Text(
+                            text = if (isSyncingAll) "Syncing" else "Sync All",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AmoledBlack
+                        )
+                    }
+                }
 
-    // Expanded state per tracker card in ALL tab
-    val expandedCards = remember { mutableStateMapOf<String, Boolean>() }
+                // Live Sync Outcome Banner
+                AnimatedVisibility(visible = syncStatusBanner != null) {
+                    syncStatusBanner?.let { (ok, msg) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (ok) AccentGold.copy(alpha = 0.14f)
+                                    else Color(0xFFEF4444).copy(alpha = 0.18f)
+                                )
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = msg,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (ok) AccentGold else Color(0xFFFCA5A5),
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss",
+                                tint = TextSecondary,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { syncStatusBanner = null }
+                            )
+                        }
+                    }
+                }
 
-    // Chimanew-Style Search & Rebind Sheet State
-    var searchRebindTracker by remember { mutableStateOf<TrackerDef?>(null) }
+                AnimatedVisibility(visible = pullPromptAfterBind != null) {
+                    pullPromptAfterBind?.let { boundKey ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(AccentGold.copy(alpha = 0.12f))
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Bound $boundKey! Pull remote progress & rating?",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = AccentGold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Skip",
+                                    fontSize = 12.sp,
+                                    color = TextSecondary,
+                                    modifier = Modifier.clickable { pullPromptAfterBind = null }
+                                )
+                                Text(
+                                    text = "Pull Now",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentGold,
+                                    modifier = Modifier.clickable {
+                                        pullPromptAfterBind = null
+                                        triggerPull(boundKey)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
 
-    // Handlers for Progress & Auto-Status switching
-    fun updateProgressWithAutoStatus(newProgress: Double) {
-        val total = item.totalProgress ?: 0.0
-        val bounded = if (total > 0.0) newProgress.coerceIn(0.0, total) else newProgress.coerceAtLeast(0.0)
+                // 2. Horizontal Matched-Artwork Switcher Strip
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    itemsIndexed(trackers, key = { _, t -> t.key }) { _, trk ->
+                        val selected = trk.key == activeTracker.key
+                        val snap = matchedSnapshots[trk.key]
+                        val thumbUrl = snap?.coverUrl
+                            ?: if (trk.boundId != null) localItem.customCoverPath ?: localItem.coverUrl.takeIf { it.isNotBlank() } else null
+                        val statusDotColor = when {
+                            trk.boundId == null -> Color.White.copy(alpha = 0.25f)
+                            !trk.isSignedIn && trk.supportsPush -> Color(0xFFEF4444)
+                            snap?.remoteProgress != null && snap.remoteProgress.toInt() != localItem.currentProgress.toInt() -> Color(0xFFF59E0B)
+                            else -> AccentGold
+                        }
+                        val statusWord = when {
+                            trk.boundId == null -> "Unlinked"
+                            !trk.isSignedIn && trk.supportsPush -> "Signed Out"
+                            snap?.remoteProgress != null && snap.remoteProgress.toInt() != localItem.currentProgress.toInt() -> "Diff"
+                            else -> "Linked"
+                        }
 
-        var newStatus = item.status
-        if (autoStatusEnabled) {
-            if (bounded > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                newStatus = TrackingStatus.IN_PROGRESS
-            } else if (total > 0.0 && bounded >= total) {
-                newStatus = TrackingStatus.COMPLETED
+                        Column(
+                            modifier = Modifier
+                                .width(66.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (selected) AccentGold.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
+                                .clickable { selectedTrackerKey = trk.key }
+                                .padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(46.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(DarkSurfaceCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!thumbUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = thumbUrl,
+                                        contentDescription = trk.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.LinkOff,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.35f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(3.dp)
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(statusDotColor)
+                                )
+                            }
+                            Text(
+                                text = trk.name,
+                                fontSize = 10.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) AccentGold else TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = statusWord,
+                                fontSize = 9.sp,
+                                color = statusDotColor,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    // Trailing "+ All" cross-category expander tile
+                    item(key = "all_trackers_toggle") {
+                        Column(
+                            modifier = Modifier
+                                .width(64.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (showAllTrackers) AccentGold.copy(alpha = 0.18f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
+                                .clickable { showAllTrackers = !showAllTrackers }
+                                .padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(46.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(Color.White.copy(alpha = 0.06f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (showAllTrackers) Icons.Default.Close else Icons.Default.Add,
+                                    contentDescription = "All Trackers",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Text(
+                                text = if (showAllTrackers) "Relevant" else "+ All",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold
+                            )
+                            Text(
+                                text = "11 Apps",
+                                fontSize = 9.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                // 3. Focused Borderless Tracker Studio
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(480.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    val activeSnap = matchedSnapshots[activeTracker.key]
+
+                    // 3a. Matched Remote Entry Showcase (with bigger 2:3 art & diff)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val heroCover = activeSnap?.coverUrl
+                            ?: if (activeTracker.boundId != null) localItem.customCoverPath ?: localItem.coverUrl.takeIf { it.isNotBlank() } else null
+                        Box(
+                            modifier = Modifier
+                                .width(64.dp)
+                                .aspectRatio(2f / 3f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurfaceCard),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (!heroCover.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = heroCover,
+                                    contentDescription = activeTracker.name,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.LinkOff,
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = activeSnap?.title ?: if (activeTracker.boundId != null) localItem.title else "Not bound on ${activeTracker.name}",
+                                fontSize = 15.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val metaLine = listOfNotNull(
+                                activeTracker.boundId?.let { "ID #$it" },
+                                activeSnap?.format,
+                                activeSnap?.year,
+                                if (!activeTracker.isSignedIn && activeTracker.supportsPush) "Signed Out" else null
+                            ).joinToString(" · ")
+                            if (metaLine.isNotBlank()) {
+                                Text(
+                                    text = metaLine,
+                                    fontSize = 11.5.sp,
+                                    color = if (!activeTracker.isSignedIn && activeTracker.supportsPush) Color(0xFFFCA5A5) else TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (activeSnap?.remoteProgress != null || activeSnap?.remoteStatus != null) {
+                                val rProg = activeSnap.remoteProgress?.toInt()?.toString() ?: "0"
+                                val rTot = activeSnap.remoteTotal?.toInt()?.let { "/$it" }.orEmpty()
+                                val rSt = activeSnap.remoteStatus?.displayName ?: "Remote"
+                                Text(
+                                    text = "Remote: $rSt · $rProg$rTot (Local ${localItem.currentProgress.toInt()})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = AccentGold
+                                )
+                            }
+                        }
+                    }
+
+                    // 3b. Action Strip: Rebind · Pull · Push · Open in Browser (+ LOCG for Comics)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StudioActionPill(
+                            icon = Icons.Default.Search,
+                            label = if (activeTracker.boundId == null) "Search & Bind" else "Rebind",
+                            accent = activeTracker.boundId == null,
+                            onClick = { rebindTargetTracker = activeTracker }
+                        )
+                        if (activeTracker.boundId != null) {
+                            StudioActionPill(
+                                icon = Icons.Default.CloudDownload,
+                                label = "Pull",
+                                onClick = { triggerPull(activeTracker.key) }
+                            )
+                            if (activeTracker.supportsPush) {
+                                StudioActionPill(
+                                    icon = Icons.Default.CloudUpload,
+                                    label = "Push",
+                                    accent = true,
+                                    onClick = { triggerPush(activeTracker.key) }
+                                )
+                            }
+                            activeTracker.browserUrlTemplate?.let { urlGen ->
+                                StudioActionPill(
+                                    icon = Icons.Default.OpenInBrowser,
+                                    label = "Open ↗",
+                                    onClick = {
+                                        runCatching {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlGen(activeTracker.boundId))))
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        if (localItem.mediaType == MediaType.COMIC) {
+                            StudioActionPill(
+                                icon = Icons.Default.OpenInBrowser,
+                                label = "League of Comic Geeks ↗",
+                                onClick = {
+                                    val url = "https://leagueofcomicgeeks.com/search?keyword=${Uri.encode(localItem.title)}"
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                    // 3c. Status + Lock Status
+                    val (isLockedForTracker, lockedStatusForTracker) = when (activeTracker.key) {
+                        "ANILIST" -> localItem.isAnilistStatusLocked to localItem.anilistStatus
+                        "MAL" -> localItem.isMalStatusLocked to localItem.malStatus
+                        "BANGUMI" -> localItem.isBangumiStatusLocked to localItem.bangumiStatus
+                        "TRAKT" -> localItem.isTraktStatusLocked to localItem.traktStatus
+                        "SIMKL" -> localItem.isSimklStatusLocked to localItem.simklStatus
+                        "COMICK" -> localItem.isComickStatusLocked to localItem.comickStatus
+                        else -> false to null
+                    }
+                    val activeEffectiveStatus = if (isLockedForTracker && lockedStatusForTracker != null) {
+                        lockedStatusForTracker
+                    } else {
+                        localItem.status
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "STATUS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 0.8.sp
+                            )
+                            if (activeTracker.supportsStatusLock) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(
+                                            if (isLockedForTracker) AccentGold.copy(alpha = 0.16f)
+                                            else Color.White.copy(alpha = 0.06f)
+                                        )
+                                        .clickable {
+                                            val nextLocked = !isLockedForTracker
+                                            val updated = when (activeTracker.key) {
+                                                "ANILIST" -> localItem.copy(isAnilistStatusLocked = nextLocked, anilistStatus = if (nextLocked) localItem.status else null)
+                                                "MAL" -> localItem.copy(isMalStatusLocked = nextLocked, malStatus = if (nextLocked) localItem.status else null)
+                                                "BANGUMI" -> localItem.copy(isBangumiStatusLocked = nextLocked, bangumiStatus = if (nextLocked) localItem.status else null)
+                                                "TRAKT" -> localItem.copy(isTraktStatusLocked = nextLocked, traktStatus = if (nextLocked) localItem.status else null)
+                                                "SIMKL" -> localItem.copy(isSimklStatusLocked = nextLocked, simklStatus = if (nextLocked) localItem.status else null)
+                                                "COMICK" -> localItem.copy(isComickStatusLocked = nextLocked, comickStatus = if (nextLocked) localItem.status else null)
+                                                else -> localItem
+                                            }
+                                            commitLocalUpdate(updated)
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isLockedForTracker) Icons.Default.Lock else Icons.Default.LockOpen,
+                                        contentDescription = "Lock Status",
+                                        tint = if (isLockedForTracker) AccentGold else TextSecondary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = if (isLockedForTracker) "Status Locked to ${activeTracker.name}" else "Sync Status Globally",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isLockedForTracker) AccentGold else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                TrackingStatus.IN_PROGRESS,
+                                TrackingStatus.PLAN_TO_TRACK,
+                                TrackingStatus.COMPLETED,
+                                TrackingStatus.ON_HOLD,
+                                TrackingStatus.DROPPED
+                            ).forEach { st ->
+                                val selected = activeEffectiveStatus == st
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(if (selected) AccentGold else Color.White.copy(alpha = 0.08f))
+                                        .clickable {
+                                            val updated = if (isLockedForTracker) {
+                                                when (activeTracker.key) {
+                                                    "ANILIST" -> localItem.copy(anilistStatus = st)
+                                                    "MAL" -> localItem.copy(malStatus = st)
+                                                    "BANGUMI" -> localItem.copy(bangumiStatus = st)
+                                                    "TRAKT" -> localItem.copy(traktStatus = st)
+                                                    "SIMKL" -> localItem.copy(simklStatus = st)
+                                                    "COMICK" -> localItem.copy(comickStatus = st)
+                                                    else -> localItem.copy(status = st)
+                                                }
+                                            } else {
+                                                val now = System.currentTimeMillis()
+                                                localItem.copy(
+                                                    status = st,
+                                                    startedAtMs = localItem.startedAtMs ?: if (st == TrackingStatus.IN_PROGRESS) now else null,
+                                                    finishedAtMs = localItem.finishedAtMs ?: if (st == TrackingStatus.COMPLETED) now else null
+                                                )
+                                            }
+                                            commitLocalUpdate(updated)
+                                        }
+                                        .padding(horizontal = 13.dp, vertical = 7.dp)
+                                ) {
+                                    Text(
+                                        text = st.displayName,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) AmoledBlack else TextPrimary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                    // 3d. Progress + Volumes + Split-Cour Season Offset
+                    val curOverride = overridesMap[activeTracker.key] ?: TrackerOverrideConfig()
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = "PROGRESS & SPLIT-COUR OFFSET",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary,
+                            letterSpacing = 0.8.sp
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                val totStr = localItem.totalProgress?.toInt()?.let { " / $it" }.orEmpty()
+                                Text(
+                                    text = "${localItem.mediaType.unitLabel}: ${localItem.currentProgress.toInt()}$totStr",
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary
+                                )
+                                if (curOverride.episodeOffset != 0) {
+                                    val pushed = (localItem.currentProgress.toInt() + curOverride.episodeOffset).coerceAtLeast(0)
+                                    Text(
+                                        text = "${activeTracker.name} pushes: $pushed (offset ${if (curOverride.episodeOffset > 0) "+" else ""}${curOverride.episodeOffset})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccentGold
+                                    )
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SmallStepCircle(Icons.Default.Remove) {
+                                    val next = (localItem.currentProgress - 1.0).coerceAtLeast(0.0)
+                                    commitLocalUpdate(localItem.copy(currentProgress = next))
+                                }
+                                SmallStepCircle(Icons.Default.Add, accent = true) {
+                                    val maxT = localItem.totalProgress
+                                    val next = (localItem.currentProgress + 1.0).let {
+                                        if (maxT != null && maxT > 0.0) it.coerceAtMost(maxT) else it
+                                    }
+                                    commitLocalUpdate(localItem.copy(currentProgress = next))
+                                }
+                            }
+                        }
+
+                        // Volumes stepper for Manga / Novels / Comics
+                        if (localItem.mediaType == MediaType.MANGA || localItem.mediaType == MediaType.NOVEL || localItem.mediaType == MediaType.COMIC || activeTracker.key in listOf("ANILIST", "MAL", "BANGUMI")) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Volumes Read: ${localItem.volumesProgress}",
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SmallStepCircle(Icons.Default.Remove) {
+                                        commitLocalUpdate(localItem.copy(volumesProgress = (localItem.volumesProgress - 1).coerceAtLeast(0)))
+                                    }
+                                    SmallStepCircle(Icons.Default.Add, accent = true) {
+                                        commitLocalUpdate(localItem.copy(volumesProgress = localItem.volumesProgress + 1))
+                                    }
+                                }
+                            }
+                        }
+
+                        // Steam Playtime & Achievements read/edit row
+                        if (activeTracker.key == "STEAM" || localItem.mediaType == MediaType.GAME) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Playtime: ${String.format(Locale.US, "%.1f", localItem.playtimeHours)}h" +
+                                        (localItem.steamAchievementsUnlocked?.let { u ->
+                                            val t = localItem.steamAchievementsTotal ?: 0
+                                            " · $u/$t Achievements"
+                                        }.orEmpty()),
+                                    fontSize = 13.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+
+                        // Split-cour offset controls for episode-indexed trackers
+                        if (activeTracker.key in listOf("ANILIST", "MAL", "BANGUMI", "SIMKL", "TRAKT")) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Offset:", fontSize = 11.5.sp, color = TextSecondary)
+                                listOf(-12, -1, 0, 1, 12).forEach { delta ->
+                                    val label = if (delta == 0) "Reset (0)" else if (delta > 0) "+$delta" else "$delta"
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .clickable {
+                                                val nextOffset = if (delta == 0) 0 else curOverride.episodeOffset + delta
+                                                val nextMap = overridesMap.toMutableMap()
+                                                nextMap[activeTracker.key] = curOverride.copy(episodeOffset = nextOffset)
+                                                commitLocalUpdate(
+                                                    localItem.copy(
+                                                        trackerOverridesJson = TrackerMetadataCodec.encodeOverrides(nextMap)
+                                                    )
+                                                )
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = if (delta == 0) AccentGold else TextPrimary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                    // 3e. Rating & Native Scale Conversion
+                    var sliderVal by remember(localItem.id, localItem.userRating) {
+                        mutableFloatStateOf(localItem.userRating?.coerceIn(0f, 10f) ?: 0f)
+                    }
+                    val nativePreview = remember(sliderVal, activeTracker.key) {
+                        if (sliderVal < 0.5f) "Unrated"
+                        else when (activeTracker.key) {
+                            "ANILIST", "VNDB", "IGDB" -> "${(sliderVal * 10f).roundToInt()}/100"
+                            "HARDCOVER" -> "${((sliderVal / 2f) * 2f).roundToInt() / 2.0}★ / 5"
+                            "TMDB" -> "${((sliderVal * 2f).roundToInt() / 2.0)}/10"
+                            else -> "${sliderVal.roundToInt()}/10"
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "RATING · ${activeTracker.scoreFormat.uppercase()}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                text = if (sliderVal < 0.5f) "Unrated" else "${String.format(Locale.US, "%.1f", sliderVal)}/10 ($nativePreview)",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold
+                            )
+                        }
+                        Slider(
+                            value = sliderVal,
+                            onValueChange = { sliderVal = ((it * 10f).roundToInt()) / 10f },
+                            onValueChangeFinished = {
+                                val nextRating = if (sliderVal < 0.95f) null else sliderVal.coerceIn(1.0f, 10.0f)
+                                commitLocalUpdate(localItem.copy(userRating = nextRating))
+                            },
+                            valueRange = 0f..10f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentGold,
+                                activeTrackColor = AccentGold,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.14f)
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                    // 3f. Dates & Rewatches 3-Column Row
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { datePickTarget = "START" },
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text("STARTED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                            Text(formatSheetDate(localItem.startedAtMs), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        }
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { datePickTarget = "FINISH" },
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text("FINISHED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                            Text(formatSheetDate(localItem.finishedAtMs), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        }
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("REWATCHES", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    "-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextSecondary,
+                                    modifier = Modifier.clickable {
+                                        val nextR = (localItem.rewatchCount - 1).coerceAtLeast(0)
+                                        commitLocalUpdate(localItem.copy(rewatchCount = nextR, malRewatches = nextR))
+                                    }.padding(horizontal = 4.dp)
+                                )
+                                Text("${localItem.rewatchCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                                Text(
+                                    "+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AccentGold,
+                                    modifier = Modifier.clickable {
+                                        val nextR = localItem.rewatchCount + 1
+                                        commitLocalUpdate(localItem.copy(rewatchCount = nextR, malRewatches = nextR))
+                                    }.padding(horizontal = 4.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+                    // 3g. Unified Personal Note + Custom Per-Tracker Override + Real Cap Counter
+                    val noteCap = activeTracker.noteCap
+                    val isCustomOverride = curOverride.useCustomNote
+                    val activeNoteText = if (isCustomOverride) {
+                        curOverride.customNote.orEmpty()
+                    } else {
+                        localItem.personalNotes ?: when (activeTracker.key) {
+                            "ANILIST" -> localItem.anilistNotes.orEmpty()
+                            "MAL" -> localItem.malComments.orEmpty()
+                            "BANGUMI" -> localItem.bangumiComment.orEmpty()
+                            "SIMKL" -> localItem.simklMemo.orEmpty()
+                            else -> ""
+                        }
+                    }
+                    var draftNote by remember(localItem.id, activeTracker.key, isCustomOverride, activeNoteText) {
+                        mutableStateOf(activeNoteText)
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "PERSONAL NOTE",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextSecondary,
+                                    letterSpacing = 0.8.sp
+                                )
+                                val capStr = if (noteCap > 0) "${draftNote.length}/$noteCap chars" else "${draftNote.length} chars"
+                                Text(
+                                    text = if (isCustomOverride) "Custom for ${activeTracker.name} · $capStr" else "Mirrored with Details · $capStr",
+                                    fontSize = 10.5.sp,
+                                    color = if (noteCap > 0 && draftNote.length > noteCap) Color(0xFFF59E0B) else AccentGold.copy(alpha = 0.85f)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(if (isCustomOverride) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
+                                    .clickable {
+                                        val nextOv = curOverride.copy(
+                                            useCustomNote = !isCustomOverride,
+                                            customNote = if (!isCustomOverride && curOverride.customNote.isNullOrBlank()) draftNote else curOverride.customNote
+                                        )
+                                        val nextMap = overridesMap.toMutableMap()
+                                        nextMap[activeTracker.key] = nextOv
+                                        commitLocalUpdate(localItem.copy(trackerOverridesJson = TrackerMetadataCodec.encodeOverrides(nextMap)))
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = if (isCustomOverride) "Custom Override" else "Global Note",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isCustomOverride) AccentGold else TextSecondary
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                        ) {
+                            BasicTextField(
+                                value = draftNote,
+                                onValueChange = { next ->
+                                    draftNote = next
+                                    val clean = next.takeIf { it.isNotEmpty() }
+                                    if (isCustomOverride) {
+                                        val nextMap = overridesMap.toMutableMap()
+                                        nextMap[activeTracker.key] = curOverride.copy(useCustomNote = true, customNote = clean)
+                                        commitLocalUpdate(localItem.copy(trackerOverridesJson = TrackerMetadataCodec.encodeOverrides(nextMap)))
+                                    } else {
+                                        commitLocalUpdate(
+                                            localItem.copy(
+                                                personalNotes = clean,
+                                                anilistNotes = clean?.take(2000),
+                                                malComments = clean?.take(1000),
+                                                bangumiComment = clean?.take(380),
+                                                simklMemo = clean?.take(140)
+                                            )
+                                        )
+                                    }
+                                },
+                                textStyle = TextStyle(color = TextPrimary, fontSize = 13.5.sp, lineHeight = 19.sp),
+                                cursorBrush = SolidColor(AccentGold),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (draftNote.isEmpty()) {
+                                Text(
+                                    text = "Write a note for ${activeTracker.name}...",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary.copy(alpha = 0.55f)
+                                )
+                            }
+                        }
+                    }
+
+                    // 3h. Native Tracker Extras
+                    when (activeTracker.key) {
+                        "ANILIST" -> {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("ANILIST EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
+                                TrackerToggleRow(
+                                    label = "Favorite on AniList ♥",
+                                    checked = localItem.anilistFavorite,
+                                    onToggle = { v ->
+                                        commitLocalUpdate(localItem.copy(anilistFavorite = v, isFavorite = v || localItem.isFavorite))
+                                    }
+                                )
+                                TrackerToggleRow(
+                                    label = "Private Entry",
+                                    checked = localItem.anilistPrivate,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(anilistPrivate = v)) }
+                                )
+                                TrackerToggleRow(
+                                    label = "Hide from Status Lists",
+                                    checked = localItem.anilistHiddenFromStatus,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(anilistHiddenFromStatus = v)) }
+                                )
+                            }
+                        }
+                        "MAL" -> {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("MYANIMELIST EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
+                                TrackerToggleRow(
+                                    label = "Currently Rewatching / Rereading",
+                                    checked = localItem.malRewatching,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(malRewatching = v)) }
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Priority:", fontSize = 12.5.sp, color = TextSecondary)
+                                    listOf(0 to "Low", 1 to "Medium", 2 to "High").forEach { (pVal, pLbl) ->
+                                        val sel = localItem.malPriority == pVal
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(if (sel) AccentGold else Color.White.copy(alpha = 0.08f))
+                                                .clickable { commitLocalUpdate(localItem.copy(malPriority = pVal)) }
+                                                .padding(horizontal = 11.dp, vertical = 5.dp)
+                                        ) {
+                                            Text(pLbl, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = if (sel) AmoledBlack else TextPrimary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "BANGUMI" -> {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("BANGUMI EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
+                                TrackerToggleRow(
+                                    label = "Visible to Friends Only (Private)",
+                                    checked = localItem.bangumiPrivate,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(bangumiPrivate = v)) }
+                                )
+                            }
+                        }
+                        "SIMKL" -> {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("SIMKL EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
+                                TrackerToggleRow(
+                                    label = "Private Memo",
+                                    checked = localItem.simklPrivate,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(simklPrivate = v)) }
+                                )
+                            }
+                        }
+                        "HARDCOVER" -> {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("HARDCOVER EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
+                                TrackerToggleRow(
+                                    label = "Private Shelf Entry",
+                                    checked = localItem.anilistPrivate,
+                                    onToggle = { v -> commitLocalUpdate(localItem.copy(anilistPrivate = v)) }
+                                )
+                            }
+                        }
+                    }
+
+                    // 3i. Danger Footer: Unlink Locally | Delete from Tracker
+                    if (activeTracker.boundId != null) {
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color.White.copy(alpha = 0.07f))
+                                    .clickable {
+                                        val unlinked = activeTracker.onUpdateBoundId(null)
+                                        val nextMap = matchedSnapshots.toMutableMap().apply { remove(activeTracker.key) }
+                                        val cleaned = unlinked.copy(matchedTrackerMetaJson = TrackerMetadataCodec.encodeMatchedSnapshots(nextMap))
+                                        commitLocalUpdate(cleaned)
+                                        syncStatusBanner = true to "Unlinked ${activeTracker.name} locally"
+                                    }
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.LinkOff, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Unlink Locally", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color(0xFFEF4444).copy(alpha = 0.16f))
+                                    .clickable { deleteDialogTracker = activeTracker }
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFCA5A5), modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Delete Remote", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFCA5A5))
+                            }
+                        }
+                    }
+                }
             }
         }
-        onUpdateItem(item.copy(currentProgress = bounded, status = newStatus))
+    }
+
+    // Native Per-Tracker Rebind Sheet
+    rebindTargetTracker?.let { trk ->
+        SearchAndRebindBottomSheet(
+            tracker = trk,
+            initialQuery = localItem.title,
+            mediaType = localItem.mediaType,
+            syncEngine = syncEngine,
+            presentationSettings = presentationSettings,
+            backdropBitmap = backdropBitmap,
+            backdropTargetUrl = backdropTargetUrl,
+            onBound = { snap ->
+                val withId = trk.onUpdateBoundId(snap.remoteId)
+                val nextSnaps = TrackerMetadataCodec.decodeMatchedSnapshots(withId.matchedTrackerMetaJson).toMutableMap()
+                nextSnaps[trk.key] = snap
+                val updated = withId.copy(matchedTrackerMetaJson = TrackerMetadataCodec.encodeMatchedSnapshots(nextSnaps))
+                commitLocalUpdate(updated)
+                rebindTargetTracker = null
+                pullPromptAfterBind = trk.key
+            },
+            onDismiss = { rebindTargetTracker = null }
+        )
+    }
+
+    // 1-Tap Confirmation Dialog: Remove from <Tracker> Only OR Remove & Delete Local Entry
+    deleteDialogTracker?.let { trk ->
+        AlertDialog(
+            onDismissRequest = { deleteDialogTracker = null },
+            containerColor = DarkSurface,
+            title = {
+                Text("Delete from ${trk.name}?", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "Choose whether to remove this entry only from your ${trk.name} account, or delete both the remote entry and your local OmniTrack entry.",
+                    color = TextSecondary,
+                    fontSize = 13.5.sp
+                )
+            },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            deleteDialogTracker = null
+                            val unlinked = trk.onUpdateBoundId(null)
+                            val nextSnaps = matchedSnapshots.toMutableMap().apply { remove(trk.key) }
+                            val cleaned = unlinked.copy(matchedTrackerMetaJson = TrackerMetadataCodec.encodeMatchedSnapshots(nextSnaps))
+                            val runner: (String, Boolean, MediaItemEntity, (TrackerSyncOutcome, Boolean) -> Unit) -> Unit =
+                                onDeleteFromRemote ?: { k, alsoLocal, u, cb ->
+                                    scope.launch {
+                                        val out = syncEngine.deleteRemoteEntry(k, localItem)
+                                        if (!alsoLocal) commitLocalUpdate(u)
+                                        cb(out, alsoLocal && out.success)
+                                    }
+                                }
+                            runner(trk.key, false, cleaned) { out, _ ->
+                                if (out.success) localItem = cleaned
+                                syncStatusBanner = out.success to out.message
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.22f), contentColor = Color(0xFFFCA5A5)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Remove from ${trk.name} Only", fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            deleteDialogTracker = null
+                            val unlinked = trk.onUpdateBoundId(null)
+                            val runner: (String, Boolean, MediaItemEntity, (TrackerSyncOutcome, Boolean) -> Unit) -> Unit =
+                                onDeleteFromRemote ?: { k, alsoLocal, u, cb ->
+                                    scope.launch {
+                                        val out = syncEngine.deleteRemoteEntry(k, localItem)
+                                        cb(out, alsoLocal && out.success)
+                                    }
+                                }
+                            runner(trk.key, true, unlinked) { out, deletedLocal ->
+                                if (deletedLocal) {
+                                    onDeleteLocalEntry()
+                                    onDismiss()
+                                } else {
+                                    syncStatusBanner = out.success to out.message
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Remove from ${trk.name} & Delete Local", fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteDialogTracker = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Start / Finish Date Picker
+    datePickTarget?.let { target ->
+        val initMs = if (target == "START") localItem.startedAtMs else localItem.finishedAtMs
+        val state = rememberDatePickerState(initialSelectedDateMillis = initMs ?: System.currentTimeMillis())
+        DatePickerDialog(
+            onDismissRequest = { datePickTarget = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    val chosen = state.selectedDateMillis
+                    commitLocalUpdate(
+                        if (target == "START") localItem.copy(startedAtMs = chosen) else localItem.copy(finishedAtMs = chosen)
+                    )
+                    datePickTarget = null
+                }) {
+                    Text("Set Date", color = AccentGold, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    commitLocalUpdate(
+                        if (target == "START") localItem.copy(startedAtMs = null) else localItem.copy(finishedAtMs = null)
+                    )
+                    datePickTarget = null
+                }) {
+                    Text("Clear", color = TextSecondary)
+                }
+            }
+        ) {
+            DatePicker(state = state)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchAndRebindBottomSheet(
+    tracker: TrackerDef,
+    initialQuery: String,
+    mediaType: MediaType,
+    syncEngine: TrackerSyncEngine,
+    presentationSettings: PresentationSettings?,
+    backdropBitmap: ImageBitmap?,
+    backdropTargetUrl: String?,
+    onBound: (RemoteTrackerEntrySnapshot) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var query by remember { mutableStateOf(initialQuery) }
+    var results by remember { mutableStateOf<List<RemoteTrackerEntrySnapshot>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    LaunchedEffect(tracker.key, query) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) {
+            results = emptyList()
+            isSearching = false
+            return@LaunchedEffect
+        }
+        isSearching = true
+        try {
+            kotlinx.coroutines.delay(250)
+            results = syncEngine.searchTrackerDirectly(tracker.key, trimmed, mediaType)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            results = emptyList()
+        } finally {
+            isSearching = false
+        }
     }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = AmoledBlack,
-        dragHandle = null
+        dragHandle = null,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+        BackHandler { onDismiss() }
+        DetailSheetBackdrop(
+            presentationSettings = presentationSettings,
+            backdropBitmap = backdropBitmap,
+            backdropTargetUrl = backdropTargetUrl,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Top Header: Back Arrow on Left, Title, Service Count & Clean Auto-Status Toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = "Multi-Tracker Hub",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "${availableTrackers.count { !it.boundId.isNullOrBlank() }} of ${availableTrackers.size} services active",
-                            fontSize = 11.5.sp,
-                            color = AccentJade
-                        )
-                    }
-                }
-
-                // Clean Auto-Status Switching Pill (Zero Emojis)
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (autoStatusEnabled) AccentArctic.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.06f))
-                        .clickable { autoStatusEnabled = !autoStatusEnabled }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = if (autoStatusEnabled) "Auto Status: Active" else "Auto Status: Off",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (autoStatusEnabled) AccentArctic else TextMuted
-                    )
-                }
-            }
-
-            // Category Switcher Chips (Spacious Squircle stadium pills)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                categoryOptions.forEach { cat ->
-                    val isCatSelected = cat == selectedCategory
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isCatSelected) AccentJade else DarkSurfaceElevated)
-                            .border(1.dp, if (isCatSelected) AccentJade else GlassBorder, RoundedCornerShape(999.dp))
-                            .clickable {
-                                selectedCategory = cat
-                                activeTab = "ALL"
-                            }
-                            .padding(horizontal = 16.dp, vertical = 9.dp)
-                    ) {
-                        Text(
-                            text = cat,
-                            fontSize = 12.5.sp,
-                            fontWeight = if (isCatSelected) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isCatSelected) AmoledBlack else TextSecondary
-                        )
-                    }
-                }
-            }
-
-            // Tab Switcher Row (ALL + Individual Tracker Tabs with Spacious Breathing Room)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                tabOptions.forEach { tabName ->
-                    val isTabActive = tabName == activeTab
-                    val trackerMatch = availableTrackers.find { it.name == tabName }
-                    val tabAccent = trackerMatch?.accentColor ?: AccentArctic
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isTabActive) tabAccent else DarkSurfaceElevated)
-                            .border(1.dp, if (isTabActive) tabAccent else GlassBorder, RoundedCornerShape(999.dp))
-                            .clickable { activeTab = tabName }
-                            .padding(horizontal = 18.dp, vertical = 9.dp)
-                    ) {
-                        Text(
-                            text = tabName,
-                            fontSize = 12.5.sp,
-                            fontWeight = if (isTabActive) FontWeight.ExtraBold else FontWeight.SemiBold,
-                            color = if (isTabActive) AmoledBlack else TextPrimary
-                        )
-                    }
-                }
-            }
-
-            // UNIVERSAL CONTROLS BAR: ALWAYS VISIBLE IN ALL TABS & INDIVIDUAL TABS
-            UniversalSyncControlsBar(
-                item = item,
-                onUpdateProgress = { updateProgressWithAutoStatus(it) },
-                onUpdateStatus = { onUpdateItem(item.copy(status = it)) },
-                onUpdateRating = { onUpdateItem(item.copy(userRating = it)) }
-            )
-
-            // Push Local Changes to Remote Cloud Button
-            Button(
-                onClick = {
-                    if (!isSyncingNow) {
-                        isSyncingNow = true
-                        scope.launch {
-                            try {
-                                syncEngine.enqueueProgressUpdate(item, item.currentProgress)
-                                syncEngine.drainQueue()
-                                Toast.makeText(context, "Pushed ${item.title} to active trackers!", Toast.LENGTH_SHORT).show()
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
-                            } finally {
-                                isSyncingNow = false
-                            }
-                        }
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = AccentJade),
-                shape = RoundedCornerShape(999.dp),
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSyncingNow
-            ) {
-                if (isSyncingNow) {
-                    CircularProgressIndicator(color = AmoledBlack, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-                } else {
-                    Icon(Icons.Default.Sync, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Push Changes to Remote Trackers", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                }
-            }
-
-            // CONTENT: "ALL" Tab vs. Individual Tracker Tab
-            if (activeTab == "ALL") {
-                // ALL Tab: Clean Collapsible Squircle Accordion Cards
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    availableTrackers.forEach { tracker ->
-                        val isExpanded = expandedCards[tracker.key] ?: true
-                        CollapsibleTrackerCard(
-                            tracker = tracker,
-                            item = item,
-                            tokens = tokens,
-                            isExpanded = isExpanded,
-                            onToggleExpand = { expandedCards[tracker.key] = !isExpanded },
-                            onOpenBrowser = {
-                                tracker.boundId?.let { id ->
-                                    tracker.browserUrlTemplate?.let { template ->
-                                        val url = template(id)
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    }
-                                }
-                            },
-                            onSearchRebind = { searchRebindTracker = tracker },
-                            onUntrack = {
-                                tracker.onUpdateBoundId(null)
-                                Toast.makeText(context, "Untracked from ${tracker.name}", Toast.LENGTH_SHORT).show()
-                            },
-                            onDeleteItem = {
-                                tracker.onUpdateBoundId(null)
-                                Toast.makeText(context, "Removed from ${tracker.name} list", Toast.LENGTH_SHORT).show()
-                            },
-                            onUpdateItem = onUpdateItem
-                        )
-                    }
-                }
-            } else {
-                // Dedicated Individual Tracker Tab
-                val tracker = availableTrackers.find { it.name == activeTab }
-                if (tracker != null) {
-                    SingleTrackerFocusedView(
-                        tracker = tracker,
-                        item = item,
-                        tokens = tokens,
-                        onOpenBrowser = {
-                            tracker.boundId?.let { id ->
-                                tracker.browserUrlTemplate?.let { template ->
-                                    val url = template(id)
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                }
-                            }
-                        },
-                        onSearchRebind = { searchRebindTracker = tracker },
-                        onUntrack = {
-                            tracker.onUpdateBoundId(null)
-                            Toast.makeText(context, "Untracked from ${tracker.name}", Toast.LENGTH_SHORT).show()
-                        },
-                        onDeleteItem = {
-                            tracker.onUpdateBoundId(null)
-                            Toast.makeText(context, "Removed from ${tracker.name} list", Toast.LENGTH_SHORT).show()
-                        },
-                        onUpdateItem = onUpdateItem
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-        }
-    }
-
-    // Chimanew-Style Search & Rebind Modal Bottom Sheet
-    searchRebindTracker?.let { targetTracker ->
-        SearchAndRebindBottomSheet(
-            tracker = targetTracker,
-            item = item,
-            app = app,
-            onDismiss = { searchRebindTracker = null },
-            onSelectResult = { selectedId ->
-                targetTracker.onUpdateBoundId(selectedId)
-                Toast.makeText(context, "Bound #${selectedId} to ${targetTracker.name}!", Toast.LENGTH_SHORT).show()
-                searchRebindTracker = null
-            }
-        )
-    }
-}
-
-/**
- * Universal controls bar with Status pills, Nuvio-style smooth continuous progress line scrubber,
- * and 1.0–10.0 Rating slider.
- * ALWAYS VISIBLE across all tabs and individual tracker screens.
- */
-@Composable
-private fun UniversalSyncControlsBar(
-    item: MediaItemEntity,
-    onUpdateProgress: (Double) -> Unit,
-    onUpdateStatus: (TrackingStatus) -> Unit,
-    onUpdateRating: (Float?) -> Unit
-) {
-    val totalProgress = item.totalProgress ?: 0.0
-    var showUniversalStatusSheet by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(26.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // 1. Status Selector: Single Stadium Pill opening Chimanew status sheet
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Tracking Status", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(AmoledBlack)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
-                    .clickable { showUniversalStatusSheet = true }
-                    .padding(horizontal = 14.dp, vertical = 7.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(item.status.statusColor())
-                    )
-                    Text(
-                        text = item.status.displayName,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = TextPrimary
-                    )
-                    Icon(
-                        imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        if (showUniversalStatusSheet) {
-            ChimanewStatusBottomSheet(
-                currentStatus = item.status,
-                onStatusSelected = {
-                    onUpdateStatus(it)
-                    showUniversalStatusSheet = false
-                },
-                onDismiss = { showUniversalStatusSheet = false }
-            )
-        }
-
-        // 2. Progress Header with Fraction & Percentage Pill
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Progress", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                val progressText = if (totalProgress > 0.0) {
-                    "${item.currentProgress.toInt()} / ${totalProgress.toInt()}"
-                } else {
-                    "${item.currentProgress.toInt()} ${item.mediaType.unitLabel.lowercase()}"
-                }
-                Text(
-                    text = progressText,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    color = AccentArctic
-                )
-                if (totalProgress > 0.0) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AccentArctic.copy(alpha = 0.18f))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        val pct = ((item.currentProgress / totalProgress) * 100).toInt().coerceIn(0, 100)
-                        Text(
-                            text = "$pct%",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                            color = AccentArctic
-                        )
-                    }
-                }
-            }
-        }
-
-        // Stepper Buttons with Smooth Repeating Hold and Continuous Progress Scrubber Line
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // Repeating Decrement Button
-            RepeatingHoldButton(
-                onStep = { onUpdateProgress((item.currentProgress - 1.0).coerceAtLeast(0.0)) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(AmoledBlack)
-            ) {
-                Text("-1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            }
-
-            // Continuous Scrubber Line Track
-            Box(modifier = Modifier.weight(1f)) {
-                ProgressScrubberLine(
-                    currentProgress = item.currentProgress,
-                    totalProgress = item.totalProgress,
-                    onProgressChanged = onUpdateProgress
-                )
-            }
-
-            // Repeating Increment Button
-            RepeatingHoldButton(
-                onStep = { onUpdateProgress(item.currentProgress + 1.0) },
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(AccentArctic)
-            ) {
-                Text("+1", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
-            }
-        }
-
-        // 3. Master Score (1.0 to 10.0 with 0.1 precision)
-        val score = item.userRating ?: 0f
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Master Rating (0.1 Precision)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextMuted)
-            Text(
-                text = if (score > 0f) "★ ${String.format("%.1f", score)} / 10.0" else "Unrated",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = AccentGold
-            )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            RepeatingHoldButton(
-                onStep = {
-                    val next = ((score - 0.1f) * 10f).roundToInt() / 10f
-                    onUpdateRating(if (next <= 0f) null else next.coerceIn(1.0f, 10.0f))
-                },
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(AmoledBlack)
-            ) {
-                Text("-0.1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
-            }
-
-            Slider(
-                value = score,
-                onValueChange = { raw ->
-                    val rounded = ((raw * 10f).roundToInt() / 10f).coerceIn(1.0f, 10.0f)
-                    onUpdateRating(rounded)
-                },
-                valueRange = 1.0f..10.0f,
-                steps = 89, // (10.0 - 1.0) / 0.1 - 1 = 89 steps
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(
-                    thumbColor = AccentGold,
-                    activeTrackColor = AccentGold,
-                    inactiveTrackColor = AmoledBlack
-                )
-            )
-
-            RepeatingHoldButton(
-                onStep = {
-                    val next = if (score <= 0f) 1.0f else ((score + 0.1f) * 10f).roundToInt() / 10f
-                    onUpdateRating(next.coerceIn(1.0f, 10.0f))
-                },
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(AccentGold)
-            ) {
-                Text("+0.1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
-            }
-        }
-    }
-}
-
-/**
- * Smooth, scrollable/draggable continuous progress line like in Nuvio Enhanced.
- * Features live drag tracking, glow indicators, percentage fill, and haptic feedback.
- */
-@Composable
-private fun ProgressScrubberLine(
-    currentProgress: Double,
-    totalProgress: Double?,
-    onProgressChanged: (Double) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    val total = totalProgress ?: 0.0
-    val isBounded = total > 0.0
-    var trackWidthPx by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
-    var isDragging by remember { mutableStateOf(false) }
-    var dragProgressValue by remember(currentProgress) { androidx.compose.runtime.mutableDoubleStateOf(currentProgress) }
-    var lastHapticInt by remember { androidx.compose.runtime.mutableIntStateOf(currentProgress.toInt()) }
-
-    val activeValue = if (isDragging) dragProgressValue else currentProgress
-    val progressFraction = if (isBounded) (activeValue / total).coerceIn(0.0, 1.0).toFloat() else 0f
-
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        // Scrubber line track
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(32.dp)
-                .onSizeChanged { trackWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(totalProgress) {
-                    detectTapGestures { offset ->
-                        if (isBounded) {
-                            val ratio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
-                            val newVal = (ratio * total).roundToInt().toDouble()
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onProgressChanged(newVal)
-                        }
-                    }
-                }
-                .pointerInput(totalProgress) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            isDragging = true
-                            if (isBounded) {
-                                val ratio = (offset.x / trackWidthPx).coerceIn(0f, 1f)
-                                dragProgressValue = (ratio * total).roundToInt().toDouble()
-                            }
-                        },
-                        onDragEnd = {
-                            isDragging = false
-                            onProgressChanged(dragProgressValue)
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        },
-                        onDragCancel = {
-                            isDragging = false
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            change.consume()
-                            if (isBounded) {
-                                val deltaRatio = dragAmount / trackWidthPx
-                                val next = (dragProgressValue + deltaRatio * total).coerceIn(0.0, total)
-                                val rounded = next.roundToInt().toDouble()
-                                if (rounded.toInt() != lastHapticInt) {
-                                    lastHapticInt = rounded.toInt()
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                }
-                                dragProgressValue = rounded
-                                onProgressChanged(rounded)
-                            } else {
-                                val delta = (dragAmount / 12f).toDouble()
-                                val next = (dragProgressValue + delta).coerceAtLeast(0.0)
-                                val rounded = next.roundToInt().toDouble()
-                                if (rounded.toInt() != lastHapticInt) {
-                                    lastHapticInt = rounded.toInt()
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                }
-                                dragProgressValue = rounded
-                                onProgressChanged(rounded)
-                            }
-                        }
-                    )
-                },
-            contentAlignment = Alignment.CenterStart
-        ) {
-            // Background track (hollow line)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.White.copy(alpha = 0.12f))
-            )
-
-            // Active progress line (glowing filled track)
-            if (isBounded) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = progressFraction)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                listOf(AccentArctic.copy(alpha = 0.7f), AccentArctic)
-                            )
-                        )
-                )
-
-                // Draggable thumb pill
-                Box(
-                    modifier = Modifier
-                        .offset(x = androidx.compose.ui.unit.max(0.dp, (trackWidthPx * progressFraction / androidx.compose.ui.platform.LocalDensity.current.density).dp - 10.dp))
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(AccentArctic)
-                        .border(2.dp, AmoledBlack, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(AmoledBlack)
-                    )
-                }
-            } else {
-                // Unlimited/ongoing scrubber indicator
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(AccentArctic.copy(alpha = 0.35f))
-                )
-            }
-        }
-
-        // Quick jump percentage pills (Nuvio Enhanced style)
-        if (isBounded) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                listOf(0, 25, 50, 75, 100).forEach { pct ->
-                    val targetVal = ((pct / 100.0) * total).roundToInt().toDouble()
-                    val isCurrent = activeValue.toInt() == targetVal.toInt()
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (isCurrent) AccentArctic else AmoledBlack)
-                            .clickable {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onProgressChanged(targetVal)
-                            }
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "$pct%",
-                            fontSize = 9.5.sp,
-                            fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                            color = if (isCurrent) AmoledBlack else TextMuted
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Collapsible Squircle Accordion Card for ALL Tab
- */
-@Composable
-private fun CollapsibleTrackerCard(
-    tracker: TrackerDef,
-    item: MediaItemEntity,
-    tokens: com.omnitrack.app.data.sync.TrackerTokens,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onOpenBrowser: () -> Unit,
-    onSearchRebind: () -> Unit,
-    onUntrack: () -> Unit,
-    onDeleteItem: () -> Unit,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    val isBound = !tracker.boundId.isNullOrBlank()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, if (isBound) tracker.accentColor.copy(alpha = 0.35f) else GlassBorder, RoundedCornerShape(26.dp))
-            .animateContentSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Card Header (Tap to expand/collapse)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onToggleExpand
-                ),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(tracker.accentColor)
-                )
-                Column {
-                    Text(
-                        text = tracker.name,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = if (isBound) "Bound #${tracker.boundId}" else "Not Connected",
-                        fontSize = 11.sp,
-                        color = if (isBound) tracker.accentColor else TextMuted
-                    )
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Score conversion preview badge
-                if (item.userRating != null) {
-                    val converted = getRemoteConvertedScore(tracker.scoreFormat, item.userRating)
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AmoledBlack)
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(converted, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-                    }
-                }
-
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        // Expanded Card Details
-        AnimatedVisibility(visible = isExpanded) {
             Column(
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Action Stadium Pills Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Search & Bind · ${tracker.name}", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        Text("Direct lookup on ${tracker.name} catalog", fontSize = 11.5.sp, color = TextSecondary)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                // Direct Search Input
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (isBound) {
-                        ActionStadiumPill("Open", Icons.Default.OpenInBrowser, tracker.accentColor, onOpenBrowser)
-                    }
-                    ActionStadiumPill("Change", Icons.Default.Search, AccentArctic, onSearchRebind)
-                    if (isBound) {
-                        ActionStadiumPill("Untrack", Icons.Default.LinkOff, TextMuted, onUntrack)
-                        ActionStadiumPill("Delete", Icons.Default.Delete, Color(0xFFEF4444), onDeleteItem)
-                    }
-                }
-
-                if (tracker.key != "TMDB" && tracker.key != "STEAM") {
-                    TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
-                }
-
-                when (tracker.key) {
-                    "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
-                    "MAL" -> MalSpecificControls(item, onUpdateItem)
-                    "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
-                    "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
-                    "TMDB" -> TmdbSpecificControls(item, onUpdateItem)
-                    "STEAM" -> SteamSpecificControls(item, onUpdateItem)
-                    "VNDB" -> VndbSpecificControls(item, onUpdateItem)
-                    else -> {
-                        Text(
-                            text = "Scale: ${tracker.scoreFormat} • Auto-Sync on playback",
-                            fontSize = 11.5.sp,
-                            color = TextMuted
+                    Icon(Icons.Default.Search, contentDescription = null, tint = AccentGold, modifier = Modifier.size(18.dp))
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
+                        cursorBrush = SolidColor(AccentGold),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (query.isNotEmpty()) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Clear",
+                            tint = TextSecondary,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { query = "" }
                         )
                     }
                 }
+
+                if (isSearching) {
+                    Box(modifier = Modifier.fillMaxWidth().height(260.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
+                    }
+                } else if (results.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                        Text("No matches on ${tracker.name} for \"$query\"", fontSize = 13.sp, color = TextSecondary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(340.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        itemsIndexed(results, key = { idx, r -> "${r.trackerKey}_${r.remoteId}_$idx" }) { idx, hit ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onBound(hit) }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(44.dp)
+                                        .aspectRatio(2f / 3f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(DarkSurfaceCard)
+                                ) {
+                                    if (!hit.coverUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = hit.coverUrl,
+                                            contentDescription = hit.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
+                                }
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(hit.title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val sub = listOfNotNull(hit.format, hit.year, "ID #${hit.remoteId}").joinToString(" · ")
+                                    Text(sub, fontSize = 11.5.sp, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(
+                                    text = "Bind",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AmoledBlack,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(AccentGold)
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                            if (idx < results.lastIndex) {
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-/**
- * Focused view for Individual Tracker Tabs
- */
 @Composable
-private fun SingleTrackerFocusedView(
-    tracker: TrackerDef,
-    item: MediaItemEntity,
-    tokens: com.omnitrack.app.data.sync.TrackerTokens,
-    onOpenBrowser: () -> Unit,
-    onSearchRebind: () -> Unit,
-    onUntrack: () -> Unit,
-    onDeleteItem: () -> Unit,
-    onUpdateItem: (MediaItemEntity) -> Unit
+private fun StudioActionPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    accent: Boolean = false,
+    onClick: () -> Unit
 ) {
-    val isBound = !tracker.boundId.isNullOrBlank()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, tracker.accentColor.copy(alpha = 0.4f), RoundedCornerShape(26.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .background(tracker.accentColor)
-                )
-                Text(
-                    text = "${tracker.name} Sync Profile",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Black,
-                    color = TextPrimary
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (isBound) tracker.accentColor.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = if (isBound) "BOUND #${tracker.boundId}" else "UNLINKED",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isBound) tracker.accentColor else TextMuted
-                )
-            }
-        }
-
-        // Action Buttons Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (isBound) {
-                ActionStadiumPill("Open on ${tracker.name}", Icons.Default.OpenInBrowser, tracker.accentColor, onOpenBrowser)
-            }
-            ActionStadiumPill("Search & Rebind Season", Icons.Default.Search, AccentArctic, onSearchRebind)
-            if (isBound) {
-                ActionStadiumPill("Untrack", Icons.Default.LinkOff, TextMuted, onUntrack)
-                ActionStadiumPill("Delete from Remote", Icons.Default.Delete, Color(0xFFEF4444), onDeleteItem)
-            }
-        }
-
-        // Translation pill
-        if (item.userRating != null) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(AmoledBlack)
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Remote Rating Translation:", fontSize = 11.5.sp, color = TextMuted)
-                Text(
-                    text = "Local ${String.format("%.1f", item.userRating)} ➔ ${getRemoteConvertedScore(tracker.scoreFormat, item.userRating)}",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentGold
-                )
-            }
-        }
-
-        if (tracker.key != "TMDB" && tracker.key != "STEAM") {
-            TrackerStatusLockRow(tracker.key, tracker.name, item, onUpdateItem)
-        }
-
-        // Specific controls per tracker
-        when (tracker.key) {
-            "SIMKL" -> SimklSpecificControls(item, onUpdateItem)
-            "MAL" -> MalSpecificControls(item, onUpdateItem)
-            "ANILIST" -> AnilistSpecificControls(item, onUpdateItem)
-            "BANGUMI" -> BangumiSpecificControls(item, onUpdateItem)
-            "TMDB" -> TmdbSpecificControls(item, onUpdateItem)
-            "STEAM" -> SteamSpecificControls(item, onUpdateItem)
-            "VNDB" -> VndbSpecificControls(item, onUpdateItem)
-            else -> {
-                Text(
-                    text = "Status & progress automatically scrobble to ${tracker.name} on playback.",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-            }
-        }
-    }
-}
-
-/**
- * Dedicated Per-Tracker Status Lock Row:
- * Allows locking individual trackers to custom statuses decoupling them from global updates.
- */
-@Composable
-private fun TrackerStatusLockRow(
-    trackerKey: String,
-    trackerName: String,
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    var showStatusSheet by remember { mutableStateOf(false) }
-
-    val (isLocked, currentStatus) = when (trackerKey) {
-        "SIMKL" -> item.isSimklStatusLocked to (item.simklStatus ?: item.status)
-        "ANILIST" -> item.isAnilistStatusLocked to (item.anilistStatus ?: item.status)
-        "MAL" -> item.isMalStatusLocked to (item.malStatus ?: item.status)
-        "BANGUMI" -> item.isBangumiStatusLocked to (item.bangumiStatus ?: item.status)
-        "TRAKT" -> item.isTraktStatusLocked to (item.traktStatus ?: item.status)
-        "COMICK" -> item.isComickStatusLocked to (item.comickStatus ?: item.status)
-        else -> false to item.status
-    }
-
-    fun updateLock(locked: Boolean, newStatus: TrackingStatus?) {
-        val updated = when (trackerKey) {
-            "SIMKL" -> item.copy(isSimklStatusLocked = locked, simklStatus = if (locked) (newStatus ?: item.status) else null)
-            "ANILIST" -> item.copy(isAnilistStatusLocked = locked, anilistStatus = if (locked) (newStatus ?: item.status) else null)
-            "MAL" -> item.copy(isMalStatusLocked = locked, malStatus = if (locked) (newStatus ?: item.status) else null)
-            "BANGUMI" -> item.copy(isBangumiStatusLocked = locked, bangumiStatus = if (locked) (newStatus ?: item.status) else null)
-            "TRAKT" -> item.copy(isTraktStatusLocked = locked, traktStatus = if (locked) (newStatus ?: item.status) else null)
-            "COMICK" -> item.copy(isComickStatusLocked = locked, comickStatus = if (locked) (newStatus ?: item.status) else null)
-            else -> item
-        }
-        onUpdateItem(updated)
-    }
-
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(AmoledBlack)
-            .border(1.dp, if (isLocked) AccentGold.copy(alpha = 0.4f) else GlassBorder, RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (accent) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                contentDescription = null,
-                tint = if (isLocked) AccentGold else TextMuted,
-                modifier = Modifier.size(15.dp)
-            )
-            Text(
-                text = if (isLocked) "Locked to $trackerName" else "Syncs with Global",
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isLocked) AccentGold else TextSecondary
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            // Status Stadium Pill (Clickable if locked)
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (isLocked) AccentGold.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f))
-                    .clickable {
-                        if (isLocked) showStatusSheet = true
-                    }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = currentStatus.displayName,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isLocked) AccentGold else TextMuted
-                    )
-                    if (isLocked) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = null,
-                            tint = AccentGold,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
-            }
-
-            // Lock / Unlock Toggle Pill
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (isLocked) AccentGold else Color.White.copy(alpha = 0.08f))
-                    .clickable {
-                        updateLock(!isLocked, currentStatus)
-                    }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = if (isLocked) "Unlock" else "Lock",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = if (isLocked) AmoledBlack else TextMuted
-                )
-            }
-        }
-    }
-
-    if (showStatusSheet) {
-        ChimanewStatusBottomSheet(
-            currentStatus = currentStatus,
-            onStatusSelected = {
-                updateLock(true, it)
-                showStatusSheet = false
-            },
-            onDismiss = { showStatusSheet = false }
-        )
-    }
-}
-
-/**
- * SIMKL Specific Controls:
- * - Public/Private Memo Toggle
- * - Strictly 140 Character Limit Note Box (Official SIMKL limit)
- */
-@Composable
-private fun SimklSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    var memoText by remember(item.simklMemo) { mutableStateOf(item.simklMemo ?: "") }
-    var isPrivate by remember(item.simklPrivate) { mutableStateOf(item.simklPrivate) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("SIMKL Personal Memo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-            // Public / Private Memo Toggle
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (isPrivate) Color.White.copy(alpha = 0.12f) else AccentJade.copy(alpha = 0.18f))
-                    .clickable {
-                        val next = !isPrivate
-                        isPrivate = next
-                        onUpdateItem(item.copy(simklPrivate = next))
-                    }
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isPrivate) Icons.Default.Lock else Icons.Default.LockOpen,
-                        contentDescription = null,
-                        tint = if (isPrivate) TextMuted else AccentJade,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(
-                        text = if (isPrivate) "Private" else "Public",
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isPrivate) TextMuted else AccentJade
-                    )
-                }
-            }
-        }
-
-        // Memo input with 140 character limit
-        BasicTextField(
-            value = memoText,
-            onValueChange = {
-                if (it.length <= 140) {
-                    memoText = it
-                    onUpdateItem(item.copy(simklMemo = it))
-                }
-            },
-            textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
-            cursorBrush = SolidColor(AccentJade),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (memoText.isEmpty()) {
-                    Text("Add personal SIMKL memo (e.g. favorite scene)...", color = TextMuted, fontSize = 12.sp)
-                }
-                inner()
-            }
-        )
-
-        // Character limit display (unboxed, clean)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(
-                text = "${memoText.length} / 140",
-                fontSize = 10.5.sp,
-                color = if (memoText.length >= 135) Color(0xFFEF4444) else TextMuted
-            )
-        }
-    }
-}
-
-/**
- * MyAnimeList (MAL) Specific Controls:
- * - 1,000 Character Limit Comments
- * - Unboxed counter: 1/1000 (NOT in a box!)
- * - Rewatches Stepper
- */
-@Composable
-private fun MalSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    var malComment by remember(item.malComments) { mutableStateOf(item.malComments ?: "") }
-    var rewatches by remember(item.malRewatches) { mutableStateOf(item.malRewatches) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("MAL Notes & Comments", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-            // Total Rewatches Stepper
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("Rewatches:", fontSize = 11.sp, color = TextMuted)
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(DarkSurfaceElevated)
-                        .clickable {
-                            if (rewatches > 0) {
-                                val next = rewatches - 1
-                                rewatches = next
-                                onUpdateItem(item.copy(malRewatches = next))
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("-", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                }
-                Text("$rewatches", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clip(CircleShape)
-                        .background(DarkSurfaceElevated)
-                        .clickable {
-                            val next = rewatches + 1
-                            rewatches = next
-                            onUpdateItem(item.copy(malRewatches = next))
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("+", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                }
-            }
-        }
-
-        // MAL comments text input (1000 char limit)
-        BasicTextField(
-            value = malComment,
-            onValueChange = {
-                if (it.length <= 1000) {
-                    malComment = it
-                    onUpdateItem(item.copy(malComments = it))
-                }
-            },
-            textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
-            cursorBrush = SolidColor(Color(0xFF2E51A2)),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (malComment.isEmpty()) {
-                    Text("MyAnimeList comments & tags...", color = TextMuted, fontSize = 12.sp)
-                }
-                inner()
-            }
-        )
-
-        // Unboxed Character Counter (Exact user request: "dont put it in a box like (1 / 1000)")
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(
-                text = "${malComment.length} / 1000",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (malComment.length >= 950) Color(0xFFEF4444) else TextMuted
-            )
-        }
-    }
-}
-
-/**
- * AniList Specific Controls:
- * - Heart / Favorite Toggle
- * - Private Entry Toggle
- * - 2,000 Character Limit Notes
- */
-@Composable
-private fun AnilistSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    var anilistNotes by remember(item.anilistNotes) { mutableStateOf(item.anilistNotes ?: "") }
-    var isFavorite by remember(item.anilistFavorite) { mutableStateOf(item.anilistFavorite) }
-    var isPrivate by remember(item.anilistPrivate) { mutableStateOf(item.anilistPrivate) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("AniList Custom Notes", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Heart / Favorite Pill
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (isFavorite) Color(0xFFEF4444).copy(alpha = 0.2f) else DarkSurfaceElevated)
-                        .clickable {
-                            val next = !isFavorite
-                            isFavorite = next
-                            onUpdateItem(item.copy(anilistFavorite = next))
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (isFavorite) Color(0xFFEF4444) else TextMuted,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-
-                // Private Entry Pill
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (isPrivate) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                        .clickable {
-                            val next = !isPrivate
-                            isPrivate = next
-                            onUpdateItem(item.copy(anilistPrivate = next))
-                        }
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = if (isPrivate) "Private" else "Public",
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isPrivate) AccentArctic else TextMuted
-                    )
-                }
-            }
-        }
-
-        BasicTextField(
-            value = anilistNotes,
-            onValueChange = {
-                if (it.length <= 2000) {
-                    anilistNotes = it
-                    onUpdateItem(item.copy(anilistNotes = it))
-                }
-            },
-            textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
-            cursorBrush = SolidColor(Color(0xFF02A9FF)),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (anilistNotes.isEmpty()) {
-                    Text("AniList personal notes & markdown...", color = TextMuted, fontSize = 12.sp)
-                }
-                inner()
-            }
-        )
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(
-                text = "${anilistNotes.length} / 2000",
-                fontSize = 11.sp,
-                color = TextMuted
-            )
-        }
-    }
-}
-
-/**
- * Bangumi Specific Controls:
- * - 380 Character Limit Short Comment (bgm.tv API cap)
- * - Privacy Toggle
- */
-@Composable
-private fun BangumiSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    var bgmComment by remember(item.bangumiComment) { mutableStateOf(item.bangumiComment ?: "") }
-    var isPrivate by remember(item.bangumiPrivate) { mutableStateOf(item.bangumiPrivate) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Bangumi Short Comment", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (isPrivate) Color(0xFFF09199).copy(alpha = 0.2f) else DarkSurfaceElevated)
-                    .clickable {
-                        val next = !isPrivate
-                        isPrivate = next
-                        onUpdateItem(item.copy(bangumiPrivate = next))
-                    }
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = if (isPrivate) "Friends Only" else "Public",
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPrivate) Color(0xFFF09199) else TextMuted
-                )
-            }
-        }
-
-        BasicTextField(
-            value = bgmComment,
-            onValueChange = {
-                if (it.length <= 380) {
-                    bgmComment = it
-                    onUpdateItem(item.copy(bangumiComment = it))
-                }
-            },
-            textStyle = TextStyle(color = TextPrimary, fontSize = 12.5.sp),
-            cursorBrush = SolidColor(Color(0xFFF09199)),
-            modifier = Modifier.fillMaxWidth(),
-            decorationBox = { inner ->
-                if (bgmComment.isEmpty()) {
-                    Text("Bangumi吐槽 / Short comment...", color = TextMuted, fontSize = 12.sp)
-                }
-                inner()
-            }
-        )
-
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(
-                text = "${bgmComment.length} / 380",
-                fontSize = 11.sp,
-                color = if (bgmComment.length >= 360) Color(0xFFEF4444) else TextMuted
-            )
-        }
-    }
-}
-
-/**
- * Chimanew-Style Search & Rebind Modal Bottom Sheet
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SearchAndRebindBottomSheet(
-    tracker: TrackerDef,
-    item: MediaItemEntity,
-    app: OmniTrackApplication,
-    onDismiss: () -> Unit,
-    onSelectResult: (String) -> Unit
-) {
-    val searchSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var searchQuery by remember { mutableStateOf(item.title) }
-    var isSearching by remember { mutableStateOf(false) }
-    var searchResults by remember { mutableStateOf<List<SearchResultItem>>(emptyList()) }
-    val scope = rememberCoroutineScope()
-
-    fun runSearch(query: String) {
-        if (query.isBlank()) return
-        isSearching = true
-        scope.launch {
-            try {
-                val tmdbKey = app.preferenceManager.tmdbApiKey.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
-                val results = app.omniSearchRepository.searchAll(query, item.mediaType, tmdbApiKey = tmdbKey)
-                searchResults = results
-            } catch (_: Exception) {
-                searchResults = emptyList()
-            } finally {
-                isSearching = false
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        runSearch(item.title)
-    }
-
-    LaunchedEffect(searchQuery) {
-        val trimmed = searchQuery.trim()
-        if (trimmed.length >= 2 && trimmed != item.title) {
-            delay(350)
-            runSearch(trimmed)
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = searchSheetState,
-        containerColor = AmoledBlack,
-        dragHandle = null
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("Search & Bind ${tracker.name}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                    Text("Select season or correct edition for ${item.title}", fontSize = 11.5.sp, color = TextMuted)
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = null, tint = TextMuted)
-                }
-            }
-
-            // Search text field
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                BasicTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
-                    cursorBrush = SolidColor(tracker.accentColor),
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { runSearch(searchQuery) })
-                )
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(
-                        onClick = { searchQuery = "" },
-                        modifier = Modifier.size(20.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = TextMuted, modifier = Modifier.size(14.dp))
-                    }
-                }
-            }
-
-            // Results List
-            if (isSearching) {
-                Box(modifier = Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = tracker.accentColor, strokeWidth = 2.dp)
-                }
-            } else if (searchResults.isEmpty()) {
-                Box(modifier = Modifier.fillMaxWidth().height(140.dp), contentAlignment = Alignment.Center) {
-                    Text("No results found. Try alternate title keywords.", fontSize = 12.sp, color = TextMuted)
-                }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(380.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    searchResults.forEach { res ->
-                        val targetId = when (tracker.key) {
-                            "ANILIST" -> res.anilistId?.toString()
-                            "MAL" -> res.malId?.toString()
-                            "BANGUMI" -> res.bangumiId?.toString()
-                            "TMDB" -> res.tmdbId?.toString()
-                            "TRAKT" -> res.tmdbId?.toString() ?: res.anilistId?.toString()
-                            "SIMKL" -> res.tmdbId?.toString() ?: res.malId?.toString() ?: res.anilistId?.toString()
-                            "VNDB" -> res.vndbId
-                            "IGDB" -> res.igdbId?.toString()
-                            "STEAM" -> res.igdbId?.toString()
-                            "COMICK" -> res.title.trim().lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
-                            else -> res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.bangumiId?.toString()
-                        } ?: res.tmdbId?.toString() ?: res.anilistId?.toString() ?: res.title
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(DarkSurfaceElevated)
-                                .clickable { onSelectResult(targetId) }
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = res.coverUrl,
-                                contentDescription = res.title,
-                                modifier = Modifier
-                                    .width(42.dp)
-                                    .aspectRatio(0.7f)
-                                    .clip(RoundedCornerShape(8.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(res.title, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    if (res.releaseYear != null) {
-                                        Text(res.releaseYear, fontSize = 11.sp, color = TextMuted)
-                                    }
-                                    Text("• ID #$targetId", fontSize = 11.sp, color = tracker.accentColor, fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(tracker.accentColor)
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text("Bind", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AmoledBlack)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        Icon(icon, contentDescription = null, tint = if (accent) AccentGold else TextPrimary, modifier = Modifier.size(14.dp))
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (accent) AccentGold else TextPrimary)
     }
 }
 
 @Composable
-private fun ActionStadiumPill(
-    label: String,
+private fun SmallStepCircle(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    color: Color,
+    accent: Boolean = false,
     onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(color.copy(alpha = 0.15f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .size(32.dp)
+            .clip(CircleShape)
+            .background(if (accent) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
-            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color)
-        }
-    }
-}
-
-private fun getRemoteConvertedScore(format: String, localRating: Float?): String {
-    if (localRating == null) return "Unrated"
-    return when (format) {
-        "100-Point" -> "${(localRating * 10f).roundToInt()} / 100"
-        "10-Point" -> "${localRating.roundToInt()} / 10"
-        "10-Point (Half-Star)" -> "${String.format("%.1f", ((localRating * 2f).roundToInt() / 2f))} ★"
-        "10-100 Votes" -> "${(localRating * 10f).roundToInt()} / 100"
-        "Playtime Sync" -> "Synced (hrs)"
-        "Chapters" -> "Ch. Sync"
-        else -> "${localRating.roundToInt()} / 10"
+        Icon(icon, contentDescription = null, tint = if (accent) AccentGold else TextPrimary, modifier = Modifier.size(16.dp))
     }
 }
 
 @Composable
-private fun TmdbSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
+private fun TrackerToggleRow(
+    label: String,
+    checked: Boolean,
+    onToggle: (Boolean) -> Unit
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .clickable { onToggle(!checked) }
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("TMDb Remote Actions", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-        Text("TMDb API tracks Watchlist, Favorites & Ratings without episode counters.", fontSize = 11.sp, color = TextMuted)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val inWatchlist = item.status == TrackingStatus.PLAN_TO_TRACK
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (inWatchlist) Color(0xFF01D277).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
-                    .border(1.dp, if (inWatchlist) Color(0xFF01D277) else GlassBorder, RoundedCornerShape(999.dp))
-                    .clickable {
-                        val next = if (inWatchlist) TrackingStatus.IN_PROGRESS else TrackingStatus.PLAN_TO_TRACK
-                        onUpdateItem(item.copy(status = next))
-                    }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            ) {
-                Text(
-                    text = if (inWatchlist) "✓ In Watchlist" else "+ Add to Watchlist",
-                    color = if (inWatchlist) Color(0xFF01D277) else TextPrimary,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (item.isFavorite) Color(0xFFEF4444).copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
-                    .border(1.dp, if (item.isFavorite) Color(0xFFEF4444) else GlassBorder, RoundedCornerShape(999.dp))
-                    .clickable {
-                        onUpdateItem(item.copy(isFavorite = !item.isFavorite))
-                    }
-                    .padding(horizontal = 12.dp, vertical = 7.dp)
-            ) {
-                Text(
-                    text = if (item.isFavorite) "♥ Favorited" else "♡ Favorite",
-                    color = if (item.isFavorite) Color(0xFFEF4444) else TextPrimary,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
+        Text(label, fontSize = 13.5.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+        Switch(
+            checked = checked,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = AmoledBlack,
+                checkedTrackColor = AccentGold,
+                uncheckedThumbColor = TextSecondary,
+                uncheckedTrackColor = Color.White.copy(alpha = 0.10f)
+            )
+        )
     }
 }
 
-@Composable
-private fun SteamSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Steam Playtime & Stats", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text("${String.format("%.1f", item.playtimeHours)} hrs", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66C0F4))
-        }
-
-        if (item.steamAchievementsTotal != null && item.steamAchievementsTotal > 0) {
-            val unlocked = item.steamAchievementsUnlocked ?: 0
-            val total = item.steamAchievementsTotal
-            val pct = (unlocked.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("Steam Achievements", fontSize = 11.sp, color = TextMuted)
-                    Text("$unlocked / $total (${(pct * 100).toInt()}%)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentGold)
-                }
-                LinearProgressIndicator(
-                    progress = { pct },
-                    modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(999.dp)),
-                    color = AccentGold,
-                    trackColor = Color.White.copy(alpha = 0.08f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun VndbSpecificControls(
-    item: MediaItemEntity,
-    onUpdateItem: (MediaItemEntity) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(AmoledBlack)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text("VNDB Visual Novel Tracking", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-        Text("Status: ${item.status.displayName} • Vote: ${item.userRating?.let { String.format("%.1f", it) } ?: "Not Voted"}", fontSize = 11.5.sp, color = TextMuted)
-    }
-
+private fun formatSheetDate(ms: Long?): String {
+    if (ms == null || ms <= 0L) return "Not set"
+    return runCatching {
+        Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
+            .format(DateTimeFormatter.ofPattern("MMM d, yy", Locale.US))
+    }.getOrDefault("Not set")
 }

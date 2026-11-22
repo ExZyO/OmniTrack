@@ -21,11 +21,13 @@ import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.data.sync.TrackerTokenManager
+import com.omnitrack.app.ui.theme.OmniThemeState
 import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import java.io.File
@@ -79,6 +81,13 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.metronUsername.collect { PreferenceManager.cachedMetronUsername = it } }
             launch { preferenceManager.metronPassword.collect { PreferenceManager.cachedMetronPassword = it } }
             launch { trackerTokenManager.tokens.collect { TrackerTokenManager.cachedHardcoverToken = it.hardcoverToken.orEmpty() } }
+            launch {
+                preferenceManager.themeSettings.collect { themeCfg ->
+                    withContext(Dispatchers.Main.immediate) {
+                        OmniThemeState.apply(themeCfg)
+                    }
+                }
+            }
         }
 
         AppLogger.i("Application", "OmniTrack launched successfully.")
