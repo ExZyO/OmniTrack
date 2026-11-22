@@ -494,7 +494,7 @@ fun HomeDashboardView(
                                                                 anilistId = release.anilistId,
                                                                 malId = release.malId,
                                                                 metronId = release.metronId,
-                                                                comicPublisher = release.comicPublisher
+                                                                comicPublisher = if (release.mediaType == MediaType.COMIC) release.formatLabel.takeIf { it.isNotBlank() && it != "COMIC" } else null
                                                             )
                                                         )
                                                     }
@@ -948,7 +948,6 @@ private fun HeroHeaderIconButton(
     }
 }
 
-@Composable
 private fun heroPrimaryCtaLabel(item: MediaCardSummary): String = when (item.mediaType) {
     MediaType.BOOK -> when (BookTrackingMode.fromName(item.bookTrackingMode)) {
         BookTrackingMode.AUDIO_MINUTES -> "+15m Listen"

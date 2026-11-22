@@ -91,7 +91,7 @@ class YoutubeChunkedDataSourceFactory(
 
             bytesReadInChunk = 0
             upstream.open(chunkedSpec)
-            return if (totalContentLength != C.LENGTH_UNSPECIFIED.toLong() && totalContentLength != C.LENGTH_UNSET.toLong()) {
+            return if (totalContentLength != C.LENGTH_UNSET.toLong()) {
                 totalContentLength
             } else {
                 C.LENGTH_UNSET.toLong()
