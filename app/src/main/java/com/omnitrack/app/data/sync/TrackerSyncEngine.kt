@@ -350,9 +350,10 @@ class TrackerSyncEngine(
     }
 
     private fun parseFuzzyDateToEpochMs(obj: JsonObject?): Long? {
-        val y = obj?.get("year").asSafeInt() ?: return null
-        val m = (obj["month"].asSafeInt() ?: 1).coerceIn(1, 12)
-        val d = (obj["day"].asSafeInt() ?: 1).coerceIn(1, 28)
+        val safeObj = obj ?: return null
+        val y = safeObj["year"].asSafeInt() ?: return null
+        val m = (safeObj["month"].asSafeInt() ?: 1).coerceIn(1, 12)
+        val d = (safeObj["day"].asSafeInt() ?: 1).coerceIn(1, 28)
         return runCatching {
             LocalDate.of(y, m, d).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         }.getOrNull()
