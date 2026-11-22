@@ -68,6 +68,7 @@ import androidx.compose.ui.zIndex
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
+import com.omnitrack.app.data.preferences.HeroBannerBlurLevel
 import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeHeroSource
 import com.omnitrack.app.data.preferences.HomeLayoutDefaults
@@ -725,6 +726,66 @@ fun HomeCustomizerSheet(
                         checked = heroSettings.dimBanner,
                         onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroDimBanner(v) } }
                     )
+
+                    CustomizerSectionLabel("WIDE HERO BANNER BLUR (UNIVERSAL & PER-CATEGORY)")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        HeroBannerBlurLevel.entries.forEach { level ->
+                            CustomizerChoiceChip(
+                                label = "Universal: ${level.shortLabel}",
+                                selected = heroSettings.universalBannerBlur == level,
+                                onClick = {
+                                    coroutineScope.launch { preferenceManager.updateUniversalHeroBannerBlur(level) }
+                                }
+                            )
+                        }
+                    }
+                    var selectedHomeBlurCat by remember { mutableStateOf(MediaType.ANIME) }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        MediaType.filterTabs.filter { it != MediaType.ALL }.forEach { cat ->
+                            val ov = heroSettings.categoryBannerBlurOverrides[cat.name]
+                            CustomizerChoiceChip(
+                                label = if (ov != null) "${cat.displayName} \u00B7 ${ov.shortLabel}" else cat.displayName,
+                                selected = selectedHomeBlurCat == cat,
+                                onClick = { selectedHomeBlurCat = cat }
+                            )
+                        }
+                    }
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val currentOv = heroSettings.categoryBannerBlurOverrides[selectedHomeBlurCat.name]
+                        CustomizerChoiceChip(
+                            label = "Inherit (${heroSettings.universalBannerBlur.shortLabel})",
+                            selected = currentOv == null,
+                            onClick = {
+                                coroutineScope.launch {
+                                    preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, null)
+                                }
+                            }
+                        )
+                        HeroBannerBlurLevel.entries.forEach { level ->
+                            CustomizerChoiceChip(
+                                label = level.shortLabel,
+                                selected = currentOv == level,
+                                onClick = {
+                                    coroutineScope.launch {
+                                        preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, level)
+                                    }
+                                }
+                            )
+                        }
+                    }
                     CustomizerSwitchRow(
                         title = "Allow Cropped Cover Fallback",
                         subtitle = "If wide banner is missing, blur portrait cover instead of Ambient Glow",

@@ -106,7 +106,15 @@ fun FanficWebViewSheet(
     val app = remember { context.applicationContext as OmniTrackApplication }
     val scope = rememberCoroutineScope()
 
-    var currentUrl by remember { mutableStateOf(initialUrl) }
+    val safeInitialUrl = remember(initialUrl) {
+        if (initialUrl.contains("fanfiction.net/login.php", ignoreCase = true)) {
+            "https://www.fanfiction.net"
+        } else {
+            initialUrl
+        }
+    }
+
+    var currentUrl by remember { mutableStateOf(safeInitialUrl) }
     var pageTitle by remember { mutableStateOf(initialSite.displayName) }
     var loadProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
@@ -170,7 +178,6 @@ fun FanficWebViewSheet(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
                 // Top toolbar
@@ -339,7 +346,7 @@ fun FanficWebViewSheet(
                                 }
                             }
 
-                            loadUrl(initialUrl)
+                            loadUrl(safeInitialUrl)
                             webViewHolder.value = this
                         }
                     }
@@ -351,7 +358,7 @@ fun FanficWebViewSheet(
                         .fillMaxWidth()
                         .background(DarkSurfaceCard)
                         .border(0.6.dp, Color.White.copy(alpha = 0.08f))
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {

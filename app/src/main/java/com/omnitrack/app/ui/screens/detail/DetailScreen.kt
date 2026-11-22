@@ -790,6 +790,16 @@ fun DetailScreen(
                 }
             }
 
+            @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                isRefreshing = item.mediaType == MediaType.FANFICTION && fanficAuxState.isCheckingUpdates,
+                onRefresh = {
+                    if (item.mediaType == MediaType.FANFICTION) {
+                        viewModel.checkFanficUpdates()
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            ) {
             LazyColumn(
                 state = lazyListState,
                 modifier = Modifier.fillMaxSize()
@@ -817,6 +827,7 @@ fun DetailScreen(
                                 item = item,
                                 backdropTargetUrl = backdropTargetUrl,
                                 bannerSizing = presentationSettings.bannerSizing,
+                                bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
                                 englishTitle = uiState.englishTitle,
                                 romajiTitle = uiState.romajiTitle,
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
@@ -843,6 +854,7 @@ fun DetailScreen(
                                 item = item,
                                 coverImageModel = coverImageModel,
                                 backdropTargetUrl = backdropTargetUrl,
+                                bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
                                 englishTitle = uiState.englishTitle,
                                 romajiTitle = uiState.romajiTitle,
                                 heroClearLogoUrl = uiState.heroClearLogoUrl,
@@ -1074,6 +1086,18 @@ fun DetailScreen(
                                             onRemoveMirror = { viewModel.removeFanficMirror(it) },
                                             onToggleChapterRead = { viewModel.toggleFanficChapterRead(it) },
                                             onMarkReadUpTo = { viewModel.markFanficChaptersReadUpTo(it) },
+                                            onMarkAllChaptersRead = { viewModel.markAllFanficChaptersRead(it) },
+                                            onToggleChapterBookmark = { viewModel.toggleFanficChapterBookmark(it) },
+                                            onUpdateChapterNote = { ch, note, rating ->
+                                                viewModel.updateFanficChapterNote(ch, note, rating)
+                                            },
+                                            onUpdateQuickMetadata = { cur, tot, wc, auth, fan, rat, st ->
+                                                viewModel.updateFanficQuickMetadata(cur, tot, wc, auth, fan, rat, st)
+                                            },
+                                            onTagClick = { tag ->
+                                                com.omnitrack.app.data.model.FanficTagFilterBus.emitTag(tag)
+                                                onBack()
+                                            },
                                             onAddManualChapter = { num, title, cat, url ->
                                                 viewModel.addManualFanficChapter(num, title, cat, url)
                                             },
@@ -1392,7 +1416,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.GENRES_TAGS -> {
-                            if (sectionsReady) {
+                            if (sectionsReady && item.mediaType != MediaType.FANFICTION) {
                                 item(key = "section_genres_tags", contentType = "genres_tags") {
                                     Column {
                                         DetailGenresTagsSection(
@@ -1464,7 +1488,7 @@ fun DetailScreen(
                             }
                         }
                         DetailSectionKey.EXTERNAL_LINKS -> {
-                            if (sectionsReady && uiState.externalLinks.isNotEmpty()) {
+                            if (sectionsReady && uiState.externalLinks.isNotEmpty() && item.mediaType != MediaType.FANFICTION) {
                                 item(key = "section_external_links", contentType = "external_links") {
                                     Column {
                                         DetailExternalLinksSection(
@@ -1601,6 +1625,7 @@ fun DetailScreen(
                 item(key = "bottom_spacer", contentType = "spacer") {
                     Spacer(modifier = Modifier.height(48.dp))
                 }
+            }
             }
 
             // Top Status Bar Gradient Scrim (so white back arrow never vanishes on bright banners)
@@ -2800,6 +2825,7 @@ private fun DetailHeroHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     backdropTargetUrl: String?,
     bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
+    bannerBlurDp: Int = 0,
     englishTitle: String? = null,
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
@@ -2840,10 +2866,17 @@ private fun DetailHeroHeaderSection(
                     alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
-                            scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
-                        ),
+                        .graphicsLayer {
+                            val fx = item.bannerFocalX.coerceIn(-1f, 1f)
+                            val fy = item.bannerFocalY.coerceIn(-1f, 1f)
+                            val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                            val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                            scaleX = effZoom
+                            scaleY = effZoom
+                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                        }
+                        .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier),
                     contentScale = ContentScale.Crop
                 )
             }
@@ -2860,10 +2893,17 @@ private fun DetailHeroHeaderSection(
                     alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
-                            scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
-                        )
+                        .graphicsLayer {
+                            val fx = item.bannerFocalX.coerceIn(-1f, 1f)
+                            val fy = item.bannerFocalY.coerceIn(-1f, 1f)
+                            val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                            val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                            scaleX = effZoom
+                            scaleY = effZoom
+                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                        }
+                        .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                         .featherArtwork(startYRatio = 0.50f),
                     contentScale = ContentScale.Crop
                 )
@@ -3005,7 +3045,7 @@ private fun DetailHeroHeaderSection(
             }
         }
 
-        if (item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC) {
+        if (item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC && item.mediaType != MediaType.FANFICTION) {
             DetailNuvioMetaRow(item = item)
         }
         NuvioRatingsRow(
@@ -3205,6 +3245,7 @@ private fun DetailClassicHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     coverImageModel: Any?,
     backdropTargetUrl: String?,
+    bannerBlurDp: Int = 0,
     englishTitle: String? = null,
     romajiTitle: String? = null,
     heroClearLogoUrl: String? = null,
@@ -3246,10 +3287,17 @@ private fun DetailClassicHeaderSection(
                 alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
-                        scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
-                    )
+                    .graphicsLayer {
+                        val fx = item.bannerFocalX.coerceIn(-1f, 1f)
+                        val fy = item.bannerFocalY.coerceIn(-1f, 1f)
+                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                        val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                        scaleX = effZoom
+                        scaleY = effZoom
+                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                    }
+                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                     .featherArtwork(startYRatio = 0.50f),
                 contentScale = ContentScale.Crop
             )

@@ -931,7 +931,8 @@ fun ArtworkPickerBottomSheet(
                                                                 val nextZoom = (draftZoom * zoomChange).coerceIn(1f, 2.5f)
                                                                 val w = size.width.toFloat().coerceAtLeast(1f)
                                                                 val h = size.height.toFloat().coerceAtLeast(1f)
-                                                                val sens = 1.6f / nextZoom
+                                                                val effZoom = if (nextZoom <= 1.01f) 1.24f else nextZoom
+                                                                val sens = 1.8f / effZoom
                                                                 draftZoom = nextZoom
                                                                 draftFocalX = (draftFocalX - (pan.x / w) * sens).coerceIn(-1f, 1f)
                                                                 draftFocalY = (draftFocalY - (pan.y / h) * sens).coerceIn(-1f, 1f)
@@ -946,10 +947,19 @@ fun ArtworkPickerBottomSheet(
                                                     model = framingPreviewModel,
                                                     contentDescription = "Banner Framing Preview",
                                                     contentScale = ContentScale.Crop,
-                                                    alignment = BiasAlignment(draftFocalX, draftFocalY),
+                                                    alignment = BiasAlignment(draftFocalX.coerceIn(-1f, 1f), draftFocalY.coerceIn(-1f, 1f)),
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .graphicsLayer(scaleX = draftZoom, scaleY = draftZoom)
+                                                        .graphicsLayer {
+                                                            val fx = draftFocalX.coerceIn(-1f, 1f)
+                                                            val fy = draftFocalY.coerceIn(-1f, 1f)
+                                                            val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                                                            val effZoom = if (draftZoom <= 1.01f && hasPan) 1.24f else draftZoom.coerceIn(1f, 2.5f)
+                                                            scaleX = effZoom
+                                                            scaleY = effZoom
+                                                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                                                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                                                        }
                                                 )
                                             }
                                             Box(

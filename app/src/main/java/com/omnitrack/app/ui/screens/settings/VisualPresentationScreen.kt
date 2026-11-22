@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,8 +39,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,11 +58,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.OmniTrackApplication
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.BannerSizing
 import com.omnitrack.app.data.preferences.DetailsBackdropStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
+import com.omnitrack.app.data.preferences.HeroBannerBlurLevel
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.AmbientAuraWireframe
 import com.omnitrack.app.ui.components.BannerSizingWireframe
@@ -305,6 +310,194 @@ fun VisualPresentationScreen(
                     }
                 ) {
                     AmbientAuraWireframe(isBlur = false)
+                }
+            }
+
+            // Section 3B: Wide Hero Banner Blur (Universal + Per-Category Overrides)
+            PresentationSectionTitle("WIDE HERO BANNER BLUR (HOME, DISCOVER & DETAILS)")
+            var selectedBlurCategory by remember { mutableStateOf(MediaType.ANIME) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.03f))
+                    .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Universal Banner Blur",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Default blur applied to wide hero banners unless overridden by a category",
+                            fontSize = 11.5.sp,
+                            color = TextSecondary
+                        )
+                    }
+                    if (presentationSettings.categoryBannerBlurOverrides.isNotEmpty()) {
+                        Text(
+                            text = "Clear Overrides (${presentationSettings.categoryBannerBlurOverrides.size})",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(AccentGold.copy(alpha = 0.14f))
+                                .clickable {
+                                    scope.launch { prefManager.clearAllCategoryHeroBannerBlurOverrides() }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    HeroBannerBlurLevel.entries.forEach { level ->
+                        val active = presentationSettings.universalBannerBlur == level
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .border(
+                                    0.8.dp,
+                                    if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    scope.launch { prefManager.updateUniversalHeroBannerBlur(level) }
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = level.shortLabel,
+                                fontSize = 12.sp,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                color = if (active) AccentGold else TextPrimary
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.6.dp)
+
+                Text(
+                    text = "Per-Category Override",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MediaType.filterTabs.filter { it != MediaType.ALL }.forEach { cat ->
+                        val hasOverride = presentationSettings.categoryBannerBlurOverrides.containsKey(cat.name)
+                        val isSelected = selectedBlurCategory == cat
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    when {
+                                        isSelected -> AccentGold.copy(alpha = 0.20f)
+                                        hasOverride -> AccentGold.copy(alpha = 0.08f)
+                                        else -> Color.White.copy(alpha = 0.05f)
+                                    }
+                                )
+                                .border(
+                                    0.7.dp,
+                                    when {
+                                        isSelected -> AccentGold
+                                        hasOverride -> AccentGold.copy(alpha = 0.45f)
+                                        else -> Color.Transparent
+                                    },
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable { selectedBlurCategory = cat }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            val overrideLvl = presentationSettings.categoryBannerBlurOverrides[cat.name]
+                            Text(
+                                text = if (overrideLvl != null) "${cat.displayName} \u00B7 ${overrideLvl.shortLabel}" else cat.displayName,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected || hasOverride) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected || hasOverride) AccentGold else TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                val currentCatOverride = presentationSettings.categoryBannerBlurOverrides[selectedBlurCategory.name]
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val inheritActive = currentCatOverride == null
+                    Box(
+                        modifier = Modifier
+                            .weight(1.15f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (inheritActive) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                            .border(
+                                0.8.dp,
+                                if (inheritActive) AccentGold else Color.White.copy(alpha = 0.08f),
+                                RoundedCornerShape(6.dp)
+                            )
+                            .clickable {
+                                scope.launch { prefManager.updateCategoryHeroBannerBlurOverride(selectedBlurCategory, null) }
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Inherit (${presentationSettings.universalBannerBlur.shortLabel})",
+                            fontSize = 11.sp,
+                            fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
+                            color = if (inheritActive) AccentGold else TextPrimary
+                        )
+                    }
+                    HeroBannerBlurLevel.entries.forEach { level ->
+                        val active = currentCatOverride == level
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .border(
+                                    0.8.dp,
+                                    if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    scope.launch { prefManager.updateCategoryHeroBannerBlurOverride(selectedBlurCategory, level) }
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = level.shortLabel,
+                                fontSize = 11.sp,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                color = if (active) AccentGold else TextPrimary
+                            )
+                        }
+                    }
                 }
             }
 

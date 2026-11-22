@@ -864,8 +864,8 @@ class TrackerSyncEngine(
                 .url("https://api.bgm.tv/v0/users/-/collections/$bgmId")
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
-                .header("Content-Type", "application/json")
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                .header("Accept", "application/json")
+                .post(payload.toString().toByteArray(Charsets.UTF_8).toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->

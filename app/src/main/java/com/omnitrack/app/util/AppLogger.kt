@@ -33,8 +33,9 @@ data class LogEntry(
 object AppLogger {
 
     private const val PREFS_NAME = "omnitrack_diagnostics"
-    private const val KEY_LOGGING_ENABLED = "is_logging_enabled"
-    private const val KEY_LIVE_LOGCAT_AUTO_REFRESH = "is_live_logcat_auto_refresh"
+    private const val KEY_LOGGING_ENABLED = "is_logging_enabled_v2"
+    private const val KEY_LIVE_LOGCAT_ENABLED = "is_live_logcat_enabled_v2"
+    private const val KEY_LIVE_LOGCAT_AUTO_REFRESH = "is_live_logcat_auto_refresh_v2"
     private const val LOG_FILE_NAME = "omnitrack_diagnostics.log"
     private const val MAX_IN_MEMORY_LOGS = 600
 
@@ -42,8 +43,11 @@ object AppLogger {
     private var logFile: File? = null
     private val dateFormat = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
-    private val _isLoggingEnabled = MutableStateFlow(true)
+    private val _isLoggingEnabled = MutableStateFlow(false)
     val isLoggingEnabled: StateFlow<Boolean> = _isLoggingEnabled.asStateFlow()
+
+    private val _isLiveLogcatEnabled = MutableStateFlow(false)
+    val isLiveLogcatEnabled: StateFlow<Boolean> = _isLiveLogcatEnabled.asStateFlow()
 
     private val _isLiveLogcatAutoRefresh = MutableStateFlow(false)
     val isLiveLogcatAutoRefresh: StateFlow<Boolean> = _isLiveLogcatAutoRefresh.asStateFlow()
@@ -54,8 +58,10 @@ object AppLogger {
     fun init(context: Context) {
         val appCtx = context.applicationContext
         prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val enabled = prefs?.getBoolean(KEY_LOGGING_ENABLED, true) ?: true
+        val enabled = prefs?.getBoolean(KEY_LOGGING_ENABLED, false) ?: false
         _isLoggingEnabled.value = enabled
+        val liveLogcat = prefs?.getBoolean(KEY_LIVE_LOGCAT_ENABLED, false) ?: false
+        _isLiveLogcatEnabled.value = liveLogcat
         val autoRefresh = prefs?.getBoolean(KEY_LIVE_LOGCAT_AUTO_REFRESH, false) ?: false
         _isLiveLogcatAutoRefresh.value = autoRefresh
 
@@ -74,6 +80,14 @@ object AppLogger {
         prefs?.edit()?.putBoolean(KEY_LOGGING_ENABLED, enabled)?.apply()
         if (enabled) {
             i("AppLogger", "Diagnostics logging enabled by user.")
+        }
+    }
+
+    fun setLiveLogcatEnabled(enabled: Boolean) {
+        _isLiveLogcatEnabled.value = enabled
+        prefs?.edit()?.putBoolean(KEY_LIVE_LOGCAT_ENABLED, enabled)?.apply()
+        if (!enabled) {
+            setLiveLogcatAutoRefresh(false)
         }
     }
 

@@ -156,6 +156,48 @@ object DiscoverShelfCatalog {
         allShelves.filter { it.category == category }
 }
 
+enum class HeroBannerBlurLevel(val displayName: String, val shortLabel: String, val radiusDp: Int) {
+    OFF("Unblurred (Crisp)", "Off", 0),
+    SUBTLE("Subtle Blur (6dp)", "Subtle", 6),
+    MEDIUM("Medium Blur (14dp)", "Medium", 14),
+    HEAVY("Heavy Blur (24dp)", "Heavy", 24);
+
+    companion object {
+        fun fromName(name: String?): HeroBannerBlurLevel = when (name?.uppercase()) {
+            "SUBTLE" -> SUBTLE
+            "MEDIUM" -> MEDIUM
+            "HEAVY" -> HEAVY
+            else -> OFF
+        }
+
+        fun parseOverrides(raw: String?): Map<String, HeroBannerBlurLevel> {
+            if (raw.isNullOrBlank()) return emptyMap()
+            return raw.split(",")
+                .mapNotNull { entry ->
+                    val parts = entry.split(":")
+                    if (parts.size == 2) {
+                        val cat = parts[0].trim().uppercase()
+                        val lvl = runCatching { HeroBannerBlurLevel.valueOf(parts[1].trim().uppercase()) }.getOrNull()
+                        if (cat.isNotBlank() && lvl != null) cat to lvl else null
+                    } else null
+                }
+                .toMap()
+        }
+
+        fun encodeOverrides(map: Map<String, HeroBannerBlurLevel>): String =
+            map.entries.joinToString(",") { "${it.key}:${it.value.name}" }
+
+        fun resolveBlurDp(
+            mediaType: MediaType?,
+            universal: HeroBannerBlurLevel,
+            overrides: Map<String, HeroBannerBlurLevel>
+        ): Int {
+            val level = mediaType?.let { overrides[it.name] } ?: universal
+            return level.radiusDp
+        }
+    }
+}
+
 data class DiscoverCustomizationSettings(
     val layoutStyle: DiscoverLayoutStyle = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT,
     val showSpotlightBanner: Boolean = true,
@@ -166,8 +208,13 @@ data class DiscoverCustomizationSettings(
     val showCustomEntryCard: Boolean = true,
     val showAiToggle: Boolean = true,
     val disabledCategories: Set<String> = emptySet(),
-    val disabledShelves: Set<String> = emptySet()
-)
+    val disabledShelves: Set<String> = emptySet(),
+    val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
+    val categoryBannerBlurOverrides: Map<String, HeroBannerBlurLevel> = emptyMap()
+) {
+    fun resolveBannerBlurDp(mediaType: MediaType?): Int =
+        HeroBannerBlurLevel.resolveBlurDp(mediaType, universalBannerBlur, categoryBannerBlurOverrides)
+}
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
     HERO("Hero Layout", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
@@ -320,8 +367,13 @@ data class HomeHeroSettings(
     val showQuickPlusOnContinue: Boolean = true,
     val shelfPosterSize: HomeShelfPosterSize = HomeShelfPosterSize.STANDARD,
     val shelfItemLimit: Int = 0, // 0 = Unlimited (Infinite), or 8 / 12 / 20
-    val defaultCategory: MediaType = MediaType.ALL
-)
+    val defaultCategory: MediaType = MediaType.ALL,
+    val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
+    val categoryBannerBlurOverrides: Map<String, HeroBannerBlurLevel> = emptyMap()
+) {
+    fun resolveBannerBlurDp(mediaType: MediaType?): Int =
+        HeroBannerBlurLevel.resolveBlurDp(mediaType, universalBannerBlur, categoryBannerBlurOverrides)
+}
 
 enum class PreferredTitleLanguage(val displayName: String, val description: String) {
     ENGLISH("English", "Prefer official English localization (e.g. The Apothecary Diaries)"),
@@ -333,8 +385,13 @@ data class PresentationSettings(
     val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
     val bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
     val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
-    val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR
-)
+    val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR,
+    val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
+    val categoryBannerBlurOverrides: Map<String, HeroBannerBlurLevel> = emptyMap()
+) {
+    fun resolveBannerBlurDp(mediaType: MediaType?): Int =
+        HeroBannerBlurLevel.resolveBlurDp(mediaType, universalBannerBlur, categoryBannerBlurOverrides)
+}
 
 class PreferenceManager(private val context: Context) {
 
@@ -434,6 +491,8 @@ class PreferenceManager(private val context: Context) {
         val VN_NSFW_FILTER_MODE = stringPreferencesKey("vn_nsfw_filter_mode")
         val FANFICTION_ENABLED = booleanPreferencesKey("fanfiction_enabled")
         val FANFIC_NSFW_FILTER_MODE = stringPreferencesKey("fanfic_nsfw_filter_mode")
+        val UNIVERSAL_HERO_BANNER_BLUR = stringPreferencesKey("universal_hero_banner_blur")
+        val CATEGORY_HERO_BANNER_BLUR_OVERRIDES = stringPreferencesKey("category_hero_banner_blur_overrides")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -460,7 +519,9 @@ class PreferenceManager(private val context: Context) {
                 } ?: DetailsBackdropStyle.CINEMATIC_FADE,
                 fallbackBackgroundStyle = prefs[PreferencesKeys.FALLBACK_BACKGROUND_STYLE]?.let {
                     runCatching { FallbackBackgroundStyle.valueOf(it) }.getOrNull()
-                } ?: FallbackBackgroundStyle.CINEMATIC_BLUR
+                } ?: FallbackBackgroundStyle.CINEMATIC_BLUR,
+                universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
+                categoryBannerBlurOverrides = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES])
             )
         }
         .distinctUntilChanged()
@@ -519,7 +580,9 @@ class PreferenceManager(private val context: Context) {
                 showCustomEntryCard = prefs[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] ?: true,
                 showAiToggle = prefs[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] ?: true,
                 disabledCategories = prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] ?: emptySet(),
-                disabledShelves = prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet()
+                disabledShelves = prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet(),
+                universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
+                categoryBannerBlurOverrides = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES])
             )
         }
         .distinctUntilChanged()
@@ -1132,7 +1195,9 @@ class PreferenceManager(private val context: Context) {
                 },
                 defaultCategory = runCatching {
                     prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY]?.let { MediaType.valueOf(it) } ?: MediaType.ALL
-                }.getOrDefault(MediaType.ALL)
+                }.getOrDefault(MediaType.ALL),
+                universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
+                categoryBannerBlurOverrides = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES])
             )
         }
         .distinctUntilChanged()
@@ -1330,6 +1395,38 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateFanficNsfwFilterMode(mode: VnNsfwFilterMode) {
         cachedFanficNsfwFilterMode = mode
         context.dataStore.edit { it[PreferencesKeys.FANFIC_NSFW_FILTER_MODE] = mode.name }
+    }
+
+    val universalHeroBannerBlur: Flow<HeroBannerBlurLevel> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]) }
+        .distinctUntilChanged()
+
+    val categoryHeroBannerBlurOverrides: Flow<Map<String, HeroBannerBlurLevel>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES]) }
+        .distinctUntilChanged()
+
+    suspend fun updateUniversalHeroBannerBlur(level: HeroBannerBlurLevel) {
+        context.dataStore.edit { it[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR] = level.name }
+    }
+
+    suspend fun updateCategoryHeroBannerBlurOverride(type: MediaType, level: HeroBannerBlurLevel?) {
+        context.dataStore.edit { prefs ->
+            val current = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES]).toMutableMap()
+            if (level == null) {
+                current.remove(type.name)
+            } else {
+                current[type.name] = level
+            }
+            prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES] = HeroBannerBlurLevel.encodeOverrides(current)
+        }
+    }
+
+    suspend fun clearAllCategoryHeroBannerBlurOverrides() {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES] = ""
+        }
     }
 
     companion object {

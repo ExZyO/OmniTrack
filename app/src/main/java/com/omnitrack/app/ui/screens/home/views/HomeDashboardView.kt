@@ -472,10 +472,18 @@ fun HomeDashboardView(
                             } else 0
                         }
                         val heroKeys = remember(heroSlides) { heroSlides.map { it.slideKey() } }
-                        val pagerState = rememberPagerState(
-                            initialPage = startIndex,
-                            pageCount = { virtualCount }
-                        )
+                        val pagerState = androidx.compose.runtime.key(isLooping, heroSlides.size) {
+                            rememberPagerState(
+                                initialPage = startIndex,
+                                pageCount = { virtualCount }
+                            )
+                        }
+
+                        LaunchedEffect(isLooping, heroSlides.size) {
+                            if (isLooping && pagerState.currentPage < 1000) {
+                                runCatching { pagerState.scrollToPage(startIndex) }
+                            }
+                        }
 
                         LaunchedEffect(heroRefreshNonce) {
                             if (heroRefreshNonce > 0 && heroSlides.isNotEmpty()) {
@@ -1265,6 +1273,7 @@ private fun LocalMediaHeroCard(
         bannerFocalX = item.bannerFocalX,
         bannerFocalY = item.bannerFocalY,
         bannerZoom = item.bannerZoom,
+        bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
         userRating = item.userRating,
         communityScore = item.communityScore,
         progressLabel = progressLabel,
@@ -1296,6 +1305,7 @@ private fun TrendingMediaHeroCard(
         bannerFocalX = 0f,
         bannerFocalY = 0f,
         bannerZoom = 1f,
+        bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
         userRating = null,
         communityScore = item.communityScore,
         progressLabel = progressHint,
@@ -1314,6 +1324,7 @@ private fun ChimanewComboHeroCard(
     bannerFocalX: Float,
     bannerFocalY: Float,
     bannerZoom: Float,
+    bannerBlurDp: Int = 0,
     userRating: Float?,
     communityScore: Float?,
     progressLabel: String,
@@ -1345,10 +1356,17 @@ private fun ChimanewComboHeroCard(
                 alignment = BiasAlignment(bannerFocalX.coerceIn(-1f, 1f), bannerFocalY.coerceIn(-1f, 1f)),
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = bannerZoom.coerceIn(1f, 2.5f),
-                        scaleY = bannerZoom.coerceIn(1f, 2.5f)
-                    )
+                    .graphicsLayer {
+                        val fx = bannerFocalX.coerceIn(-1f, 1f)
+                        val fy = bannerFocalY.coerceIn(-1f, 1f)
+                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                        val effZoom = if (bannerZoom <= 1.01f && hasPan) 1.24f else bannerZoom.coerceIn(1f, 2.5f)
+                        scaleX = effZoom
+                        scaleY = effZoom
+                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                    }
+                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                     .alpha(if (heroSettings.dimBanner) 0.56f else 0.94f)
             )
         } else if (heroSettings.allowCroppedFallback) {

@@ -27,7 +27,7 @@ enum class FanficSite(
         displayName = "FanFiction.net",
         shortBadge = "FFN",
         baseUrl = "https://www.fanfiction.net",
-        loginUrl = "https://www.fanfiction.net/login.php",
+        loginUrl = "https://www.fanfiction.net",
         accentHex = 0xFF336699L
     ),
     SB(
@@ -263,4 +263,17 @@ fun extractFirstFanficUrl(text: String?): String? {
     val urls = URL_EXTRACT_REGEX.findAll(text).map { it.value.trimEnd('.', ',', ';', '!', '?') }.toList()
     if (urls.isEmpty()) return null
     return urls.firstOrNull { FanficSite.fromUrl(it) != FanficSite.OTHER } ?: urls.firstOrNull()
+}
+
+object FanficTagFilterBus {
+    private val _pendingTag = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val pendingTag: kotlinx.coroutines.flow.StateFlow<String?> = _pendingTag
+
+    fun emitTag(tag: String) {
+        _pendingTag.value = tag.trim().takeIf { it.isNotBlank() }
+    }
+
+    fun consume() {
+        _pendingTag.value = null
+    }
 }

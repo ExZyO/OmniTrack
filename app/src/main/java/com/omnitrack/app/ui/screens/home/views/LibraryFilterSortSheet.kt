@@ -59,9 +59,21 @@ fun LibraryFilterSortSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
+                .padding(top = 14.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(38.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.22f))
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

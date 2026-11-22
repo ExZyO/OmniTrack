@@ -276,6 +276,17 @@ fun HomeScreen(
         viewModel.selectMediaType(target)
     }
 
+    val pendingFanficTag by com.omnitrack.app.data.model.FanficTagFilterBus.pendingTag.collectAsState()
+    LaunchedEffect(pendingFanficTag, visibleFilterTabs) {
+        val tag = pendingFanficTag ?: return@LaunchedEffect
+        fanficTagFilter = tag
+        val targetPage = visibleFilterTabs.indexOf(MediaType.FANFICTION).coerceAtLeast(0)
+        viewModel.selectMediaType(MediaType.FANFICTION)
+        runCatching { pagerState.scrollToPage(targetPage) }
+        currentNavDestination = NavDestination.LIBRARY
+        com.omnitrack.app.data.model.FanficTagFilterBus.consume()
+    }
+
     // Auto-focus search text field when opened
     LaunchedEffect(isSearchVisible) {
         if (isSearchVisible) {

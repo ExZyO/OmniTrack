@@ -3,9 +3,12 @@ package com.omnitrack.app.ui.screens.home.views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -50,6 +55,7 @@ import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.DiscoverCustomizationSettings
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.DiscoverShelfCatalog
+import com.omnitrack.app.data.preferences.HeroBannerBlurLevel
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.components.DiscoverLayoutWireframe
 import com.omnitrack.app.ui.components.VisualOptionTile
@@ -282,6 +288,141 @@ fun DiscoverCustomizerSheet(
                                 onCheckedChange = onToggle
                             )
                             HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
+                        }
+
+                        item(key = "disc_banner_blur_section") {
+                            var selectedBlurCat by remember { mutableStateOf(MediaType.ANIME) }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "WIDE HERO BANNER BLUR (UNIVERSAL & PER-CATEGORY)",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextSecondary,
+                                    letterSpacing = 0.9.sp
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    HeroBannerBlurLevel.entries.forEach { level ->
+                                        val active = settings.universalBannerBlur == level
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                                .border(
+                                                    0.7.dp,
+                                                    if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable {
+                                                    scope.launch { preferenceManager.updateUniversalHeroBannerBlur(level) }
+                                                }
+                                                .padding(vertical = 7.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = level.shortLabel,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (active) AccentGold else TextPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    allCategories.filter { it != MediaType.ALL }.forEach { cat ->
+                                        val ov = settings.categoryBannerBlurOverrides[cat.name]
+                                        val isSel = selectedBlurCat == cat
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (isSel) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                                .border(
+                                                    0.7.dp,
+                                                    if (isSel || ov != null) AccentGold else Color.Transparent,
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable { selectedBlurCat = cat }
+                                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                                        ) {
+                                            Text(
+                                                text = if (ov != null) "${cat.displayName} \u00B7 ${ov.shortLabel}" else cat.displayName,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSel || ov != null) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSel || ov != null) AccentGold else TextSecondary
+                                            )
+                                        }
+                                    }
+                                }
+                                val curOv = settings.categoryBannerBlurOverrides[selectedBlurCat.name]
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val inheritActive = curOv == null
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1.15f)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (inheritActive) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                            .border(
+                                                0.7.dp,
+                                                if (inheritActive) AccentGold else Color.White.copy(alpha = 0.08f),
+                                                RoundedCornerShape(6.dp)
+                                            )
+                                            .clickable {
+                                                scope.launch { preferenceManager.updateCategoryHeroBannerBlurOverride(selectedBlurCat, null) }
+                                            }
+                                            .padding(vertical = 7.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Inherit (${settings.universalBannerBlur.shortLabel})",
+                                            fontSize = 11.sp,
+                                            fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (inheritActive) AccentGold else TextPrimary
+                                        )
+                                    }
+                                    HeroBannerBlurLevel.entries.forEach { level ->
+                                        val active = curOv == level
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                                .border(
+                                                    0.7.dp,
+                                                    if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                                    RoundedCornerShape(6.dp)
+                                                )
+                                                .clickable {
+                                                    scope.launch { preferenceManager.updateCategoryHeroBannerBlurOverride(selectedBlurCat, level) }
+                                                }
+                                                .padding(vertical = 7.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = level.shortLabel,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (active) AccentGold else TextPrimary
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

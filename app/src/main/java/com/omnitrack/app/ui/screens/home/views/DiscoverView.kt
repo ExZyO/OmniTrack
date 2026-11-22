@@ -1239,27 +1239,13 @@ fun DiscoverView(
                             DiscoverHeroSkeletonBanner()
                         } else {
                             when (discoverSettings.layoutStyle) {
-                                DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> {
-                                    val topItem = heroPool.first()
-                                    val libMatch = findLibraryMatch(allMedia, topItem)
-                                    DiscoverSpotlightBanner(
-                                        item = topItem,
-                                        libraryMatch = libMatch,
-                                        dimBanner = discoverSettings.dimHeroBanner,
-                                        onDetails = {
-                                            if (libMatch != null) onItemClick(libMatch.id) else {
-                                                EphemeralPreviewHolder.previewItem = topItem.toMediaItemEntity()
-                                                onItemClick(-1L)
-                                            }
-                                        },
-                                        onAdd = { onAddMedia(topItem) }
-                                    )
-                                }
+                                DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT,
                                 DiscoverLayoutStyle.HERO_CAROUSEL -> {
                                     DiscoverHeroCarousel(
                                         items = heroPool,
                                         allMedia = allMedia,
                                         dimBanner = discoverSettings.dimHeroBanner,
+                                        resolveBlurDp = { type -> discoverSettings.resolveBannerBlurDp(type) },
                                         onItemClick = onItemClick,
                                         onAddMedia = onAddMedia
                                     )
@@ -1586,6 +1572,7 @@ private fun DiscoverSpotlightBanner(
     item: SearchResultItem,
     libraryMatch: MediaCardSummary? = null,
     dimBanner: Boolean = true,
+    bannerBlurDp: Int = 0,
     onDetails: () -> Unit,
     onAdd: () -> Unit
 ) {
@@ -1628,19 +1615,27 @@ private fun DiscoverSpotlightBanner(
                 alignment = BiasAlignment(focalX.coerceIn(-1f, 1f), focalY.coerceIn(-1f, 1f)),
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(
-                        scaleX = zoom,
-                        scaleY = zoom
-                    )
+                    .graphicsLayer {
+                        val fx = focalX.coerceIn(-1f, 1f)
+                        val fy = focalY.coerceIn(-1f, 1f)
+                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
+                        val effZoom = if (zoom <= 1.01f && hasPan) 1.24f else zoom.coerceIn(1f, 2.5f)
+                        scaleX = effZoom
+                        scaleY = effZoom
+                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                    }
+                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
             )
         } else if (!bannerDisabled && coverModel != null) {
+            val fallbackBlur = maxOf(bannerBlurDp, if (dimBanner) 18 else 10)
             AsyncImage(
                 model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(if (dimBanner) 18.dp else 10.dp)
+                    .blur(fallbackBlur.dp)
                     .alpha(if (dimBanner) 0.45f else 0.84f)
             )
         }
@@ -1764,21 +1759,37 @@ private fun DiscoverHeroCarousel(
     items: List<SearchResultItem>,
     allMedia: List<MediaCardSummary>,
     dimBanner: Boolean,
+    resolveBlurDp: (MediaType?) -> Int = { 0 },
     onItemClick: (Long) -> Unit,
     onAddMedia: (SearchResultItem) -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { items.size })
+    if (items.isEmpty()) return
+    val isLooping = items.size > 1
+    val virtualCount = if (isLooping) 100_000 else items.size
+    val startIndex = remember(items.size) {
+        if (isLooping) 50_000 - (50_000 % items.size) else 0
+    }
+    val pagerState = androidx.compose.runtime.key(isLooping, items.size) {
+        rememberPagerState(initialPage = startIndex, pageCount = { virtualCount })
+    }
+    LaunchedEffect(isLooping, items.size) {
+        if (isLooping && pagerState.currentPage < 1000) {
+            runCatching { pagerState.scrollToPage(startIndex) }
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxWidth()
         ) { page ->
-            val item = items[page]
+            val idx = if (isLooping) page % items.size else page
+            val item = items[idx]
             val match = findLibraryMatch(allMedia, item)
             DiscoverSpotlightBanner(
                 item = item,
                 libraryMatch = match,
                 dimBanner = dimBanner,
+                bannerBlurDp = resolveBlurDp(item.mediaType),
                 onDetails = {
                     if (match != null) onItemClick(match.id) else {
                         EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
@@ -1789,13 +1800,14 @@ private fun DiscoverHeroCarousel(
             )
         }
         if (items.size > 1) {
+            val activeIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 repeat(items.size) { idx ->
-                    val active = pagerState.currentPage == idx
+                    val active = activeIdx == idx
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 3.dp)

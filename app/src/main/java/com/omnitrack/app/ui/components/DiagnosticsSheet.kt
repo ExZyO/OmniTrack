@@ -155,6 +155,7 @@ fun DiagnosticsSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isLoggingEnabled by AppLogger.isLoggingEnabled.collectAsState()
+    val isLiveLogcatEnabled by AppLogger.isLiveLogcatEnabled.collectAsState()
     val autoRefresh by AppLogger.isLiveLogcatAutoRefresh.collectAsState()
     val appEventLogs by AppLogger.logs.collectAsState()
 
@@ -167,14 +168,16 @@ fun DiagnosticsSheet(
     val logcatListState = rememberLazyListState()
     val eventsListState = rememberLazyListState()
 
-    LaunchedEffect(activeTab, refreshSignal) {
-        if (activeTab == 0) {
+    LaunchedEffect(activeTab, refreshSignal, isLiveLogcatEnabled) {
+        if (activeTab == 0 && isLiveLogcatEnabled) {
             logcatLines = withContext(Dispatchers.IO) { readProcessLogcat(1500) }
+        } else if (!isLiveLogcatEnabled) {
+            logcatLines = emptyList()
         }
     }
 
-    LaunchedEffect(activeTab, autoRefresh) {
-        if (activeTab == 0 && autoRefresh) {
+    LaunchedEffect(activeTab, autoRefresh, isLiveLogcatEnabled) {
+        if (activeTab == 0 && isLiveLogcatEnabled && autoRefresh) {
             while (isActive) {
                 logcatLines = withContext(Dispatchers.IO) { readProcessLogcat(1500) }
                 delay(2000L)
@@ -413,15 +416,31 @@ fun DiagnosticsSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (activeTab == 0 && isLiveLogcatEnabled) {
+                        Text(
+                            text = if (autoRefresh) "2s: ON" else "2s: OFF",
+                            color = if (autoRefresh) AccentGold else TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(
+                                    if (autoRefresh) AccentGold.copy(alpha = 0.14f)
+                                    else Color.White.copy(alpha = 0.06f)
+                                )
+                                .clickable { AppLogger.setLiveLogcatAutoRefresh(!autoRefresh) }
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
                     Text(
-                        text = if (activeTab == 0) "Auto 2s" else "Capture",
+                        text = if (activeTab == 0) "Logcat" else "Events",
                         color = TextSecondary,
                         fontSize = 11.sp
                     )
                     Switch(
-                        checked = if (activeTab == 0) autoRefresh else isLoggingEnabled,
+                        checked = if (activeTab == 0) isLiveLogcatEnabled else isLoggingEnabled,
                         onCheckedChange = { checked ->
-                            if (activeTab == 0) AppLogger.setLiveLogcatAutoRefresh(checked)
+                            if (activeTab == 0) AppLogger.setLiveLogcatEnabled(checked)
                             else AppLogger.setLoggingEnabled(checked)
                         },
                         colors = SwitchDefaults.colors(
@@ -546,7 +565,16 @@ fun DiagnosticsSheet(
                     .padding(top = 6.dp)
             ) {
                 if (activeTab == 0) {
-                    if (filteredLogcat.isEmpty()) {
+                    if (!isLiveLogcatEnabled) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Live Logcat is off — toggle Logcat switch above to capture",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    } else if (filteredLogcat.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 text = "No process logcat lines match current filters",
@@ -605,7 +633,7 @@ fun DiagnosticsSheet(
                     if (filteredEvents.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
-                                text = "No structured app events logged",
+                                text = if (!isLoggingEnabled) "App Events logging is off — toggle Events switch above to capture" else "No structured app events logged",
                                 color = TextSecondary,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace

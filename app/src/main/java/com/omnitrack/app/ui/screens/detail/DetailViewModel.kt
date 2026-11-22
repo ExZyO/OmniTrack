@@ -6524,12 +6524,25 @@ class DetailViewModel(
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0L) return@launch
             val nextRead = !chapter.isRead
-            repository.updateFanficChapter(
-                chapter.copy(
-                    isRead = nextRead,
-                    readAtMs = if (nextRead) System.currentTimeMillis() else null
+            val now = System.currentTimeMillis()
+            val isMain = FanficThreadmarkCategory.fromRaw(chapter.category) == FanficThreadmarkCategory.MAIN
+            if (nextRead && isMain) {
+                val all = repository.getFanficChaptersOnce(mediaId)
+                all.filter {
+                    FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN &&
+                        (it.sortOrder <= chapter.sortOrder || it.chapterNumber <= chapter.chapterNumber) &&
+                        !it.isRead
+                }.forEach { ch ->
+                    repository.updateFanficChapter(ch.copy(isRead = true, readAtMs = now))
+                }
+            } else {
+                repository.updateFanficChapter(
+                    chapter.copy(
+                        isRead = nextRead,
+                        readAtMs = if (nextRead) now else null
+                    )
                 )
-            )
+            }
             syncFanficChapterCountProgress(mediaId)
         }
     }
@@ -6542,12 +6555,122 @@ class DetailViewModel(
             val now = System.currentTimeMillis()
             all.filter {
                 FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN &&
-                    it.sortOrder <= target.sortOrder &&
+                    (it.sortOrder <= target.sortOrder || it.chapterNumber <= target.chapterNumber) &&
                     !it.isRead
             }.forEach { ch ->
                 repository.updateFanficChapter(ch.copy(isRead = true, readAtMs = now))
             }
             syncFanficChapterCountProgress(mediaId)
+        }
+    }
+
+    fun markAllFanficChaptersRead(markRead: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val all = repository.getFanficChaptersOnce(mediaId)
+            val now = if (markRead) System.currentTimeMillis() else null
+            all.filter {
+                FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN &&
+                    it.isRead != markRead
+            }.forEach { ch ->
+                repository.updateFanficChapter(ch.copy(isRead = markRead, readAtMs = now))
+            }
+            if (all.none { FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN }) {
+                val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+                val targetProg = if (markRead) (latest.totalProgress ?: latest.currentProgress) else 0.0
+                val newStatus = if (latest.autoStatusEnabled) {
+                    if (markRead && targetProg > 0.0) TrackingStatus.COMPLETED else TrackingStatus.IN_PROGRESS
+                } else latest.status
+                repository.updateMedia(
+                    latest.copy(
+                        currentProgress = targetProg,
+                        status = newStatus,
+                        lastUpdated = System.currentTimeMillis()
+                    )
+                )
+            } else {
+                syncFanficChapterCountProgress(mediaId)
+            }
+        }
+    }
+
+    fun toggleFanficChapterBookmark(chapter: FanficChapterEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            repository.updateFanficChapter(
+                chapter.copy(isBookmarked = !chapter.isBookmarked)
+            )
+        }
+    }
+
+    fun updateFanficChapterNote(chapter: FanficChapterEntity, note: String?, rating: Float?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            repository.updateFanficChapter(
+                chapter.copy(
+                    userNotes = note?.trim()?.takeIf { it.isNotBlank() },
+                    userRating = rating
+                )
+            )
+        }
+    }
+
+    fun updateFanficQuickMetadata(
+        currentCh: Double,
+        totalCh: Double?,
+        wordCount: Int?,
+        author: String?,
+        primaryFandom: String?,
+        ratingCode: String,
+        workStatus: FanficWorkStatus
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val cap = totalCh?.takeIf { it > 0.0 }
+            val clampedCur = if (cap != null) currentCh.coerceIn(0.0, cap) else currentCh.coerceAtLeast(0.0)
+            val newStatus = if (latest.autoStatusEnabled) {
+                when {
+                    cap != null && clampedCur >= cap -> TrackingStatus.COMPLETED
+                    clampedCur > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    currentProgress = clampedCur,
+                    totalProgress = cap,
+                    fanficWordCount = wordCount?.takeIf { it > 0 },
+                    bookAuthor = author?.trim()?.takeIf { it.isNotBlank() },
+                    fanficPrimaryFandom = primaryFandom?.trim()?.takeIf { it.isNotBlank() },
+                    fanficRating = ratingCode,
+                    fanficWorkStatus = workStatus.name,
+                    airStatus = workStatus.label,
+                    status = newStatus,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+            // Sync chapter checkmarks up to clampedCur
+            val all = repository.getFanficChaptersOnce(mediaId)
+            val mainSorted = all
+                .filter { FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN }
+                .sortedWith(compareBy({ it.sortOrder }, { it.chapterNumber }))
+            if (mainSorted.isNotEmpty()) {
+                val targetReadCount = clampedCur.toInt().coerceIn(0, mainSorted.size)
+                val now = System.currentTimeMillis()
+                mainSorted.forEachIndexed { idx, ch ->
+                    val shouldBeRead = idx < targetReadCount
+                    if (ch.isRead != shouldBeRead) {
+                        repository.updateFanficChapter(
+                            ch.copy(isRead = shouldBeRead, readAtMs = if (shouldBeRead) now else null)
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -6629,6 +6752,22 @@ class DetailViewModel(
                     lastUpdated = System.currentTimeMillis()
                 )
             )
+            val all = repository.getFanficChaptersOnce(mediaId)
+            val mainSorted = all
+                .filter { FanficThreadmarkCategory.fromRaw(it.category) == FanficThreadmarkCategory.MAIN }
+                .sortedWith(compareBy({ it.sortOrder }, { it.chapterNumber }))
+            if (mainSorted.isNotEmpty()) {
+                val targetReadCount = clamped.toInt().coerceIn(0, mainSorted.size)
+                val now = System.currentTimeMillis()
+                mainSorted.forEachIndexed { idx, ch ->
+                    val shouldBeRead = idx < targetReadCount
+                    if (ch.isRead != shouldBeRead) {
+                        repository.updateFanficChapter(
+                            ch.copy(isRead = shouldBeRead, readAtMs = if (shouldBeRead) now else null)
+                        )
+                    }
+                }
+            }
         }
     }
 

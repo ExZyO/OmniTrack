@@ -178,7 +178,6 @@ fun FanficImportSheet(
             modifier = Modifier
                 .fillMaxSize()
                 .background(AmoledBlack)
-                .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding(),
             color = AmoledBlack
@@ -546,6 +545,7 @@ fun FanficImportSheet(
                                 }
                             }
                         }
+                        Spacer(modifier = Modifier.height(36.dp))
                     }
                 } else {
                     // Tab 1: Sites & Bulk Import
@@ -763,11 +763,12 @@ fun FanficImportSheet(
                                                 }
                                             },
                                             shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.fillMaxWidth(),
                                             colors = ButtonDefaults.buttonColors(containerColor = Color(forum.accentHex), contentColor = Color.White)
                                         ) {
                                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
                                             Spacer(Modifier.width(5.dp))
-                                            Text("Import ${forum.shortBadge}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("Import ${forum.shortBadge} Watched Threads", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -792,6 +793,7 @@ fun FanficImportSheet(
                                 Text(bulkImportStatus.orEmpty(), color = TextPrimary, fontSize = 12.sp)
                             }
                         }
+                        Spacer(modifier = Modifier.height(36.dp))
                     }
                 }
             }
