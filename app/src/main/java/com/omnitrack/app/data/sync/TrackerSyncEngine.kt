@@ -918,24 +918,29 @@ class TrackerSyncEngine(
                         .header("Accept", "application/json")
                         .get()
                         .build()
-                    val epIdsToMark = client.newCall(epGetReq).execute().use { epResp ->
+                    val epIdsToMark: List<Long> = client.newCall(epGetReq).execute().use { epResp ->
                         if (!epResp.isSuccessful) emptyList()
                         else {
                             val rootObj = json.parseToJsonElement(epResp.body?.string().orEmpty()).asSafeObj()
                             val dataArr = rootObj?.get("data").asSafeArr().orEmpty()
-                            dataArr.mapNotNull { el ->
-                                val row = el.asSafeObj() ?: return@mapNotNull null
-                                val epObj = row["episode"].asSafeObj() ?: return@mapNotNull null
-                                val epId = epObj["id"].asSafeLong() ?: return@mapNotNull null
-                                val sortNum = (epObj["sort"] as? JsonPrimitive)?.doubleOrNull
-                                    ?: (epObj["ep"] as? JsonPrimitive)?.doubleOrNull
+                            val result = mutableListOf<Long>()
+                            for ((idx, el) in dataArr.withIndex()) {
+                                val row = el.asSafeObj() ?: continue
+                                val epObj = row["episode"].asSafeObj() ?: continue
+                                val epId = epObj["id"].asSafeLong() ?: continue
+                                val sortNum = epObj["sort"].asSafeStr()?.toDoubleOrNull()
+                                    ?: epObj["ep"].asSafeStr()?.toDoubleOrNull()
                                 val curType = row["type"].asSafeInt() ?: 0
-                                Triple(epId, sortNum, curType)
-                            }.filterIndexed { idx, (_, sortNum, _) ->
-                                if (sortNum != null && sortNum > 0.0) sortNum <= effProg.toDouble()
-                                else (idx + 1) <= effProg
-                            }.filter { (_, _, curType) -> curType != 2 }
-                                .map { it.first }
+                                val isWithinProgress = if (sortNum != null && sortNum > 0.0) {
+                                    sortNum <= effProg.toDouble()
+                                } else {
+                                    (idx + 1) <= effProg
+                                }
+                                if (isWithinProgress && curType != 2) {
+                                    result.add(epId)
+                                }
+                            }
+                            result
                         }
                     }
                     if (epIdsToMark.isNotEmpty()) {
