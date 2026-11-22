@@ -10,9 +10,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -43,17 +45,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -94,6 +107,9 @@ import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.LibraryFastScroller
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MediaTypeTabRow
+import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
+import com.omnitrack.app.ui.components.MultiSelectCheckBadge
+import com.omnitrack.app.ui.components.MultiSelectTopBar
 import com.omnitrack.app.ui.components.NavDestination
 import com.omnitrack.app.ui.components.OmniFloatingNavBar
 import com.omnitrack.app.ui.components.StatusFilterChips
@@ -185,6 +201,10 @@ fun HomeScreen(
     var customEntryInitType by remember { mutableStateOf(MediaType.NOVEL) }
     var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var libraryActionTarget by remember { mutableStateOf<com.omnitrack.app.data.db.dto.MediaCardSummary?>(null) }
+    var isLibraryMultiSelect by remember { mutableStateOf(false) }
+    var selectedLibraryIds by remember { mutableStateOf(setOf<Long>()) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
 
     val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
     val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
@@ -300,8 +320,11 @@ fun HomeScreen(
     // System Back Gesture handling:
     // 1. If search is open -> close search
     // 2. If on another tab (Discover, History, Settings) -> return to Library (Home page)
-    BackHandler(enabled = isSearchVisible || currentNavDestination != NavDestination.HOME) {
-        if (isSearchVisible) {
+    BackHandler(enabled = isLibraryMultiSelect || isSearchVisible || currentNavDestination != NavDestination.HOME) {
+        if (isLibraryMultiSelect) {
+            isLibraryMultiSelect = false
+            selectedLibraryIds = emptySet()
+        } else if (isSearchVisible) {
             isSearchVisible = false
             searchQuery = ""
         } else if (currentNavDestination != NavDestination.HOME) {
@@ -492,6 +515,26 @@ fun HomeScreen(
                                         imageVector = Icons.Default.Add,
                                         contentDescription = "Add Custom Entry",
                                         tint = AccentGold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // Multi-Select toggle button
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isLibraryMultiSelect) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                                        .clickable {
+                                            isLibraryMultiSelect = !isLibraryMultiSelect
+                                            if (!isLibraryMultiSelect) selectedLibraryIds = emptySet()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Checklist,
+                                        contentDescription = "Select Multiple",
+                                        tint = if (isLibraryMultiSelect) AccentGold else TextSecondary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -820,9 +863,31 @@ fun HomeScreen(
                                 }
 
                                 // Kinematic Layer: Scale decay and gentle parallax during finger drag (RenderNode layer only — zero recomposition)
+                                Column(modifier = Modifier.fillMaxSize()) {
+                                    AnimatedVisibility(visible = isLibraryMultiSelect) {
+                                        MultiSelectTopBar(
+                                            selectedCount = selectedLibraryIds.size,
+                                            totalCount = displayedItems.size,
+                                            onSelectAll = {
+                                                selectedLibraryIds = displayedItems.map { it.id }.toSet()
+                                            },
+                                            onInvertSelection = {
+                                                val currentIds = displayedItems.map { it.id }.toSet()
+                                                selectedLibraryIds = currentIds - selectedLibraryIds
+                                            },
+                                            onClearSelection = {
+                                                selectedLibraryIds = emptySet()
+                                            },
+                                            onExitMultiSelect = {
+                                                isLibraryMultiSelect = false
+                                                selectedLibraryIds = emptySet()
+                                            }
+                                        )
+                                    }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
+                                        .weight(1f)
                                         .graphicsLayer {
                                             val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
                                             val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
@@ -872,18 +937,28 @@ fun HomeScreen(
                                         Box(modifier = Modifier.fillMaxSize()) {
                                             LazyColumn(
                                                 state = pageListState,
-                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = 112.dp),
+                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 168.dp else 112.dp),
                                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
                                                 items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
+                                                    val isItemSelected = item.id in selectedLibraryIds
                                                     LibraryListRow(
                                                         item = item,
-                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards,
+                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards && !isLibraryMultiSelect,
+                                                        isSelectionMode = isLibraryMultiSelect,
+                                                        isSelected = isItemSelected,
                                                         onClick = {
-                                                            AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
-                                                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
-                                                            onItemClick(item.id)
+                                                            if (isLibraryMultiSelect) {
+                                                                selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
+                                                            } else {
+                                                                AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
+                                                                com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                                onItemClick(item.id)
+                                                            }
+                                                        },
+                                                        onLongClick = {
+                                                            libraryActionTarget = item
                                                         },
                                                         onQuickProgress = {
                                                             AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
@@ -915,7 +990,7 @@ fun HomeScreen(
                                             LazyVerticalGrid(
                                                 state = pageGridState,
                                                 columns = gridColumns,
-                                                contentPadding = PaddingValues(start = 14.dp, end = 16.dp, top = 6.dp, bottom = 112.dp),
+                                                contentPadding = PaddingValues(start = 14.dp, end = 16.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 168.dp else 112.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                                                 modifier = Modifier.fillMaxSize()
@@ -924,8 +999,11 @@ fun HomeScreen(
                                                     items = displayedItems,
                                                     key = { _, item -> item.id }
                                                 ) { _, item ->
+                                                    val isItemSelected = item.id in selectedLibraryIds
                                                     MediaCard(
                                                         item = item,
+                                                        isSelectionMode = isLibraryMultiSelect,
+                                                        isSelected = isItemSelected,
                                                         cornerRadiusDp = posterStyle.cornerRadiusDp,
                                                         isLandscape = posterStyle.isLandscape,
                                                         hideLabels = posterStyle.hideLabels,
@@ -933,12 +1011,19 @@ fun HomeScreen(
                                                         cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
                                                         cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
                                                         cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
-                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards,
+                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards && !isLibraryMultiSelect,
                                                         showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
                                                         onCardClick = {
-                                                            AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
-                                                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
-                                                            onItemClick(item.id)
+                                                            if (isLibraryMultiSelect) {
+                                                                selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
+                                                            } else {
+                                                                AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
+                                                                com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                                onItemClick(item.id)
+                                                            }
+                                                        },
+                                                        onCardLongClick = {
+                                                            libraryActionTarget = item
                                                         },
                                                         onQuickProgress = {
                                                             AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
@@ -955,6 +1040,7 @@ fun HomeScreen(
                                             )
                                         }
                                     }
+                                }
                                 }
                             }
                         }
@@ -991,6 +1077,18 @@ fun HomeScreen(
                         onSetStatus = { summary, status -> viewModel.setMediaStatus(summary, status) },
                         onRemoveFromHistory = { summary -> viewModel.removeFromHistory(summary.id) },
                         onDeleteItem = { summary -> viewModel.deleteMediaItem(summary.id) },
+                        onBatchMarkCompleted = { ids -> viewModel.batchMarkCompleted(ids) },
+                        onBatchMarkUnread = { ids -> viewModel.batchMarkUnread(ids) },
+                        onBatchIncrementProgress = { summaries -> viewModel.batchIncrementProgress(summaries) },
+                        onBatchSetStatus = { ids, status -> viewModel.batchSetStatus(ids, status) },
+                        onBatchSyncTrackers = { ids ->
+                            Toast.makeText(context, "Syncing ${ids.size} items...", Toast.LENGTH_SHORT).show()
+                            viewModel.batchSyncToTrackers(ids) { count ->
+                                Toast.makeText(context, "Synced $count / ${ids.size} items to connected trackers", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onBatchRemoveFromHistory = { ids -> viewModel.batchRemoveFromHistory(ids) },
+                        onBatchDeleteItems = { ids -> viewModel.batchDeleteItems(ids) },
                         watchedTimestamps90d = watchedTimestamps90d,
                         onOpenHeatmap = { showActivityHeatmapSheet = true }
                     )
@@ -1247,6 +1345,254 @@ fun HomeScreen(
             )
         }
 
+        // Floating Multi-Select Batch Action Dock for Library
+        AnimatedVisibility(
+            visible = isLibraryMultiSelect && currentNavDestination == NavDestination.LIBRARY,
+            enter = fadeIn(animationSpec = tween(160)) + slideInVertically(initialOffsetY = { it / 2 }),
+            exit = fadeOut(animationSpec = tween(160)),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 14.dp)
+                .padding(bottom = 96.dp)
+        ) {
+            MultiSelectBottomActionDock(
+                selectedCount = selectedLibraryIds.size,
+                onMarkCompleted = {
+                    val ids = selectedLibraryIds
+                    viewModel.batchMarkCompleted(ids)
+                    Toast.makeText(context, "Marked ${ids.size} items completed", Toast.LENGTH_SHORT).show()
+                    isLibraryMultiSelect = false
+                    selectedLibraryIds = emptySet()
+                },
+                onMarkUnread = {
+                    val ids = selectedLibraryIds
+                    viewModel.batchMarkUnread(ids)
+                    Toast.makeText(context, "Reset ${ids.size} items to unread (0)", Toast.LENGTH_SHORT).show()
+                    isLibraryMultiSelect = false
+                    selectedLibraryIds = emptySet()
+                },
+                onIncrementProgress = {
+                    val ids = selectedLibraryIds
+                    val targets = uiState.allMediaSummaries.filter { it.id in ids }
+                    viewModel.batchIncrementProgress(targets)
+                    Toast.makeText(context, "Incremented progress on ${targets.size} items", Toast.LENGTH_SHORT).show()
+                },
+                onSetStatus = { st ->
+                    val ids = selectedLibraryIds
+                    viewModel.batchSetStatus(ids, st)
+                    Toast.makeText(context, "Updated ${ids.size} items to ${st.displayName}", Toast.LENGTH_SHORT).show()
+                    isLibraryMultiSelect = false
+                    selectedLibraryIds = emptySet()
+                },
+                onSyncTrackers = {
+                    val ids = selectedLibraryIds
+                    Toast.makeText(context, "Syncing ${ids.size} items...", Toast.LENGTH_SHORT).show()
+                    viewModel.batchSyncToTrackers(ids) { count ->
+                        Toast.makeText(context, "Synced $count / ${ids.size} items to trackers", Toast.LENGTH_SHORT).show()
+                    }
+                    isLibraryMultiSelect = false
+                    selectedLibraryIds = emptySet()
+                },
+                onDeleteSelected = {
+                    if (selectedLibraryIds.isNotEmpty()) {
+                        showBatchDeleteConfirm = true
+                    }
+                }
+            )
+        }
+
+        if (showBatchDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showBatchDeleteConfirm = false },
+                containerColor = AmoledBlack,
+                title = {
+                    Text("Delete ${selectedLibraryIds.size} Selected Items?", color = TextPrimary, fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(
+                        text = "This permanently removes the selected entries and their local notes/history from your OmniTrack Library.",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val ids = selectedLibraryIds
+                            showBatchDeleteConfirm = false
+                            viewModel.batchDeleteItems(ids)
+                            Toast.makeText(context, "Deleted ${ids.size} items", Toast.LENGTH_SHORT).show()
+                            isLibraryMultiSelect = false
+                            selectedLibraryIds = emptySet()
+                        }
+                    ) {
+                        Text("Delete All", color = androidx.compose.ui.graphics.Color(0xFFF87171), fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                }
+            )
+        }
+
+        // Long-Press Quick Action Sheet for Library items (with "Select Multiple..." at the top)
+        val libSheetTarget = libraryActionTarget
+        if (libSheetTarget != null) {
+            @OptIn(ExperimentalMaterial3Api::class)
+            ModalBottomSheet(
+                onDismissRequest = { libraryActionTarget = null },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                containerColor = AmoledBlack,
+                dragHandle = null
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(AmoledBlack)
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                        .padding(bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 38.dp, height = 4.dp)
+                                .clip(CircleShape)
+                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.24f))
+                        )
+                    }
+                    Text(
+                        text = libSheetTarget.title,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${libSheetTarget.mediaType.displayName} \u00B7 ${libSheetTarget.status.displayName} \u00B7 ${formatConciseProgress(libSheetTarget)}",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    HorizontalDivider(color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    // 1. Select Multiple...
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AccentGold.copy(alpha = 0.14f))
+                            .border(0.8.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val startId = libSheetTarget.id
+                                libraryActionTarget = null
+                                isLibraryMultiSelect = true
+                                selectedLibraryIds = selectedLibraryIds + startId
+                            }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Checklist, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
+                        Text("Select Multiple...", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // 2. Open Details
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val id = libSheetTarget.id
+                                libraryActionTarget = null
+                                onItemClick(id)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(19.dp))
+                        Text("Open Details Page", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // 3. Log +1 Progress
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val target = libSheetTarget
+                                libraryActionTarget = null
+                                viewModel.incrementProgress(target)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
+                        Text("Log +1 Progress", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // 4. Mark Completed / Read
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val target = libSheetTarget
+                                libraryActionTarget = null
+                                viewModel.batchMarkCompleted(listOf(target.id))
+                            }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.DoneAll, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
+                        Text("Mark Read / Completed", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // 5. Mark Unread (Reset to 0)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val target = libSheetTarget
+                                libraryActionTarget = null
+                                viewModel.batchMarkUnread(listOf(target.id))
+                            }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.RemoveDone, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(19.dp))
+                        Text("Mark Unread (Reset to 0)", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // 6. Delete from Library
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val targetId = libSheetTarget.id
+                                libraryActionTarget = null
+                                selectedLibraryIds = setOf(targetId)
+                                showBatchDeleteConfirm = true
+                            }
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = androidx.compose.ui.graphics.Color(0xFFF87171), modifier = Modifier.size(19.dp))
+                        Text("Delete from Library", color = androidx.compose.ui.graphics.Color(0xFFF87171), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+        }
+
         if (showFanficImportSheet) {
             com.omnitrack.app.ui.components.FanficImportSheet(
                 initialTab = fanficImportInitialTab,
@@ -1266,11 +1612,15 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryListRow(
     item: com.omnitrack.app.data.db.dto.MediaCardSummary,
     showQuickProgressButton: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     onQuickProgress: () -> Unit
 ) {
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
@@ -1293,13 +1643,20 @@ private fun LibraryListRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(DarkSurface)
-            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .background(if (isSelected) AccentGold.copy(alpha = 0.10f) else DarkSurface)
+            .border(
+                width = if (isSelected) 1.5.dp else 1.dp,
+                color = if (isSelected) AccentGold else GlassBorder,
+                shape = RoundedCornerShape(12.dp)
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (isSelectionMode) {
+            MultiSelectCheckBadge(selected = isSelected)
+        }
         val hasThumbImg = coverModel != null && (coverModel !is String || coverModel.isNotBlank())
         Box(
             modifier = Modifier

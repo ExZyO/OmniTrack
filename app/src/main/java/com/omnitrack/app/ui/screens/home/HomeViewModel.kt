@@ -168,6 +168,38 @@ class HomeViewModel(
                             }
                         }
                     }
+
+                    // Background backfill of 16:9 TMDb wide banners for existing library TV Shows & Movies
+                    val needsWideBanner = allItems.filter {
+                        (it.mediaType == MediaType.SHOW || it.mediaType == MediaType.MOVIE) &&
+                            (it.bannerUrl.isNullOrBlank() || it.bannerUrl == it.coverUrl)
+                    }
+                    if (needsWideBanner.isNotEmpty()) {
+                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            for (showOrMovie in needsWideBanner) {
+                                runCatching {
+                                    val matches = homeSearchRepository.searchAll(
+                                        query = showOrMovie.title,
+                                        filter = showOrMovie.mediaType,
+                                        tmdbApiKey = PreferenceManager.cachedTmdbApiKey
+                                    )
+                                    val best = matches.firstOrNull { m ->
+                                        !m.bannerUrl.isNullOrBlank() && m.bannerUrl != m.coverUrl &&
+                                            ((showOrMovie.tmdbId != null && m.tmdbId == showOrMovie.tmdbId) ||
+                                                m.title.equals(showOrMovie.title, ignoreCase = true))
+                                    } ?: matches.firstOrNull { !it.bannerUrl.isNullOrBlank() && it.bannerUrl != it.coverUrl }
+                                    if (best != null && !best.bannerUrl.isNullOrBlank()) {
+                                        repository.updateMedia(
+                                            showOrMovie.copy(
+                                                bannerUrl = best.bannerUrl,
+                                                tmdbId = showOrMovie.tmdbId ?: best.tmdbId
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } finally {
                 _isLoading.value = false
@@ -237,8 +269,11 @@ class HomeViewModel(
             try {
                 coroutineScope {
                     val aniDeferred = async { runCatching { releaseCalendarRepository.fetchTrendingAniList(force) }.getOrDefault(emptyList()) }
+                    val showsDeferred = async { runCatching { homeSearchRepository.fetchDiscoverShowsShelves("trending", PreferenceManager.cachedTmdbApiKey).take(6) }.getOrDefault(emptyList()) }
+                    val moviesDeferred = async { runCatching { homeSearchRepository.fetchDiscoverMoviesShelves("trending", PreferenceManager.cachedTmdbApiKey).take(4) }.getOrDefault(emptyList()) }
                     val booksDeferred = async { runCatching { homeSearchRepository.fetchDiscoverBooksShelves("trending").take(6) }.getOrDefault(emptyList()) }
                     val gamesDeferred = async { runCatching { homeSearchRepository.fetchDiscoverGamesShelves("top_rated").take(6) }.getOrDefault(emptyList()) }
+                    val vnsDeferred = async { runCatching { homeSearchRepository.fetchDiscoverVisualNovelsShelves("popular").take(4) }.getOrDefault(emptyList()) }
                     val comicsDeferred = async {
                         runCatching {
                             com.omnitrack.app.data.enrichment.ComicEnrichmentSource()
@@ -247,20 +282,26 @@ class HomeViewModel(
                         }.getOrDefault(emptyList())
                     }
                     val ani = aniDeferred.await()
+                    val shows = showsDeferred.await()
+                    val movies = moviesDeferred.await()
                     val books = booksDeferred.await()
                     val games = gamesDeferred.await()
+                    val vns = vnsDeferred.await()
                     val comics = comicsDeferred.await()
                     val merged = mutableListOf<SearchResultItem>()
-                    val maxLen = maxOf(ani.size, books.size, games.size, comics.size)
+                    val maxLen = listOf(ani.size, shows.size, movies.size, books.size, games.size, vns.size, comics.size).maxOrNull() ?: 0
                     for (i in 0 until maxLen) {
                         if (i < ani.size) merged.add(ani[i])
+                        if (i < shows.size) merged.add(shows[i])
+                        if (i < movies.size) merged.add(movies[i])
                         if (i < books.size) merged.add(books[i])
                         if (i < games.size) merged.add(games[i])
+                        if (i < vns.size) merged.add(vns[i])
                         if (i < comics.size) merged.add(comics[i])
                     }
                     _trendingItems.value = merged
                         .distinctBy { "${it.mediaType}_${it.title.trim().lowercase()}" }
-                        .take(24)
+                        .take(32)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -690,6 +731,117 @@ class HomeViewModel(
     fun deleteMediaItem(mediaId: Long) {
         viewModelScope.launch {
             repository.deleteMediaById(mediaId)
+        }
+    }
+
+    fun batchMarkCompleted(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            for (id in ids) {
+                val entity = repository.getMediaByIdOnce(id) ?: continue
+                val nextProg = if (entity.totalProgress != null && entity.totalProgress > 0.0) {
+                    entity.totalProgress
+                } else if (entity.mediaType == MediaType.MOVIE) {
+                    1.0
+                } else {
+                    entity.currentProgress
+                }
+                if (entity.mediaType == MediaType.FANFICTION) {
+                    runCatching { repository.markAllFanficChaptersRead(id, true) }
+                }
+                repository.updateMedia(
+                    entity.copy(
+                        status = TrackingStatus.COMPLETED,
+                        currentProgress = nextProg,
+                        lastUpdated = now
+                    )
+                )
+            }
+        }
+    }
+
+    fun batchMarkUnread(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            for (id in ids) {
+                val entity = repository.getMediaByIdOnce(id) ?: continue
+                if (entity.mediaType == MediaType.FANFICTION) {
+                    runCatching { repository.markAllFanficChaptersRead(id, false) }
+                }
+                repository.updateMedia(
+                    entity.copy(
+                        status = TrackingStatus.PLAN_TO_TRACK,
+                        currentProgress = 0.0,
+                        playtimeHours = 0.0,
+                        bookAudioMinutes = if (entity.bookAudioMinutes != null) 0 else null,
+                        lastUpdated = now
+                    )
+                )
+            }
+        }
+    }
+
+    fun batchIncrementProgress(summaries: Collection<MediaCardSummary>) {
+        if (summaries.isEmpty()) return
+        summaries.forEach { incrementProgress(it) }
+    }
+
+    fun batchSetStatus(ids: Collection<Long>, status: TrackingStatus) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            for (id in ids) {
+                val entity = repository.getMediaByIdOnce(id) ?: continue
+                val nextProg = if (status == TrackingStatus.COMPLETED && entity.totalProgress != null && entity.totalProgress > 0.0) {
+                    entity.totalProgress
+                } else {
+                    entity.currentProgress
+                }
+                repository.updateMedia(
+                    entity.copy(
+                        status = status,
+                        currentProgress = nextProg,
+                        lastUpdated = now
+                    )
+                )
+            }
+        }
+    }
+
+    fun batchSyncToTrackers(ids: Collection<Long>, onDone: (Int) -> Unit = {}) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var syncedCount = 0
+            val engine = com.omnitrack.app.OmniTrackApplication.instance.trackerSyncEngine
+            for (id in ids) {
+                val entity = repository.getMediaByIdOnce(id) ?: continue
+                val outcomes = runCatching { engine.pushMediaToConnectedTrackers(entity) }.getOrDefault(emptyList())
+                if (outcomes.any { it.success }) syncedCount++
+            }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                onDone(syncedCount)
+            }
+        }
+    }
+
+    fun batchRemoveFromHistory(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            for (id in ids) {
+                val entity = repository.getMediaByIdOnce(id) ?: continue
+                repository.updateMedia(entity.copy(lastUpdated = 0L))
+            }
+        }
+    }
+
+    fun batchDeleteItems(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            for (id in ids) {
+                repository.deleteMediaById(id)
+            }
         }
     }
 

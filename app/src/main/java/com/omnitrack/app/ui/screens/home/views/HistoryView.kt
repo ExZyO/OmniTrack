@@ -34,10 +34,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -74,6 +76,9 @@ import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.components.FanficTypographicCover
+import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
+import com.omnitrack.app.ui.components.MultiSelectCheckBadge
+import com.omnitrack.app.ui.components.MultiSelectTopBar
 import com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
@@ -115,6 +120,13 @@ fun HistoryView(
     onSetStatus: (MediaCardSummary, TrackingStatus) -> Unit = { _, _ -> },
     onRemoveFromHistory: (MediaCardSummary) -> Unit = {},
     onDeleteItem: (MediaCardSummary) -> Unit = {},
+    onBatchMarkCompleted: (Collection<Long>) -> Unit = {},
+    onBatchMarkUnread: (Collection<Long>) -> Unit = {},
+    onBatchIncrementProgress: (Collection<MediaCardSummary>) -> Unit = {},
+    onBatchSetStatus: (Collection<Long>, TrackingStatus) -> Unit = { _, _ -> },
+    onBatchSyncTrackers: (Collection<Long>) -> Unit = {},
+    onBatchRemoveFromHistory: (Collection<Long>) -> Unit = {},
+    onBatchDeleteItems: (Collection<Long>) -> Unit = {},
     watchedTimestamps90d: List<Long> = emptyList(),
     onOpenHeatmap: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -132,6 +144,9 @@ fun HistoryView(
     var selectedSort by remember { mutableStateOf(HistorySortMode.RECENT) }
     var actionTarget by remember { mutableStateOf<MediaCardSummary?>(null) }
     var deleteConfirmTarget by remember { mutableStateOf<MediaCardSummary?>(null) }
+    var isMultiSelectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var showBatchDeleteConfirm by remember { mutableStateOf(false) }
 
     val activeHistoryMedia = remember(allMedia) {
         allMedia.filter { it.lastUpdated > 0L }
@@ -210,13 +225,16 @@ fun HistoryView(
         }
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
             .statusBarsPadding()
     ) {
-        // Frameless Editorial Header + Streak / Heatmap link
+    Column(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Frameless Editorial Header + Streak / Multi-Select / Heatmap links
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -238,17 +256,50 @@ fun HistoryView(
                     color = TextSecondary
                 )
             }
-            IconButton(
-                onClick = onOpenHeatmap,
-                modifier = Modifier.size(38.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Map,
-                    contentDescription = "Activity Heatmap",
-                    tint = AccentGold,
-                    modifier = Modifier.size(21.dp)
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(
+                    onClick = {
+                        isMultiSelectMode = !isMultiSelectMode
+                        if (!isMultiSelectMode) selectedIds = emptySet()
+                    },
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Checklist,
+                        contentDescription = "Select Multiple",
+                        tint = if (isMultiSelectMode) AccentGold else TextSecondary,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onOpenHeatmap,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Map,
+                        contentDescription = "Activity Heatmap",
+                        tint = AccentGold,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
             }
+        }
+
+        if (isMultiSelectMode) {
+            MultiSelectTopBar(
+                selectedCount = selectedIds.size,
+                totalCount = filteredHistory.size,
+                onSelectAll = { selectedIds = filteredHistory.map { it.id }.toSet() },
+                onInvertSelection = {
+                    val allIds = filteredHistory.map { it.id }.toSet()
+                    selectedIds = allIds - selectedIds
+                },
+                onClearSelection = { selectedIds = emptySet() },
+                onExitMultiSelect = {
+                    isMultiSelectMode = false
+                    selectedIds = emptySet()
+                }
+            )
         }
 
         // Clean Flat Inline Search (Option A)
@@ -425,7 +476,7 @@ fun HistoryView(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 114.dp)
+                contentPadding = PaddingValues(bottom = if (isMultiSelectMode) 172.dp else 114.dp)
             ) {
                 groupedByBucket.forEach { (bucketTitle, bucketItems) ->
                     item(key = "hgrp_$bucketTitle") {
@@ -442,12 +493,19 @@ fun HistoryView(
                         items = bucketItems,
                         key = { _, item -> "hist_${item.id}" }
                     ) { index, item ->
+                        val isSelected = item.id in selectedIds
                         HistoryHairlineRow(
                             item = item,
                             zone = zone,
+                            isSelectionMode = isMultiSelectMode,
+                            isSelected = isSelected,
                             onClick = {
-                                ActiveSiblingHolder.setSiblings(filteredHistory.map { it.id })
-                                onItemClick(item.id)
+                                if (isMultiSelectMode) {
+                                    selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                                } else {
+                                    ActiveSiblingHolder.setSiblings(filteredHistory.map { it.id })
+                                    onItemClick(item.id)
+                                }
                             },
                             onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -465,6 +523,86 @@ fun HistoryView(
                 }
             }
         }
+    }
+
+    if (isMultiSelectMode) {
+        MultiSelectBottomActionDock(
+            selectedCount = selectedIds.size,
+            onMarkCompleted = {
+                onBatchMarkCompleted(selectedIds)
+                isMultiSelectMode = false
+                selectedIds = emptySet()
+            },
+            onMarkUnread = {
+                onBatchMarkUnread(selectedIds)
+                isMultiSelectMode = false
+                selectedIds = emptySet()
+            },
+            onIncrementProgress = {
+                val targets = activeHistoryMedia.filter { it.id in selectedIds }
+                onBatchIncrementProgress(targets)
+            },
+            onSetStatus = { st ->
+                onBatchSetStatus(selectedIds, st)
+                isMultiSelectMode = false
+                selectedIds = emptySet()
+            },
+            onSyncTrackers = {
+                onBatchSyncTrackers(selectedIds)
+                isMultiSelectMode = false
+                selectedIds = emptySet()
+            },
+            onHideFromHistory = {
+                onBatchRemoveFromHistory(selectedIds)
+                isMultiSelectMode = false
+                selectedIds = emptySet()
+            },
+            onDeleteSelected = {
+                if (selectedIds.isNotEmpty()) {
+                    showBatchDeleteConfirm = true
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 14.dp)
+                .padding(bottom = 96.dp)
+        )
+    }
+    }
+
+    if (showBatchDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteConfirm = false },
+            containerColor = AmoledBlack,
+            title = {
+                Text("Delete ${selectedIds.size} Selected Items?", color = TextPrimary, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text(
+                    text = "This removes the selected entries, local notes, and chapter/episode history from your OmniTrack Library.",
+                    fontSize = 13.sp,
+                    color = TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val ids = selectedIds
+                        showBatchDeleteConfirm = false
+                        onBatchDeleteItems(ids)
+                        isMultiSelectMode = false
+                        selectedIds = emptySet()
+                    }
+                ) {
+                    Text("Delete All", color = Color(0xFFF87171), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBatchDeleteConfirm = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
     }
 
     // Long-Press Action Sheet (Frameless AMOLED)
@@ -553,6 +691,17 @@ fun HistoryView(
                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 HistorySheetActionRow(
+                    icon = Icons.Default.Checklist,
+                    label = "Select Multiple...",
+                    tint = AccentGold,
+                    onClick = {
+                        val id = sheetTarget.id
+                        actionTarget = null
+                        isMultiSelectMode = true
+                        selectedIds = selectedIds + id
+                    }
+                )
+                HistorySheetActionRow(
                     icon = Icons.AutoMirrored.Filled.OpenInNew,
                     label = "Open Details Page",
                     tint = TextPrimary,
@@ -578,6 +727,16 @@ fun HistoryView(
                     onClick = {
                         actionTarget = null
                         onMarkCompleted(sheetTarget)
+                    }
+                )
+                HistorySheetActionRow(
+                    icon = Icons.Default.RemoveDone,
+                    label = "Mark Unread (Reset to 0)",
+                    tint = TextSecondary,
+                    onClick = {
+                        val id = sheetTarget.id
+                        actionTarget = null
+                        onBatchMarkUnread(listOf(id))
                     }
                 )
 
@@ -707,6 +866,8 @@ private fun HistoryCompactChip(
 private fun HistoryHairlineRow(
     item: MediaCardSummary,
     zone: ZoneId,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -723,11 +884,15 @@ private fun HistoryHairlineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (isSelected) AccentGold.copy(alpha = 0.10f) else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 20.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectionMode) {
+            MultiSelectCheckBadge(selected = isSelected)
+        }
         Box(
             modifier = Modifier
                 .width(46.dp)

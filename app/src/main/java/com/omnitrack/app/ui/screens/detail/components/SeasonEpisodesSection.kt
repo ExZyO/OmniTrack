@@ -28,8 +28,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
+import com.omnitrack.app.ui.components.MultiSelectCheckBadge
+import com.omnitrack.app.ui.components.MultiSelectTopBar
+import com.omnitrack.app.ui.theme.AccentGold
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,6 +71,8 @@ fun SeasonEpisodesSection(
 
     var selectedSeasonIndex by remember { mutableIntStateOf(0) }
     val currentSeason = seasons.getOrNull(selectedSeasonIndex) ?: seasons.first()
+    var isEpisodeMultiSelect by remember { mutableStateOf(false) }
+    var selectedEpisodeNumbers by remember(selectedSeasonIndex) { mutableStateOf(setOf<Int>()) }
 
     Column(
         modifier = modifier
@@ -85,10 +92,68 @@ fun SeasonEpisodesSection(
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
-            Text(
-                text = "${currentSeason.episodes.size} episodes",
-                fontSize = 11.5.sp,
-                color = TextMuted
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${currentSeason.episodes.size} episodes",
+                    fontSize = 11.5.sp,
+                    color = TextMuted
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isEpisodeMultiSelect) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
+                        .clickable {
+                            isEpisodeMultiSelect = !isEpisodeMultiSelect
+                            if (!isEpisodeMultiSelect) selectedEpisodeNumbers = emptySet()
+                        }
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isEpisodeMultiSelect) "Done (${selectedEpisodeNumbers.size})" else "Select",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isEpisodeMultiSelect) AccentGold else TextSecondary
+                    )
+                }
+            }
+        }
+
+        if (isEpisodeMultiSelect) {
+            MultiSelectTopBar(
+                selectedCount = selectedEpisodeNumbers.size,
+                totalCount = currentSeason.episodes.size,
+                onSelectAll = { selectedEpisodeNumbers = currentSeason.episodes.map { it.number }.toSet() },
+                onInvertSelection = {
+                    val allNums = currentSeason.episodes.map { it.number }.toSet()
+                    selectedEpisodeNumbers = allNums - selectedEpisodeNumbers
+                },
+                onClearSelection = { selectedEpisodeNumbers = emptySet() },
+                onExitMultiSelect = {
+                    isEpisodeMultiSelect = false
+                    selectedEpisodeNumbers = emptySet()
+                }
+            )
+            MultiSelectBottomActionDock(
+                selectedCount = selectedEpisodeNumbers.size,
+                onMarkCompleted = {
+                    val maxEp = selectedEpisodeNumbers.maxOrNull()
+                    if (maxEp != null) {
+                        onToggleEpisodeWatched(maxEp, true)
+                    }
+                    isEpisodeMultiSelect = false
+                    selectedEpisodeNumbers = emptySet()
+                },
+                onMarkUnread = {
+                    val minEp = selectedEpisodeNumbers.minOrNull()
+                    if (minEp != null) {
+                        onToggleEpisodeWatched(minEp, false)
+                    }
+                    isEpisodeMultiSelect = false
+                    selectedEpisodeNumbers = emptySet()
+                }
             )
         }
 
@@ -126,18 +191,36 @@ fun SeasonEpisodesSection(
         ) {
             currentSeason.episodes.forEach { episode ->
                 val isWatched = episode.number <= currentProgress.toInt()
+                val isEpSelected = episode.number in selectedEpisodeNumbers
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
-                        .background(DarkSurfaceElevated)
-                        .border(1.dp, if (isWatched) AccentJade.copy(alpha = 0.25f) else GlassBorder, RoundedCornerShape(20.dp))
-                        .clickable { onToggleEpisodeWatched(episode.number, !isWatched) }
+                        .background(if (isEpSelected) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated)
+                        .border(
+                            1.dp,
+                            when {
+                                isEpSelected -> AccentGold
+                                isWatched -> AccentJade.copy(alpha = 0.25f)
+                                else -> GlassBorder
+                            },
+                            RoundedCornerShape(20.dp)
+                        )
+                        .clickable {
+                            if (isEpisodeMultiSelect) {
+                                selectedEpisodeNumbers = if (isEpSelected) selectedEpisodeNumbers - episode.number else selectedEpisodeNumbers + episode.number
+                            } else {
+                                onToggleEpisodeWatched(episode.number, !isWatched)
+                            }
+                        }
                         .padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    if (isEpisodeMultiSelect) {
+                        MultiSelectCheckBadge(selected = isEpSelected)
+                    }
                     // Episode Number / Thumbnail box
                     Box(
                         modifier = Modifier

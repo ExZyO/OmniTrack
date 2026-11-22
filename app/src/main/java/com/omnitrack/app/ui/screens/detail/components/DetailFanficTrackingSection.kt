@@ -69,6 +69,9 @@ import com.omnitrack.app.data.model.FanficWorkStatus
 import com.omnitrack.app.data.model.decodeFanficMeta
 import com.omnitrack.app.data.model.formatWordCount
 import com.omnitrack.app.ui.components.repeatingClickable
+import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
+import com.omnitrack.app.ui.components.MultiSelectCheckBadge
+import com.omnitrack.app.ui.components.MultiSelectTopBar
 import com.omnitrack.app.ui.components.shouldBlurFanficTags
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -143,6 +146,8 @@ fun DetailFanficTrackingSection(
     var showJumpChapterDialog by remember { mutableStateOf(false) }
     var jumpChapterInput by remember { mutableStateOf("") }
     var editingNoteChapter by remember { mutableStateOf<FanficChapterEntity?>(null) }
+    var isChapterMultiSelect by remember { mutableStateOf(false) }
+    var selectedChapterIds by remember { mutableStateOf(setOf<Long>()) }
 
     // Chapter filter & sort states
     var chapterFilterMode by remember { mutableStateOf("ALL") } // "ALL", "UNREAD", "BOOKMARKED"
@@ -810,6 +815,24 @@ fun DetailFanficTrackingSection(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(5.dp))
+                            .background(if (isChapterMultiSelect) AccentGold.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.04f))
+                            .clickable {
+                                isChapterMultiSelect = !isChapterMultiSelect
+                                if (!isChapterMultiSelect) selectedChapterIds = emptySet()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isChapterMultiSelect) "Done (${selectedChapterIds.size})" else "Select",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isChapterMultiSelect) AccentGold else TextSecondary
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
                             .background(AccentGold.copy(alpha = 0.14f))
                             .clickable {
                                 manualChapCategory = selectedCategory
@@ -824,6 +847,41 @@ fun DetailFanficTrackingSection(
                             color = AccentGold
                         )
                     }
+                }
+
+                if (isChapterMultiSelect) {
+                    MultiSelectTopBar(
+                        selectedCount = selectedChapterIds.size,
+                        totalCount = filteredChapters.size,
+                        onSelectAll = { selectedChapterIds = filteredChapters.map { it.id }.toSet() },
+                        onInvertSelection = {
+                            val allIds = filteredChapters.map { it.id }.toSet()
+                            selectedChapterIds = allIds - selectedChapterIds
+                        },
+                        onClearSelection = { selectedChapterIds = emptySet() },
+                        onExitMultiSelect = {
+                            isChapterMultiSelect = false
+                            selectedChapterIds = emptySet()
+                        }
+                    )
+                    MultiSelectBottomActionDock(
+                        selectedCount = selectedChapterIds.size,
+                        onMarkCompleted = {
+                            val targets = filteredChapters.filter { it.id in selectedChapterIds && !it.isRead }
+                            val maxTarget = targets.maxByOrNull { it.chapterNumber }
+                            if (maxTarget != null) {
+                                onToggleChapterRead(maxTarget)
+                            }
+                            isChapterMultiSelect = false
+                            selectedChapterIds = emptySet()
+                        },
+                        onMarkUnread = {
+                            val targets = filteredChapters.filter { it.id in selectedChapterIds && it.isRead }
+                            targets.forEach { ch -> onToggleChapterRead(ch) }
+                            isChapterMultiSelect = false
+                            selectedChapterIds = emptySet()
+                        }
+                    )
                 }
 
                 if (filteredChapters.isEmpty()) {
@@ -841,18 +899,25 @@ fun DetailFanficTrackingSection(
                     filteredChapters.forEach { ch ->
                         val chUrl = ch.chapterUrl?.takeIf { it.isNotBlank() } ?: item.fanficSourceUrl
                         val isHighlighted = highlightedChapterNumber == ch.chapterNumber
+                        val isChapSelected = ch.id in selectedChapterIds
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
-                                    if (isHighlighted) AccentGold.copy(alpha = 0.08f) else Color.Transparent
+                                    when {
+                                        isChapSelected -> AccentGold.copy(alpha = 0.12f)
+                                        isHighlighted -> AccentGold.copy(alpha = 0.08f)
+                                        else -> Color.Transparent
+                                    }
                                 )
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        if (!chUrl.isNullOrBlank()) {
+                                        if (isChapterMultiSelect) {
+                                            selectedChapterIds = if (isChapSelected) selectedChapterIds - ch.id else selectedChapterIds + ch.id
+                                        } else if (!chUrl.isNullOrBlank()) {
                                             onOpenExternalUrl(chUrl)
                                         } else {
                                             onToggleChapterRead(ch)
@@ -862,6 +927,9 @@ fun DetailFanficTrackingSection(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                if (isChapterMultiSelect) {
+                                    MultiSelectCheckBadge(selected = isChapSelected)
+                                }
                                 // Cumulative read checkmark (tapping unread Ch. 7 marks Ch. 1..7 read!)
                                 Box(
                                     modifier = Modifier

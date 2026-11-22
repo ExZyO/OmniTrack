@@ -733,10 +733,10 @@ class OmniSearchRepository(
         preferType: MediaType? = null
     ): List<SearchResultItem> {
         val results = mutableListOf<SearchResultItem>()
-        if (!tmdbApiKey.isNullOrBlank()) {
-            results.addAll(searchTmdb(query, tmdbApiKey, preferType))
-        } else {
-            // Keyless Public Fallbacks:
+        val effectiveTmdbKey = tmdbApiKey?.trim()?.takeIf { it.isNotBlank() } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+        results.addAll(searchTmdb(query, effectiveTmdbKey, preferType))
+        if (results.isEmpty()) {
+            // Keyless Public Fallbacks if TMDb is unreachable:
             // TV Shows -> TVMaze (zero-key open API)
             if (preferType == null || preferType == MediaType.SHOW || preferType == MediaType.ALL) {
                 results.addAll(searchTvMaze(query))
@@ -1161,6 +1161,104 @@ class OmniSearchRepository(
 
     suspend fun fetchDiscoverBooksShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val safePage = page.coerceAtLeast(1)
+        val cacheKey = "books:${shelf.lowercase()}_p$safePage"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+
+        suspend fun queryAppleBooks(term: String, media: String = "ebook", formatLabel: String = "HARDCOVER"): List<SearchResultItem> =
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val reqLimit = (safePage * 16).coerceAtMost(128)
+                    val encodedTerm = URLEncoder.encode(term, "UTF-8")
+                    val req = Request.Builder()
+                        .url("https://itunes.apple.com/search?term=$encodedTerm&media=$media&limit=$reqLimit")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                        val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("results") as? JsonArray ?: return@withGeneralPacing emptyList()
+                        results.mapNotNull { el ->
+                            val o = el as? JsonObject ?: return@mapNotNull null
+                            val rawTitle = (if (media == "audiobook") {
+                                o["collectionName"].cleanString() ?: o["trackName"].cleanString()
+                            } else {
+                                o["trackName"].cleanString() ?: o["collectionName"].cleanString()
+                            }) ?: return@mapNotNull null
+                            val t = rawTitle.replace(Regex("""\s*\(Unabridged\)\s*$""", RegexOption.IGNORE_CASE), "").trim()
+                            val cov = (o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString())
+                                ?.replace("100x100bb", "1200x1200bb")
+                                ?.replace("60x60bb", "1200x1200bb")
+                                ?.replace("http://", "https://")
+                                ?: return@mapNotNull null
+                            SearchResultItem(
+                                title = t,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl(cov),
+                                releaseYear = o["releaseDate"].cleanString()?.take(4),
+                                synopsis = o["description"].cleanString()?.let { cleanSynopsis(it) },
+                                mediaType = MediaType.BOOK,
+                                sourceProvider = "Apple Books",
+                                communityScore = (o["averageUserRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f },
+                                bookAuthor = o["artistName"].cleanString(),
+                                bookFormat = formatLabel
+                            )
+                        }.distinctBy { it.title.lowercase() }.drop((safePage - 1) * 16).take(16)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+
+        suspend fun queryGoogleBooksShelf(q: String): List<SearchResultItem> =
+            NetworkPacer.withGeneralPacing {
+                try {
+                    val startIndex = ((safePage - 1) * 16).coerceAtLeast(0)
+                    val encoded = URLEncoder.encode(q, "UTF-8")
+                    val req = Request.Builder()
+                        .url("https://www.googleapis.com/books/v1/volumes?q=$encoded&printType=books&maxResults=16&startIndex=$startIndex")
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                        val items = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("items") as? JsonArray ?: return@withGeneralPacing emptyList()
+                        items.mapNotNull { el ->
+                            val o = (el as? JsonObject)?.get("volumeInfo") as? JsonObject ?: return@mapNotNull null
+                            val t = o["title"].cleanString() ?: return@mapNotNull null
+                            val imgLinks = o["imageLinks"] as? JsonObject
+                            val rawCov = (imgLinks?.get("extraLarge").cleanString()
+                                ?: imgLinks?.get("large").cleanString()
+                                ?: imgLinks?.get("medium").cleanString()
+                                ?: imgLinks?.get("thumbnail").cleanString())
+                                ?.replace("http://", "https://")
+                                ?.replace("&edge=curl", "")
+                                ?.replace("zoom=1", "zoom=2")
+                                ?: return@mapNotNull null
+                            val author = (o["authors"] as? JsonArray)?.firstOrNull()?.cleanString()
+                            val pages = (o["pageCount"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                            val rating5 = (o["averageRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull
+                            SearchResultItem(
+                                title = t,
+                                coverUrl = LosslessCoverMapper.toLosslessUrl(rawCov),
+                                releaseYear = o["publishedDate"].cleanString()?.take(4),
+                                synopsis = o["description"].cleanString()?.let { cleanSynopsis(it) },
+                                mediaType = MediaType.BOOK,
+                                sourceProvider = "Google Books",
+                                totalProgress = pages?.toDouble(),
+                                communityScore = rating5?.let { it * 2f },
+                                bookAuthor = author,
+                                bookFormat = "HARDCOVER"
+                            )
+                        }.distinctBy { it.title.lowercase() }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+
         suspend fun queryOpenLibrarySearch(q: String, subject: String? = null): List<SearchResultItem> =
             NetworkPacer.withOpenLibraryPacing {
                 try {
@@ -1205,84 +1303,72 @@ class OmniSearchRepository(
                 }
             }
 
-        when (shelf.lowercase()) {
-            "audiobooks" -> NetworkPacer.withGeneralPacing {
-                try {
-                    val reqLimit = (safePage * 16).coerceAtMost(128)
-                    val req = Request.Builder()
-                        .url("https://itunes.apple.com/search?term=bestseller+fiction&media=audiobook&limit=$reqLimit")
-                        .header("User-Agent", "OmniTrack/1.0")
-                        .get()
-                        .build()
-                    client.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
-                        val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
-                            ?.get("results") as? JsonArray ?: return@withGeneralPacing emptyList()
-                        results.mapNotNull { el ->
-                            val o = el as? JsonObject ?: return@mapNotNull null
-                            val t = o["collectionName"].cleanString() ?: o["trackName"].cleanString() ?: return@mapNotNull null
-                            val cov = (o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString())
-                                ?.replace("100x100bb", "1200x1200bb")
-                                ?.replace("60x60bb", "1200x1200bb")
-                                ?: return@mapNotNull null
-                            SearchResultItem(
-                                title = t,
-                                coverUrl = cov,
-                                releaseYear = o["releaseDate"].cleanString()?.take(4),
-                                synopsis = o["description"].cleanString()?.let { cleanSynopsis(it) },
-                                mediaType = MediaType.BOOK,
-                                sourceProvider = "Apple Books",
-                                communityScore = (o["averageUserRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f },
-                                bookAuthor = o["artistName"].cleanString(),
-                                bookFormat = "AUDIOBOOK"
-                            )
-                        }.drop((safePage - 1) * 16).take(16)
-                    }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    emptyList()
-                }
+        val resolved = when (shelf.lowercase()) {
+            "audiobooks" -> queryAppleBooks(term = "bestseller fiction fantasy", media = "audiobook", formatLabel = "AUDIOBOOK")
+            "classics_poetry" -> {
+                val apple = queryAppleBooks(term = "classic literature homer dante shakespeare dostoevsky")
+                val google = if (apple.size < 8) queryGoogleBooksShelf("subject:classics") else emptyList()
+                val ol = if (apple.isEmpty() && google.isEmpty()) queryOpenLibrarySearch(q = "classic", subject = "classic literature") else emptyList()
+                (apple + google + ol).distinctBy { it.title.lowercase() }.take(16)
             }
-            "classics_poetry" -> queryOpenLibrarySearch(q = "paradise lost divine comedy faust iliad odyssey hamlet")
-            "scifi_fantasy" -> queryOpenLibrarySearch(q = "science fiction fantasy dune", subject = "science fiction")
-            "philosophy_nonfiction" -> queryOpenLibrarySearch(q = "philosophy ethics meditations history", subject = "philosophy")
-            else -> NetworkPacer.withOpenLibraryPacing {
-                try {
-                    val req = Request.Builder()
-                        .url("https://openlibrary.org/trending/weekly.json?limit=16&page=$safePage")
-                        .header("User-Agent", "OmniTrack/1.0")
-                        .get()
-                        .build()
-                    client.newCall(req).execute().use { resp ->
-                        if (!resp.isSuccessful) return@withOpenLibraryPacing emptyList()
-                        val works = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
-                            ?.get("works") as? JsonArray ?: return@withOpenLibraryPacing emptyList()
-                        works.mapNotNull { el ->
-                            val o = el as? JsonObject ?: return@mapNotNull null
-                            val t = o["title"].cleanString() ?: return@mapNotNull null
-                            val covId = (o["cover_i"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
-                                ?.takeIf { it > 0 } ?: return@mapNotNull null
-                            val workId = o["key"].cleanString()?.substringAfterLast("/")
-                            val author = (o["author_name"] as? JsonArray)?.firstOrNull()?.cleanString()
-                            val year = (o["first_publish_year"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull?.toString()
-                            SearchResultItem(
-                                title = t,
-                                coverUrl = LosslessCoverMapper.toLosslessUrl("https://covers.openlibrary.org/b/id/$covId-L.jpg"),
-                                releaseYear = year,
-                                mediaType = MediaType.BOOK,
-                                sourceProvider = "OpenLibrary",
-                                openLibraryId = workId,
-                                bookAuthor = author,
-                                bookFormat = "HARDCOVER"
-                            )
-                        }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(16)
+            "scifi_fantasy" -> {
+                val apple = queryAppleBooks(term = "science fiction fantasy dune brandon sanderson tolkien")
+                val google = if (apple.size < 8) queryGoogleBooksShelf("subject:fantasy+science+fiction") else emptyList()
+                val ol = if (apple.isEmpty() && google.isEmpty()) queryOpenLibrarySearch(q = "fantasy", subject = "science fiction") else emptyList()
+                (apple + google + ol).distinctBy { it.title.lowercase() }.take(16)
+            }
+            "philosophy_nonfiction" -> {
+                val apple = queryAppleBooks(term = "philosophy stoicism history nonfiction meditations")
+                val google = if (apple.size < 8) queryGoogleBooksShelf("subject:philosophy") else emptyList()
+                val ol = if (apple.isEmpty() && google.isEmpty()) queryOpenLibrarySearch(q = "philosophy", subject = "philosophy") else emptyList()
+                (apple + google + ol).distinctBy { it.title.lowercase() }.take(16)
+            }
+            else -> {
+                val apple = queryAppleBooks(term = "nytimes bestseller fiction")
+                val google = if (apple.size < 8) queryGoogleBooksShelf("subject:fiction") else emptyList()
+                val ol = if (apple.isEmpty() && google.isEmpty()) {
+                    NetworkPacer.withOpenLibraryPacing {
+                        try {
+                            val req = Request.Builder()
+                                .url("https://openlibrary.org/trending/weekly.json?limit=16&page=$safePage")
+                                .header("User-Agent", "OmniTrack/1.0")
+                                .get()
+                                .build()
+                            client.newCall(req).execute().use { resp ->
+                                if (!resp.isSuccessful) return@withOpenLibraryPacing emptyList()
+                                val works = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                    ?.get("works") as? JsonArray ?: return@withOpenLibraryPacing emptyList()
+                                works.mapNotNull { el ->
+                                    val o = el as? JsonObject ?: return@mapNotNull null
+                                    val t = o["title"].cleanString() ?: return@mapNotNull null
+                                    val covId = (o["cover_i"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull
+                                        ?.takeIf { it > 0 } ?: return@mapNotNull null
+                                    val workId = o["key"].cleanString()?.substringAfterLast("/")
+                                    val author = (o["author_name"] as? JsonArray)?.firstOrNull()?.cleanString()
+                                    val year = (o["first_publish_year"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.intOrNull?.toString()
+                                    SearchResultItem(
+                                        title = t,
+                                        coverUrl = LosslessCoverMapper.toLosslessUrl("https://covers.openlibrary.org/b/id/$covId-L.jpg"),
+                                        releaseYear = year,
+                                        mediaType = MediaType.BOOK,
+                                        sourceProvider = "OpenLibrary",
+                                        openLibraryId = workId,
+                                        bookAuthor = author,
+                                        bookFormat = "HARDCOVER"
+                                    )
+                                }.distinctBy { it.openLibraryId ?: it.title.lowercase() }.take(16)
+                            }
+                        } catch (e: Exception) {
+                            if (e is CancellationException) throw e
+                            emptyList()
+                        }
                     }
-                } catch (e: Exception) {
-                    if (e is CancellationException) throw e
-                    emptyList()
-                }
+                } else emptyList()
+                (apple + google + ol).distinctBy { it.title.lowercase() }.take(16)
             }
         }
+        if (resolved.isNotEmpty()) discoverShelfCache[cacheKey] = resolved
+        resolved
     }
 
     private suspend fun searchVndb(query: String): List<SearchResultItem> = NetworkPacer.withVndbPacing {
@@ -2314,7 +2400,7 @@ class OmniSearchRepository(
         val pagedCacheKey = "${cacheKey}_p$safePage"
         discoverShelfCache[pagedCacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         val isMovie = targetType == MediaType.MOVIE
-        val key = tmdbApiKey?.trim().orEmpty()
+        val key = tmdbApiKey?.trim()?.takeIf { it.isNotBlank() } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
         if (key.isNotBlank()) {
             val tmdbItems = NetworkPacer.withTmdbPacing {
                 try {
@@ -2411,14 +2497,14 @@ class OmniSearchRepository(
     suspend fun fetchDiscoverMoviesShelves(shelf: String, tmdbApiKey: String? = null, page: Int = 1): List<SearchResultItem> =
         fetchTmdbOrCinemetaShelf("movie:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.MOVIE, shelf, tmdbApiKey, page)
 
-    suspend fun fetchDiscoverVisualNovelsShelves(shelf: String, page: Int = 1): List<SearchResultItem> {
+    suspend fun fetchDiscoverVisualNovelsShelves(shelf: String, page: Int = 1): List<SearchResultItem> = withContext(Dispatchers.IO) {
         val safePage = page.coerceAtLeast(1)
         val cacheKey = "vn:${shelf.lowercase()}_p$safePage"
-        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         val hideNsfw = com.omnitrack.app.data.preferences.PreferenceManager.cachedVnNsfwFilterMode ==
             com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
-        return NetworkPacer.withVndbPacing {
+        NetworkPacer.withVndbPacing {
             try {
                 val payload = buildJsonObject {
                     put("filters", json.parseToJsonElement("[\"votecount\", \">=\", 250]"))

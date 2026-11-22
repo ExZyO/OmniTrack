@@ -9,9 +9,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,12 +122,16 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MediaCard(
     item: MediaCardSummary,
     onCardClick: () -> Unit,
     onQuickProgress: () -> Unit,
     modifier: Modifier = Modifier,
+    onCardLongClick: (() -> Unit)? = null,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
     cornerRadiusDp: Int = 12,
     isLandscape: Boolean = false,
     hideLabels: Boolean = false,
@@ -189,10 +195,11 @@ fun MediaCard(
                 scaleX = bounceScale.value
                 scaleY = bounceScale.value
             }
-            .clickable(
+            .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onCardClick
+                onClick = onCardClick,
+                onLongClick = onCardLongClick
             ),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
@@ -204,6 +211,9 @@ fun MediaCard(
                 .shadow(10.dp, shape)
                 .clip(shape)
                 .background(DarkSurfaceCard)
+                .then(
+                    if (isSelected) Modifier.border(2.dp, AccentGold, shape) else Modifier
+                )
                 .glassCardDepth(
                     shape = shape,
                     edgeStrength = cardDepthEdgeStrength,
@@ -287,6 +297,14 @@ fun MediaCard(
             }
 
             // Landscape transparent title logo overlay (1:1 with Nuvio)
+            if (isSelectionMode) {
+                MultiSelectCheckBadge(
+                    selected = isSelected,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                )
+            }
             val hasClearart = isLandscape && showLandscapeClearlogo && !item.clearartUrl.isNullOrBlank()
             if (hasClearart) {
                 Box(

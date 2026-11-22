@@ -1303,6 +1303,7 @@ private fun LocalMediaHeroCard(
             }
         } else null,
         authenticBannerModel = authenticBannerModel,
+        forceCoverBackdrop = item.mediaType == MediaType.BOOK && !ArtworkModelResolver.isBannerDisabled(item),
         bannerFocalX = item.bannerFocalX,
         bannerFocalY = item.bannerFocalY,
         bannerZoom = item.bannerZoom,
@@ -1350,6 +1351,7 @@ private fun TrendingMediaHeroCard(
             }
         } else null,
         authenticBannerModel = authenticBannerModel,
+        forceCoverBackdrop = item.mediaType == MediaType.BOOK,
         bannerFocalX = 0f,
         bannerFocalY = 0f,
         bannerZoom = 1f,
@@ -1370,6 +1372,7 @@ private fun ChimanewComboHeroCard(
     posterModel: Any?,
     posterFallback: (@Composable () -> Unit)? = null,
     authenticBannerModel: Any?,
+    forceCoverBackdrop: Boolean = false,
     bannerFocalX: Float,
     bannerFocalY: Float,
     bannerZoom: Float,
@@ -1418,7 +1421,8 @@ private fun ChimanewComboHeroCard(
                     .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                     .alpha(if (heroSettings.dimBanner) 0.56f else 0.94f)
             )
-        } else if (heroSettings.allowCroppedFallback && posterModel != null) {
+        } else if ((heroSettings.allowCroppedFallback || forceCoverBackdrop) && posterModel != null) {
+            val fallbackBlur = if (bannerBlurDp > 0) maxOf(bannerBlurDp, 16) else 20
             AsyncImage(
                 model = posterModel,
                 contentDescription = null,
@@ -1426,8 +1430,8 @@ private fun ChimanewComboHeroCard(
                 alignment = Alignment.TopCenter,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(20.dp)
-                    .alpha(if (heroSettings.dimBanner) 0.34f else 0.72f)
+                    .blur(fallbackBlur.dp)
+                    .alpha(if (heroSettings.dimBanner) 0.38f else 0.76f)
             )
         } else {
             // Default Gentle Ambient Glow procedural canvas (never crops portrait covers)

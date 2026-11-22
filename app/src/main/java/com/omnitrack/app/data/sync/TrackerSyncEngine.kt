@@ -732,6 +732,8 @@ class TrackerSyncEngine(
                 item.simklId?.let { put("simkl", it.toInt()) }
                 item.tmdbId?.let { put("tmdb", it.toInt()) }
                 item.malId?.let { put("mal", it.toInt()) }
+                item.anilistId?.let { put("anilist", it.toInt()) }
+                item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
             }
             val effMemo = TrackerMetadataCodec.resolveEffectiveNote(item, "SIMKL", 140)
             val listPayload = buildJsonObject {
@@ -745,54 +747,175 @@ class TrackerSyncEngine(
                 })
             }
 
-            val reqList = Request.Builder()
-                .url("https://api.simkl.com/sync/add-to-list")
-                .header("Authorization", "Bearer $token")
-                .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
-                .header("User-Agent", "OmniTrack/1.0 (Android)")
-                .header("Content-Type", "application/json")
-                .post(listPayload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val mainOutcome = client.newCall(reqList).execute().use { response ->
-                val code = response.code
-                if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=SIMKL op=push http=$code")
-                    TrackerSyncOutcome("SIMKL", false, code, "SIMKL HTTP $code")
-                } else {
-                    TrackerSyncOutcome("SIMKL", true, code, "SIMKL synced")
+            suspend fun postSimklWrite(url: String, jsonBody: String): Int {
+                for (attempt in 0..1) {
+                    val req = Request.Builder()
+                        .url(url)
+                        .header("Authorization", "Bearer $token")
+                        .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .header("Content-Type", "application/json")
+                        .post(jsonBody.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    val (code, bodyStr) = client.newCall(req).execute().use { resp ->
+                        resp.code to resp.body?.string().orEmpty()
+                    }
+                    if ((code == 400 && bodyStr.contains("rate_limit", ignoreCase = true)) || code == 429) {
+                        if (attempt == 0) {
+                            kotlinx.coroutines.delay(3000L)
+                            continue
+                        }
+                    }
+                    return code
                 }
+                return 400
             }
 
-            // Push watched episodes / completed movie to SIMKL /sync/history so episode counts stay synced
+            val listCode = postSimklWrite("https://api.simkl.com/sync/add-to-list", listPayload.toString())
+            val mainOutcome = if (listCode !in 200..299) {
+                AppLogger.w("TrackerSync", "service=SIMKL op=push http=$listCode")
+                TrackerSyncOutcome("SIMKL", false, listCode, "SIMKL HTTP $listCode")
+            } else {
+                TrackerSyncOutcome("SIMKL", true, listCode, "SIMKL synced")
+            }
+
+            // Push watched episodes & remove unwatched episodes > currentProgress on SIMKL (NuvioMobile-Enhanced parity)
             if (mainOutcome.success) {
-                val historySeasons = if (item.mediaType != MediaType.MOVIE && item.currentProgress >= 1.0) {
+                val curEp = item.currentProgress.toInt().coerceIn(0, 500)
+                val totalEp = item.totalProgress?.toInt()?.takeIf { it > 0 }?.coerceAtMost(500)
+                val isAnime = item.mediaType == MediaType.ANIME
+                val allDbEps = if (item.id > 0L && item.mediaType != MediaType.MOVIE) {
+                    repository.getAllEpisodeProgressOnce(item.id).filter { it.episodeNumber > 0 }
+                } else emptyList()
+                val watchedDbEps = allDbEps.filter { it.isWatched }
+                val hasMultiSeasonDb = allDbEps.any { it.seasonNumber > 1 }
+
+                // 1) Mark watched episodes (1..curEp or watchedDbEps) via /sync/history
+                val historySeasons = if (item.mediaType != MediaType.MOVIE && curEp >= 1) {
                     buildWatchedSeasonsArray(item)
                 } else null
+                val flatWatchedEpisodes = if (isAnime && !hasMultiSeasonDb && curEp >= 1) {
+                    val epNums = if (watchedDbEps.isNotEmpty()) {
+                        watchedDbEps.map { it.episodeNumber }.distinct().sorted()
+                    } else {
+                        (1..curEp).toList()
+                    }
+                    buildJsonArray {
+                        epNums.forEach { epNum -> add(buildJsonObject { put("number", epNum) }) }
+                    }
+                } else null
+
                 val shouldPushHistory = (item.mediaType == MediaType.MOVIE && effectiveStatus == TrackingStatus.COMPLETED) ||
-                    (item.mediaType != MediaType.MOVIE && (historySeasons != null || effectiveStatus == TrackingStatus.COMPLETED))
+                    (item.mediaType != MediaType.MOVIE && (historySeasons != null || flatWatchedEpisodes != null || effectiveStatus == TrackingStatus.COMPLETED))
                 if (shouldPushHistory) {
                     val histPayload = buildJsonObject {
                         put(arrayName, buildJsonArray {
                             add(buildJsonObject {
                                 put("ids", idObj)
-                                if (historySeasons != null) {
+                                if (flatWatchedEpisodes != null) {
+                                    put("episodes", flatWatchedEpisodes)
+                                } else if (historySeasons != null) {
                                     put("seasons", historySeasons)
                                 }
                             })
                         })
                     }
                     runCatching {
-                        client.newCall(
-                            Request.Builder()
-                                .url("https://api.simkl.com/sync/history")
-                                .header("Authorization", "Bearer $token")
-                                .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
-                                .header("User-Agent", "OmniTrack/1.0 (Android)")
-                                .header("Content-Type", "application/json")
-                                .post(histPayload.toString().toRequestBody("application/json".toMediaType()))
-                                .build()
-                        ).execute().close()
+                        kotlinx.coroutines.delay(1000L)
+                        postSimklWrite("https://api.simkl.com/sync/history", histPayload.toString())
+                    }
+                }
+
+                // 2) Remove unwatched episodes (> curEp or explicitly unchecked in DB) via /sync/history/remove
+                //    so decreasing episode progress (e.g. Ep 10 -> Ep 5 or 0) updates Simkl immediately!
+                if (item.mediaType != MediaType.MOVIE && effectiveStatus != TrackingStatus.COMPLETED) {
+                    val maxUpper = totalEp ?: (curEp + 36).coerceAtMost(200)
+                    if (curEp < maxUpper || allDbEps.any { !it.isWatched }) {
+                        val removePayload = if (isAnime && !hasMultiSeasonDb) {
+                            val unwatchedNums = buildSet {
+                                allDbEps.filter { !it.isWatched && it.episodeNumber > curEp }.forEach { add(it.episodeNumber) }
+                                for (ep in (curEp + 1)..maxUpper) add(ep)
+                            }.sorted()
+                            if (unwatchedNums.isNotEmpty()) {
+                                buildJsonObject {
+                                    put("shows", buildJsonArray {
+                                        add(buildJsonObject {
+                                            put("ids", idObj)
+                                            put("episodes", buildJsonArray {
+                                                unwatchedNums.forEach { epNum ->
+                                                    add(buildJsonObject { put("number", epNum) })
+                                                }
+                                            })
+                                        })
+                                    })
+                                }
+                            } else null
+                        } else {
+                            val seasonsToRemove = if (allDbEps.isNotEmpty()) {
+                                val unwatchedBySeason = allDbEps
+                                    .filter { !it.isWatched }
+                                    .groupBy { it.seasonNumber.coerceAtLeast(1) }
+                                    .toMutableMap()
+                                if (unwatchedBySeason.isEmpty() && curEp < maxUpper) {
+                                    unwatchedBySeason[1] = ((curEp + 1)..maxUpper).map { epNum ->
+                                        com.omnitrack.app.data.db.entity.EpisodeProgressEntity(
+                                            mediaId = item.id,
+                                            seasonNumber = 1,
+                                            episodeNumber = epNum,
+                                            isWatched = false
+                                        )
+                                    }
+                                }
+                                if (unwatchedBySeason.isNotEmpty()) {
+                                    buildJsonArray {
+                                        unwatchedBySeason.toSortedMap().forEach { (sNum, eps) ->
+                                            add(buildJsonObject {
+                                                put("number", sNum)
+                                                put("episodes", buildJsonArray {
+                                                    eps.map { it.episodeNumber }.distinct().sorted().forEach { epNum ->
+                                                        add(buildJsonObject { put("number", epNum) })
+                                                    }
+                                                })
+                                            })
+                                        }
+                                    }
+                                } else null
+                            } else if (curEp < maxUpper) {
+                                buildJsonArray {
+                                    add(buildJsonObject {
+                                        put("number", 1)
+                                        put("episodes", buildJsonArray {
+                                            for (epNum in (curEp + 1)..maxUpper) {
+                                                add(buildJsonObject { put("number", epNum) })
+                                            }
+                                        })
+                                    })
+                                }
+                            } else null
+
+                            if (seasonsToRemove != null) {
+                                buildJsonObject {
+                                    put("shows", buildJsonArray {
+                                        add(buildJsonObject {
+                                            put("ids", idObj)
+                                            put("seasons", seasonsToRemove)
+                                        })
+                                    })
+                                }
+                            } else null
+                        }
+
+                        if (removePayload != null) {
+                            runCatching {
+                                kotlinx.coroutines.delay(1000L)
+                                postSimklWrite("https://api.simkl.com/sync/history/remove", removePayload.toString())
+                                if (curEp == 0) {
+                                    // Re-assert list membership after clearing episode 1..maxUpper
+                                    kotlinx.coroutines.delay(1000L)
+                                    postSimklWrite("https://api.simkl.com/sync/add-to-list", listPayload.toString())
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -807,16 +930,8 @@ class TrackerSyncEngine(
                     })
                 }
                 runCatching {
-                    client.newCall(
-                        Request.Builder()
-                            .url("https://api.simkl.com/sync/ratings")
-                            .header("Authorization", "Bearer $token")
-                            .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
-                            .header("User-Agent", "OmniTrack/1.0 (Android)")
-                            .header("Content-Type", "application/json")
-                            .post(rPayload.toString().toRequestBody("application/json".toMediaType()))
-                            .build()
-                    ).execute().close()
+                    kotlinx.coroutines.delay(1000L)
+                    postSimklWrite("https://api.simkl.com/sync/ratings", rPayload.toString())
                 }
             }
             mainOutcome
