@@ -166,7 +166,7 @@ fun DetailFanficTrackingSection(
     val filteredChapters = remember(categoryChapters, chapterFilterMode, sortNewestFirst) {
         val base = when (chapterFilterMode) {
             "UNREAD" -> categoryChapters.filter { !it.isRead }
-            "BOOKMARKED" -> categoryChapters.filter { it.isBookmarked || !it.userNotes.isNullOrBlank() }
+            "BOOKMARKED" -> categoryChapters.filter { it.isBookmarked || !it.userNote.isNullOrBlank() }
             else -> categoryChapters
         }
         if (sortNewestFirst) {
@@ -357,11 +357,10 @@ fun DetailFanficTrackingSection(
             FanficWorkStatus.entries.forEach { st ->
                 val sel = workStatus == st
                 val stColor = when (st) {
-                    FanficWorkStatus.COMPLETED -> AccentJade
+                    FanficWorkStatus.COMPLETE -> AccentJade
                     FanficWorkStatus.ONGOING -> AccentGold
                     FanficWorkStatus.HIATUS -> Color(0xFFF59E0B)
-                    FanficWorkStatus.ABANDONED -> Color(0xFFEF4444)
-                    FanficWorkStatus.UNKNOWN -> TextSecondary
+                    FanficWorkStatus.DEAD -> Color(0xFFEF4444)
                 }
                 Box(
                     modifier = Modifier
@@ -739,7 +738,7 @@ fun DetailFanficTrackingSection(
                     listOf(
                         "ALL" to "All (${categoryChapters.size})",
                         "UNREAD" to "Unread (${categoryChapters.count { !it.isRead }})",
-                        "BOOKMARKED" to "\u2605 Saved (${categoryChapters.count { it.isBookmarked || !it.userNotes.isNullOrBlank() }})"
+                        "BOOKMARKED" to "\u2605 Saved (${categoryChapters.count { it.isBookmarked || !it.userNote.isNullOrBlank() }})"
                     ).forEach { (mode, label) ->
                         val active = chapterFilterMode == mode
                         Box(
@@ -908,9 +907,9 @@ fun DetailFanficTrackingSection(
                                             fontSize = 10.5.sp
                                         )
                                     }
-                                    if (!ch.userNotes.isNullOrBlank()) {
+                                    if (!ch.userNote.isNullOrBlank()) {
                                         Text(
-                                            text = "\u201C${ch.userNotes}\u201D",
+                                            text = "\u201C${ch.userNote}\u201D",
                                             color = AccentGold.copy(alpha = 0.9f),
                                             fontSize = 11.sp,
                                             maxLines = 2,
@@ -941,7 +940,7 @@ fun DetailFanficTrackingSection(
                                     Icon(
                                         imageVector = Icons.Default.Edit,
                                         contentDescription = "Chapter Note",
-                                        tint = if (!ch.userNotes.isNullOrBlank()) AccentGold else TextMuted,
+                                        tint = if (!ch.userNote.isNullOrBlank()) AccentGold else TextMuted,
                                         modifier = Modifier.size(14.dp)
                                     )
                                 }
@@ -1161,7 +1160,7 @@ fun DetailFanficTrackingSection(
 
     // DIALOG 3: Per-Chapter Note & Rating Editor
     editingNoteChapter?.let { targetCh ->
-        var noteInput by remember(targetCh.id) { mutableStateOf(targetCh.userNotes.orEmpty()) }
+        var noteInput by remember(targetCh.id) { mutableStateOf(targetCh.userNote.orEmpty()) }
         var ratingInput by remember(targetCh.id) { mutableStateOf(targetCh.userRating?.toString().orEmpty()) }
         AlertDialog(
             onDismissRequest = { editingNoteChapter = null },

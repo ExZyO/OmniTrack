@@ -6611,7 +6611,7 @@ class DetailViewModel(
             if (mediaId <= 0L) return@launch
             repository.updateFanficChapter(
                 chapter.copy(
-                    userNotes = note?.trim()?.takeIf { it.isNotBlank() },
+                    userNote = note?.trim()?.takeIf { it.isNotBlank() },
                     userRating = rating
                 )
             )
