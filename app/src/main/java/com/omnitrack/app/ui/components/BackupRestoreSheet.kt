@@ -1,6 +1,8 @@
 package com.omnitrack.app.ui.components
 
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -84,6 +86,31 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private fun resolveDocumentMeta(context: Context, uri: Uri): Pair<String, Long?> {
+    var displayName: String? = null
+    var fileSize: Long? = null
+    runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIdx >= 0) displayName = cursor.getString(nameIdx)
+                val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) fileSize = cursor.getLong(sizeIdx)
+            }
+        }
+    }
+    val resolvedName = displayName?.takeIf { it.isNotBlank() }
+        ?: uri.lastPathSegment?.substringAfterLast('/')
+        ?: "Selected .omnibk"
+    return resolvedName to fileSize
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -187,11 +214,19 @@ fun BackupRestoreSheet(
             statusMessage = "Inspecting .omnibk archive..."
             scope.launch {
                 try {
-                    val inspection = context.contentResolver.openInputStream(uri)?.use { stream ->
-                        OmniBackupManager.inspectBackup(stream)
+                    val (displayName, fileSize) = withContext(Dispatchers.IO) {
+                        resolveDocumentMeta(context, uri)
+                    }
+                    val inspection = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            OmniBackupManager.inspectBackup(
+                                inputStream = stream,
+                                sourceName = displayName,
+                                fileSizeBytes = fileSize
+                            )
+                        }
                     } ?: BackupInspectionResult(valid = false, errorMessage = "Could not open selected backup file")
-                    val name = uri.lastPathSegment?.substringAfterLast('/') ?: "Selected .omnibk"
-                    applyInspection(name, uri, null, inspection)
+                    applyInspection(displayName, uri, null, inspection)
                     statusMessage = null
                 } catch (e: Exception) {
                     if (e is CancellationException) throw e
@@ -219,7 +254,7 @@ fun BackupRestoreSheet(
         restoreOptions.includeCachedCovers
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isProcessing) onDismiss() },
         sheetState = sheetState,
         containerColor = DarkSurface,
         dragHandle = null
@@ -274,7 +309,8 @@ fun BackupRestoreSheet(
                 }
 
                 IconButton(
-                    onClick = onDismiss,
+                    onClick = { if (!isProcessing) onDismiss() },
+                    enabled = !isProcessing,
                     modifier = Modifier.size(34.dp)
                 ) {
                     Icon(
@@ -733,8 +769,14 @@ fun BackupRestoreSheet(
                                         statusMessage = "Inspecting ${file.name}..."
                                         scope.launch {
                                             try {
-                                                val inspection = file.inputStream().use { stream ->
-                                                    OmniBackupManager.inspectBackup(stream)
+                                                val inspection = withContext(Dispatchers.IO) {
+                                                    file.inputStream().use { stream ->
+                                                        OmniBackupManager.inspectBackup(
+                                                            inputStream = stream,
+                                                            sourceName = file.name,
+                                                            fileSizeBytes = file.length()
+                                                        )
+                                                    }
                                                 }
                                                 applyInspection(file.name, null, file, inspection)
                                                 statusMessage = null

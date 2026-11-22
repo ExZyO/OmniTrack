@@ -101,6 +101,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
@@ -669,8 +670,14 @@ fun MultiTrackerSheet(
                     itemsIndexed(trackers, key = { _, t -> t.key }) { _, trk ->
                         val selected = trk.key == activeTracker.key
                         val snap = matchedSnapshots[trk.key]
-                        val thumbUrl = snap?.coverUrl
-                            ?: if (trk.boundId != null) localItem.customCoverPath ?: localItem.coverUrl.takeIf { it.isNotBlank() } else null
+                        val rawThumb = if (trk.boundId != null) {
+                            localItem.customCoverPath?.takeIf { it.isNotBlank() }
+                                ?: snap?.coverUrl?.takeIf { it.isNotBlank() }
+                                ?: localItem.coverUrl.takeIf { it.isNotBlank() }
+                        } else {
+                            snap?.coverUrl?.takeIf { it.isNotBlank() }
+                        }
+                        val thumbModel = ArtworkModelResolver.toCoilModel(rawThumb)
                         val statusDotColor = when {
                             trk.boundId == null -> Color.White.copy(alpha = 0.25f)
                             !trk.isSignedIn && trk.supportsPush -> Color(0xFFEF4444)
@@ -705,9 +712,9 @@ fun MultiTrackerSheet(
                                     .background(DarkSurfaceCard),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (!thumbUrl.isNullOrBlank()) {
+                                if (thumbModel != null) {
                                     AsyncImage(
-                                        model = thumbUrl,
+                                        model = thumbModel,
                                         contentDescription = trk.name,
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
@@ -810,8 +817,14 @@ fun MultiTrackerSheet(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val heroCover = activeSnap?.coverUrl
-                            ?: if (activeTracker.boundId != null) localItem.customCoverPath ?: localItem.coverUrl.takeIf { it.isNotBlank() } else null
+                        val rawHeroCover = if (activeTracker.boundId != null) {
+                            localItem.customCoverPath?.takeIf { it.isNotBlank() }
+                                ?: activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
+                                ?: localItem.coverUrl.takeIf { it.isNotBlank() }
+                        } else {
+                            activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
+                        }
+                        val heroCoverModel = ArtworkModelResolver.toCoilModel(rawHeroCover)
                         Box(
                             modifier = Modifier
                                 .width(64.dp)
@@ -820,9 +833,9 @@ fun MultiTrackerSheet(
                                 .background(DarkSurfaceCard),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (!heroCover.isNullOrBlank()) {
+                            if (heroCoverModel != null) {
                                 AsyncImage(
-                                    model = heroCover,
+                                    model = heroCoverModel,
                                     contentDescription = activeTracker.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()

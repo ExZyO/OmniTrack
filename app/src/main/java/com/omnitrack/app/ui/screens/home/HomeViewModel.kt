@@ -3,6 +3,7 @@ package com.omnitrack.app.ui.screens.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
@@ -204,7 +205,12 @@ class HomeViewModel(
                 ?: (rel.metronId?.let { byMetron[it] })
                 ?: byTypedTitle["${rel.mediaType.name}_${rel.title.trim().lowercase()}"]
                 ?: byTitle[rel.title.trim().lowercase()]
-            if (matched != null) rel.copy(localMediaId = matched.id) else rel
+            if (matched != null) {
+                rel.copy(
+                    localMediaId = matched.id,
+                    coverUrl = ArtworkModelResolver.preferredCover(matched).ifBlank { rel.coverUrl }
+                )
+            } else rel
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

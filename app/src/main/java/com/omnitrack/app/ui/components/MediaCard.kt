@@ -145,13 +145,17 @@ fun MediaCard(
 
     // In landscape mode, prioritize bannerUrl (16:9 backdrop) over portrait cover
     // CONTRACT: Manual customBannerPath / customCoverPath strictly takes top priority
-    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.customCoverPath, item.coverUrl, customPosterUrl, customPosterFailed) {
+    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.artworkRole, item.customCoverPath, item.coverUrl, customPosterUrl, customPosterFailed) {
         if (isLandscape) {
-            item.customBannerPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
+            item.customBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let {
+                com.omnitrack.app.data.artwork.ArtworkModelResolver.toCoilModel(it)
+            }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
                 else (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
         } else {
-            item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
+            item.customCoverPath?.takeIf { it.isNotBlank() }?.let {
+                com.omnitrack.app.data.artwork.ArtworkModelResolver.toCoilModel(it)
+            }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
                 else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
         }

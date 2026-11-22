@@ -264,6 +264,7 @@ fun DiscoverCustomizerSheet(
 
                         val uiToggles: List<Triple<String, String, Pair<Boolean, (Boolean) -> Unit>>> = listOf(
                             Triple("Spotlight / Hero Banner", "Featured visual showcase above shelves (Layouts A & B)", settings.showSpotlightBanner to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSpotlight(v) } }),
+                            Triple("Dim Hero Banner Background", "Darkens the Discover hero backdrop for stronger text contrast", settings.dimHeroBanner to { v: Boolean -> scope.launch { preferenceManager.setDiscoverDimHeroBanner(v) } }),
                             Triple("Quick-Search Inspiration Chips", "Curated one-tap search pills below category tabs", settings.showQuickSearchChips to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowQuickChips(v) } }),
                             Triple("Secondary Sub-Filter Bars", "Format, origin, publisher & platform sub-filters", settings.showSubFilters to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSubFilters(v) } }),
                             Triple("\"In Your Library\" Spotlight Rail", "Bottom rail highlighting entries you already track", settings.showInYourLibraryShelf to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowInLibrary(v) } }),

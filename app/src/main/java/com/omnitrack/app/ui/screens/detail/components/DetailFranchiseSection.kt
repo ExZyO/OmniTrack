@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
@@ -153,7 +154,7 @@ private fun RelationRailGroup(
                         if (!item.coverUrl.isNullOrBlank()) {
                             AsyncImage(
                                 model = ImageRequest.Builder(context)
-                                    .data(item.coverUrl)
+                                    .data(ArtworkModelResolver.toCoilModel(item.coverUrl))
                                     .crossfade(true)
                                     .build(),
                                 contentDescription = item.title,

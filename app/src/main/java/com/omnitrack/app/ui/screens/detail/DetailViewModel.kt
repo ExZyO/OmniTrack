@@ -3,6 +3,8 @@ package com.omnitrack.app.ui.screens.detail
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.BookEntryEntity
 import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.ComicIssueEntity
@@ -1169,7 +1171,55 @@ class DetailViewModel(
         }
     }
 
-    val uiState: StateFlow<DetailUiState> = combine(auxFlow, activeRoomDataFlow) { aux, room ->
+    private fun applyLibraryArtwork(
+        rec: RecommendationItem,
+        library: List<MediaCardSummary>
+    ): RecommendationItem {
+        val match = ArtworkModelResolver.findLibraryMatch(
+            library = library,
+            mediaType = rec.mediaType,
+            anilistId = rec.anilistId,
+            malId = rec.malId,
+            tmdbId = rec.tmdbId,
+            openLibraryId = rec.openLibraryId,
+            title = rec.title
+        ) ?: return rec
+        return rec.copy(
+            coverUrl = ArtworkModelResolver.preferredCover(match).ifBlank { rec.coverUrl },
+            bannerUrl = if (ArtworkModelResolver.isBannerDisabled(match)) {
+                null
+            } else {
+                ArtworkModelResolver.preferredBanner(match) ?: rec.bannerUrl
+            }
+        )
+    }
+
+    private fun applyLibraryArtworkToRelation(
+        rel: AnimeRelationItem,
+        library: List<MediaCardSummary>
+    ): AnimeRelationItem {
+        val match = ArtworkModelResolver.findLibraryMatch(
+            library = library,
+            mediaType = rel.mediaType,
+            anilistId = rel.id.takeIf { it > 0L },
+            tmdbId = rel.tmdbId,
+            openLibraryId = rel.openLibraryId,
+            title = rel.title
+        ) ?: return rel
+        return rel.copy(
+            coverUrl = ArtworkModelResolver.preferredCover(match).ifBlank { rel.coverUrl },
+            bannerUrl = if (ArtworkModelResolver.isBannerDisabled(match)) {
+                null
+            } else {
+                ArtworkModelResolver.preferredBanner(match) ?: rel.bannerUrl
+            }
+        )
+    }
+
+    val uiState: StateFlow<DetailUiState> = combine(auxFlow, activeRoomDataFlow, repository.getAllMediaSummaries()) { aux, room, library ->
+        val mappedRecommendations = if (library.isEmpty()) aux.recommendations else aux.recommendations.map { applyLibraryArtwork(it, library) }
+        val mappedCollection = if (library.isEmpty()) aux.collectionItems else aux.collectionItems.map { applyLibraryArtwork(it, library) }
+        val mappedRelations = if (library.isEmpty()) aux.animeRelations else aux.animeRelations.map { applyLibraryArtworkToRelation(it, library) }
         val hasFillers = aux.realEpisodes.any { it.isFiller } || (aux.episodesBySeason[aux.selectedSeasonNumber]?.any { it.isFiller } == true)
         val pref = _preferredTitleLanguage.value
         if (aux.previewItem != null) {
@@ -1238,13 +1288,13 @@ class DetailViewModel(
                 episodesBySeason = aux.episodesBySeason,
                 watchedEpisodes = watchedSet,
                 episodeMetaMap = metaMap,
-                recommendations = aux.recommendations,
+                recommendations = mappedRecommendations,
                 reviews = aux.reviews,
                 cast = aux.cast,
                 trailers = aux.trailers,
                 companies = aux.companies,
                 collectionName = aux.collectionName,
-                collectionItems = aux.collectionItems,
+                collectionItems = mappedCollection,
                 isPreviewMode = aux.previewItem.id <= 0L,
                 isLoading = false,
                 hasPreviousEntry = false,
@@ -1252,7 +1302,7 @@ class DetailViewModel(
                 nextAiringEpisode = aux.nextAiringEpisode,
                 animeCharacters = aux.animeCharacters,
                 animeStaff = aux.animeStaff,
-                animeRelations = aux.animeRelations,
+                animeRelations = mappedRelations,
                 animeAiring = aux.animeAiring,
                 sectionOrder = aux.sectionOrder,
                 discussionComments = aux.discussionComments,
@@ -1362,7 +1412,7 @@ class DetailViewModel(
                     episodesBySeason = aux.episodesBySeason,
                     watchedEpisodes = watchedSet,
                     episodeMetaMap = metaMap,
-                    recommendations = aux.recommendations,
+                    recommendations = mappedRecommendations,
                     reviews = aux.reviews,
                     cast = aux.cast,
                     trailers = if (aux.trailers.isEmpty() && effectiveItem.trailerYoutubeKey != null) {
@@ -1370,7 +1420,7 @@ class DetailViewModel(
                     } else aux.trailers,
                     companies = aux.companies,
                     collectionName = aux.collectionName,
-                    collectionItems = aux.collectionItems,
+                    collectionItems = mappedCollection,
                     isPreviewMode = false,
                     isLoading = false,
                     hasPreviousEntry = siblings.size > 1,
@@ -1378,7 +1428,7 @@ class DetailViewModel(
                     nextAiringEpisode = aux.nextAiringEpisode,
                     animeCharacters = aux.animeCharacters,
                     animeStaff = aux.animeStaff,
-                    animeRelations = aux.animeRelations,
+                    animeRelations = mappedRelations,
                     animeAiring = aux.animeAiring,
                     sectionOrder = aux.sectionOrder,
                     discussionComments = aux.discussionComments,
@@ -3360,7 +3410,7 @@ class DetailViewModel(
                     malId = item.malId,
                     mangadexId = item.mangadexId,
                     knownTotalChapters = item.totalProgress?.toInt(),
-                    fallbackCoverUrl = item.coverUrl
+                    fallbackCoverUrl = item.customCoverPath?.takeIf { it.isNotBlank() } ?: item.coverUrl
                 )
                 val isStillCurrent = if (item.id > 0) _mediaId.value == item.id else (_previewItem.value?.id == item.id || _previewItem.value?.title == item.title)
                 if (!isStillCurrent) return@launch
@@ -3850,7 +3900,7 @@ class DetailViewModel(
                         seasonNumber = 1,
                         name = "Season 1",
                         episodeCount = totalCount,
-                        posterUrl = item.coverUrl,
+                        posterUrl = item.customCoverPath?.takeIf { it.isNotBlank() } ?: item.coverUrl,
                         airDate = item.releaseYear
                     )
                     _realSeasons.value = listOf(synSeason)

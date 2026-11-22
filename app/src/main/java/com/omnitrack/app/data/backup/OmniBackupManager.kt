@@ -17,6 +17,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.dataStore
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.data.sync.TrackerTokenManager
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -54,6 +55,9 @@ object OmniBackupManager {
         encodeDefaults = true
     }
 
+    private fun normalizeZipEntryName(rawName: String): String =
+        rawName.replace('\\', '/').trimStart('/').removePrefix("./")
+
     private fun isSensitiveCredentialKey(key: String): Boolean {
         val k = key.lowercase(Locale.US)
         return k.startsWith("token_") ||
@@ -84,6 +88,10 @@ object OmniBackupManager {
 
             val localFile = if (outputStream == null) File(backupsDir, "omnitrack_backup_$timestamp.omnibk") else null
             val targetStream = outputStream ?: FileOutputStream(localFile!!)
+            AppLogger.i(
+                "BackupManager",
+                "createBackup start: lib=${options.includeLibrary}, sub=${options.includeSubEntries}, settings=${options.includeSettings}, creds=${options.includeCredentials}, customArt=${options.includeCustomArtwork}, cachedArt=${options.includeCachedCovers}"
+            )
 
             val mediaItems = if (options.includeLibrary) database.mediaDao().getAllMedia().first() else emptyList()
             val categories = if (options.includeLibrary) database.categoryDao().getAllCategories().first() else emptyList()
@@ -209,7 +217,7 @@ object OmniBackupManager {
             val manifestJson = json.encodeToString(manifest)
 
             ZipOutputStream(BufferedOutputStream(targetStream)).use { zipOut ->
-                zipOut.setLevel(Deflater.BEST_COMPRESSION)
+                zipOut.setLevel(Deflater.DEFAULT_COMPRESSION)
 
                 writeZipEntry(zipOut, "manifest.json", manifestJson.toByteArray(StandardCharsets.UTF_8))
 
@@ -222,6 +230,8 @@ object OmniBackupManager {
                 if (tokensDumpJson != null) {
                     writeZipEntry(zipOut, "tracker_tokens.json", tokensDumpJson.toByteArray(StandardCharsets.UTF_8))
                 }
+
+                zipOut.setLevel(Deflater.BEST_SPEED)
 
                 for (coverFile in customFiles) {
                     zipOut.putNextEntry(ZipEntry("artwork/custom/${coverFile.name}"))
@@ -236,6 +246,10 @@ object OmniBackupManager {
                 }
             }
 
+            AppLogger.i(
+                "BackupManager",
+                "createBackup completed: items=${mediaItems.size}, cats=${categories.size}, customArt=${customFiles.size}, cachedArt=${cachedFiles.size}"
+            )
             BackupResult(
                 success = true,
                 backupFile = localFile,
@@ -243,6 +257,7 @@ object OmniBackupManager {
             )
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            AppLogger.e("BackupManager", "createBackup failed: ${e.message}", e)
             BackupResult(
                 success = false,
                 errorMessage = e.message ?: "Failed to generate .omnibk archive"
@@ -250,7 +265,11 @@ object OmniBackupManager {
         }
     }
 
-    suspend fun inspectBackup(inputStream: InputStream): BackupInspectionResult = withContext(Dispatchers.IO) {
+    suspend fun inspectBackup(
+        inputStream: InputStream,
+        sourceName: String? = null,
+        fileSizeBytes: Long? = null
+    ): BackupInspectionResult = withContext(Dispatchers.IO) {
         try {
             var manifestBytes: ByteArray? = null
             var dbDumpBytes: ByteArray? = null
@@ -258,16 +277,36 @@ object OmniBackupManager {
             var tokensBytes: ByteArray? = null
             var customCount = 0
             var cachedCount = 0
+            var entryCount = 0
+            var isApk = false
+            val sampleEntries = mutableListOf<String>()
+            var skippedArtworkScan = false
 
             ZipInputStream(BufferedInputStream(inputStream)).use { zipIn ->
                 var entry: ZipEntry? = zipIn.nextEntry
                 while (entry != null) {
-                    val name = entry.name
+                    entryCount++
+                    val name = normalizeZipEntryName(entry.name)
+                    if (sampleEntries.size < 8) {
+                        sampleEntries.add(name)
+                    }
+                    if (name == "AndroidManifest.xml" || name == "classes.dex") {
+                        isApk = true
+                    }
+                    if (name.startsWith("artwork/") && manifestBytes != null) {
+                        skippedArtworkScan = true
+                        zipIn.closeEntry()
+                        break
+                    }
                     when {
-                        name == "manifest.json" -> manifestBytes = zipIn.readBytes()
-                        name == "database_dump.json" -> dbDumpBytes = zipIn.readBytes()
-                        name == "preferences.json" -> prefsBytes = zipIn.readBytes()
-                        name == "tracker_tokens.json" -> tokensBytes = zipIn.readBytes()
+                        name == "manifest.json" || (manifestBytes == null && name.endsWith("/manifest.json")) ->
+                            manifestBytes = zipIn.readBytes()
+                        name == "database_dump.json" || (dbDumpBytes == null && name.endsWith("/database_dump.json")) ->
+                            dbDumpBytes = zipIn.readBytes()
+                        name == "preferences.json" || (prefsBytes == null && name.endsWith("/preferences.json")) ->
+                            prefsBytes = zipIn.readBytes()
+                        name == "tracker_tokens.json" || (tokensBytes == null && name.endsWith("/tracker_tokens.json")) ->
+                            tokensBytes = zipIn.readBytes()
                         name.startsWith("artwork/custom/") && !entry.isDirectory -> customCount++
                         name.startsWith("artwork/cache/") && !entry.isDirectory -> cachedCount++
                     }
@@ -277,9 +316,18 @@ object OmniBackupManager {
             }
 
             if (manifestBytes == null) {
+                AppLogger.w(
+                    "BackupManager",
+                    "inspectBackup missing manifest.json: file=$sourceName size=$fileSizeBytes entries=$entryCount isApk=$isApk sample=$sampleEntries"
+                )
+                val errorMsg = when {
+                    isApk -> "Selected file '${sourceName ?: "archive"}' is an Android APK, not an .omnibk backup. Pick an omnitrack_backup_*.omnibk file."
+                    entryCount == 0 -> "Selected file '${sourceName ?: "archive"}'${fileSizeBytes?.let { " ($it bytes)" }.orEmpty()} is empty or not a valid .omnibk ZIP archive."
+                    else -> "Invalid .omnibk archive ('${sourceName ?: "archive"}'): missing manifest.json ($entryCount entries found)"
+                }
                 return@withContext BackupInspectionResult(
                     valid = false,
-                    errorMessage = "Invalid .omnibk archive: missing manifest.json"
+                    errorMessage = errorMsg
                 )
             }
 
@@ -322,6 +370,22 @@ object OmniBackupManager {
             val requiresPw = tokensDump?.formatVersion == 2 && !tokensDump.encryptedPayload.isNullOrBlank()
             val totalCredCount = (tokensDump?.encryptedTokens?.size ?: 0) + legacyCredCount
 
+            val resolvedCustomCount = if (skippedArtworkScan) {
+                manifest.customArtworkCount
+            } else {
+                maxOf(customCount, manifest.customArtworkCount.takeIf { customCount > 0 } ?: 0)
+            }
+            val resolvedCachedCount = if (skippedArtworkScan) {
+                manifest.cachedArtworkCount
+            } else {
+                maxOf(cachedCount, manifest.cachedArtworkCount.takeIf { cachedCount > 0 } ?: 0)
+            }
+
+            AppLogger.i(
+                "BackupManager",
+                "inspectBackup valid: file=$sourceName v=${manifest.version} app=${manifest.appVersion} items=$mediaCount fastScan=$skippedArtworkScan"
+            )
+
             BackupInspectionResult(
                 valid = true,
                 manifestVersion = manifest.version,
@@ -339,11 +403,12 @@ object OmniBackupManager {
                 hasCredentials = tokensBytes != null || legacyCredCount > 0,
                 credentialsCount = if (requiresPw) manifest.credentialsCount.coerceAtLeast(1) else maxOf(totalCredCount, manifest.credentialsCount.takeIf { tokensBytes != null } ?: 0),
                 credentialsRequirePassword = requiresPw,
-                customArtworkCount = maxOf(customCount, manifest.customArtworkCount.takeIf { customCount > 0 } ?: 0),
-                cachedArtworkCount = maxOf(cachedCount, manifest.cachedArtworkCount.takeIf { cachedCount > 0 } ?: 0)
+                customArtworkCount = resolvedCustomCount,
+                cachedArtworkCount = resolvedCachedCount
             )
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            AppLogger.e("BackupManager", "inspectBackup failed for file=$sourceName: ${e.message}", e)
             BackupInspectionResult(
                 valid = false,
                 errorMessage = e.message ?: "Unable to read .omnibk archive"
@@ -360,6 +425,10 @@ object OmniBackupManager {
         credentialsPassword: String? = null
     ): RestoreResult = withContext(Dispatchers.IO) {
         try {
+            AppLogger.i(
+                "BackupManager",
+                "restoreBackup start: lib=${options.includeLibrary}, sub=${options.includeSubEntries}, settings=${options.includeSettings}, creds=${options.includeCredentials}, customArt=${options.includeCustomArtwork}, cachedArt=${options.includeCachedCovers}"
+            )
             var manifestBytes: ByteArray? = null
             var dbDumpBytes: ByteArray? = null
             var prefsBytes: ByteArray? = null
@@ -370,19 +439,23 @@ object OmniBackupManager {
             ZipInputStream(BufferedInputStream(inputStream)).use { zipIn ->
                 var entry: ZipEntry? = zipIn.nextEntry
                 while (entry != null) {
-                    val name = entry.name
+                    val name = normalizeZipEntryName(entry.name)
                     when {
-                        name == "manifest.json" -> manifestBytes = zipIn.readBytes()
-                        name == "database_dump.json" -> dbDumpBytes = zipIn.readBytes()
-                        name == "preferences.json" -> prefsBytes = zipIn.readBytes()
-                        name == "tracker_tokens.json" -> tokensBytes = zipIn.readBytes()
-                        name.startsWith("artwork/custom/") && !entry.isDirectory -> {
+                        name == "manifest.json" || (manifestBytes == null && name.endsWith("/manifest.json")) ->
+                            manifestBytes = zipIn.readBytes()
+                        name == "database_dump.json" || (dbDumpBytes == null && name.endsWith("/database_dump.json")) ->
+                            dbDumpBytes = zipIn.readBytes()
+                        name == "preferences.json" || (prefsBytes == null && name.endsWith("/preferences.json")) ->
+                            prefsBytes = zipIn.readBytes()
+                        name == "tracker_tokens.json" || (tokensBytes == null && name.endsWith("/tracker_tokens.json")) ->
+                            tokensBytes = zipIn.readBytes()
+                        name.contains("artwork/custom/") && !entry.isDirectory -> {
                             val fileName = File(name.substringAfter("artwork/custom/")).name
                             if (fileName.isNotBlank()) {
                                 customArtworks[fileName] = zipIn.readBytes()
                             }
                         }
-                        name.startsWith("artwork/cache/") && !entry.isDirectory -> {
+                        name.contains("artwork/cache/") && !entry.isDirectory -> {
                             val fileName = File(name.substringAfter("artwork/cache/")).name
                             if (fileName.isNotBlank()) {
                                 cacheArtworks[fileName] = zipIn.readBytes()
@@ -395,6 +468,7 @@ object OmniBackupManager {
             }
 
             if (manifestBytes == null) {
+                AppLogger.w("BackupManager", "restoreBackup missing manifest.json")
                 return@withContext RestoreResult(
                     success = false,
                     errorMessage = "Invalid .omnibk backup file: manifest.json missing"
@@ -637,6 +711,10 @@ object OmniBackupManager {
                 rehydrateCaches(context)
             }
 
+            AppLogger.i(
+                "BackupManager",
+                "restoreBackup completed: items=$restoredMediaCount cats=$restoredCategoryCount eps=$restoredEpisodeCount comics=$restoredComicCount settings=$restoredSettings creds=$restoredCredentials art=$restoredArtworkCount"
+            )
             RestoreResult(
                 success = true,
                 mediaCount = restoredMediaCount,
@@ -649,6 +727,7 @@ object OmniBackupManager {
             )
         } catch (e: Exception) {
             if (e is CancellationException) throw e
+            AppLogger.e("BackupManager", "restoreBackup failed: ${e.message}", e)
             RestoreResult(
                 success = false,
                 errorMessage = e.message ?: "Failed to restore .omnibk backup"

@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentGold
@@ -387,7 +388,7 @@ fun ReleaseCalendarSheet(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 AsyncImage(
-                                    model = item.coverUrl,
+                                    model = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) },
                                     contentDescription = item.title,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier

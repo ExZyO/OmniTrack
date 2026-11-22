@@ -70,6 +70,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
@@ -77,6 +78,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -87,6 +89,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.ai.AiQueryEngine
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
@@ -1000,12 +1003,15 @@ fun DiscoverView(
                 }
             }
 
-            val heroPool = remember(activeDefs, discoverShelves) {
+            val heroPool = remember(activeDefs, discoverShelves, allMedia) {
                 val raw = activeDefs.flatMap { def ->
                     discoverShelves[def.id]?.items?.take(4).orEmpty()
                 }.distinctBy { "${it.mediaType}_${it.title.lowercase()}" }
-                val withBanner = raw.filter { !it.bannerUrl.isNullOrBlank() && it.bannerUrl != it.coverUrl }
-                val withoutBanner = raw.filter { it.bannerUrl.isNullOrBlank() || it.bannerUrl == it.coverUrl }
+                val withBanner = raw.filter { item ->
+                    findLibraryMatch(allMedia, item)?.let { ArtworkModelResolver.preferredBanner(it) != null }
+                        ?: (!item.bannerUrl.isNullOrBlank() && item.bannerUrl != item.coverUrl)
+                }
+                val withoutBanner = raw.filterNot { item -> item in withBanner }
                 (withBanner + withoutBanner).take(6)
             }
             val isAnyActiveShelfLoading = remember(activeDefs, discoverShelves) {
@@ -1078,11 +1084,13 @@ fun DiscoverView(
                             when (discoverSettings.layoutStyle) {
                                 DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> {
                                     val topItem = heroPool.first()
+                                    val libMatch = findLibraryMatch(allMedia, topItem)
                                     DiscoverSpotlightBanner(
                                         item = topItem,
+                                        libraryMatch = libMatch,
+                                        dimBanner = discoverSettings.dimHeroBanner,
                                         onDetails = {
-                                            val match = findLibraryMatch(allMedia, topItem)
-                                            if (match != null) onItemClick(match.id) else {
+                                            if (libMatch != null) onItemClick(libMatch.id) else {
                                                 EphemeralPreviewHolder.previewItem = topItem.toMediaItemEntity()
                                                 onItemClick(-1L)
                                             }
@@ -1094,6 +1102,7 @@ fun DiscoverView(
                                     DiscoverHeroCarousel(
                                         items = heroPool,
                                         allMedia = allMedia,
+                                        dimBanner = discoverSettings.dimHeroBanner,
                                         onItemClick = onItemClick,
                                         onAddMedia = onAddMedia
                                     )
@@ -1362,17 +1371,20 @@ fun DiscoverView(
 }
 
 private fun findLibraryMatch(allMedia: List<MediaCardSummary>, item: SearchResultItem): MediaCardSummary? =
-    allMedia.firstOrNull { summary ->
-        summary.mediaType == item.mediaType && (
-            (item.anilistId != null && summary.anilistId == item.anilistId) ||
-                (item.tmdbId != null && summary.tmdbId == item.tmdbId) ||
-                (item.steamAppId != null && summary.steamAppId == item.steamAppId) ||
-                (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
-                (item.metronId != null && summary.metronId == item.metronId) ||
-                (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
-                summary.title.equals(item.title, ignoreCase = true)
-            )
-    }
+    ArtworkModelResolver.findLibraryMatch(
+        library = allMedia,
+        mediaType = item.mediaType,
+        anilistId = item.anilistId,
+        malId = item.malId,
+        tmdbId = item.tmdbId,
+        imdbId = item.imdbId,
+        steamAppId = item.steamAppId,
+        comicVineId = item.comicVineId,
+        metronId = item.metronId,
+        openLibraryId = item.openLibraryId,
+        title = item.title,
+        nativeTitle = item.nativeTitle
+    )
 
 @Composable
 private fun DiscoverHeroSkeletonBanner() {
@@ -1399,10 +1411,33 @@ private fun DiscoverHeroSkeletonBanner() {
 @Composable
 private fun DiscoverSpotlightBanner(
     item: SearchResultItem,
+    libraryMatch: MediaCardSummary? = null,
+    dimBanner: Boolean = true,
     onDetails: () -> Unit,
     onAdd: () -> Unit
 ) {
-    val hasWideBanner = !item.bannerUrl.isNullOrBlank() && item.bannerUrl != item.coverUrl
+    val bannerDisabled = libraryMatch != null && ArtworkModelResolver.isBannerDisabled(libraryMatch)
+    val coverModel = remember(libraryMatch?.customCoverPath, libraryMatch?.coverUrl, item.coverUrl) {
+        ArtworkModelResolver.toCoilModel(libraryMatch?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
+    }
+    val bannerModel = remember(
+        libraryMatch?.customBannerPath,
+        libraryMatch?.bannerUrl,
+        libraryMatch?.artworkRole,
+        item.bannerUrl,
+        item.coverUrl,
+        bannerDisabled
+    ) {
+        if (bannerDisabled) null
+        else ArtworkModelResolver.toCoilModel(
+            libraryMatch?.let { ArtworkModelResolver.preferredBanner(it) }
+                ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }
+        )
+    }
+    val focalX = libraryMatch?.bannerFocalX ?: 0f
+    val focalY = libraryMatch?.bannerFocalY ?: 0f
+    val zoom = (libraryMatch?.bannerZoom ?: 1f).coerceIn(1f, 2.5f)
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1412,47 +1447,67 @@ private fun DiscoverSpotlightBanner(
             .background(Color.White.copy(alpha = 0.06f))
             .clickable(onClick = onDetails)
     ) {
-        if (hasWideBanner) {
+        if (bannerModel != null) {
             AsyncImage(
-                model = item.bannerUrl,
+                model = bannerModel,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                alignment = BiasAlignment(focalX.coerceIn(-1f, 1f), focalY.coerceIn(-1f, 1f)),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = zoom,
+                        scaleY = zoom
+                    )
             )
-        } else if (item.coverUrl.isNotBlank()) {
+        } else if (!bannerDisabled && coverModel != null) {
             AsyncImage(
-                model = item.coverUrl,
+                model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(18.dp)
-                    .alpha(0.45f)
+                    .blur(if (dimBanner) 18.dp else 10.dp)
+                    .alpha(if (dimBanner) 0.45f else 0.84f)
             )
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to Color.Transparent,
-                        0.42f to AmoledBlack.copy(alpha = 0.35f),
-                        0.78f to AmoledBlack.copy(alpha = 0.82f),
-                        1.0f to AmoledBlack.copy(alpha = 0.96f)
+        if (dimBanner) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Transparent,
+                            0.42f to AmoledBlack.copy(alpha = 0.35f),
+                            0.78f to AmoledBlack.copy(alpha = 0.82f),
+                            1.0f to AmoledBlack.copy(alpha = 0.96f)
+                        )
                     )
-                )
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        0.0f to AmoledBlack.copy(alpha = 0.62f),
-                        0.48f to AmoledBlack.copy(alpha = 0.18f),
-                        1.0f to Color.Transparent
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0.0f to AmoledBlack.copy(alpha = 0.62f),
+                            0.48f to AmoledBlack.copy(alpha = 0.18f),
+                            1.0f to Color.Transparent
+                        )
                     )
-                )
-        )
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.60f to Color.Transparent,
+                            0.86f to AmoledBlack.copy(alpha = 0.46f),
+                            1.0f to AmoledBlack.copy(alpha = 0.76f)
+                        )
+                    )
+            )
+        }
         Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -1468,12 +1523,14 @@ private fun DiscoverSpotlightBanner(
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.White.copy(alpha = 0.08f))
             ) {
-                AsyncImage(
-                    model = item.coverUrl,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (coverModel != null) {
+                    AsyncImage(
+                        model = coverModel,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
             Column(
                 modifier = Modifier.weight(1f),
@@ -1513,14 +1570,14 @@ private fun DiscoverSpotlightBanner(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "+ Library",
+                        text = if (libraryMatch != null) "In Library" else "+ Library",
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentGold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(AccentGold.copy(alpha = 0.18f))
-                            .clickable(onClick = onAdd)
+                            .clickable(onClick = if (libraryMatch != null) onDetails else onAdd)
                             .padding(horizontal = 11.dp, vertical = 6.dp)
                     )
                 }
@@ -1533,6 +1590,7 @@ private fun DiscoverSpotlightBanner(
 private fun DiscoverHeroCarousel(
     items: List<SearchResultItem>,
     allMedia: List<MediaCardSummary>,
+    dimBanner: Boolean,
     onItemClick: (Long) -> Unit,
     onAddMedia: (SearchResultItem) -> Unit
 ) {
@@ -1543,10 +1601,12 @@ private fun DiscoverHeroCarousel(
             modifier = Modifier.fillMaxWidth()
         ) { page ->
             val item = items[page]
+            val match = findLibraryMatch(allMedia, item)
             DiscoverSpotlightBanner(
                 item = item,
+                libraryMatch = match,
+                dimBanner = dimBanner,
                 onDetails = {
-                    val match = findLibraryMatch(allMedia, item)
                     if (match != null) onItemClick(match.id) else {
                         EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
                         onItemClick(-1L)

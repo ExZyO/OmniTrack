@@ -152,6 +152,7 @@ object DiscoverShelfCatalog {
 data class DiscoverCustomizationSettings(
     val layoutStyle: DiscoverLayoutStyle = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT,
     val showSpotlightBanner: Boolean = true,
+    val dimHeroBanner: Boolean = true,
     val showQuickSearchChips: Boolean = true,
     val showSubFilters: Boolean = true,
     val showInYourLibraryShelf: Boolean = true,
@@ -341,6 +342,7 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
         val DISCOVER_LAYOUT_STYLE = stringPreferencesKey("discover_layout_style")
         val DISCOVER_SHOW_SPOTLIGHT = booleanPreferencesKey("discover_show_spotlight")
+        val DISCOVER_DIM_HERO_BANNER = booleanPreferencesKey("discover_dim_hero_banner")
         val DISCOVER_SHOW_QUICK_CHIPS = booleanPreferencesKey("discover_show_quick_chips")
         val DISCOVER_SHOW_SUB_FILTERS = booleanPreferencesKey("discover_show_sub_filters")
         val DISCOVER_SHOW_IN_LIBRARY = booleanPreferencesKey("discover_show_in_library")
@@ -500,6 +502,7 @@ class PreferenceManager(private val context: Context) {
             DiscoverCustomizationSettings(
                 layoutStyle = DiscoverLayoutStyle.fromName(prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE]),
                 showSpotlightBanner = prefs[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] ?: true,
+                dimHeroBanner = prefs[PreferencesKeys.DISCOVER_DIM_HERO_BANNER] ?: true,
                 showQuickSearchChips = prefs[PreferencesKeys.DISCOVER_SHOW_QUICK_CHIPS] ?: true,
                 showSubFilters = prefs[PreferencesKeys.DISCOVER_SHOW_SUB_FILTERS] ?: true,
                 showInYourLibraryShelf = prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] ?: true,
@@ -513,6 +516,10 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun setDiscoverShowSpotlight(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] = enabled }
+    }
+
+    suspend fun setDiscoverDimHeroBanner(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_DIM_HERO_BANNER] = enabled }
     }
 
     suspend fun setDiscoverShowQuickChips(enabled: Boolean) {
@@ -570,6 +577,7 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.DISCOVER_LAYOUT_STYLE] = DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT.name
             prefs[PreferencesKeys.DISCOVER_SHOW_SPOTLIGHT] = true
+            prefs[PreferencesKeys.DISCOVER_DIM_HERO_BANNER] = true
             prefs[PreferencesKeys.DISCOVER_SHOW_QUICK_CHIPS] = true
             prefs[PreferencesKeys.DISCOVER_SHOW_SUB_FILTERS] = true
             prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] = true

@@ -87,6 +87,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
@@ -262,28 +263,40 @@ fun HomeDashboardView(
             .filter { (it.userRating ?: it.communityScore ?: 0f) > 0f }
             .sortedWith(compareByDescending<MediaCardSummary> { it.userRating ?: 0f }.thenByDescending { it.communityScore ?: 0f })
 
-        fun findLocalMatch(s: SearchResultItem): MediaCardSummary? = allMedia.firstOrNull { local ->
-            local.mediaType == s.mediaType && (
-                (s.anilistId != null && local.anilistId == s.anilistId) ||
-                    (s.tmdbId != null && local.tmdbId == s.tmdbId) ||
-                    local.title.equals(s.title, ignoreCase = true)
-                )
-        }
+        fun findLocalMatch(s: SearchResultItem): MediaCardSummary? = ArtworkModelResolver.findLibraryMatch(
+            library = allMedia,
+            mediaType = s.mediaType,
+            anilistId = s.anilistId,
+            malId = s.malId,
+            tmdbId = s.tmdbId,
+            imdbId = s.imdbId,
+            steamAppId = s.steamAppId,
+            comicVineId = s.comicVineId,
+            metronId = s.metronId,
+            openLibraryId = s.openLibraryId,
+            title = s.title,
+            nativeTitle = s.nativeTitle
+        )
 
         fun hasAuthenticBanner(slide: HomeHeroSlide): Boolean = when (slide) {
-            is HomeHeroSlide.LocalSlide -> {
-                val i = slide.item
-                (!i.customBannerPath.isNullOrBlank() && i.customBannerPath != "NONE") ||
-                    (!i.bannerUrl.isNullOrBlank() && i.bannerUrl != i.coverUrl)
-            }
+            is HomeHeroSlide.LocalSlide -> ArtworkModelResolver.preferredBanner(slide.item) != null
             is HomeHeroSlide.TrendingSlide -> {
-                !slide.item.bannerUrl.isNullOrBlank() && slide.item.bannerUrl != slide.item.coverUrl
+                val matched = findLocalMatch(slide.item)
+                if (matched != null) {
+                    ArtworkModelResolver.preferredBanner(matched) != null
+                } else {
+                    !slide.item.bannerUrl.isNullOrBlank() && slide.item.bannerUrl != slide.item.coverUrl
+                }
             }
         }
 
         fun hasValidCover(slide: HomeHeroSlide): Boolean = when (slide) {
-            is HomeHeroSlide.LocalSlide -> !slide.item.customCoverPath.isNullOrBlank() || slide.item.coverUrl.isNotBlank()
-            is HomeHeroSlide.TrendingSlide -> slide.item.coverUrl.isNotBlank()
+            is HomeHeroSlide.LocalSlide -> ArtworkModelResolver.preferredCover(slide.item).isNotBlank()
+            is HomeHeroSlide.TrendingSlide -> {
+                val matched = findLocalMatch(slide.item)
+                if (matched != null) ArtworkModelResolver.preferredCover(matched).isNotBlank()
+                else slide.item.coverUrl.isNotBlank()
+            }
         }
 
         fun matchesFilters(slide: HomeHeroSlide): Boolean {
@@ -496,13 +509,20 @@ fun HomeDashboardView(
                                         onDetails = { onItemClick(slide.item.id) }
                                     )
                                     is HomeHeroSlide.TrendingSlide -> {
-                                        val libMatch = allMedia.firstOrNull { local ->
-                                            local.mediaType == slide.item.mediaType && (
-                                                (slide.item.anilistId != null && local.anilistId == slide.item.anilistId) ||
-                                                    (slide.item.tmdbId != null && local.tmdbId == slide.item.tmdbId) ||
-                                                    local.title.equals(slide.item.title, ignoreCase = true)
-                                                )
-                                        }
+                                        val libMatch = ArtworkModelResolver.findLibraryMatch(
+                                            library = allMedia,
+                                            mediaType = slide.item.mediaType,
+                                            anilistId = slide.item.anilistId,
+                                            malId = slide.item.malId,
+                                            tmdbId = slide.item.tmdbId,
+                                            imdbId = slide.item.imdbId,
+                                            steamAppId = slide.item.steamAppId,
+                                            comicVineId = slide.item.comicVineId,
+                                            metronId = slide.item.metronId,
+                                            openLibraryId = slide.item.openLibraryId,
+                                            title = slide.item.title,
+                                            nativeTitle = slide.item.nativeTitle
+                                        )
                                         if (libMatch != null) {
                                             LocalMediaHeroCard(
                                                 item = libMatch,
@@ -1200,13 +1220,11 @@ private fun LocalMediaHeroCard(
     heroSettings: HomeHeroSettings,
     onDetails: () -> Unit
 ) {
-    val coverModel = remember(item.customCoverPath, item.coverUrl) {
-        item.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-            ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+    val coverModel: Any = remember(item.customCoverPath, item.coverUrl) {
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item)) ?: ""
     }
-    val authenticBannerModel = remember(item.customBannerPath, item.bannerUrl, item.coverUrl) {
-        item.customBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let { if (it.startsWith("http")) it else File(it) }
-            ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+    val authenticBannerModel = remember(item.customBannerPath, item.bannerUrl, item.artworkRole, item.coverUrl) {
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredBanner(item))
     }
     val remainingCount = remember(item.totalProgress, item.currentProgress, item.mediaType) {
         val tot = item.totalProgress?.toInt() ?: 0
@@ -2088,7 +2106,7 @@ private fun UpNextCalendarCard(
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = release.coverUrl,
+            model = remember(release.coverUrl) { ArtworkModelResolver.toCoilModel(release.coverUrl) },
             contentDescription = release.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
@@ -2148,7 +2166,7 @@ private fun UpNextCompactRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = release.coverUrl,
+            model = remember(release.coverUrl) { ArtworkModelResolver.toCoilModel(release.coverUrl) },
             contentDescription = release.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier
