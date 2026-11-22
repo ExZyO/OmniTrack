@@ -748,7 +748,13 @@ class HomeViewModel(
                     entity.currentProgress
                 }
                 if (entity.mediaType == MediaType.FANFICTION) {
-                    runCatching { repository.markAllFanficChaptersRead(id, true) }
+                    runCatching {
+                        repository.getFanficChaptersOnce(id).forEach { ch ->
+                            if (!ch.isRead) {
+                                repository.updateFanficChapter(ch.copy(isRead = true, readAtMs = now))
+                            }
+                        }
+                    }
                 }
                 repository.updateMedia(
                     entity.copy(
@@ -768,7 +774,13 @@ class HomeViewModel(
             for (id in ids) {
                 val entity = repository.getMediaByIdOnce(id) ?: continue
                 if (entity.mediaType == MediaType.FANFICTION) {
-                    runCatching { repository.markAllFanficChaptersRead(id, false) }
+                    runCatching {
+                        repository.getFanficChaptersOnce(id).forEach { ch ->
+                            if (ch.isRead) {
+                                repository.updateFanficChapter(ch.copy(isRead = false, readAtMs = null))
+                            }
+                        }
+                    }
                 }
                 repository.updateMedia(
                     entity.copy(
@@ -817,7 +829,7 @@ class HomeViewModel(
             val engine = com.omnitrack.app.OmniTrackApplication.instance.trackerSyncEngine
             for (id in ids) {
                 val entity = repository.getMediaByIdOnce(id) ?: continue
-                val outcomes = runCatching { engine.pushMediaToConnectedTrackers(entity) }.getOrDefault(emptyList())
+                val outcomes = runCatching { engine.pushItemToTrackers(entity) }.getOrDefault(emptyList())
                 if (outcomes.any { it.success }) syncedCount++
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
