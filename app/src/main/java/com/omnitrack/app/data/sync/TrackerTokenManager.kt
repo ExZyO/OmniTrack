@@ -57,6 +57,7 @@ class TrackerTokenManager(private val context: Context) {
         val HARDCOVER_TOKEN = stringPreferencesKey("token_hardcover")
         val COMICK_VERIFIER = stringPreferencesKey("pkce_comick_verifier")
         val MAL_VERIFIER = stringPreferencesKey("pkce_mal_verifier")
+        val TRAKT_VERIFIER = stringPreferencesKey("pkce_trakt_verifier")
     }
 
     val tokens: Flow<TrackerTokens> = context.dataStore.data
@@ -97,6 +98,8 @@ class TrackerTokenManager(private val context: Context) {
     suspend fun getComickVerifier(): String? = context.dataStore.data.firstOrNull()?.get(Keys.COMICK_VERIFIER)?.let { decrypt(it) }
     suspend fun saveMalVerifier(verifier: String?) = saveToken(Keys.MAL_VERIFIER, verifier)
     suspend fun getMalVerifier(): String? = context.dataStore.data.firstOrNull()?.get(Keys.MAL_VERIFIER)?.let { decrypt(it) }
+    suspend fun saveTraktVerifier(verifier: String?) = saveToken(Keys.TRAKT_VERIFIER, verifier)
+    suspend fun getTraktVerifier(): String? = context.dataStore.data.firstOrNull()?.get(Keys.TRAKT_VERIFIER)?.let { decrypt(it) }
 
     private suspend fun saveToken(key: androidx.datastore.preferences.core.Preferences.Key<String>, token: String?) {
         context.dataStore.edit { prefs ->

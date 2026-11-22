@@ -8,6 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,25 +29,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -67,23 +69,49 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.omnitrack.app.OmniTrackApplication
+import com.omnitrack.app.data.sync.BookCsvImporter
+import com.omnitrack.app.data.sync.BookImportSummary
+import com.omnitrack.app.data.sync.PkceUtil
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
+import com.omnitrack.app.data.sync.TrackerImportResult
 import com.omnitrack.app.data.sync.TrackerTokens
 import com.omnitrack.app.data.sync.VerificationState
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
+import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private enum class TrackerServiceId(
+    val code: String,
+    val title: String,
+    val subtitle: String,
+    val categoryGroup: String
+) {
+    ANILIST("AL", "AniList", "Anime, Manga & Light Novels", "ANIME & MANGA"),
+    MAL("MAL", "MyAnimeList", "Anime & Manga status list", "ANIME & MANGA"),
+    BANGUMI("BGM", "Bangumi", "Anime, Manga & Games collection", "ANIME & MANGA"),
+    COMICK("CM", "Comick", "Manga & Webtoon reading bridge", "ANIME & MANGA"),
+    TRAKT("TR", "Trakt.tv", "Movies & Shows watched history & watchlist", "MOVIES & TV"),
+    SIMKL("SK", "SIMKL", "Unified TV, Movies & Anime tracker", "MOVIES & TV"),
+    TMDB("TM", "TMDb", "Movie & TV metadata & ratings API key", "MOVIES & TV"),
+    STEAM("ST", "Steam", "PC games library & playtime", "GAMES & VISUAL NOVELS"),
+    VNDB("VN", "VNDB", "Visual Novels tracking & votes", "GAMES & VISUAL NOVELS"),
+    HARDCOVER("HC", "Hardcover", "Bookshelf, ratings & reading moods", "BOOKS")
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,14 +126,15 @@ fun TrackerAccountsSheet(
     val scope = rememberCoroutineScope()
 
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
-    var isSyncing by remember { mutableStateOf(false) }
-
     val customTraktClientId by app.preferenceManager.customTraktClientId.collectAsState(initial = "")
     val customTraktClientSecret by app.preferenceManager.customTraktClientSecret.collectAsState(initial = "")
     val customMalClientId by app.preferenceManager.customMalClientId.collectAsState(initial = "")
-    val customSimklClientId by app.preferenceManager.customSimklClientId.collectAsState(initial = "")
-    val customSimklClientSecret by app.preferenceManager.customSimklClientSecret.collectAsState(initial = "")
+
+    var selectedService by remember { mutableStateOf<TrackerServiceId?>(null) }
+    var isSyncingAll by remember { mutableStateOf(false) }
+    var syncStatusNote by remember { mutableStateOf<String?>(null) }
     var showApiKeyConfigSheet by remember { mutableStateOf(false) }
+    var showBackupRestoreSheet by remember { mutableStateOf(false) }
 
     // SIMKL PIN Code State
     var showSimklPinDialog by remember { mutableStateOf(false) }
@@ -117,646 +146,464 @@ fun TrackerAccountsSheet(
     var traktDeviceInfo by remember { mutableStateOf<TrackerAccountVerifier.TraktDeviceCode?>(null) }
     var isPollingTrakt by remember { mutableStateOf(false) }
 
+    // Verification username cache for connected services
+    var verifiedNames by remember { mutableStateOf<Map<TrackerServiceId, VerificationState>>(emptyMap()) }
+
+    fun refreshVerification(service: TrackerServiceId, tokenSnapshot: TrackerTokens) {
+        scope.launch {
+            val state = when (service) {
+                TrackerServiceId.ANILIST -> tokenSnapshot.anilistToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyAnilist(it) }
+                TrackerServiceId.MAL -> tokenSnapshot.malToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyMal(it) }
+                TrackerServiceId.BANGUMI -> tokenSnapshot.bangumiToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyBangumi(it) }
+                TrackerServiceId.COMICK -> tokenSnapshot.comickToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyComick(it) }
+                TrackerServiceId.TRAKT -> tokenSnapshot.traktToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyTrakt(it, customTraktClientId) }
+                TrackerServiceId.SIMKL -> tokenSnapshot.simklToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifySimkl(it) }
+                TrackerServiceId.TMDB -> tokenSnapshot.tmdbToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyTmdb(it) }
+                TrackerServiceId.VNDB -> tokenSnapshot.vndbToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyVndb(it) }
+                TrackerServiceId.HARDCOVER -> tokenSnapshot.hardcoverToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyHardcover(it) }
+                TrackerServiceId.STEAM -> if (!tokenSnapshot.steamApiKey.isNullOrBlank() && !tokenSnapshot.steamId64.isNullOrBlank()) {
+                    TrackerAccountVerifier.verifySteam(tokenSnapshot.steamId64, tokenSnapshot.steamApiKey)
+                } else null
+            } ?: VerificationState.Idle
+            verifiedNames = verifiedNames + (service to state)
+        }
+    }
+
+    LaunchedEffect(tokens) {
+        TrackerServiceId.entries.forEach { svc ->
+            if (isServiceConnected(svc, tokens)) {
+                val existing = verifiedNames[svc]
+                if (existing !is VerificationState.Verified) {
+                    refreshVerification(svc, tokens)
+                }
+            } else {
+                verifiedNames = verifiedNames - svc
+            }
+        }
+    }
+
+    // Local Importers (CSV + XML)
+    var isImportingLocal by remember { mutableStateOf(false) }
+
+    val goodreadsCsvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !isImportingLocal) {
+            scope.launch {
+                isImportingLocal = true
+                val summary = withContext(Dispatchers.IO) {
+                    try {
+                        val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
+                        BookCsvImporter.importCsv(text, app.repository)
+                    } catch (e: Exception) {
+                        BookImportSummary(0, 0, e.message ?: "CSV read failed")
+                    }
+                }
+                isImportingLocal = false
+                val msg = summary.error ?: "Books CSV: ${summary.imported} added, ${summary.updated} updated"
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val letterboxdCsvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !isImportingLocal) {
+            scope.launch {
+                isImportingLocal = true
+                val summary = withContext(Dispatchers.IO) {
+                    try {
+                        val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
+                        BookCsvImporter.importLetterboxdCsv(text, app.repository)
+                    } catch (e: Exception) {
+                        BookImportSummary(0, 0, e.message ?: "Letterboxd CSV failed")
+                    }
+                }
+                isImportingLocal = false
+                val msg = summary.error ?: "Letterboxd: ${summary.imported} added, ${summary.updated} updated"
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val malXmlPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !isImportingLocal) {
+            scope.launch {
+                isImportingLocal = true
+                val summary = withContext(Dispatchers.IO) {
+                    try {
+                        val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
+                        BookCsvImporter.importMalXml(text, app.repository)
+                    } catch (e: Exception) {
+                        BookImportSummary(0, 0, e.message ?: "MAL XML read failed")
+                    }
+                }
+                isImportingLocal = false
+                val msg = summary.error ?: "MAL XML: ${summary.imported} added, ${summary.updated} updated"
+                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = DarkSurface,
         dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = 780.dp)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = 20.dp, vertical = 22.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
+            val activeService = selectedService
+            if (activeService == null) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Tracker Accounts",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = syncStatusNote ?: "Sign in to sync libraries & pull your progress",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
+                        IconButton(
+                            onClick = { showApiKeyConfigSheet = true },
                             modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(AccentArctic.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CloudSync,
-                                contentDescription = null,
-                                tint = AccentArctic,
+                                imageVector = Icons.Default.Key,
+                                contentDescription = "AI & Artwork Boosters",
+                                tint = AccentGold,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Text(
-                            text = "Tracker Accounts",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                    }
-                    Text(
-                        text = "Real-time sync, live identity verification & cross-medium tracking",
-                        fontSize = 12.sp,
-                        color = TextMuted,
-                        modifier = Modifier.padding(start = 42.dp, top = 2.dp)
-                    )
-                }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    IconButton(
-                        onClick = { showApiKeyConfigSheet = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = "API Keys & Developer Credentials",
-                            tint = AccentGold,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Button(
-                        onClick = {
-                            if (!isSyncing) {
-                                isSyncing = true
-                                scope.launch {
-                                    try {
-                                        syncEngine.drainQueue()
-                                        Toast.makeText(context, "Full tracker synchronization complete", Toast.LENGTH_SHORT).show()
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    } finally {
-                                        isSyncing = false
-                                    }
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentJade),
-                        shape = RoundedCornerShape(999.dp),
-                        enabled = !isSyncing
-                    ) {
-                        if (isSyncing) {
-                            CircularProgressIndicator(
-                                color = AmoledBlack,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.CloudDownload,
-                                contentDescription = null,
-                                tint = AmoledBlack,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Sync All",
-                                color = AmoledBlack,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 1. AniList (1-Tap OAuth)
-            OAuthDirectTrackerCard(
-                title = "AniList",
-                subtitle = "Anime, Manga & Japanese Light Novels",
-                accentColor = Color(0xFF02A9FF),
-                initialToken = tokens.anilistToken.orEmpty(),
-                oauthUrl = "https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token",
-                oauthButtonLabel = "Login",
-                verifyFn = { TrackerAccountVerifier.verifyAnilist(it) },
-                onDisconnect = { scope.launch { tokenManager.saveAnilistToken(null); Toast.makeText(context, "AniList disconnected", Toast.LENGTH_SHORT).show() } }
-            )
-
-            // 2. MyAnimeList (1-Tap PKCE OAuth)
-            OAuthDirectTrackerCard(
-                title = "MyAnimeList",
-                subtitle = "Anime & Manga status tracking",
-                accentColor = Color(0xFF2E51A2),
-                initialToken = tokens.malToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifyMal(it) },
-                onDisconnect = { scope.launch { tokenManager.saveMalToken(null); Toast.makeText(context, "MAL disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val verifier = com.omnitrack.app.data.sync.PkceUtil.generateCodeVerifier()
-                                TrackerAccountVerifier.pendingMalVerifier = verifier
-                                tokenManager.saveMalVerifier(verifier)
-                                val customMal = customMalClientId.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
-                                val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
-                                val redirectUri = if (customMal != null) "omnitrack://auth/mal" else "chimahon://myanimelist-auth"
-                                android.util.Log.d("OmniTrack-MAL", "Launching MAL authorize: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$redirectUri")
-                                val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri"
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E51A2)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                },
-                developerSettingsContent = {
-                    var tempMalId by remember(customMalClientId) { mutableStateOf(customMalClientId) }
-                    var malSaved by remember { mutableStateOf(false) }
-
-                    Text("Custom Client ID (optional override):", fontSize = 11.sp, color = TextMuted)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurfaceElevated)
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicTextField(
-                            value = tempMalId,
-                            onValueChange = {
-                                tempMalId = it
-                                malSaved = false
-                            },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
-                            cursorBrush = SolidColor(Color(0xFF2E51A2)),
-                            decorationBox = { inner ->
-                                if (tempMalId.isEmpty()) {
-                                    Text("32-character MAL Client ID", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
-                                }
-                                inner()
-                            }
-                        )
-                    }
-
-                    val isMalUnchanged = malSaved || (tempMalId.trim() == customMalClientId.trim())
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                app.preferenceManager.updateCustomTrackerCredentials(
-                                    traktClientId = customTraktClientId,
-                                    traktClientSecret = customTraktClientSecret,
-                                    malClientId = tempMalId.trim(),
-                                    simklClientId = customSimklClientId,
-                                    simklClientSecret = customSimklClientSecret
-                                )
-                                TrackerAccountVerifier.customMalClientId = tempMalId.trim()
-                                malSaved = true
-                                Toast.makeText(context, "MAL Client ID updated", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        enabled = !isMalUnchanged && tempMalId.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2E51A2),
-                            contentColor = Color.White,
-                            disabledContainerColor = Color.White.copy(alpha = 0.08f),
-                            disabledContentColor = TextMuted
-                        ),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Text(if (isMalUnchanged && tempMalId.isNotBlank()) "Saved" else "Save Key", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-
-            // 3. Trakt.tv (Instant Device Code or Browser OAuth)
-            OAuthDirectTrackerCard(
-                title = "Trakt.tv",
-                subtitle = "TV Shows & Movies watched history",
-                accentColor = Color(0xFFED1C24),
-                initialToken = tokens.traktToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifyTrakt(it, customTraktClientId) },
-                onDisconnect = { scope.launch { tokenManager.saveTraktToken(null); Toast.makeText(context, "Trakt disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode(customTraktClientId)
-                                if (codeInfo != null) {
-                                    traktDeviceInfo = codeInfo
-                                    showTraktDeviceDialog = true
-                                } else {
-                                    val effectiveClientId = customTraktClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
-                                    val intent = Intent(
-                                        Intent.ACTION_VIEW,
-                                        Uri.parse("https://trakt.tv/oauth/authorize?response_type=code&client_id=$effectiveClientId&redirect_uri=omnitrack://auth/trakt")
-                                    )
-                                    context.startActivity(intent)
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                },
-                developerSettingsContent = {
-                    var tempTraktId by remember(customTraktClientId) { mutableStateOf(customTraktClientId) }
-                    var tempTraktSecret by remember(customTraktClientSecret) { mutableStateOf(customTraktClientSecret) }
-                    var traktSaved by remember { mutableStateOf(false) }
-
-                    Text("Trakt Client ID:", fontSize = 11.sp, color = TextMuted)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurfaceElevated)
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicTextField(
-                            value = tempTraktId,
-                            onValueChange = {
-                                tempTraktId = it
-                                traktSaved = false
-                            },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
-                            cursorBrush = SolidColor(Color(0xFFED1C24)),
-                            decorationBox = { inner ->
-                                if (tempTraktId.isEmpty()) {
-                                    Text("Developer App Client ID", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
-                                }
-                                inner()
-                            }
-                        )
-                    }
-
-                    Text("Trakt Client Secret:", fontSize = 11.sp, color = TextMuted)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurfaceElevated)
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        BasicTextField(
-                            value = tempTraktSecret,
-                            onValueChange = {
-                                tempTraktSecret = it
-                                traktSaved = false
-                            },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
-                            cursorBrush = SolidColor(Color(0xFFED1C24)),
-                            decorationBox = { inner ->
-                                if (tempTraktSecret.isEmpty()) {
-                                    Text("Developer App Client Secret", color = TextMuted.copy(alpha = 0.5f), fontSize = 12.sp)
-                                }
-                                inner()
-                            }
-                        )
-                    }
-
-                    val isTraktUnchanged = traktSaved || (tempTraktId.trim() == customTraktClientId.trim() && tempTraktSecret.trim() == customTraktClientSecret.trim())
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                app.preferenceManager.updateCustomTrackerCredentials(
-                                    traktClientId = tempTraktId.trim(),
-                                    traktClientSecret = tempTraktSecret.trim(),
-                                    malClientId = customMalClientId,
-                                    simklClientId = customSimklClientId,
-                                    simklClientSecret = customSimklClientSecret
-                                )
-                                TrackerAccountVerifier.customTraktClientId = tempTraktId.trim()
-                                TrackerAccountVerifier.customTraktClientSecret = tempTraktSecret.trim()
-                                traktSaved = true
-                                Toast.makeText(context, "Trakt credentials updated", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        enabled = !isTraktUnchanged && tempTraktId.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFED1C24),
-                            contentColor = Color.White,
-                            disabledContainerColor = Color.White.copy(alpha = 0.08f),
-                            disabledContentColor = TextMuted
-                        ),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Text(if (isTraktUnchanged && tempTraktId.isNotBlank()) "Saved" else "Save Keys", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-
-            // 4. SIMKL (Direct PIN Code Flow)
-            OAuthDirectTrackerCard(
-                title = "SIMKL",
-                subtitle = "Unified Anime, Shows & Movies tracker",
-                accentColor = Color(0xFF00E676),
-                initialToken = tokens.simklToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifySimkl(it) },
-                onDisconnect = { scope.launch { tokenManager.saveSimklToken(null); Toast.makeText(context, "SIMKL disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
-                                if (codeInfo != null) {
-                                    simklPinInfo = codeInfo
-                                    showSimklPinDialog = true
-                                } else {
-                                    Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Tv, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-
-            // 5. Bangumi (1-Tap OAuth via komikku://bangumi-auth with auto code-exchange)
-            OAuthDirectTrackerCard(
-                title = "Bangumi",
-                subtitle = "bgm.tv API - Anime, Manga & Games collection",
-                accentColor = Color(0xFFF09199),
-                initialToken = tokens.bangumiToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifyBangumi(it) },
-                onDisconnect = { scope.launch { tokenManager.saveBangumiToken(null); Toast.makeText(context, "Bangumi disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            val oauthUri = Uri.parse("https://bgm.tv/oauth/authorize?client_id=bgm31586666817a5d03b&response_type=code&redirect_uri=komikku://bangumi-auth")
-                            context.startActivity(Intent(Intent.ACTION_VIEW, oauthUri))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF09199)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-
-            // 6. Comick (1-Tap PKCE S256 OAuth via app.mihon://comick-auth with auto code-exchange)
-            OAuthDirectTrackerCard(
-                title = "Comick",
-                subtitle = "Manga & Webtoon chapter progress bridge",
-                accentColor = Color(0xFFF43F5E),
-                initialToken = tokens.comickToken.orEmpty(),
-                verifyFn = { TrackerAccountVerifier.verifyComick(it) },
-                onDisconnect = { scope.launch { tokenManager.saveComickToken(null); Toast.makeText(context, "Comick disconnected", Toast.LENGTH_SHORT).show() } },
-                customActionButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val pkce = com.omnitrack.app.data.sync.PkceUtil.generateS256Codes()
-                                TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
-                                tokenManager.saveComickVerifier(pkce.codeVerifier)
-                                val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=" + pkce.codeChallenge + "&code_challenge_method=S256"
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF43F5E)),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Login", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            )
-
-            // 7. VNDB (User Personal Token)
-            ManualTokenTrackerCard(
-                title = "VNDB",
-                subtitle = "Kana REST API – Visual Novels tracking & votes",
-                accentColor = Color(0xFF3B82F6),
-                initialToken = tokens.vndbToken.orEmpty(),
-                tokenCreationUrl = "https://vndb.org/u/tokens",
-                verifyFn = { TrackerAccountVerifier.verifyVndb(it) },
-                onSave = { scope.launch { tokenManager.saveVndbToken(it); Toast.makeText(context, "VNDB token saved", Toast.LENGTH_SHORT).show() } },
-                onDisconnect = { scope.launch { tokenManager.saveVndbToken(null); Toast.makeText(context, "VNDB disconnected", Toast.LENGTH_SHORT).show() } }
-            )
-
-            // 8. Steam (Requires SteamID64 AND API Key)
-            SteamTrackerCard(
-                initialApiKey = tokens.steamApiKey.orEmpty(),
-                initialSteamId64 = tokens.steamId64.orEmpty(),
-                onSave = { key, id ->
-                    scope.launch {
-                        val resolvedId = TrackerAccountVerifier.resolveSteamId(id, key) ?: id.trim()
-                        tokenManager.saveSteamApiKey(key)
-                        tokenManager.saveSteamId64(resolvedId)
-                        Toast.makeText(context, "Steam credentials verified & saved!", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDisconnect = {
-                    scope.launch {
-                        tokenManager.saveSteamApiKey(null)
-                        tokenManager.saveSteamId64(null)
-                        Toast.makeText(context, "Steam disconnected", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onImportLibrary = { syncEngine.importSteamLibrary() }
-            )
-
-            // 9. TMDb
-            ManualTokenTrackerCard(
-                title = "TMDb",
-                subtitle = "Movies & TV Shows metadata and ratings API",
-                accentColor = Color(0xFF01D277),
-                initialToken = tokens.tmdbToken.orEmpty(),
-                tokenCreationUrl = "https://www.themoviedb.org/settings/api",
-                verifyFn = { TrackerAccountVerifier.verifyTmdb(it) },
-                onSave = { token ->
-                    scope.launch {
-                        tokenManager.saveTmdbToken(token)
-                        Toast.makeText(context, "TMDb token saved", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDisconnect = {
-                    scope.launch {
-                        tokenManager.saveTmdbToken(null)
-                        Toast.makeText(context, "TMDb disconnected", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-
-            // 10. Hardcover (Books, Ratings, Moods & Two-Way Sync)
-            var isImportingHardcover by remember { mutableStateOf(false) }
-            ManualTokenTrackerCard(
-                title = "Hardcover",
-                subtitle = "Books community ratings, moods, warnings & library sync",
-                accentColor = Color(0xFF6366F1),
-                initialToken = tokens.hardcoverToken.orEmpty(),
-                tokenCreationUrl = "https://hardcover.app/account/api",
-                verifyFn = { TrackerAccountVerifier.verifyHardcover(it) },
-                onSave = { token ->
-                    scope.launch {
-                        tokenManager.saveHardcoverToken(token)
-                        Toast.makeText(context, "Hardcover token saved", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDisconnect = {
-                    scope.launch {
-                        tokenManager.saveHardcoverToken(null)
-                        Toast.makeText(context, "Hardcover disconnected", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                extraBottomContent = if (!tokens.hardcoverToken.isNullOrBlank()) {
-                    {
                         Button(
                             onClick = {
-                                if (!isImportingHardcover) {
+                                if (!isSyncingAll) {
+                                    isSyncingAll = true
+                                    syncStatusNote = "Syncing connected accounts..."
                                     scope.launch {
-                                        isImportingHardcover = true
-                                        val summary = syncEngine.importHardcoverLibrary()
-                                        isImportingHardcover = false
-                                        val msg = summary.error
-                                            ?: "Hardcover: imported ${summary.imported} new, updated ${summary.updated}"
-                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        try {
+                                            val count = syncEngine.pullRemoteLibraries { status ->
+                                                syncStatusNote = status
+                                            }
+                                            Toast.makeText(context, "Sync complete ($count updated/imported)", Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            syncStatusNote = "Sync error: ${e.message}"
+                                            Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        } finally {
+                                            isSyncingAll = false
+                                        }
                                     }
                                 }
                             },
-                            enabled = !isImportingHardcover,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF6366F1).copy(alpha = 0.16f),
-                                contentColor = Color(0xFFA5B4FC),
-                                disabledContainerColor = Color.White.copy(alpha = 0.06f),
-                                disabledContentColor = TextMuted
+                                containerColor = AccentGold,
+                                contentColor = AmoledBlack
                             ),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(10.dp),
+                            enabled = !isSyncingAll
                         ) {
-                            if (isImportingHardcover) {
+                            if (isSyncingAll) {
                                 CircularProgressIndicator(
-                                    color = Color(0xFFA5B4FC),
+                                    color = AmoledBlack,
                                     strokeWidth = 2.dp,
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Importing Hardcover Library...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             } else {
                                 Icon(
-                                    imageVector = Icons.Default.CloudDownload,
+                                    imageVector = Icons.Default.CloudSync,
                                     contentDescription = null,
-                                    tint = Color(0xFFA5B4FC),
+                                    tint = AmoledBlack,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Import Hardcover Library", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "Sync All",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
-                    }
-                } else null
-            )
-
-            // 11. Goodreads / StoryGraph CSV Import
-            var isImportingCsv by remember { mutableStateOf(false) }
-            val csvPicker = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument()
-            ) { uri ->
-                if (uri != null && !isImportingCsv) {
-                    scope.launch {
-                        isImportingCsv = true
-                        val summary = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            try {
-                                val text = context.contentResolver.openInputStream(uri)?.use { stream ->
-                                    stream.bufferedReader().readText()
-                                }.orEmpty()
-                                com.omnitrack.app.data.sync.BookCsvImporter.importCsv(text, app.repository)
-                            } catch (e: Exception) {
-                                com.omnitrack.app.data.sync.BookImportSummary(0, 0, e.message ?: "CSV read failed")
-                            }
-                        }
-                        isImportingCsv = false
-                        val msg = summary.error ?: "CSV Import: ${summary.imported} added, ${summary.updated} updated"
-                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                     }
                 }
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Goodreads & StoryGraph CSV",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "Import books, reading status, star ratings, pages & personal reviews from an exported CSV file.",
-                    fontSize = 11.5.sp,
-                    color = TextMuted
-                )
-                Button(
-                    onClick = {
-                        csvPicker.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*"))
+
+                // Grouped Service List
+                val groups = listOf("ANIME & MANGA", "MOVIES & TV", "GAMES & VISUAL NOVELS", "BOOKS")
+                groups.forEach { groupName ->
+                    val services = TrackerServiceId.entries.filter { it.categoryGroup == groupName }
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = groupName,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                            color = TextSecondary
+                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                        ) {
+                            services.forEachIndexed { index, svc ->
+                                val connected = isServiceConnected(svc, tokens)
+                                val verState = verifiedNames[svc]
+                                val statusSubtitle = when {
+                                    !connected -> "Not connected"
+                                    verState is VerificationState.Verified -> "Connected · ${verState.username}"
+                                    verState is VerificationState.Checking -> "Verifying account..."
+                                    verState is VerificationState.Failed -> "Needs attention · ${verState.message}"
+                                    else -> "Connected"
+                                }
+                                TrackerGroupedRow(
+                                    code = svc.code,
+                                    title = svc.title,
+                                    subtitle = statusSubtitle,
+                                    isConnected = connected,
+                                    onClick = { selectedService = svc }
+                                )
+                                if (index < services.lastIndex) {
+                                    HorizontalDivider(color = GlassBorder, thickness = 0.5.dp, modifier = Modifier.padding(start = 60.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Local Backups & File Imports
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "LOCAL BACKUPS & IMPORTS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp,
+                        color = TextSecondary
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(DarkSurfaceElevated)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                    ) {
+                        TrackerGroupedRow(
+                            code = "CSV",
+                            title = "Goodreads & StoryGraph CSV",
+                            subtitle = if (isImportingLocal) "Importing..." else "Import books, shelves, ratings & pages",
+                            isConnected = false,
+                            onClick = { goodreadsCsvPicker.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*")) }
+                        )
+                        HorizontalDivider(color = GlassBorder, thickness = 0.5.dp, modifier = Modifier.padding(start = 60.dp))
+                        TrackerGroupedRow(
+                            code = "LBX",
+                            title = "Letterboxd CSV",
+                            subtitle = "Import movies & ratings from Letterboxd export",
+                            isConnected = false,
+                            onClick = { letterboxdCsvPicker.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*")) }
+                        )
+                        HorizontalDivider(color = GlassBorder, thickness = 0.5.dp, modifier = Modifier.padding(start = 60.dp))
+                        TrackerGroupedRow(
+                            code = "XML",
+                            title = "MyAnimeList XML Export",
+                            subtitle = "Import exported MAL anime or manga list",
+                            isConnected = false,
+                            onClick = { malXmlPicker.launch(arrayOf("text/xml", "application/xml", "text/*", "*/*")) }
+                        )
+                        HorizontalDivider(color = GlassBorder, thickness = 0.5.dp, modifier = Modifier.padding(start = 60.dp))
+                        TrackerGroupedRow(
+                            code = "BAK",
+                            title = "OmniTrack Backup (.omnibk)",
+                            subtitle = "Full compressed library, art & settings restore",
+                            isConnected = false,
+                            onClick = { showBackupRestoreSheet = true }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+            } else {
+                // Per-Account Detail View
+                TrackerAccountDetailView(
+                    service = activeService,
+                    tokens = tokens,
+                    verificationState = verifiedNames[activeService] ?: VerificationState.Idle,
+                    onBack = { selectedService = null },
+                    onRefreshCheck = { refreshVerification(activeService, tokens) },
+                    onLaunchOAuth = {
+                        when (activeService) {
+                            TrackerServiceId.ANILIST -> {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token")
+                                    )
+                                )
+                            }
+                            TrackerServiceId.MAL -> {
+                                scope.launch {
+                                    val verifier = PkceUtil.generateCodeVerifier()
+                                    TrackerAccountVerifier.pendingMalVerifier = verifier
+                                    tokenManager.saveMalVerifier(verifier)
+                                    val customMal = customMalClientId.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
+                                    val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
+                                    val redirectUri = if (customMal != null) "omnitrack://auth/mal" else "chimahon://myanimelist-auth"
+                                    val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri"
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            }
+                            TrackerServiceId.TRAKT -> {
+                                scope.launch {
+                                    val effectiveClientId = customTraktClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
+                                    val verifier = TrackerAccountVerifier.generatePkceVerifier()
+                                    val challenge = TrackerAccountVerifier.generatePkceS256Challenge(verifier)
+                                    TrackerAccountVerifier.pendingTraktVerifier = verifier
+                                    tokenManager.saveTraktVerifier(verifier)
+                                    val authUri = Uri.parse(
+                                        "https://trakt.tv/oauth/authorize?response_type=code&client_id=$effectiveClientId&redirect_uri=omnitrack://auth/trakt&code_challenge=$challenge&code_challenge_method=S256"
+                                    )
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, authUri))
+                                }
+                            }
+                            TrackerServiceId.SIMKL -> {
+                                scope.launch {
+                                    val codeInfo = TrackerAccountVerifier.requestSimklPinCode()
+                                    if (codeInfo != null) {
+                                        simklPinInfo = codeInfo
+                                        showSimklPinDialog = true
+                                    } else {
+                                        Toast.makeText(context, "Failed to generate SIMKL PIN", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            TrackerServiceId.BANGUMI -> {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://bgm.tv/oauth/authorize?client_id=bgm31586666817a5d03b&response_type=code&redirect_uri=komikku://bangumi-auth")
+                                    )
+                                )
+                            }
+                            TrackerServiceId.COMICK -> {
+                                scope.launch {
+                                    val pkce = PkceUtil.generateS256Codes()
+                                    TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
+                                    tokenManager.saveComickVerifier(pkce.codeVerifier)
+                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256"
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                }
+                            }
+                            else -> {}
+                        }
                     },
-                    enabled = !isImportingCsv,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentGold.copy(alpha = 0.16f),
-                        contentColor = AccentGold,
-                        disabledContainerColor = Color.White.copy(alpha = 0.06f),
-                        disabledContentColor = TextMuted
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    if (isImportingCsv) {
-                        CircularProgressIndicator(
-                            color = AccentGold,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Importing CSV...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.CloudDownload,
-                            contentDescription = null,
-                            tint = AccentGold,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Select CSV Export File", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    onTraktDeviceCode = {
+                        scope.launch {
+                            val codeInfo = TrackerAccountVerifier.requestTraktDeviceCode(customTraktClientId)
+                            if (codeInfo != null) {
+                                traktDeviceInfo = codeInfo
+                                showTraktDeviceDialog = true
+                            } else {
+                                Toast.makeText(context, "Could not request Trakt TV code", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onSaveManualToken = { tokenInput ->
+                        scope.launch {
+                            val clean = tokenInput.trim()
+                            when (activeService) {
+                                TrackerServiceId.VNDB -> tokenManager.saveVndbToken(clean)
+                                TrackerServiceId.TMDB -> tokenManager.saveTmdbToken(clean)
+                                TrackerServiceId.HARDCOVER -> tokenManager.saveHardcoverToken(clean)
+                                TrackerServiceId.ANILIST -> tokenManager.saveAnilistToken(clean)
+                                TrackerServiceId.MAL -> tokenManager.saveMalToken(clean)
+                                TrackerServiceId.TRAKT -> tokenManager.saveTraktToken(clean)
+                                TrackerServiceId.SIMKL -> tokenManager.saveSimklToken(clean)
+                                TrackerServiceId.BANGUMI -> tokenManager.saveBangumiToken(clean)
+                                TrackerServiceId.COMICK -> tokenManager.saveComickToken(clean)
+                                TrackerServiceId.STEAM -> {}
+                            }
+                            Toast.makeText(context, "${activeService.title} token saved", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onSaveSteam = { apiKey, steamIdInput ->
+                        scope.launch {
+                            val resolved = TrackerAccountVerifier.resolveSteamId(steamIdInput, apiKey) ?: steamIdInput.trim()
+                            tokenManager.saveSteamApiKey(apiKey.trim())
+                            tokenManager.saveSteamId64(resolved)
+                            Toast.makeText(context, "Steam credentials verified & saved", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onImportLibrary = {
+                        when (activeService) {
+                            TrackerServiceId.ANILIST -> syncEngine.importAniListLibrary {}
+                            TrackerServiceId.MAL -> syncEngine.importMalLibrary {}
+                            TrackerServiceId.TRAKT -> syncEngine.importTraktLibrary {}
+                            TrackerServiceId.SIMKL -> syncEngine.importSimklLibrary {}
+                            TrackerServiceId.BANGUMI -> syncEngine.importBangumiLibrary {}
+                            TrackerServiceId.VNDB -> syncEngine.importVndbLibrary {}
+                            TrackerServiceId.HARDCOVER -> syncEngine.importHardcoverLibraryDetailed {}
+                            TrackerServiceId.STEAM -> syncEngine.importSteamLibraryDetailed {}
+                            TrackerServiceId.COMICK, TrackerServiceId.TMDB -> null
+                        }
+                    },
+                    onSyncNow = {
+                        scope.launch {
+                            try {
+                                syncEngine.drainQueue()
+                                Toast.makeText(context, "Synced queued changes", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    onDisconnect = {
+                        scope.launch {
+                            when (activeService) {
+                                TrackerServiceId.ANILIST -> tokenManager.saveAnilistToken(null)
+                                TrackerServiceId.MAL -> tokenManager.saveMalToken(null)
+                                TrackerServiceId.TRAKT -> tokenManager.saveTraktToken(null)
+                                TrackerServiceId.SIMKL -> tokenManager.saveSimklToken(null)
+                                TrackerServiceId.BANGUMI -> tokenManager.saveBangumiToken(null)
+                                TrackerServiceId.COMICK -> tokenManager.saveComickToken(null)
+                                TrackerServiceId.VNDB -> tokenManager.saveVndbToken(null)
+                                TrackerServiceId.TMDB -> tokenManager.saveTmdbToken(null)
+                                TrackerServiceId.HARDCOVER -> tokenManager.saveHardcoverToken(null)
+                                TrackerServiceId.STEAM -> {
+                                    tokenManager.saveSteamApiKey(null)
+                                    tokenManager.saveSteamId64(null)
+                                }
+                            }
+                            Toast.makeText(context, "${activeService.title} disconnected", Toast.LENGTH_SHORT).show()
+                        }
                     }
-                }
+                )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
-
 
     // SIMKL PIN Code Dialog
     if (showSimklPinDialog && simklPinInfo != null) {
@@ -768,7 +615,7 @@ fun TrackerAccountsSheet(
                 val token = TrackerAccountVerifier.pollSimklPinToken(info.userCode, info.deviceCode)
                 if (!token.isNullOrBlank()) {
                     tokenManager.saveSimklToken(token)
-                    Toast.makeText(context, "SIMKL connected successfully!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "SIMKL connected", Toast.LENGTH_LONG).show()
                     isPollingSimkl = false
                     showSimklPinDialog = false
                     break
@@ -776,106 +623,25 @@ fun TrackerAccountsSheet(
             }
         }
 
-        androidx.compose.ui.window.Dialog(onDismissRequest = {
-            isPollingSimkl = false
-            showSimklPinDialog = false
-        }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF00E676).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tv,
-                        contentDescription = null,
-                        tint = Color(0xFF00E676),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                Text(
-                    text = "Authorize on SIMKL",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-
-                Text(
-                    text = "Enter this code at simkl.com/pin (or tap Open Link below):",
-                    fontSize = 12.sp,
-                    color = TextMuted,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(AmoledBlack)
-                        .border(1.dp, Color(0xFF00E676).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                        .padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = info.userCode,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF00E676),
-                        letterSpacing = 6.sp,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("SIMKL PIN", info.userCode))
-                            Toast.makeText(context, "Code copied!", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy", color = TextPrimary, fontSize = 12.sp)
-                    }
-
-                    Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Open Link", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+        PinAuthorizeDialog(
+            title = "Authorize on SIMKL",
+            instruction = "Enter this code at simkl.com/pin:",
+            codeText = info.userCode,
+            verifyUrl = info.verificationUrl,
+            onCopy = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("SIMKL PIN", info.userCode))
+                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+            },
+            onOpenUrl = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))) },
+            onDismiss = {
+                isPollingSimkl = false
+                showSimklPinDialog = false
             }
-        }
+        )
     }
 
-    // Trakt.tv Device Code Dialog
+    // Trakt Device Code Dialog
     if (showTraktDeviceDialog && traktDeviceInfo != null) {
         val info = traktDeviceInfo!!
         LaunchedEffect(info) {
@@ -889,7 +655,7 @@ fun TrackerAccountsSheet(
                 )
                 if (!token.isNullOrBlank()) {
                     tokenManager.saveTraktToken(token)
-                    Toast.makeText(context, "Trakt.tv connected successfully!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Trakt.tv connected", Toast.LENGTH_LONG).show()
                     isPollingTrakt = false
                     showTraktDeviceDialog = false
                     break
@@ -897,103 +663,22 @@ fun TrackerAccountsSheet(
             }
         }
 
-        androidx.compose.ui.window.Dialog(onDismissRequest = {
-            isPollingTrakt = false
-            showTraktDeviceDialog = false
-        }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFED1C24).copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tv,
-                        contentDescription = null,
-                        tint = Color(0xFFED1C24),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                Text(
-                    text = "Authorize on Trakt.tv",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-
-                Text(
-                    text = "Enter this 8-character code at trakt.tv/activate:",
-                    fontSize = 12.sp,
-                    color = TextMuted,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(AmoledBlack)
-                        .border(1.dp, Color(0xFFED1C24).copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                        .padding(vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = info.userCode,
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFFED1C24),
-                        letterSpacing = 4.sp,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Trakt Code", info.userCode))
-                            Toast.makeText(context, "Code copied!", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Copy", color = TextPrimary, fontSize = 12.sp)
-                    }
-
-                    Button(
-                        onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))
-                            context.startActivity(intent)
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFED1C24)),
-                        shape = RoundedCornerShape(14.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Open Link", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
+        PinAuthorizeDialog(
+            title = "Authorize on Trakt.tv",
+            instruction = "Enter this 8-character code at trakt.tv/activate:",
+            codeText = info.userCode,
+            verifyUrl = info.verificationUrl,
+            onCopy = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Trakt Code", info.userCode))
+                Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
+            },
+            onOpenUrl = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.verificationUrl))) },
+            onDismiss = {
+                isPollingTrakt = false
+                showTraktDeviceDialog = false
             }
-        }
+        )
     }
 
     if (showApiKeyConfigSheet) {
@@ -1002,778 +687,560 @@ fun TrackerAccountsSheet(
             onDismiss = { showApiKeyConfigSheet = false }
         )
     }
-}
 
-@Composable
-private fun OAuthDirectTrackerCard(
-    title: String,
-    subtitle: String,
-    accentColor: Color,
-    initialToken: String,
-    oauthUrl: String? = null,
-    oauthButtonLabel: String = "1-Tap Log In",
-    verifyFn: suspend (String) -> VerificationState,
-    onDisconnect: () -> Unit,
-    customActionButton: (@Composable () -> Unit)? = null,
-    developerSettingsContent: (@Composable () -> Unit)? = null
-) {
-    val context = LocalContext.current
-    var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
-
-    LaunchedEffect(initialToken) {
-        if (initialToken.isNotBlank()) {
-            verificationState = VerificationState.Checking
-            verificationState = verifyFn(initialToken.trim())
-        } else {
-            verificationState = VerificationState.Idle
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 15.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 11.5.sp,
-                    color = TextMuted
-                )
-            }
-
-            // Real Live Verification Status Pill
-            when (val state = verificationState) {
-                is VerificationState.Checking -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color = AccentArctic,
-                            strokeWidth = 1.5.dp,
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Text(text = "Verifying...", fontSize = 9.5.sp, color = TextMuted)
-                    }
-                }
-                is VerificationState.Verified -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AccentJade.copy(alpha = 0.12f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(AccentJade)
-                        )
-                        Text(
-                            text = "Verified as ${state.username}",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentJade
-                        )
-                    }
-                }
-                is VerificationState.Failed -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFEF4444))
-                        )
-                        Text(
-                            text = "Session expired",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFEF4444)
-                        )
-                    }
-                }
-                is VerificationState.Idle -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(TextMuted)
-                        )
-                        Text(
-                            text = "Not Connected",
-                            fontSize = 10.5.sp,
-                            color = TextMuted
-                        )
-                    }
-                }
-            }
-        }
-
-        // Direct Actions Only — ZERO TEXT FIELD!
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (initialToken.isBlank()) {
-                if (customActionButton != null) {
-                    customActionButton()
-                } else if (oauthUrl != null) {
-                    Button(
-                        onClick = {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(oauthUrl))
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = accentColor),
-                        shape = RoundedCornerShape(999.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(text = oauthButtonLabel, color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            } else {
-                Button(
-                    onClick = onDisconnect,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(999.dp)
-                ) {
-                    Text(text = "Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        if (developerSettingsContent != null) {
-            var showDevKeys by remember { mutableStateOf(false) }
-
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { showDevKeys = !showDevKeys }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = if (showDevKeys) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Custom Developer Credentials",
-                    fontSize = 11.5.sp,
-                    color = TextMuted,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            if (showDevKeys) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(AmoledBlack.copy(alpha = 0.5f))
-                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    developerSettingsContent()
-                }
-            }
-        }
+    if (showBackupRestoreSheet) {
+        BackupRestoreSheet(
+            onDismiss = { showBackupRestoreSheet = false }
+        )
     }
 }
 
+private fun isServiceConnected(service: TrackerServiceId, tokens: TrackerTokens): Boolean = when (service) {
+    TrackerServiceId.ANILIST -> !tokens.anilistToken.isNullOrBlank()
+    TrackerServiceId.MAL -> !tokens.malToken.isNullOrBlank()
+    TrackerServiceId.BANGUMI -> !tokens.bangumiToken.isNullOrBlank()
+    TrackerServiceId.COMICK -> !tokens.comickToken.isNullOrBlank()
+    TrackerServiceId.TRAKT -> !tokens.traktToken.isNullOrBlank()
+    TrackerServiceId.SIMKL -> !tokens.simklToken.isNullOrBlank()
+    TrackerServiceId.TMDB -> !tokens.tmdbToken.isNullOrBlank()
+    TrackerServiceId.STEAM -> !tokens.steamApiKey.isNullOrBlank() && !tokens.steamId64.isNullOrBlank()
+    TrackerServiceId.VNDB -> !tokens.vndbToken.isNullOrBlank()
+    TrackerServiceId.HARDCOVER -> !tokens.hardcoverToken.isNullOrBlank()
+}
+
 @Composable
-private fun ManualTokenTrackerCard(
+private fun TrackerGroupedRow(
+    code: String,
     title: String,
     subtitle: String,
-    accentColor: Color,
-    initialToken: String,
-    tokenCreationUrl: String? = null,
-    verifyFn: suspend (String) -> VerificationState,
-    onSave: (String) -> Unit,
-    onDisconnect: () -> Unit,
-    extraBottomContent: (@Composable () -> Unit)? = null
+    isConnected: Boolean,
+    onClick: () -> Unit
 ) {
-    val context = LocalContext.current
-    var textValue by remember(initialToken) { mutableStateOf(initialToken) }
-    var hasJustSaved by remember { mutableStateOf(false) }
-    var isRevealed by remember { mutableStateOf(false) }
-    var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
-
-    LaunchedEffect(initialToken) {
-        if (initialToken.isNotBlank()) {
-            verificationState = VerificationState.Checking
-            verificationState = verifyFn(initialToken.trim())
-        } else {
-            verificationState = VerificationState.Idle
-        }
-    }
-
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 11.5.sp,
-                    color = TextMuted
-                )
-            }
-
-            // Real Live Verification Status Pill
-            when (val state = verificationState) {
-                is VerificationState.Checking -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            color = AccentArctic,
-                            strokeWidth = 1.5.dp,
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Text(text = "Verifying...", fontSize = 9.5.sp, color = TextMuted)
-                    }
-                }
-                is VerificationState.Verified -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AccentJade.copy(alpha = 0.12f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(AccentJade)
-                        )
-                        Text(
-                            text = "Verified as ${state.username}",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AccentJade
-                        )
-                    }
-                }
-                is VerificationState.Failed -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFEF4444))
-                        )
-                        Text(
-                            text = "Invalid token",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFEF4444)
-                        )
-                    }
-                }
-                is VerificationState.Idle -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(TextMuted)
-                        )
-                        Text(
-                            text = "Not Connected",
-                            fontSize = 10.sp,
-                            color = TextMuted
-                        )
-                    }
-                }
-            }
-        }
-
-        // Token Input Field for User-Supplied Token
-        Row(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(AmoledBlack)
-                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(DarkSurfaceCard)
+                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
         ) {
-            BasicTextField(
-                value = textValue,
-                onValueChange = {
-                    textValue = it
-                    hasJustSaved = false
-                },
-                textStyle = TextStyle(
-                    color = TextPrimary,
-                    fontSize = 12.5.sp,
-                    fontFamily = FontFamily.Monospace
-                ),
-                cursorBrush = SolidColor(accentColor),
-                visualTransformation = if (isRevealed) VisualTransformation.None else PasswordVisualTransformation(),
-                modifier = Modifier.weight(1f),
-                decorationBox = { innerTextField ->
-                    if (textValue.isEmpty()) {
-                        Text(
-                            text = "Paste personal access token...",
-                            color = TextMuted,
-                            fontSize = 12.5.sp
-                        )
-                    }
-                    innerTextField()
-                }
+            Text(
+                text = code,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isConnected) AccentGold else TextSecondary
             )
-
-            IconButton(
-                onClick = { isRevealed = !isRevealed },
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    imageVector = if (isRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                    contentDescription = null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
         }
 
-        // Actions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (tokenCreationUrl != null && initialToken.isBlank()) {
-                Button(
-                    onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(tokenCreationUrl))
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.08f)),
-                    shape = RoundedCornerShape(999.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.OpenInBrowser, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Create Token", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-
-            if (initialToken.isNotBlank()) {
-                Button(
-                    onClick = {
-                        hasJustSaved = false
-                        textValue = ""
-                        onDisconnect()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(999.dp)
-                ) {
-                    Text(text = "Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-
-            val isVerified = verificationState is VerificationState.Verified
-            val isSaved = hasJustSaved ||
-                (initialToken.isNotBlank() && (textValue.trim() == initialToken.trim() || textValue.isBlank())) ||
-                (isVerified && (initialToken.isNotBlank() || hasJustSaved || textValue.trim() == initialToken.trim()))
-
-            Button(
-                onClick = {
-                    hasJustSaved = true
-                    textValue = textValue.trim()
-                    onSave(textValue.trim())
-                },
-                enabled = !isSaved && textValue.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = accentColor,
-                    contentColor = AmoledBlack,
-                    disabledContainerColor = Color.White.copy(alpha = 0.08f),
-                    disabledContentColor = TextMuted
-                ),
-                shape = RoundedCornerShape(999.dp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (isConnected) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(AccentGold)
+                    )
+                }
                 Text(
-                    text = if (isSaved) "Saved" else "Save Token",
+                    text = subtitle,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        extraBottomContent?.invoke()
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = TextSecondary,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
 @Composable
-private fun SteamTrackerCard(
-    initialApiKey: String,
-    initialSteamId64: String,
-    onSave: (String, String) -> Unit,
-    onDisconnect: () -> Unit,
-    onImportLibrary: (suspend () -> com.omnitrack.app.data.sync.SteamImportSummary)? = null
+private fun TrackerAccountDetailView(
+    service: TrackerServiceId,
+    tokens: TrackerTokens,
+    verificationState: VerificationState,
+    onBack: () -> Unit,
+    onRefreshCheck: () -> Unit,
+    onLaunchOAuth: () -> Unit,
+    onTraktDeviceCode: () -> Unit,
+    onSaveManualToken: (String) -> Unit,
+    onSaveSteam: (String, String) -> Unit,
+    onImportLibrary: suspend () -> TrackerImportResult?,
+    onSyncNow: () -> Unit,
+    onDisconnect: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var apiKeyText by remember(initialApiKey) { mutableStateOf(initialApiKey) }
-    var steamIdText by remember(initialSteamId64) { mutableStateOf(initialSteamId64) }
-    var isApiKeyRevealed by remember { mutableStateOf(false) }
-    var isImportingLibrary by remember { mutableStateOf(false) }
-    var verificationState by remember { mutableStateOf<VerificationState>(VerificationState.Idle) }
+    val connected = isServiceConnected(service, tokens)
 
-    LaunchedEffect(initialApiKey, initialSteamId64) {
-        if (initialApiKey.isNotBlank() && initialSteamId64.isNotBlank()) {
-            verificationState = VerificationState.Checking
-            verificationState = TrackerAccountVerifier.verifySteam(initialApiKey.trim(), initialSteamId64.trim())
-        } else {
-            verificationState = VerificationState.Idle
+    var isImporting by remember(service) { mutableStateOf(false) }
+    var lastImportResult by remember(service) { mutableStateOf<TrackerImportResult?>(null) }
+
+    var manualTokenInput by remember(service) { mutableStateOf("") }
+    var showTokenText by remember { mutableStateOf(false) }
+
+    var steamKeyInput by remember(service, tokens.steamApiKey) { mutableStateOf(tokens.steamApiKey.orEmpty()) }
+    var steamIdInput by remember(service, tokens.steamId64) { mutableStateOf(tokens.steamId64.orEmpty()) }
+    var showSteamKey by remember { mutableStateOf(false) }
+
+    // Back Header
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Back",
+                tint = TextPrimary
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = service.title,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = service.subtitle,
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
+        }
+        if (connected) {
+            IconButton(onClick = onRefreshCheck, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Re-check connection",
+                    tint = AccentGold,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 
-    val isConnected = initialApiKey.isNotBlank() && initialSteamId64.isNotBlank()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, GlassBorder, RoundedCornerShape(24.dp))
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    // Connected Summary Panel
+    if (connected) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(AccentGold)
+                )
+                val statusLabel = when (verificationState) {
+                    is VerificationState.Verified -> "Signed in as ${verificationState.username}"
+                    is VerificationState.Checking -> "Verifying account..."
+                    is VerificationState.Failed -> "Verification warning: ${verificationState.message}"
+                    VerificationState.Idle -> "Connected"
+                }
                 Text(
-                    text = "Steam",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
+                    text = statusLabel,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = TextPrimary
                 )
+            }
+
+            if (service == TrackerServiceId.TMDB || service == TrackerServiceId.COMICK) {
                 Text(
-                    text = "Video game library & playtime sync via Web API",
-                    fontSize = 11.5.sp,
-                    color = TextMuted
+                    text = if (service == TrackerServiceId.TMDB) {
+                        "Used automatically for Movie & Show metadata, ratings and screen adaptations."
+                    } else {
+                        "Connected for chapter progress syncing while reading Manga."
+                    },
+                    fontSize = 12.sp,
+                    color = TextSecondary
                 )
-            }
-
-            when (val state = verificationState) {
-                is VerificationState.Checking -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        CircularProgressIndicator(color = Color(0xFF66C0F4), strokeWidth = 1.5.dp, modifier = Modifier.size(10.dp))
-                        Text(text = "Verifying...", fontSize = 9.5.sp, color = TextMuted)
-                    }
-                }
-                is VerificationState.Verified -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(AccentJade.copy(alpha = 0.12f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(AccentJade))
-                        Text(text = "Verified as ${state.username}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentJade)
-                    }
-                }
-                is VerificationState.Failed -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.12f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFEF4444)))
-                        Text(text = "Invalid credentials", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-                    }
-                }
-                is VerificationState.Idle -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
-                    ) {
-                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(TextMuted))
-                        Text(text = "Not Connected", fontSize = 10.sp, color = TextMuted)
-                    }
-                }
-            }
-        }
-
-        // Field 1: SteamID64
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Steam Username, Profile URL, or 17-digit SteamID64", fontSize = 11.sp, color = TextMuted)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(AmoledBlack)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BasicTextField(
-                    value = steamIdText,
-                    onValueChange = { steamIdText = it },
-                    textStyle = TextStyle(
-                        color = TextPrimary,
-                        fontSize = 12.5.sp,
-                        fontFamily = FontFamily.Monospace
+            } else {
+                Button(
+                    onClick = {
+                        if (!isImporting) {
+                            scope.launch {
+                                isImporting = true
+                                lastImportResult = onImportLibrary()
+                                isImporting = false
+                            }
+                        }
+                    },
+                    enabled = !isImporting,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentGold,
+                        contentColor = AmoledBlack
                     ),
-                    cursorBrush = SolidColor(Color(0xFF66C0F4)),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        if (steamIdText.isEmpty()) Text("Username, profile link, or 76561198...", color = TextMuted, fontSize = 12.sp)
-                        inner()
-                    }
-                )
-            }
-        }
-
-        // Field 2: Steam Web API Key
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("32-Character Steam Web API Key", fontSize = 11.sp, color = TextMuted)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(AmoledBlack)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BasicTextField(
-                    value = apiKeyText,
-                    onValueChange = { apiKeyText = it },
-                    textStyle = TextStyle(
-                        color = TextPrimary,
-                        fontSize = 12.5.sp,
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    cursorBrush = SolidColor(Color(0xFF66C0F4)),
-                    visualTransformation = if (isApiKeyRevealed) VisualTransformation.None else PasswordVisualTransformation(),
-                    modifier = Modifier.weight(1f),
-                    decorationBox = { inner ->
-                        if (apiKeyText.isEmpty()) Text("Paste 32-character API key...", color = TextMuted, fontSize = 12.sp)
-                        inner()
-                    }
-                )
-
-                IconButton(
-                    onClick = { isApiKeyRevealed = !isApiKeyRevealed },
-                    modifier = Modifier.size(24.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(46.dp)
                 ) {
+                    if (isImporting) {
+                        CircularProgressIndicator(
+                            color = AmoledBlack,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Importing ${service.title} Library...", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Import Full Library", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            lastImportResult?.let { res ->
+                val summaryMsg = res.error
+                    ?: "Imported ${res.imported} new · Updated ${res.updated} · Up to date ${res.skipped}"
+                Text(
+                    text = summaryMsg,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (res.error != null) Color(0xFFFCA5A5) else AccentGold
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onSyncNow,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GlassBorder),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Sync Now", color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                OutlinedButton(
+                    onClick = onDisconnect,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF7F1D1D)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Sign Out", color = Color(0xFFFCA5A5), fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
+    // Connect / Credentials Form
+    if (service == TrackerServiceId.STEAM) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = if (connected) "Update Steam Credentials" else "Connect Steam",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = "Make sure Steam Profile & Game Details are public so owned games and playtime can import.",
+                fontSize = 12.sp,
+                color = TextSecondary
+            )
+
+            DetailTextInputRow(
+                label = "Steam Web API Key",
+                value = steamKeyInput,
+                onValueChange = { steamKeyInput = it },
+                placeholder = "32-character key from steamcommunity.com/dev/apikey",
+                isMasked = !showSteamKey,
+                onToggleMask = { showSteamKey = !showSteamKey }
+            )
+
+            DetailTextInputRow(
+                label = "SteamID64 or Profile URL",
+                value = steamIdInput,
+                onValueChange = { steamIdInput = it },
+                placeholder = "76561198... or custom profile name",
+                isMasked = false,
+                onToggleMask = null
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://steamcommunity.com/dev/apikey")))
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GlassBorder),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Get API Key", color = TextPrimary, fontSize = 12.sp)
+                }
+                Button(
+                    onClick = { onSaveSteam(steamKeyInput, steamIdInput) },
+                    enabled = steamKeyInput.isNotBlank() && steamIdInput.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Save & Verify", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    } else if (!connected) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            val supportsBrowserSignIn = service in listOf(
+                TrackerServiceId.ANILIST,
+                TrackerServiceId.MAL,
+                TrackerServiceId.TRAKT,
+                TrackerServiceId.SIMKL,
+                TrackerServiceId.BANGUMI,
+                TrackerServiceId.COMICK
+            )
+
+            if (supportsBrowserSignIn) {
+                Button(
+                    onClick = onLaunchOAuth,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(46.dp)
+                ) {
+                    Text(
+                        text = if (service == TrackerServiceId.SIMKL) "Connect with SIMKL PIN" else "Sign in with ${service.title}",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (service == TrackerServiceId.TRAKT) {
+                    OutlinedButton(
+                        onClick = onTraktDeviceCode,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, GlassBorder),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Use 8-Character TV Activation Code", color = TextPrimary, fontSize = 12.5.sp)
+                    }
+                }
+            } else {
+                val tokenUrl = when (service) {
+                    TrackerServiceId.VNDB -> "https://vndb.org/u/tokens"
+                    TrackerServiceId.TMDB -> "https://www.themoviedb.org/settings/api"
+                    TrackerServiceId.HARDCOVER -> "https://hardcover.app/account/api"
+                    else -> ""
+                }
+                DetailTextInputRow(
+                    label = "${service.title} Personal Token",
+                    value = manualTokenInput,
+                    onValueChange = { manualTokenInput = it },
+                    placeholder = "Paste personal API token",
+                    isMasked = !showTokenText,
+                    onToggleMask = { showTokenText = !showTokenText }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (tokenUrl.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(tokenUrl))) },
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, GlassBorder),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Create Token", color = TextPrimary, fontSize = 12.sp)
+                        }
+                    }
+                    Button(
+                        onClick = { onSaveManualToken(manualTokenInput) },
+                        enabled = manualTokenInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Save & Connect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(14.dp))
+}
+
+@Composable
+private fun DetailTextInputRow(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    isMasked: Boolean,
+    onToggleMask: (() -> Unit)?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextSecondary)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(DarkSurfaceCard)
+                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                singleLine = true,
+                visualTransformation = if (isMasked) PasswordVisualTransformation() else VisualTransformation.None,
+                modifier = Modifier.weight(1f),
+                textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                cursorBrush = SolidColor(AccentGold),
+                decorationBox = { inner ->
+                    if (value.isEmpty()) {
+                        Text(placeholder, color = TextSecondary.copy(alpha = 0.6f), fontSize = 12.sp)
+                    }
+                    inner()
+                }
+            )
+            if (onToggleMask != null) {
+                IconButton(onClick = onToggleMask, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        imageVector = if (isApiKeyRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        imageVector = if (isMasked) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = null,
-                        tint = TextMuted,
+                        tint = TextSecondary,
                         modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
+    }
+}
 
-        // Actions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
+@Composable
+private fun PinAuthorizeDialog(
+    title: String,
+    instruction: String,
+    codeText: String,
+    verifyUrl: String,
+    onCopy: () -> Unit,
+    onOpenUrl: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(20.dp))
+                .padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (!isConnected) {
-                Button(
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://steamcommunity.com/dev/apikey"))
-                        context.startActivity(intent)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF66C0F4)),
-                    shape = RoundedCornerShape(999.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Link, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Get API Key", color = AmoledBlack, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-
-            if (isConnected) {
-                Button(
-                    onClick = {
-                        apiKeyText = ""
-                        steamIdText = ""
-                        onDisconnect()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    shape = RoundedCornerShape(999.dp)
-                ) {
-                    Text("Disconnect", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-
-            val isUnchanged = isConnected && apiKeyText.trim() == initialApiKey.trim() && steamIdText.trim() == initialSteamId64.trim()
-            Button(
-                onClick = { onSave(apiKeyText.trim(), steamIdText.trim()) },
-                enabled = !isUnchanged && apiKeyText.isNotBlank() && steamIdText.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF66C0F4),
-                    contentColor = AmoledBlack,
-                    disabledContainerColor = Color.White.copy(alpha = 0.08f),
-                    disabledContentColor = TextMuted
-                ),
-                shape = RoundedCornerShape(999.dp)
+            Text(
+                text = title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextPrimary
+            )
+            Text(
+                text = "$instruction ($verifyUrl)",
+                fontSize = 12.sp,
+                color = TextSecondary,
+                textAlign = TextAlign.Center
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AmoledBlack)
+                    .border(1.dp, AccentGold.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                    .padding(vertical = 14.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (isUnchanged) "Saved" else "Save Credentials",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    text = codeText,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    color = AccentGold,
+                    letterSpacing = 4.sp,
+                    fontFamily = FontFamily.Monospace
                 )
             }
-        }
-
-        if (isConnected && onImportLibrary != null) {
-            Button(
-                onClick = {
-                    if (!isImportingLibrary) {
-                        scope.launch {
-                            isImportingLibrary = true
-                            val summary = onImportLibrary()
-                            isImportingLibrary = false
-                            val msg = summary.error ?: "Imported ${summary.imported} new games, updated ${summary.updated}"
-                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                        }
-                    }
-                },
-                enabled = !isImportingLibrary,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF66C0F4).copy(alpha = 0.16f),
-                    contentColor = Color(0xFF66C0F4),
-                    disabledContainerColor = Color.White.copy(alpha = 0.06f),
-                    disabledContentColor = TextMuted
-                ),
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (isImportingLibrary) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF66C0F4),
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Importing Steam Library...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.CloudDownload,
-                        contentDescription = null,
-                        tint = Color(0xFF66C0F4),
-                        modifier = Modifier.size(15.dp)
-                    )
+                OutlinedButton(
+                    onClick = onCopy,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, GlassBorder)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import Steam Library & Playtime", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Copy", color = TextPrimary, fontSize = 12.sp)
+                }
+                Button(
+                    onClick = onOpenUrl,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Open Link", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }

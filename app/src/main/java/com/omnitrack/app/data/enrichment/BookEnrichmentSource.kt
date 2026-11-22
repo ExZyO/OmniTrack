@@ -103,7 +103,8 @@ class BookEnrichmentSource(
 
     suspend fun fetchFullBookData(
         item: MediaItemEntity,
-        hardcoverToken: String
+        hardcoverToken: String,
+        tmdbApiKey: String? = null
     ): BookFullEnrichmentResult? = withContext(Dispatchers.IO) {
         try {
             coroutineScope {
@@ -151,17 +152,25 @@ class BookEnrichmentSource(
                 val poetry = poetryDeferred.await()
                 val reddit = redditDeferred.await()
 
-                val wikidataDeferred = async {
-                    wiki?.wikidataId?.let { fetchWikidataBookMetadata(it) }
-                }
-                val wikidata = wikidataDeferred.await()
-
                 val resolvedTitle = hc?.title ?: ol?.title ?: item.title
                 val resolvedAuthor = authorHint
                     ?: ol?.authorName
                     ?: hc?.authorName
                     ?: appleEbook?.artistName
                     ?: poetry?.author
+
+                val wikidataDeferred = async {
+                    wiki?.wikidataId?.let { fetchWikidataBookMetadata(it, resolvedAuthor) }
+                }
+                val adaptationsDeferred = async {
+                    fetchBookScreenAdaptations(
+                        title = resolvedTitle,
+                        authorHint = resolvedAuthor,
+                        tmdbApiKey = tmdbApiKey
+                    )
+                }
+                val wikidata = wikidataDeferred.await()
+                val adaptations = adaptationsDeferred.await()
 
                 val resolvedWorkId = extractCleanWorkId(item.openLibraryId) ?: ol?.workId
                 val resolvedHardcoverId = item.hardcoverId?.takeIf { it.isNotBlank() } ?: hc?.hardcoverId
@@ -244,7 +253,9 @@ class BookEnrichmentSource(
                     }
                 }.distinctBy { "${it.category}_${it.name.lowercase()}" }
 
-                val bookRelations = wikidata?.relations.orEmpty()
+                val bookRelations = (wikidata?.relations.orEmpty() + adaptations).distinctBy {
+                    "${it.mediaType}_${it.format}_${it.title.lowercase().trim()}"
+                }
 
                 val externalLinks = buildList {
                     resolvedWorkId?.let { wid ->
@@ -864,7 +875,10 @@ class BookEnrichmentSource(
         val relations: List<AnimeRelationItem> = emptyList()
     )
 
-    private suspend fun fetchWikidataBookMetadata(qid: String): WikidataBookMeta? {
+    private suspend fun fetchWikidataBookMetadata(
+        qid: String,
+        authorHint: String? = null
+    ): WikidataBookMeta? {
         val entity = NetworkPacer.withGeneralPacing {
             try {
                 val req = Request.Builder()
@@ -923,34 +937,38 @@ class BookEnrichmentSource(
             }
         }
 
-        val relations = buildList {
+        val relationSpecs = buildList {
             prequelQids.forEachIndexed { idx, id ->
                 labelsMap[id]?.let { label ->
-                    add(
-                        AnimeRelationItem(
-                            id = (8000 + idx).toLong(),
-                            title = label,
-                            relationType = "PREQUEL",
-                            format = "BOOK",
-                            coverUrl = null,
-                            mediaType = MediaType.BOOK
-                        )
-                    )
+                    add(Triple((8000 + idx).toLong(), "PREQUEL", label))
                 }
             }
             sequelQids.forEachIndexed { idx, id ->
                 labelsMap[id]?.let { label ->
-                    add(
-                        AnimeRelationItem(
-                            id = (8100 + idx).toLong(),
-                            title = label,
-                            relationType = "SEQUEL",
-                            format = "BOOK",
-                            coverUrl = null,
-                            mediaType = MediaType.BOOK
-                        )
-                    )
+                    add(Triple((8100 + idx).toLong(), "SEQUEL", label))
                 }
+            }
+        }
+
+        val relations = if (relationSpecs.isEmpty()) {
+            emptyList()
+        } else {
+            coroutineScope {
+                relationSpecs.map { (relId, relType, label) ->
+                    async {
+                        val artwork = resolveBookRelationArtwork(label, authorHint)
+                        AnimeRelationItem(
+                            id = relId,
+                            title = label,
+                            relationType = relType,
+                            format = "BOOK",
+                            coverUrl = artwork?.coverUrl,
+                            mediaType = MediaType.BOOK,
+                            year = artwork?.year,
+                            openLibraryId = artwork?.openLibraryId
+                        )
+                    }
+                }.map { it.await() }
             }
         }
 
@@ -962,6 +980,152 @@ class BookEnrichmentSource(
             seriesName = seriesQids.firstNotNullOfOrNull { labelsMap[it] },
             relations = relations
         )
+    }
+
+    private data class BookRelationArtwork(
+        val coverUrl: String? = null,
+        val openLibraryId: String? = null,
+        val year: Int? = null
+    )
+
+    private suspend fun resolveBookRelationArtwork(
+        title: String,
+        authorHint: String?
+    ): BookRelationArtwork? {
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return null
+
+        suspend fun queryOpenLibrary(includeAuthor: Boolean): BookRelationArtwork? =
+            NetworkPacer.withOpenLibraryPacing {
+                try {
+                    val encTitle = URLEncoder.encode(cleanTitle, "UTF-8")
+                    val encAuthor = if (includeAuthor) {
+                        authorHint?.split(",")?.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
+                            ?.let { "&author=${URLEncoder.encode(it, "UTF-8")}" }.orEmpty()
+                    } else ""
+                    val url = "https://openlibrary.org/search.json?title=$encTitle$encAuthor&limit=5&fields=key,title,first_publish_year,cover_i"
+                    val req = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withOpenLibraryPacing null
+                        val docs = json.parseToJsonElement(resp.body?.string().orEmpty()).obj()
+                            ?.get("docs").arr().orEmpty()
+                        val bestDoc = docs.firstOrNull { el ->
+                            val o = el.obj() ?: return@firstOrNull false
+                            o["title"].str().equals(cleanTitle, ignoreCase = true) &&
+                                (o["cover_i"].intVal() ?: 0) > 0
+                        }.obj() ?: docs.firstOrNull { el ->
+                            (el.obj()?.get("cover_i").intVal() ?: 0) > 0
+                        }.obj() ?: docs.firstOrNull().obj() ?: return@withOpenLibraryPacing null
+
+                        val olId = extractCleanWorkId(bestDoc["key"].str())
+                        val year = bestDoc["first_publish_year"].intVal()
+                        val coverUrl = bestDoc["cover_i"].intVal()?.takeIf { it > 0 }
+                            ?.let { LosslessCoverMapper.toLosslessUrl("https://covers.openlibrary.org/b/id/$it-L.jpg") }
+                        BookRelationArtwork(coverUrl = coverUrl, openLibraryId = olId, year = year)
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    null
+                }
+            }
+
+        var resolved = queryOpenLibrary(includeAuthor = true)
+        if (resolved == null || resolved.coverUrl.isNullOrBlank()) {
+            val noAuthorResolved = queryOpenLibrary(includeAuthor = false)
+            if (noAuthorResolved != null) {
+                resolved = BookRelationArtwork(
+                    coverUrl = resolved?.coverUrl ?: noAuthorResolved.coverUrl,
+                    openLibraryId = resolved?.openLibraryId ?: noAuthorResolved.openLibraryId,
+                    year = resolved?.year ?: noAuthorResolved.year
+                )
+            }
+        }
+        if (resolved?.coverUrl.isNullOrBlank()) {
+            val apple = fetchAppleBooksEntry(cleanTitle, authorHint, mediaType = "ebook")
+                ?: fetchAppleBooksEntry(cleanTitle, null, mediaType = "ebook")
+            if (apple?.coverUrl != null || apple?.releaseYear != null) {
+                resolved = BookRelationArtwork(
+                    coverUrl = apple.coverUrl?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                    openLibraryId = resolved?.openLibraryId,
+                    year = resolved?.year ?: apple.releaseYear?.take(4)?.toIntOrNull()
+                )
+            }
+        }
+        return resolved
+    }
+
+    private suspend fun fetchBookScreenAdaptations(
+        title: String,
+        authorHint: String?,
+        tmdbApiKey: String?
+    ): List<AnimeRelationItem> = NetworkPacer.withTmdbPacing {
+        try {
+            val effectiveKey = tmdbApiKey?.trim()?.takeIf { it.isNotBlank() }
+                ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            val cleanTitle = title.trim()
+            if (cleanTitle.length < 2) return@withTmdbPacing emptyList()
+            val normQuery = cleanTitle.lowercase().replace(Regex("[^a-z0-9 ]"), " ").replace(Regex("\\s+"), " ").trim()
+            if (normQuery.length < 2) return@withTmdbPacing emptyList()
+            val encoded = URLEncoder.encode(cleanTitle, "UTF-8")
+            val req = Request.Builder()
+                .url("https://api.themoviedb.org/3/search/multi?api_key=$effectiveKey&query=$encoded&include_adult=false")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withTmdbPacing emptyList()
+                val results = json.parseToJsonElement(resp.body?.string().orEmpty()).obj()
+                    ?.get("results").arr().orEmpty()
+
+                val isSingleShortWord = !normQuery.contains(" ") && normQuery.length < 6
+                val authorLastName = authorHint?.split(",")?.firstOrNull()?.trim()
+                    ?.split(" ")?.lastOrNull()?.lowercase()?.takeIf { it.length >= 3 }
+
+                results.mapNotNull { el ->
+                    val o = el.obj() ?: return@mapNotNull null
+                    val mediaTypeStr = o["media_type"].str()?.lowercase() ?: return@mapNotNull null
+                    if (mediaTypeStr != "movie" && mediaTypeStr != "tv") return@mapNotNull null
+
+                    val posterPath = o["poster_path"].str() ?: return@mapNotNull null
+                    val resultTitle = (o["title"].str() ?: o["name"].str())?.trim() ?: return@mapNotNull null
+                    val normResult = resultTitle.lowercase().replace(Regex("[^a-z0-9 ]"), " ")
+                        .replace(Regex("\\s+"), " ").trim()
+                    val overviewLower = o["overview"].str().orEmpty().lowercase()
+
+                    val exactMatch = normResult == normQuery
+                    val prefixOrAuthorMatch = normResult.startsWith("$normQuery:") ||
+                        normResult.startsWith("$normQuery ") ||
+                        (authorLastName != null && (authorLastName in normResult || authorLastName in overviewLower) && normQuery in normResult)
+                    val titleMatch = if (isSingleShortWord) {
+                        exactMatch || (normResult.startsWith("$normQuery:") || (authorLastName != null && authorLastName in overviewLower && normQuery in normResult))
+                    } else {
+                        exactMatch || prefixOrAuthorMatch || normQuery in normResult
+                    }
+                    if (!titleMatch) return@mapNotNull null
+
+                    val tmdbId = o["id"].intVal()?.toLong() ?: return@mapNotNull null
+                    val backdropPath = o["backdrop_path"].str()
+                    val year = (o["release_date"].str() ?: o["first_air_date"].str())?.take(4)?.toIntOrNull()
+                    val format = if (mediaTypeStr == "tv") "TV" else "MOVIE"
+                    val targetType = if (mediaTypeStr == "tv") MediaType.SHOW else MediaType.MOVIE
+
+                    AnimeRelationItem(
+                        id = tmdbId,
+                        title = resultTitle,
+                        relationType = "ADAPTATION",
+                        format = format,
+                        coverUrl = "https://image.tmdb.org/t/p/w500$posterPath",
+                        bannerUrl = backdropPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                        mediaType = targetType,
+                        year = year,
+                        tmdbId = tmdbId
+                    )
+                }.distinctBy { "${it.format}_${it.tmdbId}" }.take(4)
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            emptyList()
+        }
     }
 
     private data class AppleBookMatch(

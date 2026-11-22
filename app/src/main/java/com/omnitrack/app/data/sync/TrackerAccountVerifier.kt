@@ -12,6 +12,9 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.concurrent.TimeUnit
 
 sealed class VerificationState {
@@ -46,15 +49,32 @@ object TrackerAccountVerifier {
     private const val DEFAULT_SIMKL_CLIENT_ID = "c9c006c049d34a887a0f744b29f09658e3dce579cf5db98665db4d96e35d036a"
     private const val DEFAULT_SIMKL_CLIENT_SECRET = "50fb0db6ae35c6564a1b4484ffd1d9abe79d139e358bc3417d03fcb68f540f24"
 
+    @Volatile
+    var pendingTraktVerifier: String? = null
+
+    fun generatePkceVerifier(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
+    fun generatePkceS256Challenge(verifier: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(verifier.toByteArray(Charsets.US_ASCII))
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+    }
+
     val TRAKT_CLIENT_ID: String
         get() = customTraktClientId?.takeIf { it.isNotBlank() }
             ?: BuildConfig.TRAKT_CLIENT_ID.takeIf { it.isNotBlank() }
             ?: DEFAULT_TRAKT_CLIENT_ID
 
     val TRAKT_CLIENT_SECRET: String
-        get() = customTraktClientSecret?.takeIf { it.isNotBlank() }
-            ?: BuildConfig.TRAKT_CLIENT_SECRET.takeIf { it.isNotBlank() }
-            ?: DEFAULT_TRAKT_CLIENT_SECRET
+        get() = when {
+            !customTraktClientId.isNullOrBlank() -> customTraktClientSecret?.takeIf { it.isNotBlank() } ?: ""
+            BuildConfig.TRAKT_CLIENT_ID.isNotBlank() -> BuildConfig.TRAKT_CLIENT_SECRET.takeIf { it.isNotBlank() } ?: ""
+            else -> DEFAULT_TRAKT_CLIENT_SECRET
+        }
 
     val MAL_CLIENT_ID: String
         get() = customMalClientId?.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }

@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.detail.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,13 +35,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.model.BookAuthorProfile
+import com.omnitrack.app.ui.components.FormattedRichText
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
 import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.DarkSurfaceElevated
+import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.ui.theme.TextSecondary
 
 @Composable
 fun DetailBookAuthorSection(
     authorProfile: BookAuthorProfile,
     onSelectWork: (RecommendationItem) -> Unit,
+    onOpenAuthorProfile: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var bioExpanded by remember(authorProfile.name) { mutableStateOf(false) }
@@ -51,7 +62,7 @@ fun DetailBookAuthorSection(
             text = "ABOUT THE AUTHOR",
             fontSize = 11.5.sp,
             fontWeight = FontWeight.Bold,
-            color = Color.White.copy(alpha = 0.60f),
+            color = TextSecondary,
             letterSpacing = 1.1.sp,
             modifier = Modifier.padding(horizontal = 20.dp)
         )
@@ -59,7 +70,12 @@ fun DetailBookAuthorSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 20.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                .clickable { onOpenAuthorProfile() }
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -82,7 +98,7 @@ fun DetailBookAuthorSection(
                         text = authorProfile.name.take(1).uppercase(),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.72f)
+                        color = TextPrimary
                     )
                 }
             }
@@ -92,17 +108,30 @@ fun DetailBookAuthorSection(
                     text = authorProfile.name,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White,
+                    color = TextPrimary,
                     maxLines = 2
                 )
                 authorProfile.birthDeath?.takeIf { it.isNotBlank() }?.let { dates ->
                     Text(
                         text = dates,
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.56f)
+                        fontSize = 12.5.sp,
+                        color = TextSecondary
                     )
                 }
+                Text(
+                    text = "View full profile & works",
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = AccentGold
+                )
             }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Open author profile",
+                tint = TextSecondary,
+                modifier = Modifier.size(22.dp)
+            )
         }
 
         authorProfile.bio?.takeIf { it.isNotBlank() }?.let { bio ->
@@ -113,11 +142,11 @@ fun DetailBookAuthorSection(
                     .clickable { bioExpanded = !bioExpanded },
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(
-                    text = bio,
+                FormattedRichText(
+                    rawText = bio,
+                    color = TextSecondary,
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,
-                    color = Color.White.copy(alpha = 0.78f),
                     maxLines = if (bioExpanded) 18 else 3,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -135,7 +164,7 @@ fun DetailBookAuthorSection(
                 text = "MORE BY ${authorProfile.name.uppercase()}",
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.52f),
+                color = TextSecondary,
                 letterSpacing = 0.9.sp,
                 modifier = Modifier.padding(horizontal = 20.dp)
             )

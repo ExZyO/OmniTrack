@@ -1,14 +1,11 @@
 package com.omnitrack.app.ui.screens.settings
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListItemInfo
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -45,7 +40,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,10 +52,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,15 +62,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentJade
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @Composable
 fun ArtworkPriorityScreen(
@@ -173,17 +166,17 @@ fun ArtworkPriorityScreen(
             itemsIndexed(categories) { index, mediaType ->
                 val isSelected = pagerState.currentPage == index
                 val tabBgColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentArctic.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
+                    targetValue = if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f),
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "tabBg"
                 )
                 val tabTextColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentArctic else TextMuted,
+                    targetValue = if (isSelected) AccentGold else TextMuted,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "tabText"
                 )
                 val tabBorderColor by animateColorAsState(
-                    targetValue = if (isSelected) AccentArctic.copy(alpha = 0.40f) else Color.Transparent,
+                    targetValue = if (isSelected) AccentGold.copy(alpha = 0.40f) else Color.Transparent,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "tabBorder"
                 )
@@ -250,131 +243,13 @@ fun ArtworkPriorityScreen(
     }
 }
 
-/**
- * State manager for smooth, multi-row drag and drop reordering inside LazyColumn.
- * Tracks pointer displacement continuously, swaps logical items in real-time,
- * neutralizes layout shifts to keep the dragged item pinned under the finger,
- * and settles smoothly with zero bounce on neighboring rows upon release.
- */
-private class DragDropState(
-    val lazyListState: LazyListState,
-    private val coroutineScope: CoroutineScope,
-    private val onMove: (Int, Int) -> Unit,
-    private val onDragFinished: () -> Unit
-) {
-    var draggedDistance by mutableFloatStateOf(0f)
-        private set
-
-    var draggingItemKey by mutableStateOf<String?>(null)
-        private set
-
-    var draggingItemIndex by mutableStateOf<Int?>(null)
-        private set
-
-    val settleAnimatable = Animatable(0f)
-    var isSettling by mutableStateOf(false)
-        private set
-
-    val isDragging: Boolean
-        get() = draggingItemKey != null || isSettling
-
-    private val currentElement: LazyListItemInfo?
-        get() = draggingItemKey?.let { key ->
-            lazyListState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }
-        }
-
-    fun onStartDrag(key: String, initialIndex: Int) {
-        if (isSettling) return
-        draggingItemKey = key
-        draggingItemIndex = initialIndex
-        draggedDistance = 0f
-    }
-
-    fun onDrag(changeAmount: Float) {
-        if (isSettling) return
-        val currentKey = draggingItemKey ?: return
-        val currentDraggingIdx = draggingItemIndex ?: return
-        draggedDistance += changeAmount
-
-        val currentElem = currentElement ?: return
-
-        // Compute current center position of the dragged item on screen
-        val startOffset = currentElem.offset + draggedDistance
-        val itemCenter = startOffset + currentElem.size / 2f
-
-        // Find target item whose bounds contain this center
-        val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
-        val firstItem = visibleItems.firstOrNull()
-        val lastItem = visibleItems.lastOrNull()
-
-        val targetElement = when {
-            firstItem != null && itemCenter < firstItem.offset + firstItem.size / 2f -> {
-                if (currentDraggingIdx > firstItem.index) firstItem else null
-            }
-            lastItem != null && itemCenter > lastItem.offset + lastItem.size / 2f -> {
-                if (currentDraggingIdx < lastItem.index) lastItem else null
-            }
-            else -> {
-                visibleItems.find { item ->
-                    item.key != currentKey &&
-                    item.index != currentDraggingIdx &&
-                    item.offset <= itemCenter &&
-                    (item.offset + item.size) >= itemCenter
-                }
-            }
-        }
-
-        if (targetElement != null) {
-            val fromIndex = currentDraggingIdx
-            val toIndex = targetElement.index
-            if (fromIndex != toIndex) {
-                onMove(fromIndex, toIndex)
-                draggingItemIndex = toIndex
-                // Adjust dragged distance to neutralize layout jump
-                draggedDistance += currentElem.offset - targetElement.offset
-            }
-        }
-    }
-
-    fun onStopDrag() {
-        if (draggingItemKey == null || isSettling) return
-
-        val currentDistance = draggedDistance
-        if (currentDistance != 0f) {
-            isSettling = true
-            coroutineScope.launch {
-                try {
-                    settleAnimatable.snapTo(currentDistance)
-                    settleAnimatable.animateTo(
-                        targetValue = 0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow
-                        )
-                    )
-                } finally {
-                    draggedDistance = 0f
-                    draggingItemKey = null
-                    draggingItemIndex = null
-                    isSettling = false
-                    onDragFinished()
-                }
-            }
-        } else {
-            draggingItemKey = null
-            draggingItemIndex = null
-            onDragFinished()
-        }
-    }
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryWaterfallList(
     category: MediaType,
     prefManager: PreferenceManager
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val hapticFeedback = LocalHapticFeedback.current
 
     val initialSources by prefManager.getArtSourcePriority(category)
         .collectAsState(initial = PreferenceManager.getDefaultSourcesFor(category))
@@ -386,27 +261,19 @@ private fun CategoryWaterfallList(
     }
 
     val lazyListState = rememberLazyListState()
+    var isDraggingAny by remember { mutableStateOf(false) }
 
-    val dragDropState = remember(category, lazyListState) {
-        DragDropState(
-            lazyListState = lazyListState,
-            coroutineScope = coroutineScope,
-            onMove = { fromIndex, toIndex ->
-                if (fromIndex in currentSources.indices && toIndex in currentSources.indices && fromIndex != toIndex) {
-                    val moved = currentSources.removeAt(fromIndex)
-                    currentSources.add(toIndex, moved)
-                }
-            },
-            onDragFinished = {
-                coroutineScope.launch {
-                    prefManager.updateArtSourcePriority(category, currentSources.toList())
-                }
-            }
-        )
+    val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val fromIdx = currentSources.indexOfFirst { it == from.key }
+        val toIdx = currentSources.indexOfFirst { it == to.key }
+        if (fromIdx >= 0 && toIdx >= 0 && fromIdx != toIdx) {
+            currentSources.apply { add(toIdx, removeAt(fromIdx)) }
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
     }
 
     LaunchedEffect(initialSources) {
-        if (!dragDropState.isDragging && currentSources.toList() != initialSources) {
+        if (!isDraggingAny && currentSources.toList() != initialSources) {
             currentSources.clear()
             currentSources.addAll(initialSources)
         }
@@ -423,192 +290,141 @@ private fun CategoryWaterfallList(
             items = currentSources,
             key = { _, source -> source }
         ) { idx, source ->
-            val isDragging = dragDropState.draggingItemKey == source
             val isEnabled = source !in disabledSources
-
-            val translationY = if (isDragging) {
-                if (dragDropState.isSettling) {
-                    dragDropState.settleAnimatable.value
-                } else {
-                    dragDropState.draggedDistance
-                }
-            } else {
-                0f
-            }
-
             val displayRank = when {
                 !isEnabled -> "OFF"
                 idx == 0 -> "#1"
                 else -> "#${idx + 1}"
             }
 
-            val itemModifier = if (isDragging || (!dragDropState.isDragging && !dragDropState.isSettling)) {
-                Modifier
-            } else {
-                Modifier.animateItem(
-                    placementSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .then(itemModifier)
-                    .fillMaxWidth()
-                    .zIndex(if (isDragging) 10f else 1f)
-                    .graphicsLayer {
-                        this.translationY = translationY
-                        if (isDragging) {
-                            scaleX = 1.03f
-                            scaleY = 1.03f
-                            shadowElevation = 18f
-                        }
-                    }
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (isDragging) {
-                            Color(0xFF161B26)
-                        } else {
-                            Color.Transparent
-                        }
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = if (isDragging) AccentArctic.copy(alpha = 0.50f) else Color.Transparent,
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .drawBehind {
-                        if (!isDragging) {
-                            val strokeW = 1.dp.toPx()
-                            drawLine(
-                                color = Color.White.copy(alpha = 0.08f),
-                                start = Offset(0f, size.height),
-                                end = Offset(size.width, size.height),
-                                strokeWidth = strokeW
-                            )
-                        }
-                    }
-                    .padding(vertical = 12.dp, horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Left: Eye Icon Toggle (Enable / Disable in waterfall)
-                IconButton(
-                    onClick = {
-                        val newDisabled = if (isEnabled) {
-                            disabledSources + source
-                        } else {
-                            disabledSources - source
-                        }
-                        coroutineScope.launch {
-                            prefManager.updateDisabledArtSources(category, newDisabled)
-                        }
-                    },
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                        contentDescription = if (isEnabled) "Disable Source" else "Enable Source",
-                        tint = if (isEnabled) AccentArctic else TextMuted.copy(alpha = 0.40f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Rank Badge Pill (Primary vs Fallback)
-                Box(
+            ReorderableItem(reorderableState, key = source) { isDragging ->
+                Row(
                     modifier = Modifier
-                        .padding(horizontal = 6.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            when {
-                                !isEnabled -> Color.White.copy(alpha = 0.04f)
-                                idx == 0 -> AccentJade.copy(alpha = 0.16f)
-                                isDragging -> AccentArctic.copy(alpha = 0.20f)
-                                else -> Color.White.copy(alpha = 0.06f)
-                            }
+                        .fillMaxWidth()
+                        .zIndex(if (isDragging) 10f else 1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isDragging) DarkSurfaceElevated else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (isDragging) AccentGold.copy(alpha = 0.65f) else Color.Transparent,
+                            shape = RoundedCornerShape(12.dp)
                         )
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .drawBehind {
+                            if (!isDragging) {
+                                val strokeW = 1.dp.toPx()
+                                drawLine(
+                                    color = Color.White.copy(alpha = 0.08f),
+                                    start = Offset(0f, size.height),
+                                    end = Offset(size.width, size.height),
+                                    strokeWidth = strokeW
+                                )
+                            }
+                        }
+                        .padding(vertical = 12.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = displayRank,
-                        color = when {
-                            !isEnabled -> TextMuted
-                            idx == 0 -> AccentJade
-                            isDragging -> AccentArctic
-                            else -> TextSecondary
-                        },
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-
-                // Center: Source Title & Provider Description
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 8.dp)
-                ) {
-                    Text(
-                        text = source,
-                        color = if (isEnabled) TextPrimary else TextMuted.copy(alpha = 0.6f),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = if (!isEnabled) {
-                            "Disabled — bypassed in artwork waterfall"
-                        } else {
-                            getSourceDescription(source)
-                        },
-                        color = if (isEnabled) TextMuted else TextMuted.copy(alpha = 0.45f),
-                        fontSize = 11.5.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // Right: ≡ Drag Handle (Touch lock with change.consume() to prevent HorizontalPager conflict!)
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .pointerInput(source) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                down.consume()
-                                val currentIdx = currentSources.indexOf(source)
-                                if (currentIdx >= 0) {
-                                    dragDropState.onStartDrag(source, currentIdx)
-                                }
-                                try {
-                                    while (true) {
-                                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                        change.consume()
-                                        if (!change.pressed) {
-                                            dragDropState.onStopDrag()
-                                            break
-                                        }
-                                        val deltaY = change.position.y - change.previousPosition.y
-                                        dragDropState.onDrag(deltaY)
-                                    }
-                                } catch (e: CancellationException) {
-                                    dragDropState.onStopDrag()
-                                    throw e
-                                }
+                    // Left: Eye Icon Toggle (Enable / Disable in waterfall)
+                    IconButton(
+                        onClick = {
+                            val newDisabled = if (isEnabled) {
+                                disabledSources + source
+                            } else {
+                                disabledSources - source
+                            }
+                            coroutineScope.launch {
+                                prefManager.updateDisabledArtSources(category, newDisabled)
                             }
                         },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DragHandle,
-                        contentDescription = "Reorder",
-                        tint = if (isDragging) AccentArctic else TextMuted,
-                        modifier = Modifier.size(24.dp)
-                    )
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (isEnabled) "Disable Source" else "Enable Source",
+                            tint = if (isEnabled) AccentGold else TextMuted.copy(alpha = 0.45f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Rank Badge Pill (Primary vs Fallback)
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(
+                                when {
+                                    !isEnabled -> Color.White.copy(alpha = 0.04f)
+                                    idx == 0 -> AccentGold.copy(alpha = 0.18f)
+                                    isDragging -> AccentGold.copy(alpha = 0.24f)
+                                    else -> Color.White.copy(alpha = 0.06f)
+                                }
+                            )
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = displayRank,
+                            color = when {
+                                !isEnabled -> TextMuted
+                                idx == 0 || isDragging -> AccentGold
+                                else -> TextSecondary
+                            },
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    // Center: Source Title & Provider Description
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        Text(
+                            text = source,
+                            color = if (isEnabled) TextPrimary else TextMuted.copy(alpha = 0.65f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (!isEnabled) {
+                                "Disabled — bypassed in artwork waterfall"
+                            } else {
+                                getSourceDescription(source)
+                            },
+                            color = if (isEnabled) TextSecondary else TextMuted.copy(alpha = 0.50f),
+                            fontSize = 11.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Right: ≡ Drag Handle
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .draggableHandle(
+                                onDragStarted = {
+                                    isDraggingAny = true
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                },
+                                onDragStopped = {
+                                    isDraggingAny = false
+                                    coroutineScope.launch {
+                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                    }
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DragHandle,
+                            contentDescription = "Reorder",
+                            tint = if (isDragging) AccentGold else TextSecondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
         }

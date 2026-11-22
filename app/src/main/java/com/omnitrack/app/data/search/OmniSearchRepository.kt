@@ -79,6 +79,7 @@ class OmniSearchRepository(
         "Hardcover" to 6,
         "OpenLibrary" to 8,
         "Apple Books" to 9,
+        "Apple Audiobooks" to 9,
         "PoetryDB" to 10,
         "Syosetu" to 12,
         "WLNUpdates" to 14,
@@ -111,7 +112,11 @@ class OmniSearchRepository(
         val indexByKey = mutableMapOf<String, Int>()
         val deduped = mutableListOf<SearchResultItem>()
         for (item in prioritized) {
-            val subtypeKey = if (item.mediaType == MediaType.NOVEL) ":${item.platform ?: ""}" else ""
+            val subtypeKey = when (item.mediaType) {
+                MediaType.NOVEL -> ":${item.platform ?: ""}"
+                MediaType.BOOK -> ":${com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat)}"
+                else -> ""
+            }
             val key = "${item.mediaType.name}$subtypeKey:${item.title.trim().lowercase()}"
             val existingIdx = indexByKey[key]
             if (existingIdx == null) {
@@ -1748,16 +1753,39 @@ class OmniSearchRepository(
             },
             async { searchOpenLibraryBooks(query) },
             async { searchAppleBooks(query) },
+            async { searchAppleAudiobooks(query) },
             async { searchPoetryDbBooks(query) },
             async { searchGoogleBooks(query) }
         )
         deferreds.awaitAll().flatten()
     }
 
-    private suspend fun searchAppleBooks(query: String): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+    private suspend fun searchAppleBooks(query: String): List<SearchResultItem> = searchAppleStoreBooks(
+        query = query,
+        mediaParam = "ebook",
+        bookFormat = "EBOOK",
+        sourceProvider = "Apple Books",
+        limit = 8
+    )
+
+    private suspend fun searchAppleAudiobooks(query: String): List<SearchResultItem> = searchAppleStoreBooks(
+        query = query,
+        mediaParam = "audiobook",
+        bookFormat = "AUDIOBOOK",
+        sourceProvider = "Apple Audiobooks",
+        limit = 15
+    )
+
+    private suspend fun searchAppleStoreBooks(
+        query: String,
+        mediaParam: String,
+        bookFormat: String,
+        sourceProvider: String,
+        limit: Int
+    ): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
         try {
             val encoded = URLEncoder.encode(query.trim(), "UTF-8")
-            val url = "https://itunes.apple.com/search?term=$encoded&media=ebook&limit=8"
+            val url = "https://itunes.apple.com/search?term=$encoded&media=$mediaParam&limit=$limit"
             val request = Request.Builder().url(url).header("User-Agent", "OmniTrack/1.0").get().build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withGeneralPacing emptyList()
@@ -1766,24 +1794,38 @@ class OmniSearchRepository(
                     ?.get("results") as? JsonArray ?: return@withGeneralPacing emptyList()
                 results.mapNotNull { el ->
                     val o = el as? JsonObject ?: return@mapNotNull null
-                    val title = o["trackName"].cleanString() ?: o["collectionName"].cleanString() ?: return@mapNotNull null
+                    val rawTitle = if (mediaParam == "audiobook") {
+                        o["collectionName"].cleanString() ?: o["trackName"].cleanString()
+                    } else {
+                        o["trackName"].cleanString() ?: o["collectionName"].cleanString()
+                    } ?: return@mapNotNull null
+                    val title = rawTitle.replace(Regex("""\s*\(Unabridged\)\s*$""", RegexOption.IGNORE_CASE), "").trim()
                     val rawCov = o["artworkUrl100"].cleanString() ?: o["artworkUrl60"].cleanString() ?: return@mapNotNull null
                     val hiResCov = rawCov.replace("100x100bb", "1200x1200bb")
                         .replace("60x60bb", "1200x1200bb")
                         .replace("http://", "https://")
                     val author = o["artistName"].cleanString()
                     val desc = cleanSynopsis(o["description"].cleanString())
+                    val durMins = ((o["collectionTimeMillis"] ?: o["trackTimeMillis"]) as? JsonPrimitive)
+                        ?.takeIf { it !is JsonNull }?.contentOrNull?.toLongOrNull()
+                        ?.takeIf { it > 60_000L }?.let { (it / 60_000L).toInt() }
+                    val durLabel = durMins?.let { com.omnitrack.app.data.model.formatBookDuration(it) }
+                    val synopsisHeader = listOfNotNull(
+                        author?.let { if (mediaParam == "audiobook") "Narrated / By $it" else "By $it" },
+                        durLabel?.let { "Duration: $it" }
+                    ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    val fullSynopsis = listOfNotNull(synopsisHeader, desc).joinToString("\n\n").ifBlank { null }
                     val score = (o["averageUserRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull?.let { it * 2f }
                     SearchResultItem(
                         title = title,
-                        synopsis = if (!author.isNullOrBlank()) "By $author\n\n${desc.orEmpty()}" else desc,
-                        coverUrl = hiResCov,
+                        synopsis = fullSynopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(hiResCov),
                         mediaType = MediaType.BOOK,
                         releaseYear = o["releaseDate"].cleanString()?.take(4),
                         communityScore = score,
                         bookAuthor = author,
-                        bookFormat = "EBOOK",
-                        sourceProvider = "Apple Books"
+                        bookFormat = bookFormat,
+                        sourceProvider = sourceProvider
                     )
                 }
             }

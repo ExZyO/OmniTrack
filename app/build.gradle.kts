@@ -110,6 +110,9 @@ dependencies {
     // Haze for Liquid Glass Backdrop Blur
     implementation(libs.haze)
 
+    // Smooth drag-and-drop list reordering
+    implementation(libs.reorderable)
+
     // Media3 ExoPlayer for Hero Trailer Surface & Video Playback
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)

@@ -131,6 +131,148 @@ object BookCsvImporter {
         BookImportSummary(imported = imported, updated = updated)
     }
 
+    suspend fun importLetterboxdCsv(
+        content: String,
+        mediaRepository: MediaRepository
+    ): BookImportSummary = withContext(Dispatchers.IO) {
+        val cleaned = content.removePrefix("\uFEFF")
+        val rows = parseRfc4180Csv(cleaned)
+        if (rows.size < 2) {
+            return@withContext BookImportSummary(0, 0, "Letterboxd CSV is empty or missing header row")
+        }
+        val headerIndex = LinkedHashMap<String, Int>()
+        rows.first().forEachIndexed { idx, col -> headerIndex[col.trim().lowercase()] = idx }
+        val nameIdx = headerIndex["name"] ?: headerIndex["title"]
+            ?: return@withContext BookImportSummary(0, 0, "CSV missing required 'Name' column")
+        val yearIdx = headerIndex["year"]
+        val ratingIdx = headerIndex["rating"]
+        val reviewIdx = headerIndex["review"]
+
+        val defaultStatus = if (headerIndex.containsKey("watched date") || headerIndex.containsKey("rating")) {
+            TrackingStatus.COMPLETED
+        } else {
+            TrackingStatus.PLAN_TO_TRACK
+        }
+
+        var imported = 0
+        var updated = 0
+        for (rowIdx in 1 until rows.size) {
+            val row = rows[rowIdx]
+            val title = row.getOrNull(nameIdx)?.trim()?.takeIf { it.isNotBlank() } ?: continue
+            val year = yearIdx?.let { row.getOrNull(it)?.trim()?.take(4)?.takeIf { y -> y.length == 4 && y.all(Char::isDigit) } }
+            val rating10 = ratingIdx?.let { row.getOrNull(it)?.trim()?.toFloatOrNull() }?.takeIf { it > 0f }
+                ?.let { (it * 2f).coerceIn(1f, 10f) }
+            val review = reviewIdx?.let { row.getOrNull(it)?.trim()?.takeIf { r -> r.isNotBlank() } }
+
+            val existing = mediaRepository.findExistingMedia(title = title, mediaType = MediaType.MOVIE)
+            if (existing != null) {
+                val nextStatus = if (existing.status == TrackingStatus.PLAN_TO_TRACK && defaultStatus == TrackingStatus.COMPLETED) {
+                    TrackingStatus.COMPLETED
+                } else existing.status
+                val changed = existing.copy(
+                    releaseYear = existing.releaseYear ?: year,
+                    userRating = existing.userRating ?: rating10,
+                    status = nextStatus,
+                    simklMemo = existing.simklMemo?.takeIf { it.isNotBlank() } ?: review
+                )
+                if (changed != existing) {
+                    mediaRepository.updateMedia(changed)
+                    updated++
+                }
+            } else {
+                mediaRepository.insertMedia(
+                    MediaItemEntity(
+                        title = title,
+                        coverUrl = "",
+                        mediaType = MediaType.MOVIE,
+                        status = defaultStatus,
+                        currentProgress = if (defaultStatus == TrackingStatus.COMPLETED) 1.0 else 0.0,
+                        totalProgress = 1.0,
+                        releaseYear = year,
+                        userRating = rating10,
+                        simklMemo = review
+                    )
+                )
+                imported++
+            }
+        }
+        BookImportSummary(imported = imported, updated = updated)
+    }
+
+    suspend fun importMalXml(
+        content: String,
+        mediaRepository: MediaRepository
+    ): BookImportSummary = withContext(Dispatchers.IO) {
+        val isManga = "<manga>" in content && "<anime>" !in content
+        val blockRegex = Regex("""<(anime|manga)>(.*?)</\1>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+        val matches = blockRegex.findAll(content).toList()
+        if (matches.isEmpty()) {
+            return@withContext BookImportSummary(0, 0, "No <anime> or <manga> entries found in XML")
+        }
+
+        fun extractTag(block: String, tag: String): String? {
+            val m = Regex("""<$tag>(?:<!\[CDATA\[(.*?)]]>(?s)|(.*?))</$tag>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                .find(block) ?: return null
+            return (m.groupValues[1].ifEmpty { m.groupValues[2] }).trim().takeIf { it.isNotEmpty() }
+        }
+
+        var imported = 0
+        var updated = 0
+        for (m in matches) {
+            val tagType = m.groupValues[1].lowercase()
+            val block = m.groupValues[2]
+            val title = extractTag(block, if (tagType == "manga") "manga_title" else "series_title") ?: continue
+            val malId = extractTag(block, if (tagType == "manga") "manga_mangadb_id" else "series_animedb_id")?.toLongOrNull()
+            val total = extractTag(block, if (tagType == "manga") "manga_chapters" else "series_episodes")?.toDoubleOrNull()?.takeIf { it > 0.0 }
+            val progress = extractTag(block, if (tagType == "manga") "my_read_chapters" else "my_watched_episodes")?.toDoubleOrNull() ?: 0.0
+            val score = extractTag(block, "my_score")?.toFloatOrNull()?.takeIf { it > 0f }
+            val statusStr = extractTag(block, "my_status")?.lowercase().orEmpty()
+            val status = when {
+                "completed" in statusStr -> TrackingStatus.COMPLETED
+                "watching" in statusStr || "reading" in statusStr -> TrackingStatus.IN_PROGRESS
+                "hold" in statusStr -> TrackingStatus.ON_HOLD
+                "dropped" in statusStr -> TrackingStatus.DROPPED
+                else -> TrackingStatus.PLAN_TO_TRACK
+            }
+            val typeStr = extractTag(block, if (tagType == "manga") "manga_type" else "series_type")?.lowercase().orEmpty()
+            val resolvedType = when {
+                tagType == "manga" && ("novel" in typeStr) -> MediaType.NOVEL
+                tagType == "manga" || isManga -> MediaType.MANGA
+                else -> MediaType.ANIME
+            }
+
+            val existing = mediaRepository.findExistingMedia(malId = malId, title = title, mediaType = resolvedType)
+            if (existing != null) {
+                val changed = existing.copy(
+                    malId = existing.malId ?: malId,
+                    currentProgress = maxOf(existing.currentProgress, progress),
+                    totalProgress = existing.totalProgress?.takeIf { it > 0.0 } ?: total,
+                    userRating = existing.userRating ?: score,
+                    status = if (existing.status == TrackingStatus.PLAN_TO_TRACK && status != TrackingStatus.PLAN_TO_TRACK) status else existing.status
+                )
+                if (changed != existing) {
+                    mediaRepository.updateMedia(changed)
+                    updated++
+                }
+            } else {
+                mediaRepository.insertMedia(
+                    MediaItemEntity(
+                        title = title,
+                        coverUrl = "",
+                        mediaType = resolvedType,
+                        status = status,
+                        currentProgress = progress,
+                        totalProgress = total,
+                        userRating = score,
+                        malId = malId
+                    )
+                )
+                imported++
+            }
+        }
+        BookImportSummary(imported = imported, updated = updated)
+    }
+
     private fun cleanIsbn(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
         val cleaned = raw.trim()

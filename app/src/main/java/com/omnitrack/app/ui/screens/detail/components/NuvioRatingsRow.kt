@@ -28,7 +28,6 @@ import com.omnitrack.app.data.model.BookDetailMeta
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
-import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
 
 private data class RatingBadgeData(
@@ -72,7 +71,7 @@ fun NuvioRatingsRow(
                         iconRes = R.drawable.rating_imdb,
                         iconWidth = 30.dp,
                         iconHeight = 16.dp,
-                        valueText = formatOneDecimal(score.toDouble()),
+                        valueText = formatSmartRating(score.toDouble()),
                         valueColor = Color(0xFFF5C518)
                     )
                 )
@@ -175,7 +174,7 @@ fun NuvioRatingsRow(
                             iconRes = R.drawable.brand_igdb,
                             iconWidth = 16.dp,
                             iconHeight = 16.dp,
-                            valueText = formatOneDecimal(userVal),
+                            valueText = formatSmartRating(userVal),
                             valueColor = Color(0xFFA78BFA)
                         )
                     )
@@ -355,7 +354,7 @@ fun NuvioRatingsRow(
                         source = "hardcover",
                         displayName = "Hardcover",
                         iconRes = R.drawable.brand_hardcover,
-                        valueText = "${formatOneDecimal(hc.toDouble())}/5",
+                        valueText = "${formatSmartRating(hc.toDouble())}/5",
                         valueColor = Color(0xFFA5B4FC)
                     )
                 )
@@ -369,7 +368,7 @@ fun NuvioRatingsRow(
                         source = "openlibrary",
                         displayName = "Open Library",
                         iconRes = R.drawable.brand_openlibrary,
-                        valueText = "${formatOneDecimal(ol.toDouble())}/5",
+                        valueText = "${formatSmartRating(ol.toDouble())}/5",
                         valueColor = Color(0xFF38BDF8)
                     )
                 )
@@ -380,7 +379,7 @@ fun NuvioRatingsRow(
                         source = "applebooks",
                         displayName = "Apple Books",
                         iconRes = R.drawable.brand_apple_books,
-                        valueText = "${formatOneDecimal(ab.toDouble())}/5",
+                        valueText = "${formatSmartRating(ab.toDouble())}/5",
                         valueColor = Color(0xFFFB923C)
                     )
                 )
@@ -425,23 +424,25 @@ fun NuvioRatingsRow(
     }
 }
 
-private fun formatOneDecimal(value: Double): String {
-    val rounded = (value * 10.0).roundToInt()
-    val whole = rounded / 10
-    val decimal = (rounded % 10).absoluteValue
-    return "$whole.$decimal"
+fun formatSmartRating(value: Double): String {
+    val rounded = kotlin.math.round(value * 10.0) / 10.0
+    return if ((kotlin.math.round(rounded * 10.0).toLong() % 10L) == 0L) {
+        "${kotlin.math.round(rounded).toInt()}"
+    } else {
+        String.format(java.util.Locale.US, "%.1f", rounded)
+    }
 }
 
 private fun formatMalScore(value: Double): String {
     val roundedTwo = (value * 100.0).roundToInt() / 100.0
     val formatted = String.format(java.util.Locale.US, "%.2f", roundedTwo)
-    return if (formatted.endsWith("0")) {
-        String.format(java.util.Locale.US, "%.1f", roundedTwo)
-    } else {
-        formatted
+    return when {
+        formatted.endsWith(".00") -> "${kotlin.math.round(roundedTwo).toInt()}"
+        formatted.endsWith("0") -> String.format(java.util.Locale.US, "%.1f", roundedTwo)
+        else -> formatted
     }
 }
 
 private fun formatTwoDecimals(value: Double): String {
-    return String.format(java.util.Locale.US, "%.2f", value)
+    return formatMalScore(value)
 }

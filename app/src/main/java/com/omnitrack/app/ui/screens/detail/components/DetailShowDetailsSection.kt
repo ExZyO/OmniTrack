@@ -55,6 +55,8 @@ import com.omnitrack.app.data.model.formatProtonDbLabel
 import com.omnitrack.app.data.model.formatSteamDeckLabel
 import com.omnitrack.app.data.model.formatVndbVoicedLabel
 import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -665,7 +667,7 @@ fun DetailGenresTagsSection(
                     ) {
                         Text(
                             text = label,
-                            color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                            color = if (selected) Color.White else TextSecondary,
                             fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         )
@@ -690,8 +692,8 @@ fun DetailGenresTagsSection(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(AccentArctic.copy(alpha = 0.10f))
-                                .border(1.dp, AccentArctic.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                                .background(DarkSurfaceElevated)
+                                .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
                                 .clickable { onGenreOrTagClick?.invoke(genre, false) }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
@@ -852,14 +854,8 @@ fun DetailGenresTagsSection(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (isGenre) AccentArctic.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.06f)
-                            )
-                            .border(
-                                1.dp,
-                                if (isGenre) AccentArctic.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.09f),
-                                RoundedCornerShape(6.dp)
-                            )
+                            .background(DarkSurfaceElevated)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
                             .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
@@ -961,7 +957,7 @@ fun DetailGenresTagsSection(
                         ) {
                             Text(
                                 text = label,
-                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                color = if (selected) Color.White else TextSecondary,
                                 fontSize = 12.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                             )
@@ -989,19 +985,11 @@ fun DetailGenresTagsSection(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                when {
-                                    isAward -> Color(0xFFF5C518).copy(alpha = 0.12f)
-                                    isGenre -> AccentArctic.copy(alpha = 0.10f)
-                                    else -> Color.White.copy(alpha = 0.06f)
-                                }
+                                if (isAward) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated
                             )
                             .border(
                                 1.dp,
-                                when {
-                                    isAward -> Color(0xFFF5C518).copy(alpha = 0.28f)
-                                    isGenre -> AccentArctic.copy(alpha = 0.25f)
-                                    else -> Color.White.copy(alpha = 0.09f)
-                                },
+                                if (isAward) AccentGold.copy(alpha = 0.35f) else GlassBorder,
                                 RoundedCornerShape(6.dp)
                             )
                             .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
@@ -1055,12 +1043,13 @@ fun DetailGenresTagsSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Genres (Pure White)
+            // Genres (Neutral Warm Charcoal + White Text)
             effectiveGenres.forEach { genre ->
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(AccentArctic.copy(alpha = 0.12f))
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(genre, false)
                         }
@@ -1075,12 +1064,13 @@ fun DetailGenresTagsSection(
                 }
             }
 
-            // Tags (Pure White with rank %)
+            // Tags (Neutral Surface with rank %)
             visibleTags.forEach { tagItem ->
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.06f))
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(tagItem.name, true)
                         }

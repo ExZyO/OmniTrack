@@ -16,13 +16,15 @@ data class AnimeCharacterItem(
 data class AnimeRelationItem(
     val id: Long,
     val title: String,
-    val relationType: String, // "SEQUEL", "PREQUEL", "SIDE_STORY", "SPIN_OFF", "MANGA", "NOVEL", "ALTERNATIVE", "OTHER"
-    val format: String, // "TV", "MOVIE", "MANGA", "NOVEL", "ONA", "OVA", "SPECIAL"
+    val relationType: String, // "SEQUEL", "PREQUEL", "SIDE_STORY", "SPIN_OFF", "MANGA", "NOVEL", "ADAPTATION", "ALTERNATIVE", "OTHER"
+    val format: String, // "TV", "MOVIE", "MANGA", "NOVEL", "BOOK", "ONA", "OVA", "SPECIAL"
     val coverUrl: String?,
     val bannerUrl: String? = null,
     val year: Int? = null,
     val mediaType: MediaType = MediaType.ANIME,
-    val vndbId: String? = null
+    val vndbId: String? = null,
+    val openLibraryId: String? = null,
+    val tmdbId: Long? = null
 )
 
 data class AnimeAiringSchedule(

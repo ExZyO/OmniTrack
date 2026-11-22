@@ -20,11 +20,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -58,13 +55,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.DEFAULT_GEMINI_MODELS
 import com.omnitrack.app.data.preferences.PreferenceManager
-import com.omnitrack.app.data.sync.TrackerAccountVerifier
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
+import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.TextMuted
+import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -91,12 +87,6 @@ fun ApiKeyConfigSheet(
     val currentMdblist by preferenceManager.mdblistApiKey.collectAsState(initial = "")
     val aiSearchEnabled by preferenceManager.aiSemanticSearchEnabled.collectAsState(initial = false)
 
-    val currentTraktClientId by preferenceManager.customTraktClientId.collectAsState(initial = "")
-    val currentTraktClientSecret by preferenceManager.customTraktClientSecret.collectAsState(initial = "")
-    val currentMalClientId by preferenceManager.customMalClientId.collectAsState(initial = "")
-    val currentSimklClientId by preferenceManager.customSimklClientId.collectAsState(initial = "")
-    val currentSimklClientSecret by preferenceManager.customSimklClientSecret.collectAsState(initial = "")
-
     var geminiKey by remember(currentGemini) { mutableStateOf(currentGemini) }
     var openRouterKey by remember(currentOpenRouter) { mutableStateOf(currentOpenRouter) }
     var tmdbKey by remember(currentTmdb) { mutableStateOf(currentTmdb) }
@@ -106,16 +96,10 @@ fun ApiKeyConfigSheet(
     var igdbClientSecret by remember(currentIgdbSecret) { mutableStateOf(currentIgdbSecret) }
     var mdblistKey by remember(currentMdblist) { mutableStateOf(currentMdblist) }
 
-    var traktClientId by remember(currentTraktClientId) { mutableStateOf(currentTraktClientId) }
-    var traktClientSecret by remember(currentTraktClientSecret) { mutableStateOf(currentTraktClientSecret) }
-    var malClientId by remember(currentMalClientId) { mutableStateOf(currentMalClientId) }
-    var simklClientId by remember(currentSimklClientId) { mutableStateOf(currentSimklClientId) }
-    var simklClientSecret by remember(currentSimklClientSecret) { mutableStateOf(currentSimklClientSecret) }
-
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = DarkSurface,
         dragHandle = null
     ) {
         Column(
@@ -123,7 +107,7 @@ fun ApiKeyConfigSheet(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -133,22 +117,31 @@ fun ApiKeyConfigSheet(
                     imageVector = Icons.Default.Key,
                     contentDescription = null,
                     tint = AccentGold,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
                 Column {
                     Text(
-                        text = "External APIs & AI Engine",
+                        text = "AI & Artwork Boosters",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Text(
-                        text = "Keys are securely stored in private local DataStore",
+                        text = "Optional keys for AI search, extra artwork & critic scores — sign-in happens in Tracker Accounts",
                         fontSize = 12.sp,
-                        color = TextMuted
+                        color = TextSecondary
                     )
                 }
             }
+
+            // Section 1: AI Search
+            Text(
+                text = "AI SEARCH",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = AccentGold
+            )
 
             // AI Semantic Search Toggle
             Row(
@@ -156,6 +149,7 @@ fun ApiKeyConfigSheet(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
@@ -168,7 +162,7 @@ fun ApiKeyConfigSheet(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = AccentArctic,
+                        tint = AccentGold,
                         modifier = Modifier.size(20.dp)
                     )
                     Column {
@@ -179,9 +173,9 @@ fun ApiKeyConfigSheet(
                             color = TextPrimary
                         )
                         Text(
-                            text = "Resolve conversational descriptions into canonical titles",
+                            text = "Turn vibe descriptions into matching titles in Discover",
                             fontSize = 11.5.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                 }
@@ -191,22 +185,22 @@ fun ApiKeyConfigSheet(
                         scope.launch { preferenceManager.updateAiSemanticSearchEnabled(checked) }
                     },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = AccentArctic,
-                        checkedTrackColor = AccentArctic.copy(alpha = 0.35f)
+                        checkedThumbColor = AmoledBlack,
+                        checkedTrackColor = AccentGold,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = DarkSurfaceCard
                     )
                 )
             }
 
-            // Gemini API Key
             ApiKeyField(
                 label = "Google Gemini API Key",
+                unlockNote = "Unlocks AI search queries and smart natural-language discovery.",
                 placeholder = "AIzaSy...",
                 value = geminiKey,
-                onValueChange = { geminiKey = it },
-                accentColor = AccentArctic
+                onValueChange = { geminiKey = it }
             )
 
-            // Gemini AI Model Selector (Dual-Mode Preset + Custom Model ID)
             GeminiModelSelectorSection(
                 geminiModel = currentGeminiModel,
                 customGeminiModel = currentCustomGeminiModel,
@@ -229,145 +223,75 @@ fun ApiKeyConfigSheet(
                 }
             )
 
-            // OpenRouter API Key
             ApiKeyField(
-                label = "OpenRouter API Key (Alternative AI)",
+                label = "OpenRouter API Key (Optional fallback)",
+                unlockNote = "Fallback AI router when you prefer non-Gemini models.",
                 placeholder = "sk-or-v1-...",
                 value = openRouterKey,
-                onValueChange = { openRouterKey = it },
-                accentColor = AccentArctic
+                onValueChange = { openRouterKey = it }
             )
 
-            // TMDb API Key
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Section 2: Artwork & Ratings Boosters
+            Text(
+                text = "ARTWORK & RATINGS BOOSTERS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = AccentGold
+            )
+
             ApiKeyField(
                 label = "TMDb API Key (v3 auth)",
-                placeholder = "32-character key for Movies & Shows",
+                unlockNote = "Unlocks Movie/TV metadata, posters, backdrops & screen adaptations.",
+                placeholder = "32-character v3 key (optional if using built-in key)",
                 value = tmdbKey,
-                onValueChange = { tmdbKey = it },
-                accentColor = AccentGold
+                onValueChange = { tmdbKey = it }
             )
 
-            // Fanart.tv API Key
             ApiKeyField(
                 label = "Fanart.tv Project API Key",
-                placeholder = "Clearart transparent title logos",
+                unlockNote = "Unlocks clean textless logos, clearart & wide hero banners.",
+                placeholder = "Fanart.tv API key",
                 value = fanartKey,
-                onValueChange = { fanartKey = it },
-                accentColor = AccentJade
+                onValueChange = { fanartKey = it }
             )
 
-            // SteamGridDB API Key
             ApiKeyField(
                 label = "SteamGridDB API Key",
-                placeholder = "Clean textless heroes, covers & logos for VNs & Games",
+                unlockNote = "Unlocks textless covers, heroes & logos for Games and Visual Novels.",
+                placeholder = "SteamGridDB key",
                 value = steamGridDbKey,
-                onValueChange = { steamGridDbKey = it },
-                accentColor = Color(0xFF66C0F4)
+                onValueChange = { steamGridDbKey = it }
             )
 
-            // IGDB / Twitch Client ID
             ApiKeyField(
                 label = "IGDB / Twitch Client ID",
-                placeholder = "Free Twitch Developer App Client ID for IGDB",
+                unlockNote = "Pairs with the secret below to unlock rich game trailers, genres & screenshots.",
+                placeholder = "Twitch Developer App Client ID",
                 value = igdbClientId,
-                onValueChange = { igdbClientId = it },
-                accentColor = Color(0xFF9147FF)
+                onValueChange = { igdbClientId = it }
             )
 
-            // IGDB / Twitch Client Secret
             ApiKeyField(
                 label = "IGDB / Twitch Client Secret",
-                placeholder = "Twitch Developer App Client Secret for IGDB",
+                unlockNote = "Required alongside IGDB Client ID to authenticate with Twitch.",
+                placeholder = "Twitch Developer App Client Secret",
                 value = igdbClientSecret,
-                onValueChange = { igdbClientSecret = it },
-                accentColor = Color(0xFF9147FF)
+                onValueChange = { igdbClientSecret = it }
             )
 
-            // MdbList API Key
             ApiKeyField(
                 label = "MdbList API Key",
-                placeholder = "IMDb, Rotten Tomatoes & Metacritic scores",
+                unlockNote = "Unlocks IMDb, Rotten Tomatoes & Metacritic critic score rows.",
+                placeholder = "MdbList API key",
                 value = mdblistKey,
-                onValueChange = { mdblistKey = it },
-                accentColor = Color(0xFFEF4444)
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Section 2: Tracker Developer Credentials
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CloudSync,
-                    contentDescription = null,
-                    tint = AccentJade,
-                    modifier = Modifier.size(24.dp)
-                )
-                Column {
-                    Text(
-                        text = "Tracker App Credentials",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "Private local credentials for Trakt, MyAnimeList & SIMKL",
-                        fontSize = 12.sp,
-                        color = TextMuted
-                    )
-                }
-            }
-
-            // Trakt Client ID
-            ApiKeyField(
-                label = "Trakt Client ID",
-                placeholder = "Developer App Client ID",
-                value = traktClientId,
-                onValueChange = { traktClientId = it },
-                accentColor = Color(0xFFED1C24)
-            )
-
-            // Trakt Client Secret
-            ApiKeyField(
-                label = "Trakt Client Secret",
-                placeholder = "Developer App Client Secret",
-                value = traktClientSecret,
-                onValueChange = { traktClientSecret = it },
-                accentColor = Color(0xFFED1C24)
-            )
-
-            // MyAnimeList Client ID
-            ApiKeyField(
-                label = "MyAnimeList Client ID",
-                placeholder = "32-character Client ID from MAL API Config",
-                value = malClientId,
-                onValueChange = { malClientId = it },
-                accentColor = Color(0xFF2E51A2)
-            )
-
-            // SIMKL Client ID
-            ApiKeyField(
-                label = "SIMKL Client ID",
-                placeholder = "Client ID from SIMKL TV/Device App",
-                value = simklClientId,
-                onValueChange = { simklClientId = it },
-                accentColor = Color(0xFF00B4D8)
-            )
-
-            // SIMKL Client Secret (Optional)
-            ApiKeyField(
-                label = "SIMKL Client Secret (Optional)",
-                placeholder = "Leave blank if using TV / PIN flow",
-                value = simklClientSecret,
-                onValueChange = { simklClientSecret = it },
-                accentColor = Color(0xFF00B4D8)
+                onValueChange = { mdblistKey = it }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Save Button
             Button(
                 onClick = {
                     scope.launch {
@@ -378,20 +302,6 @@ fun ApiKeyConfigSheet(
                         preferenceManager.updateSteamGridDbApiKey(steamGridDbKey.trim())
                         preferenceManager.updateIgdbCredentials(igdbClientId.trim(), igdbClientSecret.trim())
                         preferenceManager.updateMdblistApiKey(mdblistKey.trim())
-
-                        preferenceManager.updateCustomTrackerCredentials(
-                            traktClientId = traktClientId.trim(),
-                            traktClientSecret = traktClientSecret.trim(),
-                            malClientId = malClientId.trim(),
-                            simklClientId = simklClientId.trim(),
-                            simklClientSecret = simklClientSecret.trim()
-                        )
-                        TrackerAccountVerifier.customTraktClientId = traktClientId.trim()
-                        TrackerAccountVerifier.customTraktClientSecret = traktClientSecret.trim()
-                        TrackerAccountVerifier.customMalClientId = malClientId.trim()
-                        TrackerAccountVerifier.customSimklClientId = simklClientId.trim()
-                        TrackerAccountVerifier.customSimklClientSecret = simklClientSecret.trim()
-
                         onDismiss()
                     }
                 },
@@ -399,10 +309,10 @@ fun ApiKeyConfigSheet(
                     .fillMaxWidth()
                     .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentArctic)
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
             ) {
                 Text(
-                    text = "Save API Configuration",
+                    text = "Save Configuration",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = AmoledBlack
@@ -417,19 +327,40 @@ fun ApiKeyConfigSheet(
 @Composable
 private fun ApiKeyField(
     label: String,
+    unlockNote: String,
     placeholder: String,
     value: String,
-    onValueChange: (String) -> Unit,
-    accentColor: Color
+    onValueChange: (String) -> Unit
 ) {
+    val isConfigured = value.isNotBlank()
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = label,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            if (isConfigured) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Configured",
+                    tint = AccentGold,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
         Text(
-            text = label,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
+            text = unlockNote,
+            fontSize = 11.sp,
             color = TextSecondary
         )
         Row(
@@ -437,6 +368,7 @@ private fun ApiKeyField(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(DarkSurfaceElevated)
+                .border(1.dp, if (isConfigured) AccentGold.copy(alpha = 0.35f) else GlassBorder, RoundedCornerShape(10.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -446,10 +378,10 @@ private fun ApiKeyField(
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
-                cursorBrush = SolidColor(accentColor),
+                cursorBrush = SolidColor(AccentGold),
                 decorationBox = { innerTextField ->
                     if (value.isEmpty()) {
-                        Text(placeholder, color = TextMuted.copy(alpha = 0.6f), fontSize = 12.5.sp)
+                        Text(placeholder, color = TextSecondary.copy(alpha = 0.65f), fontSize = 12.5.sp)
                     }
                     innerTextField()
                 }
@@ -497,7 +429,7 @@ fun GeminiModelSelectorSection(
                     .background(DarkSurfaceElevated)
                     .border(
                         width = 1.dp,
-                        color = if (expanded) AccentArctic.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.08f),
+                        color = if (expanded) AccentGold.copy(alpha = 0.7f) else GlassBorder,
                         shape = RoundedCornerShape(10.dp)
                     )
                     .clickable { expanded = true }
@@ -513,7 +445,7 @@ fun GeminiModelSelectorSection(
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
-                        tint = AccentArctic,
+                        tint = AccentGold,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
@@ -528,7 +460,7 @@ fun GeminiModelSelectorSection(
                 Icon(
                     imageVector = Icons.Default.ExpandMore,
                     contentDescription = "Select Model",
-                    tint = TextMuted,
+                    tint = TextSecondary,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -537,8 +469,8 @@ fun GeminiModelSelectorSection(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
                 modifier = Modifier
-                    .background(Color(0xFF121216))
-                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    .background(DarkSurfaceElevated)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
             ) {
                 DEFAULT_GEMINI_MODELS.forEach { option ->
                     val isSelected = !useCustomGeminiModel && geminiModel == option.id
@@ -549,12 +481,12 @@ fun GeminiModelSelectorSection(
                                     text = option.name,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) AccentArctic else TextPrimary
+                                    color = if (isSelected) AccentGold else TextPrimary
                                 )
                                 Text(
                                     text = option.description,
                                     fontSize = 11.sp,
-                                    color = TextMuted
+                                    color = TextSecondary
                                 )
                             }
                         },
@@ -563,7 +495,7 @@ fun GeminiModelSelectorSection(
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = "Selected",
-                                    tint = AccentArctic,
+                                    tint = AccentGold,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -582,12 +514,12 @@ fun GeminiModelSelectorSection(
                                 text = "Custom Model (Enter Manually…)",
                                 fontSize = 13.sp,
                                 fontWeight = if (useCustomGeminiModel) FontWeight.Bold else FontWeight.Medium,
-                                color = if (useCustomGeminiModel) AccentArctic else TextPrimary
+                                color = if (useCustomGeminiModel) AccentGold else TextPrimary
                             )
                             Text(
                                 text = "Enter any custom or preview Gemini model ID",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextSecondary
                             )
                         }
                     },
@@ -596,7 +528,7 @@ fun GeminiModelSelectorSection(
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Selected",
-                                tint = AccentArctic,
+                                tint = AccentGold,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -617,7 +549,7 @@ fun GeminiModelSelectorSection(
                 Text(
                     text = "Custom Model ID",
                     fontSize = 11.sp,
-                    color = TextMuted
+                    color = TextSecondary
                 )
                 OutlinedTextField(
                     value = customGeminiModel,
@@ -628,7 +560,7 @@ fun GeminiModelSelectorSection(
                             text = "e.g. gemini-3.8-flash",
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
-                            color = TextMuted.copy(alpha = 0.55f)
+                            color = TextSecondary.copy(alpha = 0.6f)
                         )
                     },
                     textStyle = TextStyle(
@@ -637,11 +569,11 @@ fun GeminiModelSelectorSection(
                         fontFamily = FontFamily.Monospace
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentArctic,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
-                        focusedContainerColor = Color(0xFF0A0A0E),
-                        unfocusedContainerColor = Color(0xFF0A0A0E),
-                        cursorColor = AccentArctic
+                        focusedBorderColor = AccentGold,
+                        unfocusedBorderColor = GlassBorder,
+                        focusedContainerColor = DarkSurfaceElevated,
+                        unfocusedContainerColor = DarkSurfaceElevated,
+                        cursorColor = AccentGold
                     ),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()

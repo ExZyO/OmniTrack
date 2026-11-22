@@ -89,7 +89,7 @@ fun NuvioRailPosterCard(
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = "★ ${String.format("%.1f", rating)}",
+                        text = "★ ${com.omnitrack.app.ui.screens.detail.components.formatSmartRating(rating.toDouble())}",
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = AccentGold

@@ -38,6 +38,13 @@ data class SteamImportSummary(
     val error: String? = null
 )
 
+data class TrackerImportResult(
+    val imported: Int,
+    val updated: Int,
+    val skipped: Int,
+    val error: String? = null
+)
+
 /**
  * Background multi-tracker synchronization engine.
  * Drains the offline-first [SyncQueueDao] queue asynchronously through [NetworkPacer].
@@ -465,23 +472,53 @@ class TrackerSyncEngine(
         // 2. AniList Library Pull
         if (!tokens.anilistToken.isNullOrBlank()) {
             onStatus("Pulling AniList anime & manga library...")
-            totalImported += pullAniListLibrary(tokens.anilistToken)
+            val res = importAniListLibrary(onStatus)
+            totalImported += res.imported + res.updated
         }
 
-        // 3. Trakt History Pull
+        // 3. MyAnimeList Library Pull
+        if (!tokens.malToken.isNullOrBlank()) {
+            onStatus("Pulling MyAnimeList library...")
+            val res = importMalLibrary(onStatus)
+            totalImported += res.imported + res.updated
+        }
+
+        // 4. Trakt History & Watchlist Pull
         if (!tokens.traktToken.isNullOrBlank()) {
-            onStatus("Pulling Trakt watched library...")
-            totalImported += pullTraktLibrary(tokens.traktToken)
+            onStatus("Pulling Trakt library...")
+            val res = importTraktLibrary(onStatus)
+            totalImported += res.imported + res.updated
         }
 
-        // 4. Steam Owned Games Library Pull
+        // 5. SIMKL Library Pull
+        if (!tokens.simklToken.isNullOrBlank()) {
+            onStatus("Pulling SIMKL library...")
+            val res = importSimklLibrary(onStatus)
+            totalImported += res.imported + res.updated
+        }
+
+        // 6. Bangumi Library Pull
+        if (!tokens.bangumiToken.isNullOrBlank()) {
+            onStatus("Pulling Bangumi collections...")
+            val res = importBangumiLibrary(onStatus)
+            totalImported += res.imported + res.updated
+        }
+
+        // 7. VNDB List Pull
+        if (!tokens.vndbToken.isNullOrBlank()) {
+            onStatus("Pulling VNDB visual novel list...")
+            val res = importVndbLibrary(onStatus)
+            totalImported += res.imported + res.updated
+        }
+
+        // 8. Steam Owned Games Library Pull
         if (!tokens.steamApiKey.isNullOrBlank() && !tokens.steamId64.isNullOrBlank()) {
             onStatus("Syncing Steam library & playtime...")
             val steamSummary = importSteamLibrary(onStatus)
             totalImported += steamSummary.imported + steamSummary.updated
         }
 
-        // 5. Hardcover Books Library Pull
+        // 9. Hardcover Books Library Pull
         if (!tokens.hardcoverToken.isNullOrBlank()) {
             onStatus("Pulling Hardcover reading library...")
             val hcSummary = importHardcoverLibrary(onStatus)
@@ -721,22 +758,134 @@ class TrackerSyncEngine(
         SteamImportSummary(imported = imported, updated = updated)
     }
 
-    private suspend fun pullAniListLibrary(token: String): Int = NetworkPacer.withAniListPacing {
-        var count = 0
-        try {
-            val viewerReq = Request.Builder()
-                .url("https://graphql.anilist.co")
-                .header("Authorization", "Bearer $token")
-                .post(buildJsonObject {
-                    put("query", "query { Viewer { id name } }")
-                }.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+    private enum class MergeOutcome { IMPORTED, UPDATED, SKIPPED }
 
-            val viewerId = client.newCall(viewerReq).execute().use { response ->
-                if (!response.isSuccessful) return@withAniListPacing 0
-                val body = response.body?.string() ?: return@withAniListPacing 0
-                json.parseToJsonElement(body).jsonObject["data"]?.jsonObject?.get("Viewer")?.jsonObject?.get("id")?.jsonPrimitive?.content?.toIntOrNull()
-            } ?: return@withAniListPacing 0
+    private suspend fun smartMergeIncomingItem(incoming: MediaItemEntity): MergeOutcome {
+        val existing = repository.findExistingMedia(
+            anilistId = incoming.anilistId,
+            malId = incoming.malId,
+            tmdbId = incoming.tmdbId,
+            vndbId = incoming.vndbId,
+            igdbId = incoming.igdbId,
+            steamAppId = incoming.steamAppId,
+            openLibraryId = incoming.openLibraryId,
+            hardcoverId = incoming.hardcoverId,
+            isbn = incoming.isbn,
+            title = incoming.title,
+            mediaType = incoming.mediaType
+        )
+        if (existing == null) {
+            repository.insertMedia(incoming)
+            return MergeOutcome.IMPORTED
+        }
+
+        val bannerDisabled = existing.artworkRole == "DISABLE_BANNER" || existing.customBannerPath == "NONE"
+        val nextCover = if ((existing.coverUrl.isBlank() || existing.coverUrl.contains("placeholder")) && incoming.coverUrl.isNotBlank()) {
+            incoming.coverUrl
+        } else {
+            existing.coverUrl
+        }
+        val nextBanner = if (!bannerDisabled && existing.bannerUrl.isNullOrBlank() && !incoming.bannerUrl.isNullOrBlank()) {
+            incoming.bannerUrl
+        } else {
+            existing.bannerUrl
+        }
+        val nextProgress = maxOf(existing.currentProgress, incoming.currentProgress)
+        val nextPlaytime = maxOf(existing.playtimeHours, incoming.playtimeHours)
+        val nextTotal = existing.totalProgress?.takeIf { it > 0.0 } ?: incoming.totalProgress
+        val nextRating = existing.userRating ?: incoming.userRating
+        val nextStatus = when {
+            incoming.status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED &&
+                (existing.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK ||
+                    (existing.status == com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS &&
+                        nextProgress >= (nextTotal ?: 1.0))) -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+            existing.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK &&
+                incoming.status != com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK -> incoming.status
+            else -> existing.status
+        }
+
+        val changed = existing.copy(
+            nativeTitle = existing.nativeTitle ?: incoming.nativeTitle,
+            synopsis = existing.synopsis?.takeIf { it.isNotBlank() } ?: incoming.synopsis,
+            coverUrl = nextCover,
+            bannerUrl = nextBanner,
+            releaseYear = existing.releaseYear ?: incoming.releaseYear,
+            bookAuthor = existing.bookAuthor ?: incoming.bookAuthor,
+            platform = existing.platform ?: incoming.platform,
+            platforms = existing.platforms ?: incoming.platforms,
+            anilistId = existing.anilistId ?: incoming.anilistId,
+            malId = existing.malId ?: incoming.malId,
+            tmdbId = existing.tmdbId ?: incoming.tmdbId,
+            traktId = existing.traktId ?: incoming.traktId,
+            simklId = existing.simklId ?: incoming.simklId,
+            bangumiId = existing.bangumiId ?: incoming.bangumiId,
+            comickId = existing.comickId ?: incoming.comickId,
+            vndbId = existing.vndbId ?: incoming.vndbId,
+            igdbId = existing.igdbId ?: incoming.igdbId,
+            steamAppId = existing.steamAppId ?: incoming.steamAppId,
+            openLibraryId = existing.openLibraryId ?: incoming.openLibraryId,
+            hardcoverId = existing.hardcoverId ?: incoming.hardcoverId,
+            isbn = existing.isbn ?: incoming.isbn,
+            currentProgress = nextProgress,
+            totalProgress = nextTotal,
+            playtimeHours = nextPlaytime,
+            userRating = nextRating,
+            status = nextStatus
+        )
+        return if (changed != existing) {
+            repository.updateMedia(changed)
+            MergeOutcome.UPDATED
+        } else {
+            MergeOutcome.SKIPPED
+        }
+    }
+
+    suspend fun importSteamLibraryDetailed(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult {
+        val summary = importSteamLibrary(onStatus)
+        return TrackerImportResult(
+            imported = summary.imported,
+            updated = summary.updated,
+            skipped = 0,
+            error = summary.error
+        )
+    }
+
+    suspend fun importHardcoverLibraryDetailed(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult {
+        val summary = importHardcoverLibrary(onStatus)
+        return TrackerImportResult(
+            imported = summary.imported,
+            updated = summary.updated,
+            skipped = 0,
+            error = summary.error
+        )
+    }
+
+    suspend fun importAniListLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.anilistToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect AniList first")
+        onStatus("Fetching AniList library...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
+        try {
+            val viewerId = NetworkPacer.withAniListPacing {
+                val viewerReq = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .header("Authorization", "Bearer $token")
+                    .post(buildJsonObject { put("query", "query { Viewer { id name } }") }.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(viewerReq).execute().use { response ->
+                    if (!response.isSuccessful) return@withAniListPacing null
+                    val body = response.body?.string() ?: return@withAniListPacing null
+                    json.parseToJsonElement(body).asSafeObj()?.get("data").asSafeObj()?.get("Viewer").asSafeObj()?.get("id").asSafeInt()
+                }
+            } ?: return@withContext TrackerImportResult(0, 0, 0, "Could not fetch AniList viewer profile")
 
             for (mediaType in listOf("ANIME", "MANGA")) {
                 val listQuery = """
@@ -745,7 +894,7 @@ class TrackerSyncEngine(
                             lists {
                                 entries {
                                     progress
-                                    score
+                                    score(format: POINT_10_DECIMAL)
                                     status
                                     media {
                                         id
@@ -763,7 +912,6 @@ class TrackerSyncEngine(
                         }
                     }
                 """.trimIndent()
-
                 val listPayload = buildJsonObject {
                     put("query", listQuery)
                     putJsonObject("variables") {
@@ -771,133 +919,545 @@ class TrackerSyncEngine(
                         put("type", mediaType)
                     }
                 }
+                val lists = NetworkPacer.withAniListPacing {
+                    val listReq = Request.Builder()
+                        .url("https://graphql.anilist.co")
+                        .header("Authorization", "Bearer $token")
+                        .post(listPayload.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    client.newCall(listReq).execute().use { response ->
+                        if (!response.isSuccessful) return@withAniListPacing null
+                        val root = json.parseToJsonElement(response.body?.string().orEmpty()).asSafeObj()
+                        root?.get("data").asSafeObj()?.get("MediaListCollection").asSafeObj()?.get("lists").asSafeArr()
+                    }
+                } ?: continue
 
-                val listReq = Request.Builder()
-                    .url("https://graphql.anilist.co")
-                    .header("Authorization", "Bearer $token")
-                    .post(listPayload.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                client.newCall(listReq).execute().use { response ->
-                    if (!response.isSuccessful) return@use
-                    val body = response.body?.string() ?: return@use
-                    val root = json.parseToJsonElement(body).jsonObject
-                    val lists = root["data"]?.jsonObject?.get("MediaListCollection")?.jsonObject?.get("lists")?.jsonArray ?: return@use
-
-                    val existingMedia = repository.getAllMedia().firstOrNull() ?: emptyList()
-                    val existingAnilistIds = existingMedia.mapNotNull { it.anilistId }.toSet()
-
-                    for (listElem in lists) {
-                        val entries = listElem.jsonObject["entries"]?.jsonArray ?: continue
-                        for (entryElem in entries) {
-                            val entryObj = entryElem.jsonObject
-                            val mediaObj = entryObj["media"]?.jsonObject ?: continue
-                            val alId = mediaObj["id"]?.jsonPrimitive?.content?.toLongOrNull() ?: continue
-
-                            if (alId in existingAnilistIds) continue
-
-                            val titleObj = mediaObj["title"]?.jsonObject
-                            val title = titleObj?.get("english")?.jsonPrimitive?.content
-                                ?: titleObj?.get("romaji")?.jsonPrimitive?.content
-                                ?: titleObj?.get("native")?.jsonPrimitive?.content
-                                ?: continue
-
-                            val nativeTitle = titleObj?.get("native")?.jsonPrimitive?.content
-                            val cover = mediaObj["coverImage"]?.jsonObject?.get("extraLarge")?.jsonPrimitive?.content ?: ""
-                            val banner = mediaObj["bannerImage"]?.jsonPrimitive?.content
-                            val desc = mediaObj["description"]?.jsonPrimitive?.content
-                                ?.replace(Regex("<[^>]*>"), "")?.take(400)
-                            val format = mediaObj["format"]?.jsonPrimitive?.content
-                            val isNovel = format == "NOVEL"
-
-                            val resolvedType = when {
-                                isNovel -> com.omnitrack.app.data.model.MediaType.NOVEL
-                                mediaType == "ANIME" -> com.omnitrack.app.data.model.MediaType.ANIME
-                                else -> com.omnitrack.app.data.model.MediaType.MANGA
-                            }
-
-                            val progress = entryObj["progress"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
-                            val totalProg = if (mediaType == "ANIME") {
-                                mediaObj["episodes"]?.jsonPrimitive?.content?.toDoubleOrNull()
-                            } else {
-                                mediaObj["chapters"]?.jsonPrimitive?.content?.toDoubleOrNull()
-                            }
-                            val score = entryObj["score"]?.jsonPrimitive?.content?.toFloatOrNull()?.let { if (it > 0) it / 10f else null }
-                            val alStatus = entryObj["status"]?.jsonPrimitive?.content
-                            val trackingStatus = when (alStatus) {
-                                "CURRENT" -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
-                                "PLANNING" -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
-                                "COMPLETED" -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
-                                "PAUSED" -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
-                                "DROPPED" -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
-                                else -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
-                            }
-
-                            val newEntity = MediaItemEntity(
-                                title = title,
-                                nativeTitle = nativeTitle,
-                                synopsis = desc,
-                                coverUrl = cover,
-                                bannerUrl = banner,
-                                mediaType = resolvedType,
-                                status = trackingStatus,
-                                currentProgress = progress,
-                                totalProgress = totalProg,
-                                userRating = score,
-                                anilistId = alId,
-                                malId = mediaObj["idMal"]?.jsonPrimitive?.content?.toLongOrNull()
-                            )
-                            repository.insertMedia(newEntity)
-                            count++
+                for (listElem in lists) {
+                    val entries = listElem.asSafeObj()?.get("entries").asSafeArr() ?: continue
+                    for (entryElem in entries) {
+                        val entryObj = entryElem.asSafeObj() ?: continue
+                        val mediaObj = entryObj["media"].asSafeObj() ?: continue
+                        val alId = mediaObj["id"].asSafeLong() ?: continue
+                        val titleObj = mediaObj["title"].asSafeObj()
+                        val title = titleObj?.get("english").asSafeStr()
+                            ?: titleObj?.get("romaji").asSafeStr()
+                            ?: titleObj?.get("native").asSafeStr()
+                            ?: continue
+                        val nativeTitle = titleObj?.get("native").asSafeStr()
+                        val cover = mediaObj["coverImage"].asSafeObj()?.get("extraLarge").asSafeStr().orEmpty()
+                        val banner = mediaObj["bannerImage"].asSafeStr()
+                        val desc = mediaObj["description"].asSafeStr()?.replace(Regex("<[^>]*>"), "")?.take(400)
+                        val format = mediaObj["format"].asSafeStr()
+                        val resolvedType = when {
+                            format == "NOVEL" -> com.omnitrack.app.data.model.MediaType.NOVEL
+                            mediaType == "ANIME" -> com.omnitrack.app.data.model.MediaType.ANIME
+                            else -> com.omnitrack.app.data.model.MediaType.MANGA
+                        }
+                        val progress = entryObj["progress"].asSafeStr()?.toDoubleOrNull() ?: 0.0
+                        val totalProg = if (mediaType == "ANIME") {
+                            mediaObj["episodes"].asSafeStr()?.toDoubleOrNull()
+                        } else {
+                            mediaObj["chapters"].asSafeStr()?.toDoubleOrNull()
+                        }
+                        val score = entryObj["score"].asSafeStr()?.toFloatOrNull()?.let { if (it > 0f) it else null }
+                        val trackingStatus = when (entryObj["status"].asSafeStr()) {
+                            "CURRENT" -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                            "PLANNING" -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                            "COMPLETED" -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                            "PAUSED" -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                            "DROPPED" -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                            else -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                        }
+                        val incoming = MediaItemEntity(
+                            title = title,
+                            nativeTitle = nativeTitle,
+                            synopsis = desc,
+                            coverUrl = cover,
+                            bannerUrl = banner,
+                            mediaType = resolvedType,
+                            status = trackingStatus,
+                            currentProgress = progress,
+                            totalProgress = totalProg,
+                            userRating = score,
+                            anilistId = alId,
+                            malId = mediaObj["idMal"].asSafeLong()
+                        )
+                        when (smartMergeIncomingItem(incoming)) {
+                            MergeOutcome.IMPORTED -> imported++
+                            MergeOutcome.UPDATED -> updated++
+                            MergeOutcome.SKIPPED -> skipped++
                         }
                     }
                 }
             }
-        } catch (_: Exception) {}
-        count
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "AniList import failed")
+        }
+        onStatus("AniList: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
     }
 
-    private suspend fun pullTraktLibrary(token: String): Int = NetworkPacer.withGeneralPacing {
-        var count = 0
+    suspend fun importMalLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.malToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect MyAnimeList first")
+        onStatus("Fetching MyAnimeList library...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
         try {
-            val req = Request.Builder()
-                .url("https://api.trakt.tv/sync/watched/movies")
-                .header("Authorization", "Bearer $token")
-                .header("trakt-api-version", "2")
-                .build()
+            val clientId = TrackerAccountVerifier.MAL_CLIENT_ID
+            for (isAnime in listOf(true, false)) {
+                val endpoint = if (isAnime) {
+                    "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status,num_episodes,main_picture,start_date,media_type&limit=200"
+                } else {
+                    "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status,num_chapters,main_picture,start_date,media_type&limit=200"
+                }
+                var nextUrl: String? = endpoint
+                var page = 0
+                while (nextUrl != null && page < 5) {
+                    page++
+                    val (nodes, pagingNext) = NetworkPacer.withGeneralPacing {
+                        val req = Request.Builder()
+                            .url(nextUrl!!)
+                            .header("Authorization", "Bearer $token")
+                            .header("X-MAL-CLIENT-ID", clientId)
+                            .get()
+                            .build()
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) return@withGeneralPacing null to null
+                            val root = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                            root?.get("data").asSafeArr() to root?.get("paging").asSafeObj()?.get("next").asSafeStr()
+                        }
+                    }
+                    if (nodes == null) break
+                    for (el in nodes) {
+                        val wrapper = el.asSafeObj() ?: continue
+                        val node = wrapper["node"].asSafeObj() ?: continue
+                        val listStatus = wrapper["list_status"].asSafeObj()
+                        val malId = node["id"].asSafeLong() ?: continue
+                        val title = node["title"].asSafeStr() ?: continue
+                        val pic = node["main_picture"].asSafeObj()
+                        val cover = (pic?.get("large").asSafeStr() ?: pic?.get("medium").asSafeStr()).orEmpty()
+                        val year = node["start_date"].asSafeStr()?.take(4)
+                        val fmt = node["media_type"].asSafeStr()?.lowercase().orEmpty()
+                        val resolvedType = when {
+                            isAnime -> com.omnitrack.app.data.model.MediaType.ANIME
+                            "novel" in fmt -> com.omnitrack.app.data.model.MediaType.NOVEL
+                            else -> com.omnitrack.app.data.model.MediaType.MANGA
+                        }
+                        val statusRaw = listStatus?.get("status").asSafeStr()?.lowercase().orEmpty()
+                        val status = when (statusRaw) {
+                            "watching", "reading" -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                            "completed" -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                            "on_hold" -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                            "dropped" -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                            else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                        }
+                        val prog = (if (isAnime) listStatus?.get("num_episodes_watched") else listStatus?.get("num_chapters_read"))
+                            ?.asSafeInt()?.toDouble() ?: 0.0
+                        val total = (if (isAnime) node["num_episodes"] else node["num_chapters"])
+                            ?.asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                        val score = listStatus?.get("score")?.asSafeInt()?.takeIf { it > 0 }?.toFloat()
+                        when (smartMergeIncomingItem(
+                            MediaItemEntity(
+                                title = title,
+                                coverUrl = cover,
+                                mediaType = resolvedType,
+                                status = status,
+                                currentProgress = prog,
+                                totalProgress = total,
+                                userRating = score,
+                                releaseYear = year,
+                                malId = malId
+                            )
+                        )) {
+                            MergeOutcome.IMPORTED -> imported++
+                            MergeOutcome.UPDATED -> updated++
+                            MergeOutcome.SKIPPED -> skipped++
+                        }
+                    }
+                    nextUrl = pagingNext
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "MAL import failed")
+        }
+        onStatus("MyAnimeList: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
+    }
 
-            client.newCall(req).execute().use { response ->
-                if (!response.isSuccessful) return@use
-                val body = response.body?.string() ?: return@use
-                val array = json.parseToJsonElement(body).jsonArray
-                val existingMedia = repository.getAllMedia().firstOrNull() ?: emptyList()
-                val existingTmdbIds = existingMedia.mapNotNull { it.tmdbId }.toSet()
+    suspend fun importTraktLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.traktToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect Trakt first")
+        onStatus("Fetching Trakt library...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
+        val clientId = TrackerAccountVerifier.TRAKT_CLIENT_ID
+        try {
+            suspend fun fetchTraktArr(path: String): JsonArray? = NetworkPacer.withGeneralPacing {
+                val req = Request.Builder()
+                    .url("https://api.trakt.tv/$path")
+                    .header("Authorization", "Bearer $token")
+                    .header("trakt-api-version", "2")
+                    .header("trakt-api-key", clientId)
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing null
+                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeArr()
+                }
+            }
 
-                for (elem in array) {
-                    val obj = elem.jsonObject
-                    val movieObj = obj["movie"]?.jsonObject ?: continue
-                    val title = movieObj["title"]?.jsonPrimitive?.content ?: continue
-                    val ids = movieObj["ids"]?.jsonObject
-                    val tmdbId = ids?.get("tmdb")?.jsonPrimitive?.content?.toLongOrNull()
-                    val traktId = ids?.get("trakt")?.jsonPrimitive?.content?.toLongOrNull()
-
-                    if (tmdbId != null && tmdbId in existingTmdbIds) continue
-
-                    val newEntity = MediaItemEntity(
+            fetchTraktArr("sync/watched/movies")?.forEach { elem ->
+                val movieObj = elem.asSafeObj()?.get("movie").asSafeObj() ?: return@forEach
+                val title = movieObj["title"].asSafeStr() ?: return@forEach
+                val ids = movieObj["ids"].asSafeObj()
+                val year = movieObj["year"].asSafeStr()
+                when (smartMergeIncomingItem(
+                    MediaItemEntity(
                         title = title,
-                        coverUrl = "https://image.tmdb.org/t/p/original/placeholder.jpg",
+                        coverUrl = "",
                         mediaType = com.omnitrack.app.data.model.MediaType.MOVIE,
                         status = com.omnitrack.app.data.model.TrackingStatus.COMPLETED,
                         currentProgress = 1.0,
                         totalProgress = 1.0,
-                        tmdbId = tmdbId,
-                        traktId = traktId
+                        releaseYear = year,
+                        tmdbId = ids?.get("tmdb").asSafeLong(),
+                        traktId = ids?.get("trakt").asSafeLong(),
+                        imdbId = ids?.get("imdb").asSafeStr()
                     )
-                    repository.insertMedia(newEntity)
-                    count++
+                )) {
+                    MergeOutcome.IMPORTED -> imported++
+                    MergeOutcome.UPDATED -> updated++
+                    MergeOutcome.SKIPPED -> skipped++
                 }
             }
-        } catch (_: Exception) {}
-        count
+
+            fetchTraktArr("sync/watched/shows")?.forEach { elem ->
+                val obj = elem.asSafeObj() ?: return@forEach
+                val showObj = obj["show"].asSafeObj() ?: return@forEach
+                val title = showObj["title"].asSafeStr() ?: return@forEach
+                val ids = showObj["ids"].asSafeObj()
+                val year = showObj["year"].asSafeStr()
+                val aired = showObj["aired_episodes"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                val watchedCount = obj["seasons"].asSafeArr()?.sumOf { sEl ->
+                    sEl.asSafeObj()?.get("episodes").asSafeArr()?.size ?: 0
+                }?.toDouble() ?: 0.0
+                val status = if (aired != null && watchedCount >= aired) {
+                    com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                } else {
+                    com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                }
+                when (smartMergeIncomingItem(
+                    MediaItemEntity(
+                        title = title,
+                        coverUrl = "",
+                        mediaType = com.omnitrack.app.data.model.MediaType.SHOW,
+                        status = status,
+                        currentProgress = watchedCount,
+                        totalProgress = aired,
+                        releaseYear = year,
+                        tmdbId = ids?.get("tmdb").asSafeLong(),
+                        traktId = ids?.get("trakt").asSafeLong(),
+                        imdbId = ids?.get("imdb").asSafeStr()
+                    )
+                )) {
+                    MergeOutcome.IMPORTED -> imported++
+                    MergeOutcome.UPDATED -> updated++
+                    MergeOutcome.SKIPPED -> skipped++
+                }
+            }
+
+            fetchTraktArr("sync/watchlist")?.forEach { elem ->
+                val obj = elem.asSafeObj() ?: return@forEach
+                val typeStr = obj["type"].asSafeStr()?.lowercase()
+                val mediaObj = when (typeStr) {
+                    "movie" -> obj["movie"].asSafeObj()
+                    "show" -> obj["show"].asSafeObj()
+                    else -> null
+                } ?: return@forEach
+                val title = mediaObj["title"].asSafeStr() ?: return@forEach
+                val ids = mediaObj["ids"].asSafeObj()
+                val resolvedType = if (typeStr == "movie") com.omnitrack.app.data.model.MediaType.MOVIE else com.omnitrack.app.data.model.MediaType.SHOW
+                when (smartMergeIncomingItem(
+                    MediaItemEntity(
+                        title = title,
+                        coverUrl = "",
+                        mediaType = resolvedType,
+                        status = com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK,
+                        releaseYear = mediaObj["year"].asSafeStr(),
+                        tmdbId = ids?.get("tmdb").asSafeLong(),
+                        traktId = ids?.get("trakt").asSafeLong(),
+                        imdbId = ids?.get("imdb").asSafeStr()
+                    )
+                )) {
+                    MergeOutcome.IMPORTED -> imported++
+                    MergeOutcome.UPDATED -> updated++
+                    MergeOutcome.SKIPPED -> skipped++
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "Trakt import failed")
+        }
+        onStatus("Trakt: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
+    }
+
+    suspend fun importSimklLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.simklToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect SIMKL first")
+        onStatus("Fetching SIMKL library...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
+        try {
+            val root = NetworkPacer.withGeneralPacing {
+                val req = Request.Builder()
+                    .url("https://api.simkl.com/sync/all-items/")
+                    .header("Authorization", "Bearer $token")
+                    .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing null
+                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                }
+            } ?: return@withContext TrackerImportResult(0, 0, 0, "Failed to read SIMKL library")
+
+            suspend fun processCategory(key: String, mediaObjField: String, defaultType: com.omnitrack.app.data.model.MediaType) {
+                root[key].asSafeArr()?.forEach { el ->
+                    val entry = el.asSafeObj() ?: return@forEach
+                    val mObj = entry[mediaObjField].asSafeObj() ?: return@forEach
+                    val title = mObj["title"].asSafeStr() ?: return@forEach
+                    val ids = mObj["ids"].asSafeObj()
+                    val poster = mObj["poster"].asSafeStr()?.let { "https://simkl.in/posters/${it}_m.jpg" }.orEmpty()
+                    val year = mObj["year"].asSafeStr()
+                    val simklStatus = entry["status"].asSafeStr()?.lowercase().orEmpty()
+                    val status = when (simklStatus) {
+                        "watching" -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                        "completed" -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                        "hold" -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                        "dropped" -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                        else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                    }
+                    val watchedEps = entry["watched_episodes_count"].asSafeInt()?.toDouble()
+                        ?: if (defaultType == com.omnitrack.app.data.model.MediaType.MOVIE && status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED) 1.0 else 0.0
+                    val totalEps = entry["total_episodes_count"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                    val rating = entry["user_rating"].asSafeInt()?.takeIf { it > 0 }?.toFloat()
+                    when (smartMergeIncomingItem(
+                        MediaItemEntity(
+                            title = title,
+                            coverUrl = poster,
+                            mediaType = defaultType,
+                            status = status,
+                            currentProgress = watchedEps,
+                            totalProgress = totalEps,
+                            userRating = rating,
+                            releaseYear = year,
+                            simklId = ids?.get("simkl").asSafeLong(),
+                            tmdbId = ids?.get("tmdb").asSafeLong(),
+                            malId = ids?.get("mal").asSafeLong(),
+                            anilistId = ids?.get("anilist").asSafeLong(),
+                            imdbId = ids?.get("imdb").asSafeStr()
+                        )
+                    )) {
+                        MergeOutcome.IMPORTED -> imported++
+                        MergeOutcome.UPDATED -> updated++
+                        MergeOutcome.SKIPPED -> skipped++
+                    }
+                }
+            }
+
+            processCategory("movies", "movie", com.omnitrack.app.data.model.MediaType.MOVIE)
+            processCategory("shows", "show", com.omnitrack.app.data.model.MediaType.SHOW)
+            processCategory("anime", "show", com.omnitrack.app.data.model.MediaType.ANIME)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "SIMKL import failed")
+        }
+        onStatus("SIMKL: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
+    }
+
+    suspend fun importBangumiLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.bangumiToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect Bangumi first")
+        onStatus("Fetching Bangumi library...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
+        try {
+            val username = NetworkPacer.withBangumiPacing {
+                val meReq = Request.Builder()
+                    .url("https://api.bgm.tv/v0/me")
+                    .header("Authorization", "Bearer $token")
+                    .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                    .get()
+                    .build()
+                client.newCall(meReq).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withBangumiPacing null
+                    val obj = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                    obj?.get("username").asSafeStr() ?: obj?.get("id").asSafeStr()
+                }
+            } ?: return@withContext TrackerImportResult(0, 0, 0, "Could not fetch Bangumi profile")
+
+            var offset = 0
+            while (offset < 300) {
+                val dataArr = NetworkPacer.withBangumiPacing {
+                    val colReq = Request.Builder()
+                        .url("https://api.bgm.tv/v0/users/$username/collections?limit=100&offset=$offset")
+                        .header("Authorization", "Bearer $token")
+                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        .get()
+                        .build()
+                    client.newCall(colReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withBangumiPacing null
+                        json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("data").asSafeArr()
+                    }
+                } ?: break
+                if (dataArr.isEmpty()) break
+
+                for (el in dataArr) {
+                    val obj = el.asSafeObj() ?: continue
+                    val subj = obj["subject"].asSafeObj() ?: continue
+                    val bgmId = (obj["subject_id"].asSafeLong() ?: subj["id"].asSafeLong()) ?: continue
+                    val title = subj["name_cn"].asSafeStr() ?: subj["name"].asSafeStr() ?: continue
+                    val native = subj["name"].asSafeStr()
+                    val cover = subj["images"].asSafeObj()?.get("large").asSafeStr()
+                        ?: subj["images"].asSafeObj()?.get("common").asSafeStr().orEmpty()
+                    val resolvedType = when (obj["subject_type"].asSafeInt() ?: subj["type"].asSafeInt()) {
+                        1 -> com.omnitrack.app.data.model.MediaType.MANGA
+                        4 -> com.omnitrack.app.data.model.MediaType.GAME
+                        else -> com.omnitrack.app.data.model.MediaType.ANIME
+                    }
+                    val status = when (obj["type"].asSafeInt()) {
+                        2 -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                        3 -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                        4 -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                        5 -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                        else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                    }
+                    val progress = obj["ep_status"].asSafeInt()?.toDouble() ?: 0.0
+                    val total = subj["eps"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
+                    val rating = obj["rate"].asSafeInt()?.takeIf { it > 0 }?.toFloat()
+                    when (smartMergeIncomingItem(
+                        MediaItemEntity(
+                            title = title,
+                            nativeTitle = native.takeIf { it != title },
+                            coverUrl = cover,
+                            mediaType = resolvedType,
+                            status = status,
+                            currentProgress = progress,
+                            totalProgress = total,
+                            userRating = rating,
+                            releaseYear = subj["date"].asSafeStr()?.take(4),
+                            bangumiId = bgmId
+                        )
+                    )) {
+                        MergeOutcome.IMPORTED -> imported++
+                        MergeOutcome.UPDATED -> updated++
+                        MergeOutcome.SKIPPED -> skipped++
+                    }
+                }
+                if (dataArr.size < 100) break
+                offset += 100
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "Bangumi import failed")
+        }
+        onStatus("Bangumi: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
+    }
+
+    suspend fun importVndbLibrary(
+        onStatus: (String) -> Unit = {}
+    ): TrackerImportResult = withContext(Dispatchers.IO) {
+        val token = tokenManager.tokens.firstOrNull()?.vndbToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext TrackerImportResult(0, 0, 0, "Connect VNDB token first")
+        onStatus("Fetching VNDB visual novel list...")
+        var imported = 0
+        var updated = 0
+        var skipped = 0
+        try {
+            val userId = NetworkPacer.withVndbPacing {
+                val req = Request.Builder()
+                    .url("https://api.vndb.org/kana/authinfo")
+                    .header("Authorization", "Token $token")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withVndbPacing null
+                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("id").asSafeStr()
+                }
+            } ?: return@withContext TrackerImportResult(0, 0, 0, "Could not verify VNDB user")
+
+            val resultsArr = NetworkPacer.withVndbPacing {
+                val payload = buildJsonObject {
+                    put("user", userId)
+                    put("fields", "id,vote,labels.label,vn{id,title,released,image{url}}")
+                    put("results", 100)
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://api.vndb.org/kana/ulist")
+                    .header("Authorization", "Token $token")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withVndbPacing null
+                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("results").asSafeArr()
+                }
+            } ?: return@withContext TrackerImportResult(0, 0, 0, "Failed to read VNDB list")
+
+            for (el in resultsArr) {
+                val obj = el.asSafeObj() ?: continue
+                val vn = obj["vn"].asSafeObj() ?: continue
+                val vndbId = vn["id"].asSafeStr() ?: obj["id"].asSafeStr() ?: continue
+                val title = vn["title"].asSafeStr() ?: continue
+                val cover = vn["image"].asSafeObj()?.get("url").asSafeStr().orEmpty()
+                val year = vn["released"].asSafeStr()?.take(4)
+                val labels = obj["labels"].asSafeArr()?.mapNotNull { it.asSafeObj()?.get("label").asSafeStr()?.lowercase() }.orEmpty()
+                val status = when {
+                    labels.any { "finished" in it } -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                    labels.any { "playing" in it } -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                    labels.any { "stalled" in it || "hold" in it } -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                    labels.any { "dropped" in it } -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                    else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                }
+                val rating = obj["vote"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
+                when (smartMergeIncomingItem(
+                    MediaItemEntity(
+                        title = title,
+                        coverUrl = cover,
+                        mediaType = com.omnitrack.app.data.model.MediaType.VISUAL_NOVEL,
+                        status = status,
+                        userRating = rating,
+                        releaseYear = year,
+                        vndbId = vndbId
+                    )
+                )) {
+                    MergeOutcome.IMPORTED -> imported++
+                    MergeOutcome.UPDATED -> updated++
+                    MergeOutcome.SKIPPED -> skipped++
+                }
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "VNDB import failed")
+        }
+        onStatus("VNDB: imported $imported, updated $updated")
+        TrackerImportResult(imported, updated, skipped)
     }
 }

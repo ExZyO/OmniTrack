@@ -110,6 +110,16 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
+private fun formatArtSourceBadgeLabel(sourceName: String): String = when {
+    sourceName.contains("Wikimedia", ignoreCase = true) -> "Wikimedia"
+    sourceName.contains("Open Library", ignoreCase = true) -> "OpenLib"
+    sourceName.equals("SteamGridDB", ignoreCase = true) -> "SGDB"
+    sourceName.equals("Google Books", ignoreCase = true) -> "Google"
+    sourceName.equals("Apple Books", ignoreCase = true) -> "Apple"
+    sourceName.equals("MyAnimeList", ignoreCase = true) -> "MAL"
+    else -> sourceName.take(12)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArtworkPickerBottomSheet(
@@ -133,6 +143,8 @@ fun ArtworkPickerBottomSheet(
     openLibraryId: String? = null,
     bookAuthor: String? = null,
     initialCandidates: List<ArtworkCandidate> = emptyList(),
+    initialExcludedSources: Set<String> = emptySet(),
+    onExcludedSourcesChanged: (Set<String>) -> Unit = {},
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
     onBannerSelected: (String) -> Unit = {},
@@ -151,7 +163,9 @@ fun ArtworkPickerBottomSheet(
     var selectedTab by remember { mutableIntStateOf(0) }
     var allCandidates by remember(title, mediaType, anilistId, malId, mangadexId, vndbId, steamAppId, openLibraryId, bookAuthor) { mutableStateOf(initialCandidates) }
     var isLoading by remember { mutableStateOf(false) }
-    var excludedSources by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var excludedSources by remember(mediaId, title, initialExcludedSources) {
+        mutableStateOf(initialExcludedSources.map { it.trim().uppercase() }.filter { it.isNotBlank() }.toSet())
+    }
     var showDirectUrlInput by remember { mutableStateOf(false) }
     var customUrlInput by remember { mutableStateOf("") }
 
@@ -245,7 +259,7 @@ fun ArtworkPickerBottomSheet(
         }
     }
 
-    val isBannerDisabled = currentCustomBannerPath == "NONE"
+    val isBannerDisabled = currentCustomBannerPath == "NONE" || currentRole == "DISABLE_BANNER"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -300,7 +314,7 @@ fun ArtworkPickerBottomSheet(
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh Candidates",
-                            tint = if (isLoading) TextMuted else AccentArctic
+                            tint = if (isLoading) TextMuted else AccentGold
                         )
                     }
                     IconButton(
@@ -323,12 +337,12 @@ fun ArtworkPickerBottomSheet(
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
-                contentColor = AccentArctic,
+                contentColor = AccentGold,
                 indicator = { tabPositions ->
                     if (selectedTab < tabPositions.size) {
                         TabRowDefaults.SecondaryIndicator(
                             Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                            color = AccentArctic
+                            color = AccentGold
                         )
                     }
                 },
@@ -342,7 +356,7 @@ fun ArtworkPickerBottomSheet(
                             text = if (displayedCovers.isNotEmpty()) "Covers (${displayedCovers.size})" else "Covers",
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium,
                             fontSize = 13.5.sp,
-                            color = if (selectedTab == 0) AccentArctic else TextMuted
+                            color = if (selectedTab == 0) AccentGold else TextMuted
                         )
                     }
                 )
@@ -354,7 +368,7 @@ fun ArtworkPickerBottomSheet(
                             text = if (displayedBanners.isNotEmpty()) "Banners (${displayedBanners.size})" else "Banners",
                             fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium,
                             fontSize = 13.5.sp,
-                            color = if (selectedTab == 1) AccentArctic else TextMuted
+                            color = if (selectedTab == 1) AccentGold else TextMuted
                         )
                     }
                 )
@@ -366,7 +380,7 @@ fun ArtworkPickerBottomSheet(
                             text = "Exclusions",
                             fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium,
                             fontSize = 13.5.sp,
-                            color = if (selectedTab == 2) AccentArctic else TextMuted
+                            color = if (selectedTab == 2) AccentGold else TextMuted
                         )
                     }
                 )
@@ -380,7 +394,7 @@ fun ArtworkPickerBottomSheet(
                         .fillMaxWidth()
                         .height(2.dp)
                         .padding(bottom = 0.dp),
-                    color = AccentArctic,
+                    color = AccentGold,
                     trackColor = Color.Transparent
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -398,7 +412,7 @@ fun ArtworkPickerBottomSheet(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         CircularProgressIndicator(
-                            color = AccentArctic,
+                            color = AccentGold,
                             strokeWidth = 2.5.dp,
                             modifier = Modifier.size(32.dp)
                         )
@@ -409,6 +423,7 @@ fun ArtworkPickerBottomSheet(
                             MediaType.SHOW, MediaType.MOVIE -> "Querying TMDb, TVMaze & Bangumi..."
                             MediaType.GAME -> "Querying Steam, IGDB & SteamGridDB..."
                             MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam, AniList, IGDB, SteamGridDB & Bangumi..."
+                            MediaType.BOOK -> "Querying Open Library, Hardcover, Apple Books, Google Books & Wikimedia..."
                             else -> "Querying artwork providers..."
                         }
                         Text(
@@ -462,7 +477,7 @@ fun ArtworkPickerBottomSheet(
                                         },
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = AccentArctic,
+                                            containerColor = AccentGold,
                                             contentColor = AmoledBlack
                                         )
                                     ) {
@@ -488,7 +503,7 @@ fun ArtworkPickerBottomSheet(
                                         },
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = AccentArctic,
+                                            containerColor = AccentGold,
                                             contentColor = AmoledBlack
                                         )
                                     ) {
@@ -516,7 +531,7 @@ fun ArtworkPickerBottomSheet(
                                     shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.filledTonalButtonColors(
                                         containerColor = DarkSurfaceElevated,
-                                        contentColor = AccentArctic
+                                        contentColor = AccentGold
                                     )
                                 ) {
                                     Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -542,12 +557,12 @@ fun ArtworkPickerBottomSheet(
                                     shape = RoundedCornerShape(10.dp),
                                     border = androidx.compose.foundation.BorderStroke(
                                         1.dp,
-                                        if (showDirectUrlInput) AccentArctic else GlassBorder
+                                        if (showDirectUrlInput) AccentGold else GlassBorder
                                     )
                                 ) {
-                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentGold else TextSecondary)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentGold else TextSecondary)
                                 }
                             }
 
@@ -567,7 +582,7 @@ fun ArtworkPickerBottomSheet(
                                         singleLine = true,
                                         modifier = Modifier.weight(1f),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = AccentArctic,
+                                            focusedBorderColor = AccentGold,
                                             unfocusedBorderColor = GlassBorder,
                                             focusedTextColor = TextPrimary,
                                             unfocusedTextColor = TextPrimary
@@ -582,7 +597,7 @@ fun ArtworkPickerBottomSheet(
                                         },
                                         enabled = customUrlInput.isNotBlank(),
                                         shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = AccentArctic)
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
                                     ) {
                                         Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
@@ -623,7 +638,7 @@ fun ArtworkPickerBottomSheet(
                                                 .clip(RoundedCornerShape(10.dp))
                                                 .border(
                                                     width = if (isCurrent) 2.5.dp else 1.dp,
-                                                    color = if (isCurrent) AccentJade else GlassBorder,
+                                                    color = if (isCurrent) AccentGold else GlassBorder,
                                                     shape = RoundedCornerShape(10.dp)
                                                 )
                                                 .clickable {
@@ -638,22 +653,25 @@ fun ArtworkPickerBottomSheet(
                                                 modifier = Modifier.fillMaxSize()
                                             )
 
-                                            // Top pill source badge
+                                            // Compact source badge
                                             Box(
                                                 modifier = Modifier
                                                     .padding(6.dp)
                                                     .align(Alignment.TopStart)
                                                     .background(
-                                                        color = AmoledBlack.copy(alpha = 0.76f),
-                                                        shape = RoundedCornerShape(999.dp)
+                                                        color = Color(0xD912110E),
+                                                        shape = RoundedCornerShape(6.dp)
                                                     )
                                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
-                                                    text = candidate.sourceName,
-                                                    fontSize = 9.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = TextPrimary
+                                                    text = formatArtSourceBadgeLabel(candidate.sourceName),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    softWrap = false,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
 
@@ -687,7 +705,7 @@ fun ArtworkPickerBottomSheet(
                                                         .padding(6.dp)
                                                         .size(20.dp)
                                                         .clip(CircleShape)
-                                                        .background(AccentJade),
+                                                        .background(AccentGold),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
@@ -724,7 +742,7 @@ fun ArtworkPickerBottomSheet(
                                     shape = RoundedCornerShape(10.dp),
                                     colors = ButtonDefaults.filledTonalButtonColors(
                                         containerColor = DarkSurfaceElevated,
-                                        contentColor = AccentArctic
+                                        contentColor = AccentGold
                                     )
                                 ) {
                                     Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -788,12 +806,12 @@ fun ArtworkPickerBottomSheet(
                                     shape = RoundedCornerShape(10.dp),
                                     border = androidx.compose.foundation.BorderStroke(
                                         1.dp,
-                                        if (showDirectUrlInput) AccentArctic else GlassBorder
+                                        if (showDirectUrlInput) AccentGold else GlassBorder
                                     )
                                 ) {
-                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentGold else TextSecondary)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentArctic else TextSecondary)
+                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentGold else TextSecondary)
                                 }
                             }
 
@@ -813,7 +831,7 @@ fun ArtworkPickerBottomSheet(
                                         singleLine = true,
                                         modifier = Modifier.weight(1f),
                                         colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = AccentArctic,
+                                            focusedBorderColor = AccentGold,
                                             unfocusedBorderColor = GlassBorder,
                                             focusedTextColor = TextPrimary,
                                             unfocusedTextColor = TextPrimary
@@ -828,7 +846,7 @@ fun ArtworkPickerBottomSheet(
                                         },
                                         enabled = customUrlInput.isNotBlank(),
                                         shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = AccentArctic)
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
                                     ) {
                                         Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                     }
@@ -935,7 +953,7 @@ fun ArtworkPickerBottomSheet(
                                                 .clip(RoundedCornerShape(12.dp))
                                                 .border(
                                                     width = if (isCurrent) 2.5.dp else 1.dp,
-                                                    color = if (isCurrent) AccentArctic else GlassBorder,
+                                                    color = if (isCurrent) AccentGold else GlassBorder,
                                                     shape = RoundedCornerShape(12.dp)
                                                 )
                                                 .clickable {
@@ -950,22 +968,25 @@ fun ArtworkPickerBottomSheet(
                                                 modifier = Modifier.fillMaxSize()
                                             )
 
-                                            // Top pill source badge
+                                            // Compact source badge
                                             Box(
                                                 modifier = Modifier
                                                     .padding(8.dp)
                                                     .align(Alignment.TopStart)
                                                     .background(
-                                                        color = AmoledBlack.copy(alpha = 0.76f),
-                                                        shape = RoundedCornerShape(999.dp)
+                                                        color = Color(0xD912110E),
+                                                        shape = RoundedCornerShape(6.dp)
                                                     )
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
-                                                    text = "${candidate.sourceName} Banner",
+                                                    text = formatArtSourceBadgeLabel(candidate.sourceName),
                                                     fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = TextPrimary
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    softWrap = false,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
 
@@ -999,7 +1020,7 @@ fun ArtworkPickerBottomSheet(
                                                         .padding(8.dp)
                                                         .size(22.dp)
                                                         .clip(CircleShape)
-                                                        .background(AccentArctic),
+                                                        .background(AccentGold),
                                                     contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
@@ -1021,6 +1042,7 @@ fun ArtworkPickerBottomSheet(
                     2 -> {
                         val availableSources = remember(allCandidates) {
                             val standard = listOf(
+                                "Open Library", "Hardcover", "Apple Books", "Wikimedia Commons", "Google Books",
                                 "RanobeDB", "AniList", "MangaDex", "BookWalker", "Naver", "Kuaikan",
                                 "Bangumi", "Kitsu", "MyAnimeList", "Comick", "TMDb",
                                 "Steam", "Steam Hero", "Steam Background", "SteamGridDB",
@@ -1050,7 +1072,7 @@ fun ArtworkPickerBottomSheet(
                             )
                             Text(
                                 text = "Toggle off any provider to hide its covers and banners from discovery.",
-                                color = TextMuted,
+                                color = TextSecondary,
                                 fontSize = 12.sp
                             )
 
@@ -1080,7 +1102,7 @@ fun ArtworkPickerBottomSheet(
                                     ) {
                                         Text(
                                             text = displayLabel,
-                                            color = if (isExcluded) TextMuted else TextPrimary,
+                                            color = TextPrimary,
                                             fontSize = 14.sp,
                                             fontWeight = if (isMasterAll) FontWeight.SemiBold else FontWeight.Medium,
                                             modifier = Modifier.weight(1f)
@@ -1097,11 +1119,12 @@ fun ArtworkPickerBottomSheet(
                                                     if (checked) next.remove(sourceKey) else next.add(sourceKey)
                                                 }
                                                 excludedSources = next
+                                                onExcludedSourcesChanged(next)
                                             },
                                             colors = SwitchDefaults.colors(
                                                 checkedThumbColor = AmoledBlack,
-                                                checkedTrackColor = AccentArctic,
-                                                uncheckedThumbColor = TextMuted,
+                                                checkedTrackColor = AccentGold,
+                                                uncheckedThumbColor = TextSecondary,
                                                 uncheckedTrackColor = DarkSurfaceCard
                                             )
                                         )

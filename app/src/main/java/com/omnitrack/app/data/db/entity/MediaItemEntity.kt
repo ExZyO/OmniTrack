@@ -101,6 +101,7 @@ data class MediaItemEntity(
     val bookTotalAudioMinutes: Int? = null,
     val bookTranslator: String? = null,
     val bookEditionLabel: String? = null,
+    val excludedArtSources: String? = null,
     val trackerProgressOverrides: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

@@ -153,6 +153,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.omnitrack.app.data.model.AnimeCharacterItem
 import com.omnitrack.app.data.model.AnimeRelationItem
 import com.omnitrack.app.data.model.AnimeStaffItem
+import com.omnitrack.app.data.model.BookAuthorProfile
 import com.omnitrack.app.data.model.BookDetailMeta
 import com.omnitrack.app.data.model.BookFormat
 import com.omnitrack.app.data.model.BookTrackingMode
@@ -163,9 +164,12 @@ import com.omnitrack.app.data.model.VnSpoilerLevel
 import com.omnitrack.app.data.model.formatBookDuration
 import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
+import com.omnitrack.app.ui.components.FormattedRichText
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
+import com.omnitrack.app.ui.screens.detail.components.AuthorProfileBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.BookEntryDetailSheet
+import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.screens.detail.components.DetailBookAuthorSection
 import com.omnitrack.app.ui.screens.detail.components.DetailBookEditionsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailBookGallerySection
@@ -209,6 +213,7 @@ sealed class DetailSheetTarget {
     data class VnRoute(val routeId: Long) : DetailSheetTarget()
     data class GameEntry(val entryId: Long) : DetailSheetTarget()
     data class BookEntry(val entryId: Long) : DetailSheetTarget()
+    data class BookAuthor(val profile: BookAuthorProfile) : DetailSheetTarget()
 }
 
 private sealed class DetailNavStep {
@@ -285,10 +290,11 @@ fun DetailScreen(
     val isLightNovelVolumeMode = item?.mediaType == MediaType.NOVEL && uiState.isLightNovelMode
     val fallbackSeriesCover = effectiveCover.takeIf { it.isNotBlank() } ?: item?.coverUrl
 
+    val isBannerExplicitlyDisabled = item?.customBannerPath == "NONE" || item?.artworkRole == "DISABLE_BANNER"
     val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
     val backdropBitmap = rememberArtworkBackdrop(
-        imageUrl = effectiveBanner ?: item?.coverUrl,
-        enabled = isCinematicBlur
+        imageUrl = if (isBannerExplicitlyDisabled) null else (effectiveBanner ?: item?.coverUrl),
+        enabled = isCinematicBlur && !isBannerExplicitlyDisabled
     )
 
     val coroutineScope = rememberCoroutineScope()
@@ -1218,7 +1224,10 @@ fun DetailScreen(
                                         Column {
                                             DetailBookAuthorSection(
                                                 authorProfile = bookAuthorProfile,
-                                                onSelectWork = { rec -> pushPreview(rec) }
+                                                onSelectWork = { rec -> pushPreview(rec) },
+                                                onOpenAuthorProfile = { profile ->
+                                                    pushSheet(DetailSheetTarget.BookAuthor(profile))
+                                                }
                                             )
                                             Spacer(modifier = Modifier.height(20.dp))
                                         }
@@ -1727,6 +1736,17 @@ fun DetailScreen(
                     openLibraryId = item.openLibraryId,
                     bookAuthor = item.bookAuthor ?: uiState.bookDetailMeta.authorName,
                     initialCandidates = initialArtCandidates,
+                    initialExcludedSources = remember(item.excludedArtSources) {
+                        item.excludedArtSources
+                            ?.split(",")
+                            ?.map { it.trim().uppercase() }
+                            ?.filter { it.isNotBlank() }
+                            ?.toSet()
+                            ?: emptySet()
+                    },
+                    onExcludedSourcesChanged = { excluded ->
+                        viewModel.updateExcludedArtSources(excluded)
+                    },
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
                         if (newUrl.startsWith("/") || newUrl.startsWith("file:") || newUrl.startsWith("content:")) {
@@ -1741,9 +1761,6 @@ fun DetailScreen(
                         } else if (newBanner.startsWith("/") || newBanner.startsWith("file:")) {
                             viewModel.updateCustomBannerPath(newBanner, context)
                         } else {
-                            if (item.customBannerPath == "NONE") {
-                                viewModel.updateCustomBannerPath(null, context)
-                            }
                             viewModel.updateBanner(newBanner)
                         }
                     },
@@ -2057,6 +2074,19 @@ fun DetailScreen(
                     )
                 }
             }
+            is DetailSheetTarget.BookAuthor -> {
+                AuthorProfileBottomSheet(
+                    authorProfile = topSheet.profile,
+                    presentationSettings = presentationSettings,
+                    backdropBitmap = backdropBitmap,
+                    backdropTargetUrl = effectiveBanner,
+                    onSelectWork = { rec ->
+                        stepBackOneLevel()
+                        pushPreview(rec)
+                    },
+                    onDismiss = { stepBackOneLevel() }
+                )
+            }
             null -> {}
         }
 }
@@ -2113,8 +2143,9 @@ private fun SiblingDetailPreview(
         item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
             ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
     }
+    val isBannerExplicitlyDisabled = item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER"
     val effectiveBanner = when {
-        item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
+        isBannerExplicitlyDisabled -> null
         item.customBannerPath != null -> item.customBannerPath
         item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
         item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
@@ -2124,8 +2155,8 @@ private fun SiblingDetailPreview(
 
     val isCinematicBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
     val backdropBitmap = rememberArtworkBackdrop(
-        imageUrl = backdropTargetUrl ?: item.coverUrl,
-        enabled = isCinematicBlur
+        imageUrl = if (isBannerExplicitlyDisabled) null else (backdropTargetUrl ?: item.coverUrl),
+        enabled = isCinematicBlur && !isBannerExplicitlyDisabled
     )
     val losslessCover = remember(effectiveCover) { LosslessCoverMapper.toLosslessUrl(effectiveCover) }
     val dominantAccent = rememberCoverDominantColor(losslessCover)
@@ -2376,7 +2407,7 @@ private fun UnboxedStatsRow(
             )
             Column {
                 Text(
-                    text = item.userRating?.let { String.format("%.1f", it) } ?: "Rate",
+                    text = item.userRating?.let { formatSmartRating(it.toDouble()) } ?: "Rate",
                     color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
@@ -2633,7 +2664,7 @@ private fun DetailHeroHeaderSection(
                     }
                     Text(
                         text = heroTypeBadge,
-                        color = AccentArctic,
+                        color = AccentGold,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 1.sp
@@ -2642,13 +2673,14 @@ private fun DetailHeroHeaderSection(
                         MediaType.NOVEL -> item.originCountry?.uppercase()
                         MediaType.BOOK -> listOfNotNull(
                             bookDetailMeta.literaryForm?.label?.uppercase(),
+                            item.releaseYear?.takeIf { it.isNotBlank() },
                             bookDetailMeta.authorName ?: item.bookAuthor
                         ).joinToString(" · ").takeIf { it.isNotBlank() }
                         else -> item.platform
                     }
                     if (!heroSubInfo.isNullOrBlank()) {
-                        Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 11.sp)
-                        Text(text = heroSubInfo, color = Color.White, fontSize = 11.5.sp)
+                        Text(text = " • ", color = TextSecondary, fontSize = 11.sp)
+                        Text(text = heroSubInfo, color = TextPrimary, fontSize = 11.5.sp)
                     }
                 }
             }
@@ -2668,7 +2700,9 @@ private fun DetailHeroHeaderSection(
             }
         }
 
-        DetailNuvioMetaRow(item = item)
+        if (item.mediaType != MediaType.BOOK) {
+            DetailNuvioMetaRow(item = item)
+        }
         NuvioRatingsRow(
             item = item,
             anilistScore = novelDetailMeta.anilistScore,
@@ -2792,7 +2826,7 @@ private fun DetailBookEditorialHeroSection(
                 ).joinToString(" · ")
                 Text(
                     text = metaParts,
-                    color = Color.White.copy(alpha = 0.65f),
+                    color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.8.sp
@@ -2812,7 +2846,6 @@ private fun DetailBookEditorialHeroSection(
             }
         }
 
-        DetailNuvioMetaRow(item = item)
         NuvioRatingsRow(
             item = item,
             bookDetailMeta = bookDetailMeta
@@ -3011,15 +3044,23 @@ private fun DetailClassicHeaderSection(
                 }
                 Text(
                     text = compactTypeBadge,
-                    color = AccentArctic,
+                    color = AccentGold,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
                 )
-                val compactSubInfo = if (item.mediaType == MediaType.NOVEL) item.originCountry?.uppercase() else item.platform
+                val compactSubInfo = when (item.mediaType) {
+                    MediaType.NOVEL -> item.originCountry?.uppercase()
+                    MediaType.BOOK -> listOfNotNull(
+                        bookDetailMeta.literaryForm?.label?.uppercase(),
+                        item.releaseYear?.takeIf { it.isNotBlank() },
+                        bookDetailMeta.authorName ?: item.bookAuthor
+                    ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    else -> item.platform
+                }
                 if (!compactSubInfo.isNullOrBlank()) {
-                    Text(text = " • ", color = Color.White.copy(alpha = 0.85f), fontSize = 10.5.sp)
-                    Text(text = compactSubInfo, color = Color.White, fontSize = 11.sp)
+                    Text(text = " • ", color = TextSecondary, fontSize = 10.5.sp)
+                    Text(text = compactSubInfo, color = TextPrimary, fontSize = 11.sp)
                 }
             }
         }
@@ -3031,7 +3072,9 @@ private fun DetailClassicHeaderSection(
             .offset(y = statsOffset)
     ) {
         Column {
-            DetailNuvioMetaRow(item = item)
+            if (item.mediaType != MediaType.BOOK) {
+                DetailNuvioMetaRow(item = item)
+            }
             NuvioRatingsRow(
                 item = item,
                 anilistScore = novelDetailMeta.anilistScore,
@@ -3229,9 +3272,9 @@ private fun DetailSynopsisSection(
                 } else {
                     cleanText
                 }
-                Text(
-                    text = previewText,
-                    color = Color.White.copy(alpha = 0.90f),
+                FormattedRichText(
+                    rawText = previewText,
+                    color = TextPrimary,
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,
                     maxLines = if (synopsisExpanded) Int.MAX_VALUE else 3,

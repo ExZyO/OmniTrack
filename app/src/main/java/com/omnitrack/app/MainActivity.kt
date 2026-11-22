@@ -18,8 +18,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -223,27 +229,37 @@ class MainActivity : ComponentActivity() {
                             val customSecret = pref.customTraktClientSecret.firstOrNull()?.takeIf { it.isNotBlank() }
                             val effectiveClientId = customTrakt ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
                             val effectiveSecret = customSecret ?: TrackerAccountVerifier.TRAKT_CLIENT_SECRET
-                            val secretLine = if (effectiveSecret.isNotBlank()) "\"client_secret\": \"$effectiveSecret\"," else ""
-                            val payload = """
-                                {
-                                    "code": "$code",
-                                    "client_id": "$effectiveClientId",
-                                    $secretLine
-                                    "redirect_uri": "$effectiveRedirectUri",
-                                    "grant_type": "authorization_code"
+                            val verifier = TrackerAccountVerifier.pendingTraktVerifier?.takeIf { it.isNotBlank() }
+                                ?: tokenManager.getTraktVerifier().orEmpty()
+                            val payload = buildJsonObject {
+                                put("code", code)
+                                put("client_id", effectiveClientId)
+                                if (effectiveSecret.isNotBlank()) {
+                                    put("client_secret", effectiveSecret)
                                 }
-                            """.trimIndent()
+                                if (verifier.isNotBlank()) {
+                                    put("code_verifier", verifier)
+                                }
+                                put("redirect_uri", effectiveRedirectUri)
+                                put("grant_type", "authorization_code")
+                            }.toString()
                             val req = Request.Builder()
                                 .url("https://api.trakt.tv/oauth/token")
                                 .post(payload.toRequestBody("application/json".toMediaType()))
                                 .build()
                             client.newCall(req).execute().use { resp ->
+                                val body = resp.body?.string().orEmpty()
                                 if (resp.isSuccessful) {
-                                    val body = resp.body?.string().orEmpty()
-                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                    val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body) as? JsonObject
+                                    finalAccessToken = (parsed?.get("access_token") as? JsonPrimitive)
+                                        ?.takeIf { it !is JsonNull }
+                                        ?.contentOrNull
+                                } else {
+                                    android.util.Log.e("OmniTrack-Trakt", "Trakt token exchange failed: HTTP ${resp.code} $body")
                                 }
                             }
+                            TrackerAccountVerifier.pendingTraktVerifier = null
+                            tokenManager.saveTraktVerifier(null)
                         } catch (_: Exception) {}
                     }
                 }

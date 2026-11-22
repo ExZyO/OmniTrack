@@ -1569,19 +1569,33 @@ class DetailViewModel(
             relation.mediaType == MediaType.BOOK || format == "BOOK" -> MediaType.BOOK
             relation.mediaType == MediaType.GAME || format == "GAME" || format == "DLC" || format == "EXPANSION" || format == "REMAKE" || format == "REMASTER" -> MediaType.GAME
             relation.mediaType == MediaType.VISUAL_NOVEL || !relation.vndbId.isNullOrBlank() || format == "VN" || format == "VISUAL_NOVEL" -> MediaType.VISUAL_NOVEL
-            format == "MANGA" -> MediaType.MANGA
+            relation.mediaType == MediaType.SHOW || format == "TV" || format == "SHOW" || format == "TV_SERIES" || format == "MINISERIES" -> MediaType.SHOW
+            relation.mediaType == MediaType.MOVIE || format == "MOVIE" -> MediaType.MOVIE
+            format == "MANGA" || format == "ONE_SHOT" -> MediaType.MANGA
             format == "NOVEL" -> MediaType.NOVEL
-            format == "MOVIE" -> MediaType.MOVIE
             else -> MediaType.ANIME
         }
-        val anilistIdForLookup = relation.id.takeIf { it > 0L && targetType != MediaType.VISUAL_NOVEL && targetType != MediaType.GAME }
+        val anilistIdForLookup = relation.id.takeIf {
+            it > 0L && (targetType == MediaType.ANIME || targetType == MediaType.MANGA || targetType == MediaType.NOVEL)
+        }
         val igdbIdForLookup = relation.id.takeIf { it > 0L && targetType == MediaType.GAME }
-        preArmPreviewLoadingIfUncached(anilistIdForLookup, null, targetType, igdbId = igdbIdForLookup)
+        val tmdbIdForLookup = relation.tmdbId?.takeIf { it > 0L }
+            ?: relation.id.takeIf { it > 0L && (targetType == MediaType.MOVIE || targetType == MediaType.SHOW) }
+        val openLibraryIdForLookup = relation.openLibraryId?.takeIf { it.isNotBlank() }
+        preArmPreviewLoadingIfUncached(
+            anilistId = anilistIdForLookup,
+            tmdbId = tmdbIdForLookup,
+            mediaType = targetType,
+            igdbId = igdbIdForLookup,
+            openLibraryId = openLibraryIdForLookup
+        )
         viewModelScope.launch(Dispatchers.IO) {
             val existing = repository.findExistingMedia(
                 anilistId = anilistIdForLookup,
+                tmdbId = tmdbIdForLookup,
                 vndbId = relation.vndbId,
                 igdbId = igdbIdForLookup,
+                openLibraryId = openLibraryIdForLookup,
                 title = relation.title,
                 mediaType = targetType
             )
@@ -1592,8 +1606,10 @@ class DetailViewModel(
                 bannerUrl = relation.bannerUrl,
                 mediaType = targetType,
                 anilistId = anilistIdForLookup,
+                tmdbId = tmdbIdForLookup,
                 vndbId = relation.vndbId,
                 igdbId = igdbIdForLookup,
+                openLibraryId = openLibraryIdForLookup,
                 releaseYear = relation.year?.toString(),
                 status = TrackingStatus.PLAN_TO_TRACK
             )
@@ -2208,9 +2224,13 @@ class DetailViewModel(
 
                     if (item.id > 0L) {
                         val latest = repository.getMediaById(item.id).firstOrNull() ?: item
-                        val shouldUpgradeBanner = latest.customBannerPath.isNullOrBlank() && (
+                        val excluded = latest.excludedArtSet()
+                        val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+                        val allowedVnBanner = vnData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded, "VNDB") }
+                        val shouldUpgradeBanner = !bannerDisabled && latest.customBannerPath.isNullOrBlank() &&
+                            allowedVnBanner != null && (
                             latest.bannerUrl.isNullOrBlank() ||
-                                (latest.bannerUrl.contains("t.vndb.org/sf/") && !vnData.bannerUrl.isNullOrBlank() && !vnData.bannerUrl.contains("t.vndb.org/sf/"))
+                                (latest.bannerUrl.contains("t.vndb.org/sf/") && !allowedVnBanner.contains("t.vndb.org/sf/"))
                             )
                         val updated = latest.copy(
                             title = resolveUpdatedTitle(latest.title),
@@ -2228,7 +2248,7 @@ class DetailViewModel(
                             communityScore = vnData.communityScore ?: latest.communityScore,
                             metacriticScore = vnData.metacriticScore ?: latest.metacriticScore,
                             synopsis = latest.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
-                            bannerUrl = if (shouldUpgradeBanner) (vnData.bannerUrl ?: latest.bannerUrl) else latest.bannerUrl
+                            bannerUrl = if (shouldUpgradeBanner) (allowedVnBanner ?: latest.bannerUrl) else latest.bannerUrl
                         )
                         if (isStillCurrentItem() && updated != latest) {
                             repository.updateMedia(updated)
@@ -2318,13 +2338,18 @@ class DetailViewModel(
 
                     if (item.id > 0L) {
                         val latest = repository.getMediaById(item.id).firstOrNull() ?: item
-                        val shouldUpgradeBanner = latest.customBannerPath.isNullOrBlank() && (
+                        val excluded = latest.excludedArtSet()
+                        val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+                        val allowedGameBanner = gameData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
+                        val allowedGameCover = gameData.coverUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
+                        val shouldUpgradeBanner = !bannerDisabled && latest.customBannerPath.isNullOrBlank() &&
+                            allowedGameBanner != null && (
                             latest.bannerUrl.isNullOrBlank() ||
-                                (latest.bannerUrl.contains("header.jpg") && !gameData.bannerUrl.isNullOrBlank() && !gameData.bannerUrl.contains("header.jpg"))
+                                (latest.bannerUrl.contains("header.jpg") && !allowedGameBanner.contains("header.jpg"))
                             )
                         val shouldUpgradeCover = latest.customCoverPath.isNullOrBlank() &&
                             (latest.coverUrl.isBlank() || latest.coverUrl.contains("placeholder")) &&
-                            !gameData.coverUrl.isNullOrBlank()
+                            !allowedGameCover.isNullOrBlank()
                         val nextPlaytime = if (gameData.steamPlaytimeHours != null && gameData.steamPlaytimeHours > latest.playtimeHours) {
                             gameData.steamPlaytimeHours
                         } else latest.playtimeHours
@@ -2333,8 +2358,8 @@ class DetailViewModel(
                             igdbId = gameData.resolvedIgdbId ?: latest.igdbId,
                             steamAppId = gameData.resolvedSteamAppId ?: latest.steamAppId,
                             synopsis = latest.synopsis?.takeIf { it.isNotBlank() } ?: gameData.synopsis,
-                            coverUrl = if (shouldUpgradeCover) gameData.coverUrl!! else latest.coverUrl,
-                            bannerUrl = if (shouldUpgradeBanner) (gameData.bannerUrl ?: latest.bannerUrl) else latest.bannerUrl,
+                            coverUrl = if (shouldUpgradeCover) allowedGameCover!! else latest.coverUrl,
+                            bannerUrl = if (shouldUpgradeBanner) (allowedGameBanner ?: latest.bannerUrl) else latest.bannerUrl,
                             clearartUrl = gameData.clearLogoUrl ?: latest.clearartUrl,
                             communityScore = gameData.communityScore ?: latest.communityScore,
                             metacriticScore = gameData.metacriticScore ?: latest.metacriticScore,
@@ -2388,9 +2413,12 @@ class DetailViewModel(
             }
 
             if (item.mediaType == MediaType.BOOK) {
+                val effectiveTmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+                    ?: "844dba0bfd8f3a4f3799f6130ef9e335"
                 val bookData = bookEnrichmentSource.fetchFullBookData(
                     item = item,
-                    hardcoverToken = com.omnitrack.app.data.sync.TrackerTokenManager.cachedHardcoverToken
+                    hardcoverToken = com.omnitrack.app.data.sync.TrackerTokenManager.cachedHardcoverToken,
+                    tmdbApiKey = effectiveTmdbKey
                 )
                 if (!isStillCurrentItem()) return@launch
                 if (bookData != null) {
@@ -2406,12 +2434,16 @@ class DetailViewModel(
                     }
                     if (item.id > 0L) {
                         val latest = repository.getMediaById(item.id).firstOrNull() ?: item
-                        val nextBanner = if (latest.customBannerPath.isNullOrBlank() && latest.bannerUrl.isNullOrBlank()) {
-                            bookData.bannerUrl
+                        val excluded = latest.excludedArtSet()
+                        val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+                        val allowedBookBanner = bookData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded, "WIKIMEDIA COMMONS") }
+                        val allowedBookCover = bookData.coverUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
+                        val nextBanner = if (!bannerDisabled && latest.customBannerPath.isNullOrBlank() && latest.bannerUrl.isNullOrBlank()) {
+                            allowedBookBanner
                         } else {
                             latest.bannerUrl
                         }
-                        val nextCover = latest.coverUrl.takeIf { it.isNotBlank() } ?: bookData.coverUrl.orEmpty()
+                        val nextCover = latest.coverUrl.takeIf { it.isNotBlank() } ?: allowedBookCover.orEmpty()
                         val updated = latest.copy(
                             openLibraryId = latest.openLibraryId?.takeIf { it.isNotBlank() } ?: bookData.resolvedOpenLibraryId,
                             hardcoverId = latest.hardcoverId?.takeIf { it.isNotBlank() } ?: bookData.resolvedHardcoverId,
@@ -2966,7 +2998,11 @@ class DetailViewModel(
                                 } else if (item.id > 0) {
                                     launch(Dispatchers.IO) {
                                         val latest = repository.getMediaById(item.id).firstOrNull()
-                                        if (latest != null && latest.bannerUrl.isNullOrBlank()) {
+                                        if (latest != null && latest.bannerUrl.isNullOrBlank() &&
+                                            latest.artworkRole != "DISABLE_BANNER" &&
+                                            latest.customBannerPath.isNullOrBlank() &&
+                                            !isArtSourceExcluded(bridge.bannerUrl, latest.excludedArtSet(), "KITSU")
+                                        ) {
                                             repository.updateMedia(latest.copy(bannerUrl = bridge.bannerUrl))
                                         }
                                     }
@@ -3357,7 +3393,11 @@ class DetailViewModel(
                         val nextSyn = if (latest.synopsis.isNullOrBlank() && !repairSynopsis.isNullOrBlank()) {
                             repairSynopsis
                         } else latest.synopsis
-                        val nextBanner = latest.bannerUrl ?: content.kitsuDetails?.bannerUrl
+                        val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+                        val allowedKitsuBanner = content.kitsuDetails?.bannerUrl?.takeUnless {
+                            isArtSourceExcluded(it, latest.excludedArtSet(), "KITSU")
+                        }
+                        val nextBanner = latest.bannerUrl ?: if (!bannerDisabled && latest.customBannerPath.isNullOrBlank()) allowedKitsuBanner else null
                         val updated = latest.copy(
                             platform = targetPlatform,
                             originCountry = latest.originCountry ?: content.originCountry,
@@ -4612,15 +4652,87 @@ class DetailViewModel(
         }
     }
 
+    private fun MediaItemEntity.excludedArtSet(): Set<String> =
+        excludedArtSources
+            ?.split(",")
+            ?.map { it.trim().uppercase() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+
+    private fun inferArtSourceFromUrl(url: String?, fallbackSource: String? = null): String? {
+        val u = url.orEmpty().lowercase()
+        return when {
+            "wikimedia.org" in u || "wikipedia.org" in u -> "WIKIMEDIA COMMONS"
+            "openlibrary.org" in u -> "OPEN LIBRARY"
+            "hardcover" in u -> "HARDCOVER"
+            "mzstatic.com" in u || "apple.com" in u -> "APPLE BOOKS"
+            "googleapis.com/books" in u || "books.google" in u -> "GOOGLE BOOKS"
+            "steamgriddb" in u -> "STEAMGRIDDB"
+            "steamstatic.com" in u || "steampowered.com" in u -> "STEAM"
+            "igdb.com" in u -> "IGDB"
+            "vndb.org" in u -> "VNDB"
+            "tmdb.org" in u -> "TMDB"
+            "fanart.tv" in u -> "FANART.TV"
+            "anilist.co" in u -> "ANILIST"
+            "myanimelist.net" in u -> "MYANIMELIST"
+            "kitsu" in u -> "KITSU"
+            "bgmtv" in u || "bgm.tv" in u -> "BANGUMI"
+            else -> fallbackSource?.trim()?.uppercase()
+        }
+    }
+
+    private fun isArtSourceExcluded(
+        url: String?,
+        excluded: Set<String>,
+        fallbackSource: String? = null
+    ): Boolean {
+        if (excluded.isEmpty()) return false
+        if ("ALL" in excluded) return true
+        val inferred = inferArtSourceFromUrl(url, fallbackSource) ?: return false
+        return inferred in excluded
+    }
+
+    private fun updatePreviewEntity(transform: (MediaItemEntity) -> MediaItemEntity) {
+        val current = _previewItem.value ?: return
+        val updated = transform(current)
+        _previewItem.value = updated
+        _previewStack.update { stack ->
+            if (stack.isNotEmpty()) stack.dropLast(1) + updated else listOf(updated)
+        }
+    }
+
+    private fun deleteLocalArtFileIfNeeded(path: String?) {
+        if (path.isNullOrBlank() || path == "NONE" || path.startsWith("http://") || path.startsWith("https://")) return
+        try {
+            java.io.File(path).delete()
+        } catch (_: Exception) {
+        }
+    }
+
     fun updateCover(newCoverUrl: String) {
         viewModelScope.launch {
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
-            if (item.id > 0) {
-                repository.updateCover(item.id, newCoverUrl)
-                repository.updateCustomCover(item.id, newCoverUrl)
+            if (!item.customCoverPath.isNullOrBlank() && item.customCoverPath != newCoverUrl) {
+                deleteLocalArtFileIfNeeded(item.customCoverPath)
             }
-            if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(coverUrl = newCoverUrl, customCoverPath = newCoverUrl)
+            val nextRole = if (item.artworkRole == "BANNER_AS_COVER") "DEFAULT" else item.artworkRole
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(
+                    latest.copy(
+                        coverUrl = newCoverUrl,
+                        customCoverPath = newCoverUrl,
+                        artworkRole = nextRole
+                    )
+                )
+            }
+            updatePreviewEntity {
+                it.copy(
+                    coverUrl = newCoverUrl,
+                    customCoverPath = newCoverUrl,
+                    artworkRole = nextRole
+                )
             }
         }
     }
@@ -4628,12 +4740,30 @@ class DetailViewModel(
     fun updateBanner(newBannerUrl: String) {
         viewModelScope.launch {
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
-            if (item.id > 0) {
-                repository.updateBanner(item.id, newBannerUrl)
-                repository.updateCustomBanner(item.id, newBannerUrl)
+            if (!item.customBannerPath.isNullOrBlank() && item.customBannerPath != newBannerUrl) {
+                deleteLocalArtFileIfNeeded(item.customBannerPath)
             }
-            if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(bannerUrl = newBannerUrl, customBannerPath = newBannerUrl)
+            val nextRole = if (item.artworkRole == "DISABLE_BANNER" || item.artworkRole == "COVER_AS_BANNER") {
+                "DEFAULT"
+            } else {
+                item.artworkRole
+            }
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(
+                    latest.copy(
+                        bannerUrl = newBannerUrl,
+                        customBannerPath = newBannerUrl,
+                        artworkRole = nextRole
+                    )
+                )
+            }
+            updatePreviewEntity {
+                it.copy(
+                    bannerUrl = newBannerUrl,
+                    customBannerPath = newBannerUrl,
+                    artworkRole = nextRole
+                )
             }
         }
     }
@@ -4642,14 +4772,14 @@ class DetailViewModel(
         viewModelScope.launch {
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (!item.customCoverPath.isNullOrBlank() && item.customCoverPath != path) {
-                try { java.io.File(item.customCoverPath).delete() } catch (_: Exception) {}
+                deleteLocalArtFileIfNeeded(item.customCoverPath)
             }
+            val nextRole = if (path != null && item.artworkRole == "BANNER_AS_COVER") "DEFAULT" else item.artworkRole
             if (item.id > 0) {
-                repository.updateMedia(item.copy(customCoverPath = path))
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(customCoverPath = path, artworkRole = nextRole))
             }
-            if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(customCoverPath = path)
-            }
+            updatePreviewEntity { it.copy(customCoverPath = path, artworkRole = nextRole) }
         }
     }
 
@@ -4657,49 +4787,101 @@ class DetailViewModel(
         viewModelScope.launch {
             val item = _previewItem.value ?: uiState.value.item ?: return@launch
             if (!item.customBannerPath.isNullOrBlank() && item.customBannerPath != path) {
-                try { java.io.File(item.customBannerPath).delete() } catch (_: Exception) {}
+                deleteLocalArtFileIfNeeded(item.customBannerPath)
+            }
+            val nextRole = when {
+                path == "NONE" -> "DISABLE_BANNER"
+                path != null && (item.artworkRole == "DISABLE_BANNER" || item.artworkRole == "COVER_AS_BANNER") -> "DEFAULT"
+                path == null && item.artworkRole == "DISABLE_BANNER" -> "DEFAULT"
+                else -> item.artworkRole
             }
             if (item.id > 0) {
-                repository.updateMedia(item.copy(customBannerPath = path))
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(customBannerPath = path, artworkRole = nextRole))
             }
-            if (_previewItem.value != null) {
-                _previewItem.value = _previewItem.value?.copy(customBannerPath = path)
-            }
+            updatePreviewEntity { it.copy(customBannerPath = path, artworkRole = nextRole) }
         }
     }
 
     fun resetCover(context: android.content.Context? = null) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            if (!item.customCoverPath.isNullOrBlank()) {
-                try { java.io.File(item.customCoverPath).delete() } catch (_: Exception) {}
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            deleteLocalArtFileIfNeeded(item.customCoverPath)
+            val nextRole = if (item.artworkRole == "BANNER_AS_COVER") "DEFAULT" else item.artworkRole
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(customCoverPath = null, artworkRole = nextRole))
             }
-            repository.updateMedia(item.copy(customCoverPath = null))
+            updatePreviewEntity { it.copy(customCoverPath = null, artworkRole = nextRole) }
         }
     }
 
     fun resetBanner(context: android.content.Context? = null) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            if (!item.customBannerPath.isNullOrBlank()) {
-                try { java.io.File(item.customBannerPath).delete() } catch (_: Exception) {}
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            deleteLocalArtFileIfNeeded(item.customBannerPath)
+            val nextRole = if (item.artworkRole == "DISABLE_BANNER" || item.artworkRole == "COVER_AS_BANNER") {
+                "DEFAULT"
+            } else {
+                item.artworkRole
             }
-            repository.updateMedia(item.copy(bannerUrl = null, customBannerPath = null))
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(bannerUrl = null, customBannerPath = null, artworkRole = nextRole))
+            }
+            updatePreviewEntity { it.copy(bannerUrl = null, customBannerPath = null, artworkRole = nextRole) }
         }
     }
 
     fun toggleDisableBanner() {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            val newRole = if (item.artworkRole == "DISABLE_BANNER") "DEFAULT" else "DISABLE_BANNER"
-            repository.updateMedia(item.copy(artworkRole = newRole))
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            val currentlyDisabled = item.artworkRole == "DISABLE_BANNER" || item.customBannerPath == "NONE"
+            val newRole = if (currentlyDisabled) "DEFAULT" else "DISABLE_BANNER"
+            val newCustomBanner = if (currentlyDisabled) {
+                item.customBannerPath?.takeUnless { it == "NONE" }
+            } else {
+                "NONE"
+            }
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(artworkRole = newRole, customBannerPath = newCustomBanner))
+            }
+            updatePreviewEntity { it.copy(artworkRole = newRole, customBannerPath = newCustomBanner) }
         }
     }
 
     fun updateArtworkRole(role: String) {
         viewModelScope.launch {
-            val item = uiState.value.item ?: return@launch
-            repository.updateMedia(item.copy(artworkRole = role))
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            val normalizedBannerPath = when {
+                role == "DISABLE_BANNER" -> "NONE"
+                item.customBannerPath == "NONE" -> null
+                else -> item.customBannerPath
+            }
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(artworkRole = role, customBannerPath = normalizedBannerPath))
+            }
+            updatePreviewEntity { it.copy(artworkRole = role, customBannerPath = normalizedBannerPath) }
+        }
+    }
+
+    fun updateExcludedArtSources(sources: Set<String>) {
+        viewModelScope.launch {
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            val serialized = sources
+                .map { it.trim().uppercase() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+                .joinToString(",")
+                .takeIf { it.isNotBlank() }
+            if (item.id > 0) {
+                val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                repository.updateMedia(latest.copy(excludedArtSources = serialized))
+            }
+            updatePreviewEntity { it.copy(excludedArtSources = serialized) }
         }
     }
 
@@ -5246,15 +5428,63 @@ class DetailViewModel(
 
     fun updateBookFormat(format: BookFormat) {
         viewModelScope.launch(Dispatchers.IO) {
-            val mediaId = ensureLibraryMediaId()
+            val meta = _bookDetailMeta.value
+            val matchedEdition = meta.editions.firstOrNull { ed ->
+                val fmt = ed.format.orEmpty().lowercase()
+                when (format) {
+                    BookFormat.HARDCOVER -> "hardcover" in fmt || "hardback" in fmt
+                    BookFormat.PAPERBACK -> "paperback" in fmt || "softcover" in fmt || "mass market" in fmt || "trade" in fmt
+                    BookFormat.EBOOK -> "ebook" in fmt || "e-book" in fmt || "kindle" in fmt || "epub" in fmt || "digital" in fmt
+                    BookFormat.AUDIOBOOK -> "audio" in fmt
+                }
+            }
+            fun applyFormatTo(entity: MediaItemEntity): MediaItemEntity {
+                val nextMode = when (format) {
+                    BookFormat.AUDIOBOOK -> BookTrackingMode.AUDIO_MINUTES.name
+                    BookFormat.EBOOK -> BookTrackingMode.PERCENT.name
+                    BookFormat.HARDCOVER, BookFormat.PAPERBACK -> BookTrackingMode.PAGES.name
+                }
+                val nextEdition = matchedEdition?.let { ed ->
+                    listOfNotNull(ed.publisher?.takeIf { it.isNotBlank() }, ed.publishYear?.takeIf { it.isNotBlank() })
+                        .joinToString(" · ")
+                        .takeIf { it.isNotBlank() }
+                        ?: ed.title
+                } ?: entity.bookEditionLabel
+                val nextTotal = if (format != BookFormat.AUDIOBOOK) {
+                    matchedEdition?.pageCount?.takeIf { it > 0 }?.toDouble()
+                        ?: entity.totalProgress
+                        ?: meta.pageCount?.takeIf { it > 0 }?.toDouble()
+                } else {
+                    entity.totalProgress
+                }
+                val nextAudioMinutes = if (format == BookFormat.AUDIOBOOK) {
+                    entity.bookTotalAudioMinutes ?: meta.audiobookDurationMinutes
+                } else {
+                    entity.bookTotalAudioMinutes
+                }
+                return entity.copy(
+                    bookFormat = format.name,
+                    bookTrackingMode = nextMode,
+                    bookEditionLabel = nextEdition,
+                    totalProgress = nextTotal,
+                    isbn = entity.isbn?.takeIf { it.isNotBlank() } ?: matchedEdition?.isbn13,
+                    bookTotalAudioMinutes = nextAudioMinutes
+                )
+            }
+
+            val preview = _previewItem.value
+            if (preview != null && preview.id <= 0L) {
+                updatePreviewEntity(::applyFormatTo)
+                return@launch
+            }
+            val mediaId = preview?.id?.takeIf { it > 0L } ?: ensureLibraryMediaId()
             if (mediaId <= 0L) return@launch
             val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
-            val nextMode = if (format == BookFormat.AUDIOBOOK) {
-                BookTrackingMode.AUDIO_MINUTES.name
-            } else {
-                latest.bookTrackingMode
+            val updated = applyFormatTo(latest)
+            repository.updateMedia(updated)
+            if (preview != null) {
+                updatePreviewEntity { updated }
             }
-            repository.updateMedia(latest.copy(bookFormat = format.name, bookTrackingMode = nextMode))
         }
     }
 

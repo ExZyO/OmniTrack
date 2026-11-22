@@ -60,6 +60,8 @@ import com.omnitrack.app.data.model.formatEstimatedReadTime
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.ui.theme.TextSecondary
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -117,7 +119,7 @@ fun DetailBookTrackingSection(
                 ) {
                     Text(
                         text = mode.label,
-                        color = if (selected) Color.White else Color.White.copy(alpha = 0.48f),
+                        color = if (selected) Color.White else TextSecondary,
                         fontSize = 13.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                     )
@@ -156,7 +158,7 @@ fun DetailBookTrackingSection(
                         Text(
                             text = "Tap to edit time listened",
                             fontSize = 11.5.sp,
-                            color = Color.White.copy(alpha = 0.50f)
+                            color = TextSecondary
                         )
                     }
                     BookTrackingMode.PERCENT -> {
@@ -178,7 +180,7 @@ fun DetailBookTrackingSection(
                         Text(
                             text = "Tap to set exact percentage",
                             fontSize = 11.5.sp,
-                            color = Color.White.copy(alpha = 0.50f)
+                            color = TextSecondary
                         )
                     }
                     BookTrackingMode.PAGES -> {
@@ -194,7 +196,7 @@ fun DetailBookTrackingSection(
                         Text(
                             text = "Tap to enter exact page",
                             fontSize = 11.5.sp,
-                            color = Color.White.copy(alpha = 0.50f)
+                            color = TextSecondary
                         )
                     }
                 }
@@ -259,10 +261,22 @@ fun DetailBookTrackingSection(
             totalPages != null && totalPages > 0 -> "${totalPages.toInt()} pg"
             else -> "—"
         }
-        val col3Val = formatBookDuration(totalAudioMins)
-            ?: item.bookTranslator?.take(16)
-            ?: bookDetailMeta.originalLanguage
-            ?: "—"
+        val col3Val = when {
+            activeFormat == BookFormat.AUDIOBOOK || activeMode == BookTrackingMode.AUDIO_MINUTES -> {
+                val narr = bookDetailMeta.audiobookNarrator?.takeIf { it.isNotBlank() }
+                val dur = formatBookDuration(totalAudioMins)
+                when {
+                    dur != null && narr != null -> "$dur · $narr"
+                    dur != null -> dur
+                    narr != null -> narr
+                    else -> "—"
+                }
+            }
+            else -> formatBookDuration(totalAudioMins)
+                ?: item.bookTranslator?.take(16)
+                ?: bookDetailMeta.originalLanguage
+                ?: "—"
+        }
 
         Row(
             modifier = Modifier
@@ -272,7 +286,7 @@ fun DetailBookTrackingSection(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("EST. READ TIME", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.45f), letterSpacing = 0.8.sp)
+                Text("EST. READ TIME", fontSize = 9.5.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
                 Spacer(Modifier.height(2.dp))
                 Text(col1Val, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
@@ -282,7 +296,7 @@ fun DetailBookTrackingSection(
                     if (bookDetailMeta.lineCount != null) "VERSE LINES" else "LENGTH",
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.45f),
+                    color = TextSecondary,
                     letterSpacing = 0.8.sp
                 )
                 Spacer(Modifier.height(2.dp))
@@ -292,13 +306,14 @@ fun DetailBookTrackingSection(
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(
                     when {
+                        activeFormat == BookFormat.AUDIOBOOK || activeMode == BookTrackingMode.AUDIO_MINUTES -> "AUDIOBOOK"
                         totalAudioMins != null -> "AUDIOBOOK"
                         !item.bookTranslator.isNullOrBlank() -> "TRANSLATOR"
                         else -> "ORIGIN"
                     },
                     fontSize = 9.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.45f),
+                    color = TextSecondary,
                     letterSpacing = 0.8.sp
                 )
                 Spacer(Modifier.height(2.dp))
@@ -333,13 +348,13 @@ fun DetailBookTrackingSection(
                                 contentDescription = null,
                                 modifier = Modifier.size(13.dp),
                                 colorFilter = ColorFilter.tint(
-                                    if (selected) Color.White else Color.White.copy(alpha = 0.45f)
+                                    if (selected) Color.White else TextSecondary
                                 )
                             )
                         }
                         Text(
                             text = fmt.label,
-                            color = if (selected) Color.White else Color.White.copy(alpha = 0.48f),
+                            color = if (selected) Color.White else TextSecondary,
                             fontSize = 12.5.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                         )
@@ -349,7 +364,7 @@ fun DetailBookTrackingSection(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(2.dp)
-                            .background(if (selected) Color.White else Color.Transparent)
+                            .background(if (selected) AccentGold else Color.Transparent)
                     )
                 }
             }
@@ -372,7 +387,7 @@ fun DetailBookTrackingSection(
                 },
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.60f),
+                color = TextSecondary,
                 letterSpacing = 1.1.sp
             )
             Row(
@@ -432,7 +447,7 @@ fun DetailBookTrackingSection(
                     ).joinToString(" · ")
                     Text(
                         text = metaLine,
-                        color = Color.White.copy(alpha = 0.48f),
+                        color = TextSecondary,
                         fontSize = 11.5.sp,
                         maxLines = 2
                     )
@@ -445,7 +460,7 @@ fun DetailBookTrackingSection(
                         modifier = Modifier.padding(top = 2.dp)
                     ) {
                         Icon(Icons.Default.Star, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
-                        Text(String.format(Locale.US, "%.1f", r), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                        Text(formatSmartRating(r.toDouble()), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentGold)
                     }
                 }
             }
