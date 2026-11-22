@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
@@ -166,7 +166,7 @@ fun DetailTrailersSection(
                                     text = "$cat ($count)",
                                     fontSize = 13.sp,
                                     fontWeight = if (cat == selectedCategory) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (cat == selectedCategory) AccentArctic else Color.White
+                                    color = if (cat == selectedCategory) AccentGold else Color.White
                                 )
                             },
                             onClick = {

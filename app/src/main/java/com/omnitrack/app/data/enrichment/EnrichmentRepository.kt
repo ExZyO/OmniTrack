@@ -1257,11 +1257,34 @@ class EnrichmentRepository(
         return kotlin.math.abs(java.time.temporal.ChronoUnit.DAYS.between(parsedA, parsedB)) <= maxDays
     }
 
+    private suspend fun resolveTvdbId(
+        tmdbId: Long,
+        apiKey: String,
+        imdbId: String? = null,
+        anilistId: Long? = null
+    ): Long? {
+        tmdbTvdbIdCache[tmdbId]?.takeIf { it > 0L }?.let { return it }
+        imdbId?.let { cinemetaTvdbIdCache[it] }?.takeIf { it > 0L }?.let {
+            tmdbTvdbIdCache[tmdbId] = it
+            return it
+        }
+        if (anilistId != null && anilistId > 0L) {
+            fetchAniZipTvdbId(anilistId)?.takeIf { it > 0L }?.let {
+                tmdbTvdbIdCache[tmdbId] = it
+                return it
+            }
+        }
+        fetchTmdbImdbId(tmdbId, false, apiKey)
+        tmdbTvdbIdCache[tmdbId]?.takeIf { it > 0L }?.let { return it }
+        return null
+    }
+
     suspend fun fetchTvSeasons(
         tmdbId: Long,
         apiKey: String,
         showTitle: String? = null,
-        imdbId: String? = null
+        imdbId: String? = null,
+        anilistId: Long? = null
     ): List<com.omnitrack.app.data.model.MediaSeason> {
         val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
         val tmdbSeasons = rawSeasons.mapNotNull { meta ->
@@ -1310,23 +1333,23 @@ class EnrichmentRepository(
 
         // Cinemeta + TVDB (SkyHook) merge for multi-season anime (e.g. Frieren S2, Bleach S1-16, Apothecary Diaries S2/3)
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
+        val tvdbId = resolveTvdbId(tmdbId, apiKey, effectiveImdbId, anilistId)
+        val skyHook = if (tvdbId != null && tvdbId > 0L) fetchSkyHookShow(tvdbId) else null
         if (!effectiveImdbId.isNullOrBlank()) {
             val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
-            val tvdbId = cinemetaTvdbIdCache[effectiveImdbId] ?: tmdbTvdbIdCache[tmdbId]
-            val skyHook = if (tvdbId != null && tvdbId > 0L) fetchSkyHookShow(tvdbId) else null
 
             if (cinemetaVideos.isNotEmpty()) {
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
                 val tmdbSeason1Poster = tmdbSeasons.find { it.seasonNumber == 1 }?.posterUrl
 
-                // Parallel AniList/Kitsu poster discovery ONLY for seasons still missing a SkyHook TVDB poster (and <= 5)
+                // Parallel AniList/Kitsu poster discovery for any seasons still missing a SkyHook TVDB poster (up to 20 seasons)
                 val seasonsNeedingPosters = cinemetaSeasons.keys.filter { sNum ->
                     sNum > 0 &&
                         mergedList.find { it.seasonNumber == sNum }?.posterUrl.isNullOrBlank() &&
                         skyHook?.seasonPosters?.get(sNum).isNullOrBlank()
                 }
-                val seasonPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && seasonsNeedingPosters.isNotEmpty() && seasonsNeedingPosters.size <= 5) {
+                val seasonPosters: Map<Int, String?> = if (!showTitle.isNullOrBlank() && seasonsNeedingPosters.isNotEmpty() && seasonsNeedingPosters.size <= 20) {
                     coroutineScope {
                         seasonsNeedingPosters.map { sNum ->
                             async {
@@ -1423,7 +1446,8 @@ class EnrichmentRepository(
         seasonNumber: Int,
         apiKey: String,
         imdbId: String? = null,
-        showTitle: String? = null
+        showTitle: String? = null,
+        anilistId: Long? = null
     ): List<com.omnitrack.app.data.model.MediaEpisode> {
         val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
 
@@ -1443,7 +1467,7 @@ class EnrichmentRepository(
 
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         val cinemetaVideos = if (!effectiveImdbId.isNullOrBlank()) fetchCinemetaVideos(effectiveImdbId) else emptyList()
-        val tvdbId = (effectiveImdbId?.let { cinemetaTvdbIdCache[it] }) ?: tmdbTvdbIdCache[tmdbId]
+        val tvdbId = resolveTvdbId(tmdbId, apiKey, effectiveImdbId, anilistId)
         val skyHookEps = if (tvdbId != null && tvdbId > 0L) {
             (skyHookShowCache[tvdbId] ?: fetchSkyHookShow(tvdbId))?.episodesBySeason?.get(seasonNumber).orEmpty()
         } else emptyList()
@@ -5511,6 +5535,18 @@ class EnrichmentRepository(
         try {
             val root = fetchAniZipRoot(anilistId) ?: return@withContext null
             root["mappings"]?.jsonObject?.get("themoviedb_id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    suspend fun fetchAniZipTvdbId(anilistId: Long): Long? = withContext(Dispatchers.IO) {
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext null
+            val mappings = root["mappings"]?.jsonObject ?: return@withContext null
+            mappings["thetvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                ?: mappings["tvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             null

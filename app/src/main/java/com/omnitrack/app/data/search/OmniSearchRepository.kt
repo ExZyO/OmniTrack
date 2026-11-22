@@ -47,6 +47,7 @@ class OmniSearchRepository(
 ) {
     companion object {
         private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
+        private val discoverShelfCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
         private val wikidataAliasCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<String, String>>>()
 
         fun cleanSynopsis(raw: String?): String? {
@@ -69,7 +70,9 @@ class OmniSearchRepository(
         "TMDb" to 3,
         "MAL" to 4,
         "Kitsu" to 5,
+        "Cinemeta" to 5,
         "RanobeDB" to 6,
+        "Goodreads" to 7,
         "MangaDex" to 7,
         "MangaUpdates" to 8,
         "IGDB" to 8,
@@ -77,6 +80,9 @@ class OmniSearchRepository(
         "VNDB" to 10,
         "Bangumi" to 11,
         "Hardcover" to 6,
+        "Comic Vine" to 6,
+        "Metron" to 7,
+        "Open Library" to 8,
         "OpenLibrary" to 8,
         "Apple Books" to 9,
         "Apple Audiobooks" to 9,
@@ -115,6 +121,7 @@ class OmniSearchRepository(
             val subtypeKey = when (item.mediaType) {
                 MediaType.NOVEL -> ":${item.platform ?: ""}"
                 MediaType.BOOK -> ":${com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat)}"
+                MediaType.COMIC -> ":${com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat)}"
                 else -> ""
             }
             val key = "${item.mediaType.name}$subtypeKey:${item.title.trim().lowercase()}"
@@ -137,6 +144,10 @@ class OmniSearchRepository(
                     isbn = existing.isbn ?: item.isbn,
                     bookAuthor = existing.bookAuthor ?: item.bookAuthor,
                     bookFormat = existing.bookFormat ?: item.bookFormat,
+                    comicVineId = existing.comicVineId ?: item.comicVineId,
+                    metronId = existing.metronId ?: item.metronId,
+                    comicPublisher = existing.comicPublisher ?: item.comicPublisher,
+                    comicFormat = existing.comicFormat ?: item.comicFormat,
                     originCountry = existing.originCountry ?: item.originCountry,
                     platform = existing.platform ?: item.platform,
                     bannerUrl = existing.bannerUrl ?: item.bannerUrl,
@@ -188,6 +199,7 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = false) })
                     deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
                     deferreds.add(launchProvider { searchRanobeDb(trimmed) })
+                    deferreds.add(launchProvider { searchGoodreads(trimmed, MediaType.NOVEL) })
                     deferreds.add(launchProvider { searchKitsuNovels(trimmed) })
                     deferreds.add(launchProvider { searchMangaUpdatesNovels(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
@@ -196,9 +208,13 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchSteam(trimmed) })
                     deferreds.add(launchProvider { searchVndb(trimmed) })
                     deferreds.add(launchProvider { searchBooks(trimmed) })
+                    deferreds.add(launchProvider { searchComics(trimmed) })
                 }
                 MediaType.BOOK -> {
                     deferreds.add(launchProvider { searchBooks(trimmed) })
+                }
+                MediaType.COMIC -> {
+                    deferreds.add(launchProvider { searchComics(trimmed) })
                 }
                 MediaType.ANIME -> {
                     deferreds.add(launchProvider { searchAniList(trimmed, isAnime = true) })
@@ -223,6 +239,7 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchKitsuNovels(trimmed) })
                     deferreds.add(launchProvider { searchMangaUpdatesNovels(trimmed) })
                     deferreds.add(launchProvider { searchBangumiWithAliases(trimmed, type = 1, defaultType = MediaType.NOVEL) })
+                    deferreds.add(launchProvider { searchGoodreads(trimmed, MediaType.NOVEL) })
                     deferreds.add(launchProvider { searchSyosetu(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
                 }
@@ -1752,6 +1769,7 @@ class OmniSearchRepository(
                 } else emptyList()
             },
             async { searchOpenLibraryBooks(query) },
+            async { searchGoodreads(query, MediaType.BOOK) },
             async { searchAppleBooks(query) },
             async { searchAppleAudiobooks(query) },
             async { searchPoetryDbBooks(query) },
@@ -1975,6 +1993,441 @@ class OmniSearchRepository(
             emptyList()
         }
     }
+
+    private suspend fun searchGoodreads(query: String, targetType: MediaType): List<SearchResultItem> = NetworkPacer.withGeneralPacing {
+        val cleanQ = query.trim()
+        if (cleanQ.length < 2) return@withGeneralPacing emptyList()
+        val cacheKey = "gr:${targetType.name}:${cleanQ.lowercase()}"
+        providerSearchCache[cacheKey]?.let { return@withGeneralPacing it }
+        try {
+            val encoded = URLEncoder.encode(cleanQ, "UTF-8")
+            val req = Request.Builder()
+                .url("https://www.goodreads.com/book/auto_complete?format=json&q=$encoded")
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                val arr = json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonArray
+                    ?: return@withGeneralPacing emptyList()
+                val results = arr.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    val rawTitle = o["bookTitleBare"].cleanString() ?: o["title"].cleanString() ?: return@mapNotNull null
+                    val rawCover = o["imageUrl"].cleanString() ?: return@mapNotNull null
+                    if (rawCover.contains("nophoto", ignoreCase = true)) return@mapNotNull null
+                    val hiResCover = rawCover.replace(Regex("""\._(?:S[XY]|U[XY]|CR[\d,]+)\d*_"""), "")
+                    val author = (o["author"] as? JsonObject)?.get("name").cleanString()
+                    val rating5 = (o["avgRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toFloatOrNull()
+                    val score10 = rating5?.takeIf { it > 0f }?.let { (it * 2f).coerceIn(0f, 10f) }
+                    val pages = (o["numPages"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toDoubleOrNull()?.takeIf { it > 0.0 }
+                    val rawDesc = (o["description"] as? JsonObject)?.get("html").cleanString()
+                    val cleanedDesc = cleanSynopsis(rawDesc)
+                    val synopsisHeader = author?.let { "By $it" }
+                    val fullSynopsis = listOfNotNull(synopsisHeader, cleanedDesc).distinct().joinToString("\n\n").ifBlank { null }
+                    SearchResultItem(
+                        title = rawTitle,
+                        synopsis = fullSynopsis,
+                        coverUrl = LosslessCoverMapper.toLosslessUrl(hiResCover),
+                        mediaType = targetType,
+                        communityScore = score10,
+                        totalProgress = if (targetType == MediaType.BOOK) pages else null,
+                        bookAuthor = author,
+                        bookFormat = if (targetType == MediaType.BOOK) "Book" else null,
+                        platform = if (targetType == MediaType.NOVEL) "WEB_NOVEL" else null,
+                        sourceProvider = "Goodreads"
+                    )
+                }
+                if (results.isNotEmpty()) {
+                    providerSearchCache[cacheKey] = results
+                }
+                results
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("OmniSearchRepository", "Goodreads search exception for $cleanQ: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private suspend fun fetchAniListDiscoverShelf(
+        cacheKey: String,
+        aniType: String,
+        sort: String,
+        targetType: MediaType,
+        formatFilter: String? = null,
+        formatNotFilter: String? = null,
+        countryOfOrigin: String? = null
+    ): List<SearchResultItem> {
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        val args = buildList {
+            add("type: $aniType")
+            add("sort: [$sort]")
+            add("isAdult: false")
+            formatFilter?.let { add("format: $it") }
+            formatNotFilter?.let { add("format_not: $it") }
+            countryOfOrigin?.let { add("countryOfOrigin: \"$it\"") }
+        }.joinToString(", ")
+        val gql = """
+            query {
+                Page(page: 1, perPage: 16) {
+                    media($args) {
+                        id
+                        idMal
+                        title { romaji english native }
+                        coverImage { extraLarge large }
+                        bannerImage
+                        description(asHtml: false)
+                        averageScore
+                        startDate { year }
+                        episodes
+                        chapters
+                        volumes
+                        countryOfOrigin
+                    }
+                }
+            }
+        """.trimIndent()
+        return NetworkPacer.withAniListSearchPacing {
+            try {
+                val payload = buildJsonObject { put("query", gql) }
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .header("User-Agent", "OmniTrack/1.0 (Android; Linux)")
+                    .header("Accept", "application/json")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniListSearchPacing emptyList()
+                    val mediaList = json.parseToJsonElement(resp.body?.string().orEmpty())
+                        .jsonObject["data"]?.jsonObject?.get("Page")?.jsonObject?.get("media")?.jsonArray
+                        ?: return@withAniListSearchPacing emptyList()
+                    val parsed = mediaList.mapNotNull { node ->
+                        val obj = node.jsonObject
+                        val titleObj = obj["title"]?.jsonObject
+                        val eng = titleObj?.get("english").cleanString()
+                        val rom = titleObj?.get("romaji").cleanString()
+                        val nat = titleObj?.get("native").cleanString()
+                        val title = when (pref) {
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> eng ?: rom ?: nat
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> rom ?: eng ?: nat
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> nat ?: rom ?: eng
+                        } ?: return@mapNotNull null
+                        val cover = obj["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                            ?: obj["coverImage"]?.jsonObject?.get("large").cleanString()
+                            ?: return@mapNotNull null
+                        val banner = obj["bannerImage"].cleanString()
+                        val origin = obj["countryOfOrigin"].cleanString()
+                        val score = obj["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
+                        val year = obj["startDate"]?.jsonObject?.get("year").cleanString()
+                        val anilistId = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val malId = obj["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                        val totalProgress = when (targetType) {
+                            MediaType.ANIME -> obj["episodes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            MediaType.NOVEL -> obj["volumes"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                                ?: obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            else -> obj["chapters"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                        }
+                        val novelPlatform = if (targetType == MediaType.NOVEL) {
+                            if (origin == null || origin.equals("JP", ignoreCase = true)) "LIGHT_NOVEL" else "WEB_NOVEL"
+                        } else null
+                        SearchResultItem(
+                            title = title,
+                            nativeTitle = nat,
+                            synopsis = cleanSynopsis(obj["description"].cleanString()),
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                            bannerUrl = banner?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                            mediaType = targetType,
+                            releaseYear = year,
+                            communityScore = score,
+                            sourceProvider = "AniList",
+                            anilistId = anilistId,
+                            malId = malId,
+                            totalProgress = totalProgress,
+                            originCountry = origin,
+                            platform = novelPlatform
+                        )
+                    }
+                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    parsed
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchDiscoverAnimeShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val sort = when (shelf.lowercase()) {
+            "top_rated" -> "SCORE_DESC"
+            "popular" -> "POPULARITY_DESC"
+            else -> "TRENDING_DESC"
+        }
+        fetchAniListDiscoverShelf("anime:$sort", "ANIME", sort, MediaType.ANIME)
+    }
+
+    suspend fun fetchDiscoverMangaShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        when (shelf.lowercase()) {
+            "manhwa" -> fetchAniListDiscoverShelf(
+                cacheKey = "manga:manhwa",
+                aniType = "MANGA",
+                sort = "POPULARITY_DESC",
+                targetType = MediaType.MANGA,
+                formatNotFilter = "NOVEL",
+                countryOfOrigin = "KR"
+            )
+            "top_rated" -> fetchAniListDiscoverShelf(
+                cacheKey = "manga:top_rated",
+                aniType = "MANGA",
+                sort = "SCORE_DESC",
+                targetType = MediaType.MANGA,
+                formatNotFilter = "NOVEL"
+            )
+            else -> fetchAniListDiscoverShelf(
+                cacheKey = "manga:trending",
+                aniType = "MANGA",
+                sort = "TRENDING_DESC",
+                targetType = MediaType.MANGA,
+                formatNotFilter = "NOVEL"
+            )
+        }
+    }
+
+    suspend fun fetchDiscoverNovelsShelves(shelf: String): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        when (shelf.lowercase()) {
+            "top_webnovels" -> {
+                val cacheKey = "novel:top_webnovels"
+                discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+                val curated = listOf(
+                    "The Hundred Reigns",
+                    "Shadow Slave",
+                    "Lord of the Mysteries",
+                    "The Perfect Run",
+                    "Mother of Learning",
+                    "Worm Wildbow",
+                    "Super Supportive",
+                    "Omniscient Reader's Viewpoint",
+                    "Reverend Insanity",
+                    "The Wandering Inn",
+                    "The Primal Hunter",
+                    "He Who Fights with Monsters"
+                )
+                val items = coroutineScope {
+                    curated.map { title ->
+                        async {
+                            searchGoodreads(title, MediaType.NOVEL).firstOrNull()
+                        }
+                    }.awaitAll().filterNotNull().distinctBy { it.title.trim().lowercase() }
+                }
+                if (items.isNotEmpty()) discoverShelfCache[cacheKey] = items
+                items
+            }
+            "top_rated_ln" -> fetchAniListDiscoverShelf(
+                cacheKey = "novel:top_rated_ln",
+                aniType = "MANGA",
+                sort = "SCORE_DESC",
+                targetType = MediaType.NOVEL,
+                formatFilter = "NOVEL"
+            )
+            else -> fetchAniListDiscoverShelf(
+                cacheKey = "novel:trending_ln",
+                aniType = "MANGA",
+                sort = "TRENDING_DESC",
+                targetType = MediaType.NOVEL,
+                formatFilter = "NOVEL"
+            )
+        }
+    }
+
+    private suspend fun fetchTmdbOrCinemetaShelf(
+        cacheKey: String,
+        targetType: MediaType,
+        shelf: String,
+        tmdbApiKey: String?
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val isMovie = targetType == MediaType.MOVIE
+        val key = tmdbApiKey?.trim().orEmpty()
+        if (key.isNotBlank()) {
+            val tmdbItems = NetworkPacer.withTmdbPacing {
+                try {
+                    val seg = if (isMovie) "movie" else "tv"
+                    val url = when (shelf.lowercase()) {
+                        "top_rated" -> "https://api.themoviedb.org/3/$seg/top_rated?api_key=$key"
+                        "popular" -> "https://api.themoviedb.org/3/$seg/popular?api_key=$key"
+                        else -> "https://api.themoviedb.org/3/trending/$seg/week?api_key=$key"
+                    }
+                    val req = Request.Builder().url(url).get().build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withTmdbPacing emptyList()
+                        val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("results") as? JsonArray ?: return@withTmdbPacing emptyList()
+                        results.take(16).mapNotNull { el ->
+                            val o = el as? JsonObject ?: return@mapNotNull null
+                            val title = o["name"].cleanString() ?: o["title"].cleanString() ?: return@mapNotNull null
+                            val posterPath = o["poster_path"].cleanString() ?: return@mapNotNull null
+                            val backdropPath = o["backdrop_path"].cleanString()
+                            val date = o["first_air_date"].cleanString() ?: o["release_date"].cleanString()
+                            SearchResultItem(
+                                title = title,
+                                nativeTitle = o["original_name"].cleanString() ?: o["original_title"].cleanString(),
+                                synopsis = cleanSynopsis(o["overview"].cleanString()),
+                                coverUrl = LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$posterPath"),
+                                bannerUrl = backdropPath?.let { LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$it") },
+                                mediaType = targetType,
+                                releaseYear = date?.split("-")?.firstOrNull()?.cleanString(),
+                                communityScore = (o["vote_average"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull,
+                                sourceProvider = "TMDb",
+                                tmdbId = (o["id"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toLongOrNull()
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+            if (tmdbItems.isNotEmpty()) {
+                discoverShelfCache[cacheKey] = tmdbItems
+                return@withContext tmdbItems
+            }
+        }
+        // Keyless Cinemeta fallback
+        NetworkPacer.withGeneralPacing {
+            try {
+                val cType = if (isMovie) "movie" else "series"
+                val catalog = if (shelf.equals("top_rated", ignoreCase = true)) "imdbRating" else "top"
+                val req = Request.Builder()
+                    .url("https://v3-cinemeta.strem.io/catalog/$cType/$catalog.json")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                    val metas = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("metas") as? JsonArray ?: return@withGeneralPacing emptyList()
+                    val parsed = metas.take(16).mapNotNull { el ->
+                        val o = el as? JsonObject ?: return@mapNotNull null
+                        val title = o["name"].cleanString() ?: return@mapNotNull null
+                        val rawPoster = o["poster"].cleanString() ?: return@mapNotNull null
+                        val rawBanner = o["background"].cleanString()
+                        SearchResultItem(
+                            title = title,
+                            synopsis = cleanSynopsis(o["description"].cleanString()),
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(rawPoster.replace("/small/", "/medium/")),
+                            bannerUrl = rawBanner?.replace("/small/", "/medium/")?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                            mediaType = targetType,
+                            releaseYear = o["releaseInfo"].cleanString() ?: o["year"].cleanString(),
+                            communityScore = (o["imdbRating"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toFloatOrNull(),
+                            sourceProvider = "Cinemeta"
+                        )
+                    }
+                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    parsed
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchDiscoverShowsShelves(shelf: String, tmdbApiKey: String? = null): List<SearchResultItem> =
+        fetchTmdbOrCinemetaShelf("show:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.SHOW, shelf, tmdbApiKey)
+
+    suspend fun fetchDiscoverMoviesShelves(shelf: String, tmdbApiKey: String? = null): List<SearchResultItem> =
+        fetchTmdbOrCinemetaShelf("movie:$shelf:${!tmdbApiKey.isNullOrBlank()}", MediaType.MOVIE, shelf, tmdbApiKey)
+
+    suspend fun fetchDiscoverVisualNovelsShelves(shelf: String): List<SearchResultItem> {
+        val cacheKey = "vn:${shelf.lowercase()}"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return it }
+        val hideNsfw = com.omnitrack.app.data.preferences.PreferenceManager.cachedVnNsfwFilterMode ==
+            com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
+        val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
+        return NetworkPacer.withVndbPacing {
+            try {
+                val payload = buildJsonObject {
+                    put("filters", json.parseToJsonElement("[\"votecount\", \">=\", 250]"))
+                    put("fields", "id, title, alttitle, titles{lang,title,latin,official,main}, olang, length_minutes, released, rating, votecount, description, image{url,sexual,violence}, screenshots{url,sexual,violence}")
+                    put("sort", if (shelf.equals("top_rated", ignoreCase = true)) "rating" else "votecount")
+                    put("reverse", true)
+                    put("results", 16)
+                }
+                val req = Request.Builder()
+                    .url("https://api.vndb.org/kana/vn")
+                    .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withVndbPacing emptyList()
+                    val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("results") as? JsonArray ?: return@withVndbPacing emptyList()
+                    val parsed = results.mapNotNull { node ->
+                        val obj = node as? JsonObject ?: return@mapNotNull null
+                        val id = obj["id"].cleanString() ?: return@mapNotNull null
+                        val romajiTitle = obj["title"].cleanString() ?: return@mapNotNull null
+                        val altTitle = obj["alttitle"].cleanString()
+                        val olang = obj["olang"].cleanString()
+                        val titlesArray = obj["titles"] as? JsonArray
+                        val englishTitle = (titlesArray?.firstOrNull {
+                            val o = it as? JsonObject ?: return@firstOrNull false
+                            val isOfficial = o["official"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                            val isMain = o["main"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true
+                            o["lang"].cleanString() == "en" && (isOfficial || isMain)
+                        } as? JsonObject)?.get("title").cleanString()
+                            ?: (titlesArray?.firstOrNull { (it as? JsonObject)?.get("lang").cleanString() == "en" } as? JsonObject)?.get("title").cleanString()
+                        val resolvedTitle = when (pref) {
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ENGLISH -> englishTitle ?: romajiTitle
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.ROMAJI -> romajiTitle
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> altTitle ?: romajiTitle
+                        }
+                        val imageObj = obj["image"] as? JsonObject ?: return@mapNotNull null
+                        val imgSexual = imageObj["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f
+                        val imgViol = imageObj["violence"]?.jsonPrimitive?.floatOrNull ?: 0f
+                        if (hideNsfw && (imgSexual >= 1.0f || imgViol >= 1.5f)) return@mapNotNull null
+                        val cover = imageObj["url"].cleanString() ?: return@mapNotNull null
+                        val screenshots = obj["screenshots"] as? JsonArray
+                        val safeShot = (screenshots?.firstOrNull {
+                            val s = it as? JsonObject ?: return@firstOrNull false
+                            (s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f) < 0.5f && (s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f) < 1f
+                        } as? JsonObject)?.get("url").cleanString()
+                        val origin = when (olang?.lowercase()) {
+                            "ja" -> "JP"
+                            "en" -> "EN"
+                            "zh", "zh-hans", "zh-hant" -> "CN"
+                            "ko" -> "KR"
+                            else -> olang?.uppercase()?.take(2)
+                        }
+                        SearchResultItem(
+                            title = resolvedTitle,
+                            nativeTitle = altTitle,
+                            synopsis = cleanSynopsis(obj["description"].cleanString()?.replace(Regex("\\[[^\\]]*]"), "")),
+                            coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
+                            bannerUrl = safeShot?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                            mediaType = MediaType.VISUAL_NOVEL,
+                            releaseYear = obj["released"].cleanString()?.take(4)?.takeIf { y -> y.length == 4 && y.all { it.isDigit() } },
+                            communityScore = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f },
+                            sourceProvider = "VNDB",
+                            vndbId = id,
+                            originCountry = origin,
+                            runtimeMinutes = obj["length_minutes"]?.jsonPrimitive?.intOrNull
+                        )
+                    }
+                    if (parsed.isNotEmpty()) discoverShelfCache[cacheKey] = parsed
+                    parsed
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchDiscoverComicsShelves(shelf: String): List<SearchResultItem> =
+        com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).fetchDiscoverComicsShelves(shelf)
+
+    private suspend fun searchComics(query: String): List<SearchResultItem> =
+        com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).searchComics(query)
 
     private fun cleanSynopsis(raw: String?): String? = Companion.cleanSynopsis(raw)
 }

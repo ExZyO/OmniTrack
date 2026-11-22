@@ -102,6 +102,15 @@ data class MediaItemEntity(
     val bookTranslator: String? = null,
     val bookEditionLabel: String? = null,
     val excludedArtSources: String? = null,
+    val comicVineId: Long? = null,
+    val metronId: Long? = null,
+    val comicPublisher: String? = null,
+    val comicFormat: String? = null,
+    val comicTrackingMode: String? = null,
     val trackerProgressOverrides: String? = null,
+    val isCustomEntry: Boolean = false,
+    val bannerFocalX: Float = 0f,
+    val bannerFocalY: Float = 0f,
+    val bannerZoom: Float = 1f,
     val lastUpdated: Long = System.currentTimeMillis()
 )

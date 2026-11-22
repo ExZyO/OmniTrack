@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -67,8 +68,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -95,6 +98,8 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.model.ComicDetailMeta
+import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.BannerSizing
@@ -114,6 +119,7 @@ import com.omnitrack.app.ui.components.ArtworkPickerBottomSheet
 import com.omnitrack.app.ui.components.BackgroundMode
 import com.omnitrack.app.ui.components.ChapterStepper
 import com.omnitrack.app.ui.components.CoverGlowBox
+import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
@@ -123,6 +129,8 @@ import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomShee
 import com.omnitrack.app.ui.screens.detail.components.ChimanewStatusBottomSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailCollectionSection
+import com.omnitrack.app.ui.screens.detail.components.DetailComicCreatorsCharactersSection
+import com.omnitrack.app.ui.screens.detail.components.DetailComicTrackingSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGeneralInfoSection
 import com.omnitrack.app.ui.screens.detail.components.DetailExternalLinksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
@@ -300,6 +308,7 @@ fun DetailScreen(
     val coroutineScope = rememberCoroutineScope()
     var showArtworkPicker by remember { mutableStateOf(false) }
     var showOptionsMenu by remember { mutableStateOf(false) }
+    var showEditEntrySheet by remember { mutableStateOf(false) }
 
     var showProgressEditSheet by remember { mutableStateOf(false) }
     var showStatusPickerSheet by remember { mutableStateOf(false) }
@@ -769,14 +778,15 @@ fun DetailScreen(
             ) {
                 item(key = "detail_top_header", contentType = "top_header") {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books when no wide banner)
-                        val useEditorialBookHero = item.mediaType == MediaType.BOOK &&
+                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books & Comics when no wide banner)
+                        val useEditorialBookHero = (item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC) &&
                             (backdropTargetUrl.isNullOrBlank() || backdropTargetUrl == effectiveCover || backdropTargetUrl == item.coverUrl)
                         if (useEditorialBookHero) {
                             DetailBookEditorialHeroSection(
                                 item = item,
                                 coverImageModel = coverImageModel,
                                 bookDetailMeta = uiState.bookDetailMeta,
+                                comicDetailMeta = uiState.comicDetailMeta,
                                 onCoverClick = { showArtworkPicker = true },
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = { showProgressEditSheet = true },
@@ -795,6 +805,7 @@ fun DetailScreen(
                                 vnDetailMeta = uiState.vnDetailMeta,
                                 gameDetailMeta = uiState.gameDetailMeta,
                                 bookDetailMeta = uiState.bookDetailMeta,
+                                comicDetailMeta = uiState.comicDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = {
@@ -820,6 +831,7 @@ fun DetailScreen(
                                 vnDetailMeta = uiState.vnDetailMeta,
                                 gameDetailMeta = uiState.gameDetailMeta,
                                 bookDetailMeta = uiState.bookDetailMeta,
+                                comicDetailMeta = uiState.comicDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onCoverClick = { showArtworkPicker = true },
                                 onCoverLoaded = { url ->
@@ -990,6 +1002,29 @@ fun DetailScreen(
                                             onOpenEntryDetail = { entry ->
                                                 pushSheet(DetailSheetTarget.BookEntry(entry.id))
                                             }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            } else if (item.mediaType == MediaType.COMIC) {
+                                item(key = "section_comic_tracking", contentType = "comic_tracking") {
+                                    Column {
+                                        DetailComicTrackingSection(
+                                            item = item,
+                                            comicDetailMeta = uiState.comicDetailMeta,
+                                            issues = uiState.comicIssues,
+                                            onStepProgress = { viewModel.stepComicProgress(it) },
+                                            onSetProgressExact = { curVal, totOpt ->
+                                                viewModel.setComicProgressExact(curVal, totOpt)
+                                            },
+                                            onSwitchMode = { viewModel.switchComicTrackingMode(it) },
+                                            onUpdateFormat = { viewModel.updateComicFormat(it) },
+                                            onToggleIssueRead = { viewModel.toggleComicIssueRead(it) },
+                                            onAddCustomIssue = { num, ttl, typ, arc ->
+                                                viewModel.addCustomComicIssue(num, ttl, typ, arc)
+                                            },
+                                            onDeleteIssue = { viewModel.deleteComicIssue(it) },
+                                            onSeedIssues = { count -> viewModel.seedComicIssuesRange(count) }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1232,6 +1267,29 @@ fun DetailScreen(
                                             Spacer(modifier = Modifier.height(20.dp))
                                         }
                                     }
+                                } else if (item.mediaType == MediaType.COMIC && (
+                                        uiState.comicDetailMeta.creators.isNotEmpty() ||
+                                        uiState.comicDetailMeta.characters.isNotEmpty() ||
+                                        uiState.comicDetailMeta.storyArcs.isNotEmpty() ||
+                                        uiState.comicDetailMeta.variantCovers.size > 1
+                                    )
+                                ) {
+                                    item(key = "section_comic_creators", contentType = "comic_creators") {
+                                        Column {
+                                            DetailComicCreatorsCharactersSection(
+                                                comicDetailMeta = uiState.comicDetailMeta,
+                                                onSetAsCover = { url ->
+                                                    viewModel.setComicCoverAsArtwork(url, asBanner = false)
+                                                    Toast.makeText(context, "Cover updated", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onSetAsBanner = { url ->
+                                                    viewModel.setComicCoverAsArtwork(url, asBanner = true)
+                                                    Toast.makeText(context, "Banner updated", Toast.LENGTH_SHORT).show()
+                                                }
+                                            )
+                                            Spacer(modifier = Modifier.height(20.dp))
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1315,7 +1373,8 @@ fun DetailScreen(
                                             nextAiringEpochSeconds = uiState.animeAiring?.airingAtEpochSeconds,
                                             vnDetailMeta = if (item.mediaType == MediaType.VISUAL_NOVEL) uiState.vnDetailMeta else null,
                                             gameDetailMeta = if (item.mediaType == MediaType.GAME) uiState.gameDetailMeta else null,
-                                            bookDetailMeta = if (item.mediaType == MediaType.BOOK) uiState.bookDetailMeta else null
+                                            bookDetailMeta = if (item.mediaType == MediaType.BOOK) uiState.bookDetailMeta else null,
+                                            comicDetailMeta = if (item.mediaType == MediaType.COMIC) uiState.comicDetailMeta else null
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1594,7 +1653,16 @@ fun DetailScreen(
             if (showOptionsMenu) {
                 DetailOptionsMenuBottomSheet(
                     presentationSettings = presentationSettings,
+                    isCustomEntry = item.isCustomEntry,
                     onDismiss = { showOptionsMenu = false },
+                    onEditDetails = {
+                        showOptionsMenu = false
+                        showEditEntrySheet = true
+                    },
+                    onMatchAndEnrich = {
+                        showOptionsMenu = false
+                        viewModel.forceMatchAndEnrich()
+                    },
                     onChangeArtwork = {
                         showOptionsMenu = false
                         showArtworkPicker = true
@@ -1615,6 +1683,17 @@ fun DetailScreen(
                         viewModel.deleteItem()
                         onBack()
                     }
+                )
+            }
+
+            if (showEditEntrySheet) {
+                CustomEntryEditorSheet(
+                    existingItem = item,
+                    onSave = { updated ->
+                        showEditEntrySheet = false
+                        viewModel.updateCustomEntryDetails(updated)
+                    },
+                    onDismiss = { showEditEntrySheet = false }
                 )
             }
 
@@ -1713,7 +1792,7 @@ fun DetailScreen(
                                 }
                             }
                         }
-                    }
+                    }.distinctBy { "${it.isBanner}:${it.url}" }
                 }
                 ArtworkPickerBottomSheet(
                     title = item.title,
@@ -1746,6 +1825,12 @@ fun DetailScreen(
                     },
                     onExcludedSourcesChanged = { excluded ->
                         viewModel.updateExcludedArtSources(excluded)
+                    },
+                    currentBannerFocalX = item.bannerFocalX,
+                    currentBannerFocalY = item.bannerFocalY,
+                    currentBannerZoom = item.bannerZoom,
+                    onBannerFramingChanged = { fx, fy, z ->
+                        viewModel.updateBannerFraming(fx, fy, z)
                     },
                     onDismiss = { showArtworkPicker = false },
                     onCoverSelected = { newUrl ->
@@ -2546,6 +2631,7 @@ private fun DetailHeroHeaderSection(
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
+    comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -2558,6 +2644,7 @@ private fun DetailHeroHeaderSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(350.dp)
+                .clipToBounds()
         ) {
             val heroContext = LocalContext.current
             val bannerRequest = remember(backdropTargetUrl, heroContext) {
@@ -2569,8 +2656,13 @@ private fun DetailHeroHeaderSection(
             AsyncImage(
                 model = bannerRequest,
                 contentDescription = item.title,
+                alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
+                        scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
+                    )
                     .featherArtwork(startYRatio = 0.50f),
                 contentScale = ContentScale.Crop
             )
@@ -2660,6 +2752,7 @@ private fun DetailHeroHeaderSection(
                             )
                             if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
                         }
+                        MediaType.COMIC -> item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS"
                         else -> item.mediaType.displayName.uppercase()
                     }
                     Text(
@@ -2675,6 +2768,10 @@ private fun DetailHeroHeaderSection(
                             bookDetailMeta.literaryForm?.label?.uppercase(),
                             item.releaseYear?.takeIf { it.isNotBlank() },
                             bookDetailMeta.authorName ?: item.bookAuthor
+                        ).joinToString(" · ").takeIf { it.isNotBlank() }
+                        MediaType.COMIC -> listOfNotNull(
+                            comicDetailMeta.publisher ?: item.comicPublisher,
+                            item.releaseYear?.takeIf { it.isNotBlank() }
                         ).joinToString(" · ").takeIf { it.isNotBlank() }
                         else -> item.platform
                     }
@@ -2700,7 +2797,7 @@ private fun DetailHeroHeaderSection(
             }
         }
 
-        if (item.mediaType != MediaType.BOOK) {
+        if (item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC) {
             DetailNuvioMetaRow(item = item)
         }
         NuvioRatingsRow(
@@ -2712,7 +2809,8 @@ private fun DetailHeroHeaderSection(
             bangumiScore = novelDetailMeta.bangumiScore,
             vnDetailMeta = vnDetailMeta,
             gameDetailMeta = gameDetailMeta,
-            bookDetailMeta = bookDetailMeta
+            bookDetailMeta = bookDetailMeta,
+            comicDetailMeta = comicDetailMeta
         )
         UnboxedStatsRow(
             item = item,
@@ -2729,6 +2827,7 @@ private fun DetailBookEditorialHeroSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     coverImageModel: Any?,
     bookDetailMeta: BookDetailMeta,
+    comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onCoverClick: () -> Unit,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -2807,23 +2906,35 @@ private fun DetailBookEditorialHeroSection(
                     lineHeight = 28.sp,
                     maxLines = 3
                 )
-                val author = bookDetailMeta.authorName ?: item.bookAuthor
-                if (!author.isNullOrBlank()) {
+                val creditSub = if (item.mediaType == MediaType.COMIC) {
+                    comicDetailMeta.publisher ?: item.comicPublisher ?: item.bookAuthor
+                } else {
+                    (bookDetailMeta.authorName ?: item.bookAuthor)?.let { "by $it" }
+                }
+                if (!creditSub.isNullOrBlank()) {
                     Text(
-                        text = "by $author",
+                        text = creditSub,
                         color = AccentGold,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2
                     )
                 }
-                val metaParts = listOfNotNull(
-                    bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK",
-                    item.releaseYear?.takeIf { it.isNotBlank() },
-                    item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it PAGES" }
-                        ?: bookDetailMeta.pageCount?.takeIf { it > 0 }?.let { "$it PAGES" }
-                        ?: bookDetailMeta.lineCount?.takeIf { it > 0 }?.let { "$it LINES" }
-                ).joinToString(" · ")
+                val metaParts = if (item.mediaType == MediaType.COMIC) {
+                    listOfNotNull(
+                        item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS",
+                        comicDetailMeta.startYear ?: item.releaseYear?.takeIf { it.isNotBlank() },
+                        (item.totalProgress?.toInt() ?: comicDetailMeta.issueCount)?.takeIf { it > 0 }?.let { "$it ISSUES" }
+                    ).joinToString(" · ")
+                } else {
+                    listOfNotNull(
+                        bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK",
+                        item.releaseYear?.takeIf { it.isNotBlank() },
+                        item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it PAGES" }
+                            ?: bookDetailMeta.pageCount?.takeIf { it > 0 }?.let { "$it PAGES" }
+                            ?: bookDetailMeta.lineCount?.takeIf { it > 0 }?.let { "$it LINES" }
+                    ).joinToString(" · ")
+                }
                 Text(
                     text = metaParts,
                     color = TextSecondary,
@@ -2848,7 +2959,8 @@ private fun DetailBookEditorialHeroSection(
 
         NuvioRatingsRow(
             item = item,
-            bookDetailMeta = bookDetailMeta
+            bookDetailMeta = bookDetailMeta,
+            comicDetailMeta = comicDetailMeta
         )
         UnboxedStatsRow(
             item = item,
@@ -2872,6 +2984,7 @@ private fun DetailClassicHeaderSection(
     vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
+    comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
@@ -2890,6 +3003,7 @@ private fun DetailClassicHeaderSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(350.dp)
+                .clipToBounds()
         ) {
             val classicContext = LocalContext.current
             val bannerRequest = remember(backdropTargetUrl, classicContext) {
@@ -2901,8 +3015,13 @@ private fun DetailClassicHeaderSection(
             AsyncImage(
                 model = bannerRequest,
                 contentDescription = null,
+                alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = item.bannerZoom.coerceIn(1f, 2.5f),
+                        scaleY = item.bannerZoom.coerceIn(1f, 2.5f)
+                    )
                     .featherArtwork(startYRatio = 0.50f),
                 contentScale = ContentScale.Crop
             )
@@ -3040,6 +3159,7 @@ private fun DetailClassicHeaderSection(
                         )
                         if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
                     }
+                    MediaType.COMIC -> item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS"
                     else -> item.mediaType.displayName.uppercase()
                 }
                 Text(
@@ -3055,6 +3175,10 @@ private fun DetailClassicHeaderSection(
                         bookDetailMeta.literaryForm?.label?.uppercase(),
                         item.releaseYear?.takeIf { it.isNotBlank() },
                         bookDetailMeta.authorName ?: item.bookAuthor
+                    ).joinToString(" · ").takeIf { it.isNotBlank() }
+                    MediaType.COMIC -> listOfNotNull(
+                        comicDetailMeta.publisher ?: item.comicPublisher,
+                        item.releaseYear?.takeIf { it.isNotBlank() }
                     ).joinToString(" · ").takeIf { it.isNotBlank() }
                     else -> item.platform
                 }
@@ -3072,7 +3196,7 @@ private fun DetailClassicHeaderSection(
             .offset(y = statsOffset)
     ) {
         Column {
-            if (item.mediaType != MediaType.BOOK) {
+            if (item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC) {
                 DetailNuvioMetaRow(item = item)
             }
             NuvioRatingsRow(
@@ -3084,7 +3208,8 @@ private fun DetailClassicHeaderSection(
                 bangumiScore = novelDetailMeta.bangumiScore,
                 vnDetailMeta = vnDetailMeta,
                 gameDetailMeta = gameDetailMeta,
-                bookDetailMeta = bookDetailMeta
+                bookDetailMeta = bookDetailMeta,
+                comicDetailMeta = comicDetailMeta
             )
             UnboxedStatsRow(
                 item = item,
@@ -3318,7 +3443,7 @@ private fun DetailProgressSection(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         when (item.mediaType) {
-            MediaType.MANGA, MediaType.NOVEL -> {
+            MediaType.MANGA, MediaType.NOVEL, MediaType.COMIC -> {
                 ChapterStepper(
                     unitLabel = item.mediaType.unitLabel,
                     currentProgress = item.currentProgress,
@@ -3396,7 +3521,10 @@ private fun DetailProgressSection(
 @Composable
 private fun DetailOptionsMenuBottomSheet(
     presentationSettings: PresentationSettings,
+    isCustomEntry: Boolean = false,
     onDismiss: () -> Unit,
+    onEditDetails: () -> Unit = {},
+    onMatchAndEnrich: () -> Unit = {},
     onChangeArtwork: () -> Unit,
     onToggleLayout: () -> Unit,
     onRemoveFromLibrary: () -> Unit
@@ -3430,7 +3558,71 @@ private fun DetailOptionsMenuBottomSheet(
                 modifier = Modifier.padding(bottom = 4.dp)
             )
 
-            // 1. Change Artwork
+            // 1. Edit Details
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onEditDetails() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Edit Details",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Modify title, author, synopsis, progress & metadata lock",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // 2. Match & Enrich Online (shown for custom / manual-locked entries)
+            if (isCustomEntry) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onMatchAndEnrich() }
+                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Match & Enrich Online",
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "One-time fetch of online trailers, reviews & metadata",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            // 3. Change Artwork
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3443,19 +3635,19 @@ private fun DetailOptionsMenuBottomSheet(
                 Icon(
                     imageVector = Icons.Default.Palette,
                     contentDescription = null,
-                    tint = AccentArctic,
+                    tint = AccentGold,
                     modifier = Modifier.size(22.dp)
                 )
                 Column {
                     Text(
-                        text = "Change Artwork & Roles",
+                        text = "Change Artwork, Framing & Roles",
                         color = TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Search online covers, pick custom image, swap roles",
-                        color = TextMuted,
+                        text = "Pick covers/banners, pan & zoom banner focal point, swap roles",
+                        color = TextSecondary,
                         fontSize = 12.sp
                     )
                 }

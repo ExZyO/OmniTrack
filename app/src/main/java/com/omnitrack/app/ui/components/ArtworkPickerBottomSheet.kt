@@ -11,6 +11,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,8 +31,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,6 +63,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
@@ -73,16 +77,21 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +117,7 @@ import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private fun formatArtSourceBadgeLabel(sourceName: String): String = when {
@@ -145,6 +155,10 @@ fun ArtworkPickerBottomSheet(
     initialCandidates: List<ArtworkCandidate> = emptyList(),
     initialExcludedSources: Set<String> = emptySet(),
     onExcludedSourcesChanged: (Set<String>) -> Unit = {},
+    currentBannerFocalX: Float = 0f,
+    currentBannerFocalY: Float = 0f,
+    currentBannerZoom: Float = 1f,
+    onBannerFramingChanged: (Float, Float, Float) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit,
     onCoverSelected: (String) -> Unit,
     onBannerSelected: (String) -> Unit = {},
@@ -206,31 +220,36 @@ fun ArtworkPickerBottomSheet(
     val fetchCandidates: (Boolean) -> Unit = { forceRefresh ->
         scope.launch {
             isLoading = true
-            val finalResults = effectiveRepository.searchArtworkCandidates(
-                title = title,
-                mediaType = mediaType,
-                anilistId = anilistId,
-                malId = malId,
-                mangadexId = mangadexId,
-                nativeTitle = nativeTitle,
-                romajiTitle = romajiTitle,
-                originCountry = originCountry,
-                defaultCoverUrl = defaultCoverUrl,
-                forceRefresh = forceRefresh,
-                vndbId = vndbId,
-                englishTitle = englishTitle,
-                steamAppId = steamAppId,
-                openLibraryId = openLibraryId,
-                bookAuthor = bookAuthor,
-                initialCandidates = initialCandidates,
-                onPartialResults = { partial ->
-                    scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
-                        allCandidates = partial
+            try {
+                val finalResults = effectiveRepository.searchArtworkCandidates(
+                    title = title,
+                    mediaType = mediaType,
+                    anilistId = anilistId,
+                    malId = malId,
+                    mangadexId = mangadexId,
+                    nativeTitle = nativeTitle,
+                    romajiTitle = romajiTitle,
+                    originCountry = originCountry,
+                    defaultCoverUrl = defaultCoverUrl,
+                    forceRefresh = forceRefresh,
+                    vndbId = vndbId,
+                    englishTitle = englishTitle,
+                    steamAppId = steamAppId,
+                    openLibraryId = openLibraryId,
+                    bookAuthor = bookAuthor,
+                    initialCandidates = initialCandidates,
+                    onPartialResults = { partial ->
+                        scope.launch(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                            allCandidates = partial.distinctBy { "${it.isBanner}:${it.url}" }
+                        }
                     }
-                }
-            )
-            allCandidates = finalResults
-            isLoading = false
+                )
+                allCandidates = finalResults.distinctBy { "${it.isBanner}:${it.url}" }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            } finally {
+                isLoading = false
+            }
         }
     }
 
@@ -244,20 +263,28 @@ fun ArtworkPickerBottomSheet(
         com.omnitrack.app.data.model.VnNsfwFilterMode.SAFE_HIDE
 
     val displayedCovers = remember(allCandidates, excludedSources, hideNsfwCandidates) {
-        if ("ALL" in excludedSources) {
+        val raw = if ("ALL" in excludedSources) {
             allCandidates.filter { !it.isBanner && it.sourceName.equals("Default", ignoreCase = true) && (!hideNsfwCandidates || !it.isNsfw) }
         } else {
             allCandidates.filter { !it.isBanner && it.sourceName.uppercase() !in excludedSources && (!hideNsfwCandidates || !it.isNsfw) }
         }
+        raw.distinctBy { it.url }
     }
 
     val displayedBanners = remember(allCandidates, excludedSources, hideNsfwCandidates) {
         if ("ALL" in excludedSources) {
             emptyList()
         } else {
-            allCandidates.filter { it.isBanner && it.sourceName.uppercase() !in excludedSources && (!hideNsfwCandidates || !it.isNsfw) }
+            allCandidates
+                .filter { it.isBanner && it.sourceName.uppercase() !in excludedSources && (!hideNsfwCandidates || !it.isNsfw) }
+                .distinctBy { it.url }
         }
     }
+
+    var showFramingEditor by remember { mutableStateOf(false) }
+    var draftFocalX by remember(currentBannerFocalX) { mutableFloatStateOf(currentBannerFocalX.coerceIn(-1f, 1f)) }
+    var draftFocalY by remember(currentBannerFocalY) { mutableFloatStateOf(currentBannerFocalY.coerceIn(-1f, 1f)) }
+    var draftZoom by remember(currentBannerZoom) { mutableFloatStateOf(currentBannerZoom.coerceIn(1f, 2.5f)) }
 
     val isBannerDisabled = currentCustomBannerPath == "NONE" || currentRole == "DISABLE_BANNER"
 
@@ -424,6 +451,7 @@ fun ArtworkPickerBottomSheet(
                             MediaType.GAME -> "Querying Steam, IGDB & SteamGridDB..."
                             MediaType.VISUAL_NOVEL -> "Querying VNDB, Steam, AniList, IGDB, SteamGridDB & Bangumi..."
                             MediaType.BOOK -> "Querying Open Library, Hardcover, Apple Books, Google Books & Wikimedia..."
+                            MediaType.COMIC -> "Querying Comic Vine, Metron, Apple Books & Open Library..."
                             else -> "Querying artwork providers..."
                         }
                         Text(
@@ -628,7 +656,7 @@ fun ArtworkPickerBottomSheet(
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    items(displayedCovers, key = { it.url }) { candidate ->
+                                    gridItemsIndexed(displayedCovers, key = { idx, item -> "${idx}_${item.url}" }) { _, candidate ->
                                         val isCurrent = candidate.url == currentCoverUrl
 
                                         Box(
@@ -813,6 +841,173 @@ fun ArtworkPickerBottomSheet(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentGold else TextSecondary)
                                 }
+
+                                if (!isBannerDisabled) {
+                                    OutlinedButton(
+                                        onClick = { showFramingEditor = !showFramingEditor },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (showFramingEditor) AccentGold else GlassBorder
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showFramingEditor) AccentGold else TextSecondary)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Reposition & Zoom", fontSize = 12.sp, color = if (showFramingEditor) AccentGold else TextPrimary)
+                                    }
+                                }
+                            }
+
+                            AnimatedVisibility(visible = showFramingEditor && !isBannerDisabled) {
+                                val framingPreviewModel: Any? = remember(currentCustomBannerPath, currentBannerUrl, currentCoverUrl) {
+                                    currentCustomBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let { path ->
+                                        if (path.startsWith("http") || path.startsWith("content:")) path else java.io.File(path)
+                                    } ?: currentBannerUrl?.takeIf { it.isNotBlank() } ?: currentCoverUrl.takeIf { it.isNotBlank() }
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(DarkSurfaceElevated)
+                                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                                        .padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(176.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clipToBounds()
+                                            .background(DarkSurfaceCard)
+                                            .border(1.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                                            .pointerInput(Unit) {
+                                                detectTransformGestures { _, pan, zoom, _ ->
+                                                    val nextZoom = (draftZoom * zoom).coerceIn(1f, 2.5f)
+                                                    val w = size.width.toFloat().coerceAtLeast(1f)
+                                                    val h = size.height.toFloat().coerceAtLeast(1f)
+                                                    val sens = 1.6f / nextZoom
+                                                    draftZoom = nextZoom
+                                                    draftFocalX = (draftFocalX - (pan.x / w) * sens).coerceIn(-1f, 1f)
+                                                    draftFocalY = (draftFocalY - (pan.y / h) * sens).coerceIn(-1f, 1f)
+                                                }
+                                            }
+                                    ) {
+                                        if (framingPreviewModel != null) {
+                                            AsyncImage(
+                                                model = framingPreviewModel,
+                                                contentDescription = "Banner Framing Preview",
+                                                contentScale = ContentScale.Crop,
+                                                alignment = BiasAlignment(draftFocalX, draftFocalY),
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .graphicsLayer(scaleX = draftZoom, scaleY = draftZoom)
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(8.dp)
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(AmoledBlack.copy(alpha = 0.75f))
+                                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = "Drag to pan · Pinch to zoom",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = TextPrimary
+                                            )
+                                        }
+                                    }
+
+                                    // Synced X / Y / Zoom controls
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("X", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(18.dp))
+                                        Slider(
+                                            value = draftFocalX,
+                                            onValueChange = { draftFocalX = it },
+                                            valueRange = -1f..1f,
+                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text("Y", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(18.dp))
+                                        Slider(
+                                            value = draftFocalY,
+                                            onValueChange = { draftFocalY = it },
+                                            valueRange = -1f..1f,
+                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("Zoom", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Slider(
+                                            value = draftZoom,
+                                            onValueChange = { draftZoom = it },
+                                            valueRange = 1f..2.5f,
+                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "%.1fx", draftZoom),
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = AccentGold
+                                        )
+                                    }
+
+                                    // Quick snaps + Apply
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        listOf(
+                                            "Left" to Triple(-1f, draftFocalY, draftZoom),
+                                            "Center" to Triple(0f, 0f, draftZoom),
+                                            "Right" to Triple(1f, draftFocalY, draftZoom),
+                                            "Top" to Triple(draftFocalX, -1f, draftZoom),
+                                            "Reset" to Triple(0f, 0f, 1f)
+                                        ).forEach { (lbl, target) ->
+                                            OutlinedButton(
+                                                onClick = {
+                                                    draftFocalX = target.first
+                                                    draftFocalY = target.second
+                                                    draftZoom = target.third
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                            ) {
+                                                Text(lbl, fontSize = 11.sp, color = TextPrimary)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.weight(1f, fill = false))
+                                        Button(
+                                            onClick = {
+                                                onBannerFramingChanged(draftFocalX, draftFocalY, draftZoom)
+                                                showFramingEditor = false
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack)
+                                        ) {
+                                            Text("Apply Framing", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
 
                             // Optional Direct URL input
@@ -943,7 +1138,7 @@ fun ArtworkPickerBottomSheet(
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    items(visibleBanners, key = { it.url }) { candidate ->
+                                    itemsIndexed(visibleBanners, key = { idx, item -> "${idx}_${item.url}" }) { _, candidate ->
                                         val isCurrent = candidate.url == currentBannerUrl
 
                                         Box(

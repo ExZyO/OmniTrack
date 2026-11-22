@@ -3,6 +3,7 @@ package com.omnitrack.app.data.repository
 import com.omnitrack.app.data.db.dao.BookEntryDao
 import com.omnitrack.app.data.db.dao.BookQuoteDao
 import com.omnitrack.app.data.db.dao.CategoryDao
+import com.omnitrack.app.data.db.dao.ComicIssueDao
 import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
@@ -12,6 +13,7 @@ import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.BookEntryEntity
 import com.omnitrack.app.data.db.entity.BookQuoteEntity
 import com.omnitrack.app.data.db.entity.CategoryEntity
+import com.omnitrack.app.data.db.entity.ComicIssueEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
@@ -31,8 +33,28 @@ class MediaRepository(
     private val vnRouteDao: VnRouteDao? = null,
     private val gameEntryDao: GameEntryDao? = null,
     private val bookEntryDao: BookEntryDao? = null,
-    private val bookQuoteDao: BookQuoteDao? = null
+    private val bookQuoteDao: BookQuoteDao? = null,
+    private val comicIssueDao: ComicIssueDao? = null
 ) {
+    fun getComicIssues(mediaId: Long): Flow<List<ComicIssueEntity>> =
+        (comicIssueDao?.getIssuesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun getComicIssuesOnce(mediaId: Long): List<ComicIssueEntity> =
+        comicIssueDao?.getIssuesForMediaOnce(mediaId) ?: emptyList()
+
+    suspend fun insertComicIssue(issue: ComicIssueEntity): Long? = comicIssueDao?.insertIssue(issue)
+
+    suspend fun insertComicIssues(issues: List<ComicIssueEntity>) {
+        if (issues.isNotEmpty()) comicIssueDao?.insertIssues(issues)
+    }
+
+    suspend fun updateComicIssue(issue: ComicIssueEntity) {
+        comicIssueDao?.updateIssue(issue)
+    }
+
+    suspend fun deleteComicIssueById(issueId: Long) {
+        comicIssueDao?.deleteIssueById(issueId)
+    }
     fun getBookEntries(mediaId: Long): Flow<List<BookEntryEntity>> =
         (bookEntryDao?.getEntriesForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
@@ -205,12 +227,24 @@ class MediaRepository(
         openLibraryId: String? = null,
         hardcoverId: String? = null,
         isbn: String? = null,
+        comicVineId: Long? = null,
+        metronId: Long? = null,
         title: String? = null,
         mediaType: MediaType? = null
     ): MediaItemEntity? {
         if (!vndbId.isNullOrBlank()) {
             val found = mediaDao.findByVndbId(vndbId.trim())
             if (found != null) return found
+        }
+        if (mediaType == MediaType.COMIC) {
+            if (comicVineId != null && comicVineId > 0) {
+                val found = mediaDao.findByComicVineId(comicVineId, MediaType.COMIC)
+                if (found != null) return found
+            }
+            if (metronId != null && metronId > 0) {
+                val found = mediaDao.findByMetronId(metronId, MediaType.COMIC)
+                if (found != null) return found
+            }
         }
         if (mediaType == MediaType.BOOK) {
             if (!hardcoverId.isNullOrBlank()) {
@@ -272,6 +306,9 @@ class MediaRepository(
     suspend fun updateCustomBanner(id: Long, path: String?) = mediaDao.updateCustomBannerPath(id, path)
 
     suspend fun updateArtworkRole(id: Long, role: String) = mediaDao.updateArtworkRole(id, role)
+
+    suspend fun updateBannerFraming(id: Long, focalX: Float, focalY: Float, zoom: Float) =
+        mediaDao.updateBannerFraming(id, focalX, focalY, zoom)
 
     suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?, trakt: Int? = null, audience: Int? = null) =
         mediaDao.updateEnrichment(id, clearart, score, imdb, rt, meta, trakt, audience)

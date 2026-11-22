@@ -38,6 +38,7 @@ data class CalendarReleaseItem(
     val anilistId: Long? = null,
     val malId: Long? = null,
     val tmdbId: Long? = null,
+    val metronId: Long? = null,
     val formatLabel: String = "ANIME",
     val localMediaId: Long? = null
 )
@@ -82,9 +83,13 @@ class ReleaseCalendarRepository(
             allItems.addAll(items)
             if (!hasNext || allItems.size >= 80) break
         }
+        val comicReleases = runCatching {
+            ComicEnrichmentSource(client).fetchWeeklyComicReleases(force = force)
+        }.getOrDefault(emptyList())
+        allItems.addAll(comicReleases)
 
         val deduped = allItems
-            .distinctBy { "${it.anilistId}_${it.episodeNumber}_${it.airingAtEpochSec}" }
+            .distinctBy { "${it.mediaType}_${it.id}_${it.anilistId}_${it.metronId}_${it.episodeNumber}_${it.airingAtEpochSec}" }
             .sortedBy { it.airingAtEpochSec }
 
         if (deduped.isNotEmpty()) {

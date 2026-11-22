@@ -6,6 +6,7 @@ import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.network.NetworkClient
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,6 +66,9 @@ class HardcoverApiClient(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val endpoint = "https://api.hardcover.app/v1/graphql"
 
+    @Volatile
+    var lastError: String? = null
+
     private fun JsonElement?.obj(): JsonObject? = this as? JsonObject
     private fun JsonElement?.arr(): JsonArray? = this as? JsonArray
     private fun JsonElement?.str(): String? =
@@ -80,6 +84,7 @@ class HardcoverApiClient(
     private suspend fun executeGraphQl(token: String, query: String, variables: JsonObject? = null): JsonObject? =
         NetworkPacer.withHardcoverPacing {
             if (token.isBlank()) return@withHardcoverPacing null
+            lastError = null
             try {
                 val payload = buildJsonObject {
                     put("query", query)
@@ -93,13 +98,25 @@ class HardcoverApiClient(
                     .post(payload.toString().toRequestBody("application/json".toMediaType()))
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withHardcoverPacing null
+                    if (!resp.isSuccessful) {
+                        lastError = "Hardcover HTTP ${resp.code}"
+                        AppLogger.w("TrackerSync", "service=HARDCOVER op=graphql http=${resp.code}")
+                        return@withHardcoverPacing null
+                    }
                     val body = resp.body?.string().orEmpty()
                     if (body.isBlank()) return@withHardcoverPacing null
-                    json.parseToJsonElement(body).obj()?.get("data").obj()
+                    val root = json.parseToJsonElement(body).obj() ?: return@withHardcoverPacing null
+                    val errMsg = root["errors"].arr()?.firstOrNull().obj()?.get("message").str()
+                    if (!errMsg.isNullOrBlank()) {
+                        lastError = "Hardcover GraphQL: $errMsg"
+                        AppLogger.w("TrackerSync", "service=HARDCOVER op=graphql graphqlError=true")
+                    }
+                    root["data"].obj()
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
+                lastError = "Hardcover network error (${e.javaClass.simpleName})"
+                AppLogger.w("TrackerSync", "service=HARDCOVER op=graphql ex=${e.javaClass.simpleName}")
                 null
             }
         }

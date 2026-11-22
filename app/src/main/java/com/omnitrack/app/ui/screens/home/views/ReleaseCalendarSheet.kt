@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
@@ -81,10 +84,16 @@ fun ReleaseCalendarSheet(
 
     val hasLibraryMatches = remember(releases) { releases.any { it.localMediaId != null } }
     var onlyLibrary by remember(hasLibraryMatches) { mutableStateOf(hasLibraryMatches) }
+    var selectedTypeFilter by remember { mutableStateOf("ALL") } // "ALL", "ANIME", "COMIC"
     var selectedDate by remember { mutableStateOf(today) }
 
-    val scopeFilteredReleases = remember(releases, onlyLibrary) {
-        if (onlyLibrary) releases.filter { it.localMediaId != null } else releases
+    val scopeFilteredReleases = remember(releases, onlyLibrary, selectedTypeFilter) {
+        releases.filter { item ->
+            (!onlyLibrary || item.localMediaId != null) &&
+                (selectedTypeFilter == "ALL" ||
+                    (selectedTypeFilter == "ANIME" && item.mediaType == MediaType.ANIME) ||
+                    (selectedTypeFilter == "COMIC" && item.mediaType == MediaType.COMIC))
+        }
     }
 
     val datesWithEvents = remember(scopeFilteredReleases, zone) {
@@ -128,7 +137,7 @@ fun ReleaseCalendarSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Live 7-day airing schedule (AniList)",
+                        text = "Live 7-day airing & comic pull list schedule",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
@@ -147,6 +156,47 @@ fun ReleaseCalendarSheet(
                             contentDescription = "Refresh Schedule",
                             tint = TextSecondary,
                             modifier = Modifier.size(21.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Category Filter Chips: All / Anime / Comics
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val animeCount = releases.count { it.mediaType == MediaType.ANIME && (!onlyLibrary || it.localMediaId != null) }
+                val comicCount = releases.count { it.mediaType == MediaType.COMIC && (!onlyLibrary || it.localMediaId != null) }
+                val allCount = animeCount + comicCount
+                listOf(
+                    "ALL" to "All ($allCount)",
+                    "ANIME" to "Anime ($animeCount)",
+                    "COMIC" to "Comics ($comicCount)"
+                ).forEach { (key, label) ->
+                    val selected = selectedTypeFilter == key
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (selected) AccentGold else DarkSurfaceElevated)
+                            .border(
+                                width = 1.dp,
+                                color = if (selected) AccentGold else GlassBorder,
+                                shape = RoundedCornerShape(999.dp)
+                            )
+                            .clickable { selectedTypeFilter = key }
+                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) AmoledBlack else TextSecondary
                         )
                     }
                 }
@@ -334,7 +384,9 @@ fun ReleaseCalendarSheet(
                                 )
                                 Text(
                                     text = buildString {
-                                        if (item.episodeNumber != null) append("Ep ${item.episodeNumber}")
+                                        if (item.episodeNumber != null) {
+                                            append(if (item.mediaType == MediaType.COMIC) "Issue #${item.episodeNumber}" else "Ep ${item.episodeNumber}")
+                                        }
                                         if (item.formatLabel.isNotBlank()) {
                                             if (isNotEmpty()) append(" \u00B7 ")
                                             append(item.formatLabel)

@@ -1,6 +1,8 @@
 package com.omnitrack.app.data.sync
 
 import com.omnitrack.app.BuildConfig
+import com.omnitrack.app.util.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -110,11 +112,15 @@ object TrackerAccountVerifier {
                 .url("https://graphql.anilist.co")
                 .header("Authorization", "Bearer $token")
                 .header("Content-Type", "application/json")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .post(query.toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=ANILIST http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val viewer = parsed["data"]?.jsonObject?.get("Viewer")?.jsonObject
@@ -126,7 +132,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=ANILIST ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -136,11 +144,15 @@ object TrackerAccountVerifier {
             val request = Request.Builder()
                 .url("https://api.myanimelist.net/v2/users/@me")
                 .header("Authorization", "Bearer $token")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=MAL http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val name = parsed["name"]?.jsonPrimitive?.content
@@ -151,7 +163,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=MAL ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -164,11 +178,15 @@ object TrackerAccountVerifier {
                 .header("Authorization", "Bearer $token")
                 .header("trakt-api-version", "2")
                 .header("trakt-api-key", clientId)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=TRAKT http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val username = parsed["username"]?.jsonPrimitive?.content
@@ -180,7 +198,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=TRAKT ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -191,11 +211,15 @@ object TrackerAccountVerifier {
                 .url("https://api.simkl.com/users/settings")
                 .header("Authorization", "Bearer $token")
                 .header("simkl-api-key", SIMKL_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=SIMKL http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val user = parsed["user"]?.jsonObject
@@ -207,7 +231,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=SIMKL ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -222,7 +248,10 @@ object TrackerAccountVerifier {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=BANGUMI http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val nickname = parsed["nickname"]?.jsonPrimitive?.content
@@ -235,7 +264,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=BANGUMI ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -246,11 +277,15 @@ object TrackerAccountVerifier {
             val request = Request.Builder()
                 .url("https://api.vndb.org/kana/authinfo")
                 .header("Authorization", "Token $token")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .get()
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=VNDB http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val username = parsed["username"]?.jsonPrimitive?.content
@@ -261,7 +296,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=VNDB ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -277,7 +314,10 @@ object TrackerAccountVerifier {
                 .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=COMICK http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val username = parsed["username"]?.jsonPrimitive?.content
@@ -289,7 +329,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=COMICK ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -306,9 +348,16 @@ object TrackerAccountVerifier {
 
         try {
             val url = "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key=$apiKey&vanityurl=$vanity"
-            val request = Request.Builder().url(url).get().build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=STEAM op=resolve http=${response.code}")
+                    return@withContext null
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val respObj = parsed["response"]?.jsonObject
@@ -317,7 +366,8 @@ object TrackerAccountVerifier {
                     respObj["steamid"]?.jsonPrimitive?.content
                 } else null
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             null
         }
     }
@@ -327,10 +377,17 @@ object TrackerAccountVerifier {
         try {
             val resolvedId = resolveSteamId(steamId64, apiKey) ?: steamId64.trim()
             val url = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=$apiKey&steamids=$resolvedId"
-            val request = Request.Builder().url(url).get().build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=STEAM http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val players = parsed["response"]?.jsonObject?.get("players")?.jsonArray
@@ -343,7 +400,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=STEAM ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -351,10 +410,17 @@ object TrackerAccountVerifier {
         if (apiKey.isBlank()) return@withContext VerificationState.Idle
         try {
             val url = "https://api.themoviedb.org/3/authentication?api_key=$apiKey"
-            val request = Request.Builder().url(url).get().build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                .get()
+                .build()
 
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext VerificationState.Failed("HTTP ${response.code}")
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerVerify", "service=TMDB http=${response.code}")
+                    return@withContext VerificationState.Failed("HTTP ${response.code}")
+                }
                 val bodyStr = response.body?.string().orEmpty()
                 val parsed = json.parseToJsonElement(bodyStr).jsonObject
                 val success = parsed["success"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -365,7 +431,9 @@ object TrackerAccountVerifier {
                 }
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Network error")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=TMDB ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Network error (${e.javaClass.simpleName})")
         }
     }
 
@@ -400,7 +468,8 @@ object TrackerAccountVerifier {
                 val interval = obj["interval"]?.jsonPrimitive?.content?.toIntOrNull() ?: 5
                 TraktDeviceCode(deviceCode, userCode, verificationUrl, interval)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             null
         }
     }
@@ -436,7 +505,8 @@ object TrackerAccountVerifier {
                     null
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             null
         }
     }
@@ -477,7 +547,9 @@ object TrackerAccountVerifier {
                     return@withContext SimklPinCode(userCode, verificationUrl, expires, interval, deviceCode)
                 }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+        }
 
         // 2. Legacy SIMKL PIN Flow fallback (GET /oauth/pin)
         try {
@@ -500,7 +572,8 @@ object TrackerAccountVerifier {
                 val expires = obj["expires_in"]?.jsonPrimitive?.content?.toIntOrNull() ?: 900
                 SimklPinCode(userCode, verificationUrl, expires, interval, null)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             null
         }
     }
@@ -526,7 +599,9 @@ object TrackerAccountVerifier {
                         if (!token.isNullOrBlank()) return@withContext token
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
         }
 
         // Legacy fallback
@@ -548,7 +623,8 @@ object TrackerAccountVerifier {
                     } else null
                 } else null
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
             null
         }
     }
@@ -557,14 +633,17 @@ object TrackerAccountVerifier {
         val clean = token.trim()
         if (clean.isBlank()) return@withContext VerificationState.Idle
         try {
-            val handle = com.omnitrack.app.data.enrichment.HardcoverApiClient(client).verifyToken(clean)
+            val hcClient = com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
+            val handle = hcClient.verifyToken(clean)
             if (!handle.isNullOrBlank()) {
                 VerificationState.Verified("@$handle")
             } else {
-                VerificationState.Failed("Invalid or expired Hardcover token")
+                VerificationState.Failed(hcClient.lastError ?: "Invalid or expired Hardcover token")
             }
         } catch (e: Exception) {
-            VerificationState.Failed(e.message ?: "Hardcover verification failed")
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerVerify", "service=HARDCOVER ex=${e.javaClass.simpleName}")
+            VerificationState.Failed("Hardcover network error (${e.javaClass.simpleName})")
         }
     }
 }

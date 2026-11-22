@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -81,11 +82,14 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
-import com.omnitrack.app.data.preferences.HomeHeroSource
+import com.omnitrack.app.data.preferences.ContinueTrackingStyle
+import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeLayoutDefaults
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.DiagnosticsSheet
+import com.omnitrack.app.ui.components.LibraryFastScroller
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MediaTypeTabRow
 import com.omnitrack.app.ui.components.NavDestination
@@ -142,6 +146,7 @@ fun HomeScreen(
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
     val gridStates = remember { List(MediaType.filterTabs.size) { androidx.compose.foundation.lazy.grid.LazyGridState() } }
+    val listStates = remember { List(MediaType.filterTabs.size) { LazyListState() } }
 
     var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.HOME) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -151,16 +156,22 @@ fun HomeScreen(
     var showReleaseCalendarSheet by remember { mutableStateOf(false) }
     var showActivityHeatmapSheet by remember { mutableStateOf(false) }
     var showLibraryFilterSheet by remember { mutableStateOf(false) }
+    var showCustomEntrySheet by remember { mutableStateOf(false) }
+    var customEntryInitTitle by remember { mutableStateOf("") }
+    var customEntryInitType by remember { mutableStateOf(MediaType.NOVEL) }
     var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
     val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
-    val homeHeroSource by prefManager.homeHeroSource.collectAsState(initial = HomeHeroSource.CONTINUE)
+    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
+    val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
+    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
     val libraryViewMode by prefManager.libraryViewMode.collectAsState(initial = "GRID_3")
     val librarySortMode by prefManager.librarySortMode.collectAsState(initial = "RECENT")
     val calendarReleases by viewModel.calendarReleases.collectAsState()
     val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
     val trendingItems by viewModel.trendingItems.collectAsState()
+    val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
     val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
     val undoEvent by viewModel.undoEvent.collectAsState()
 
@@ -184,6 +195,8 @@ fun HomeScreen(
     var selectedGameCompletion by rememberSaveable { mutableStateOf("ALL") }
     var selectedBookFormat by rememberSaveable { mutableStateOf("ALL") }
     var selectedBookCategory by rememberSaveable { mutableStateOf("ALL") }
+    var selectedComicPublisher by rememberSaveable { mutableStateOf("ALL") }
+    var selectedComicFormat by rememberSaveable { mutableStateOf("ALL") }
     val searchFocusRequester = remember { FocusRequester() }
 
     // Automatic background update check
@@ -255,7 +268,9 @@ fun HomeScreen(
                         calendarReleases = calendarReleases,
                         watchedTimestamps90d = watchedTimestamps90d,
                         homeRows = homeRows,
-                        heroSource = homeHeroSource,
+                        heroSettings = heroSettings,
+                        continueTrackingStyle = continueTrackingStyle,
+                        categoryDiscoverShelves = categoryDiscoverShelves,
                         hasUpdateAvailable = availableUpdate != null,
                         onItemClick = onItemClick,
                         onPreviewSearchItem = { searchItem ->
@@ -263,7 +278,12 @@ fun HomeScreen(
                             onItemClick(-1L)
                         },
                         onQuickProgress = { viewModel.incrementProgress(it) },
+                        onMarkCompleted = { viewModel.markCompleted(it) },
+                        onSetStatus = { summary, status -> viewModel.setMediaStatus(summary, status) },
                         onAddSearchItem = { viewModel.addMediaFromSearch(it) },
+                        onRequestDiscoverShelf = { rowKey ->
+                            viewModel.loadHomeDiscoverShelf(rowKey, tmdbKey)
+                        },
                         onOpenCalendar = {
                             viewModel.loadReleaseCalendar()
                             showReleaseCalendarSheet = true
@@ -365,6 +385,27 @@ fun HomeScreen(
                                         imageVector = Icons.Default.BugReport,
                                         contentDescription = "Diagnostics",
                                         tint = TextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // Add Custom Entry button
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(DarkSurfaceElevated)
+                                        .clickable {
+                                            customEntryInitTitle = ""
+                                            customEntryInitType = if (uiState.selectedMediaType == MediaType.ALL) MediaType.NOVEL else uiState.selectedMediaType
+                                            showCustomEntrySheet = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add Custom Entry",
+                                        tint = AccentGold,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -587,6 +628,16 @@ fun HomeScreen(
                             )
                         }
 
+                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.COMIC) {
+                            ComicUnderlineFilterBar(
+                                selectedPublisher = selectedComicPublisher,
+                                selectedFormat = selectedComicFormat,
+                                onPublisherSelected = { selectedComicPublisher = it },
+                                onFormatSelected = { selectedComicFormat = it },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Main Content: Horizontal Pager for Category Swiping
@@ -608,7 +659,7 @@ fun HomeScreen(
                             ) { pageIndex ->
                                 val pageMediaType = MediaType.filterTabs[pageIndex]
 
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory, librarySortMode) {
+                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory, selectedComicPublisher, selectedComicFormat, librarySortMode) {
                                     val filtered = uiState.allMediaSummaries.filter { item ->
                                         (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
                                         (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
@@ -625,11 +676,14 @@ fun HomeScreen(
                                         }) &&
                                         (pageMediaType != MediaType.BOOK || selectedBookFormat == "ALL" || com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormat) &&
                                         (pageMediaType != MediaType.BOOK || selectedBookCategory == "ALL" || com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, null) == selectedBookCategory) &&
+                                        (pageMediaType != MediaType.COMIC || selectedComicPublisher == "ALL" || com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisher) &&
+                                        (pageMediaType != MediaType.COMIC || selectedComicFormat == "ALL" || com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormat) &&
                                         (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
                                         (searchQuery.isBlank() ||
                                             item.title.contains(searchQuery, ignoreCase = true) ||
                                             item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true)
+                                            item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true ||
+                                            item.comicPublisher?.contains(searchQuery, ignoreCase = true) == true)
                                     }
                                     when (librarySortMode) {
                                         "RATING" -> filtered.sortedWith(
@@ -677,25 +731,34 @@ fun HomeScreen(
                                             }
                                         }
                                     } else if (libraryViewMode == "LIST") {
-                                        LazyColumn(
-                                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 112.dp),
-                                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                                            modifier = Modifier.fillMaxSize()
-                                        ) {
-                                            items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
-                                                LibraryListRow(
-                                                    item = item,
-                                                    onClick = {
-                                                        AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
-                                                        com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
-                                                        onItemClick(item.id)
-                                                    },
-                                                    onQuickProgress = {
-                                                        AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
-                                                        viewModel.incrementProgress(item)
-                                                    }
-                                                )
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            LazyColumn(
+                                                state = listStates[pageIndex],
+                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = 112.dp),
+                                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                                modifier = Modifier.fillMaxSize()
+                                            ) {
+                                                items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
+                                                    LibraryListRow(
+                                                        item = item,
+                                                        onClick = {
+                                                            AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
+                                                            com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                            onItemClick(item.id)
+                                                        },
+                                                        onQuickProgress = {
+                                                            AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
+                                                            viewModel.incrementProgress(item)
+                                                        }
+                                                    )
+                                                }
                                             }
+                                            LibraryFastScroller(
+                                                items = displayedItems,
+                                                sortMode = librarySortMode,
+                                                listState = listStates[pageIndex],
+                                                columnsCount = 1
+                                            )
                                         }
                                     } else {
                                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -705,10 +768,15 @@ fun HomeScreen(
                                                 libraryViewMode == "GRID_2" -> GridCells.Fixed(2)
                                                 else -> if (isPhoneScreen) GridCells.Fixed(3) else GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
                                             }
+                                            val approxCols = when {
+                                                posterStyle.isLandscape -> if (isPhoneScreen) 1 else (maxWidth / 340.dp).toInt().coerceAtLeast(1)
+                                                libraryViewMode == "GRID_2" -> 2
+                                                else -> if (isPhoneScreen) 3 else (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(1)
+                                            }
                                             LazyVerticalGrid(
                                                 state = gridStates[pageIndex],
                                                 columns = gridColumns,
-                                                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 112.dp),
+                                                contentPadding = PaddingValues(start = 14.dp, end = 16.dp, top = 6.dp, bottom = 112.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                                 verticalArrangement = Arrangement.spacedBy(14.dp),
                                                 modifier = Modifier.fillMaxSize()
@@ -738,6 +806,12 @@ fun HomeScreen(
                                                     )
                                                 }
                                             }
+                                            LibraryFastScroller(
+                                                items = displayedItems,
+                                                sortMode = librarySortMode,
+                                                gridState = gridStates[pageIndex],
+                                                columnsCount = approxCols
+                                            )
                                         }
                                     }
                                 }
@@ -751,6 +825,11 @@ fun HomeScreen(
                         allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick,
                         onAddMedia = { viewModel.addMediaFromSearch(it) },
+                        onCreateCustomEntry = { initialTitle, suggestedType ->
+                            customEntryInitTitle = initialTitle
+                            customEntryInitType = suggestedType
+                            showCustomEntrySheet = true
+                        },
                         modifier = Modifier.statusBarsPadding(),
                         homeViewModel = viewModel
                     )
@@ -903,9 +982,11 @@ fun HomeScreen(
                         title = rel.title,
                         coverUrl = rel.coverUrl,
                         mediaType = rel.mediaType,
-                        sourceProvider = "AniList",
+                        sourceProvider = if (rel.mediaType == MediaType.COMIC) "Metron" else "AniList",
                         anilistId = rel.anilistId,
-                        malId = rel.malId
+                        malId = rel.malId,
+                        metronId = rel.metronId,
+                        comicPublisher = if (rel.mediaType == MediaType.COMIC) rel.formatLabel else null
                     ).toMediaItemEntity()
                     onItemClick(-1L)
                 },
@@ -915,9 +996,11 @@ fun HomeScreen(
                             title = rel.title,
                             coverUrl = rel.coverUrl,
                             mediaType = rel.mediaType,
-                            sourceProvider = "AniList",
+                            sourceProvider = if (rel.mediaType == MediaType.COMIC) "Metron" else "AniList",
                             anilistId = rel.anilistId,
-                            malId = rel.malId
+                            malId = rel.malId,
+                            metronId = rel.metronId,
+                            comicPublisher = if (rel.mediaType == MediaType.COMIC) rel.formatLabel else null
                         )
                     )
                 },
@@ -953,6 +1036,21 @@ fun HomeScreen(
                     }
                 },
                 onDismiss = { showLibraryFilterSheet = false }
+            )
+        }
+
+        if (showCustomEntrySheet) {
+            CustomEntryEditorSheet(
+                existingItem = null,
+                initialTitle = customEntryInitTitle,
+                initialMediaType = customEntryInitType,
+                onSave = { entity ->
+                    showCustomEntrySheet = false
+                    viewModel.createCustomMediaEntry(entity) { newId ->
+                        if (newId > 0L) onItemClick(newId)
+                    }
+                },
+                onDismiss = { showCustomEntrySheet = false }
             )
         }
     }
@@ -1215,6 +1313,47 @@ internal fun VnUnderlineFilterBar(
             selectedKey = selectedLength,
             onSelected = onLengthSelected
         )
+    }
+}
+
+@Composable
+internal fun ComicUnderlineFilterBar(
+    selectedPublisher: String,
+    selectedFormat: String?,
+    onPublisherSelected: (String) -> Unit,
+    onFormatSelected: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        UnderlineFilterGroup(
+            options = listOf(
+                "ALL" to "All Publishers",
+                "MARVEL" to "Marvel",
+                "DC" to "DC",
+                "IMAGE" to "Image",
+                "DARK_HORSE" to "Dark Horse",
+                "IDW" to "IDW",
+                "INDIE" to "Indie"
+            ),
+            selectedKey = selectedPublisher,
+            onSelected = onPublisherSelected
+        )
+        if (selectedFormat != null && onFormatSelected != null) {
+            UnderlineFilterGroup(
+                options = listOf(
+                    "ALL" to "All Formats",
+                    "ISSUES" to "Single Issues",
+                    "TPB" to "TPB / HC",
+                    "OMNIBUS" to "Omnibus",
+                    "DIGITAL" to "Digital"
+                ),
+                selectedKey = selectedFormat,
+                onSelected = onFormatSelected
+            )
+        }
     }
 }
 

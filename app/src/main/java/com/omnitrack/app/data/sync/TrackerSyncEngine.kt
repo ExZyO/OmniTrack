@@ -5,6 +5,7 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.network.NetworkPacer
 import com.omnitrack.app.data.repository.MediaRepository
+import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -61,6 +63,18 @@ class TrackerSyncEngine(
         item: MediaItemEntity,
         newProgress: Double
     ) = withContext(Dispatchers.IO) {
+        if (item.isCustomEntry &&
+            item.anilistId == null &&
+            item.malId == null &&
+            item.traktId == null &&
+            item.simklId == null &&
+            item.bangumiId == null &&
+            item.vndbId == null &&
+            item.tmdbId == null &&
+            item.hardcoverId.isNullOrBlank()
+        ) {
+            return@withContext
+        }
         // Enqueue tasks for each active remote tracker ID
         if (item.anilistId != null) {
             syncQueueDao.enqueue(
@@ -224,9 +238,14 @@ class TrackerSyncEngine(
                 .build()
 
             client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=ANILIST op=push http=${response.code}")
+                }
                 response.isSuccessful
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=ANILIST op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -271,13 +290,19 @@ class TrackerSyncEngine(
             val request = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $token")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .put(bodyBuilder.build())
                 .build()
 
             client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=MAL op=push http=${response.code}")
+                }
                 response.isSuccessful
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=MAL op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -287,13 +312,18 @@ class TrackerSyncEngine(
         item: MediaItemEntity,
         token: String?
     ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank() || item.tmdbId == null) return@withGeneralPacing true
+        if (token.isNullOrBlank() || (item.tmdbId == null && item.traktId == null && item.imdbId.isNullOrBlank())) {
+            return@withGeneralPacing true
+        }
         try {
+            val arrayKey = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
             val payload = buildJsonObject {
-                put("movies", kotlinx.serialization.json.buildJsonArray {
+                put(arrayKey, kotlinx.serialization.json.buildJsonArray {
                     add(buildJsonObject {
                         putJsonObject("ids") {
-                            put("tmdb", item.tmdbId.toInt())
+                            item.traktId?.let { put("trakt", it.toInt()) }
+                            item.tmdbId?.let { put("tmdb", it.toInt()) }
+                            item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
                         }
                     })
                 })
@@ -303,13 +333,20 @@ class TrackerSyncEngine(
                 .url("https://api.trakt.tv/sync/history")
                 .header("Authorization", "Bearer $token")
                 .header("trakt-api-version", "2")
+                .header("trakt-api-key", TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
             client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=TRAKT op=push http=${response.code}")
+                }
                 response.isSuccessful
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=TRAKT op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -319,7 +356,9 @@ class TrackerSyncEngine(
         item: MediaItemEntity,
         token: String?
     ): Boolean = NetworkPacer.withGeneralPacing {
-        if (token.isNullOrBlank()) return@withGeneralPacing true
+        if (token.isNullOrBlank() || (item.simklId == null && item.tmdbId == null && item.malId == null)) {
+            return@withGeneralPacing true
+        }
         try {
             val arrayName = if (item.mediaType == com.omnitrack.app.data.model.MediaType.MOVIE) "movies" else "shows"
             val idObj = buildJsonObject {
@@ -341,12 +380,21 @@ class TrackerSyncEngine(
             val request = Request.Builder()
                 .url("https://api.simkl.com/sync/history")
                 .header("Authorization", "Bearer $token")
+                .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .header("Content-Type", "application/json")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=SIMKL op=push http=${response.code}")
+                }
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=SIMKL op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -383,8 +431,15 @@ class TrackerSyncEngine(
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=BANGUMI op=push http=${response.code}")
+                }
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=BANGUMI op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -426,11 +481,19 @@ class TrackerSyncEngine(
             val request = Request.Builder()
                 .url("https://api.vndb.org/kana/ulist/${item.vndbId}")
                 .header("Authorization", "token $token")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .patch(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=VNDB op=push http=${response.code}")
+                }
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=VNDB op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -452,11 +515,19 @@ class TrackerSyncEngine(
             val request = Request.Builder()
                 .url("https://api.themoviedb.org/3/$type/${item.tmdbId}/rating")
                 .header("Authorization", "Bearer $token")
+                .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AppLogger.w("TrackerSync", "service=TMDB op=push http=${response.code}")
+                }
+                response.isSuccessful
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("TrackerSync", "service=TMDB op=push ex=${e.javaClass.simpleName}")
             false
         }
     }
@@ -549,9 +620,10 @@ class TrackerSyncEngine(
             return@withContext BookImportSummary(0, 0, "Connect your Hardcover API token first")
         }
         onStatus("Fetching Hardcover library...")
-        val records = com.omnitrack.app.data.enrichment.HardcoverApiClient(client).pullUserBooks(token)
+        val hcClient = com.omnitrack.app.data.enrichment.HardcoverApiClient(client)
+        val records = hcClient.pullUserBooks(token)
         if (records.isEmpty()) {
-            return@withContext BookImportSummary(0, 0, "0 books returned from Hardcover")
+            return@withContext BookImportSummary(0, 0, hcClient.lastError ?: "0 books returned from Hardcover")
         }
         var imported = 0
         var updated = 0
@@ -1007,8 +1079,8 @@ class TrackerSyncEngine(
         var imported = 0
         var updated = 0
         var skipped = 0
+        var lastHttpError: Int? = null
         try {
-            val clientId = TrackerAccountVerifier.MAL_CLIENT_ID
             for (isAnime in listOf(true, false)) {
                 val endpoint = if (isAnime) {
                     "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status,num_episodes,main_picture,start_date,media_type&limit=200"
@@ -1017,17 +1089,21 @@ class TrackerSyncEngine(
                 }
                 var nextUrl: String? = endpoint
                 var page = 0
-                while (nextUrl != null && page < 5) {
+                while (nextUrl != null && page < 20) {
                     page++
                     val (nodes, pagingNext) = NetworkPacer.withGeneralPacing {
                         val req = Request.Builder()
                             .url(nextUrl!!)
                             .header("Authorization", "Bearer $token")
-                            .header("X-MAL-CLIENT-ID", clientId)
+                            .header("User-Agent", "OmniTrack/1.0 (Android)")
                             .get()
                             .build()
                         client.newCall(req).execute().use { resp ->
-                            if (!resp.isSuccessful) return@withGeneralPacing null to null
+                            if (!resp.isSuccessful) {
+                                lastHttpError = resp.code
+                                AppLogger.w("TrackerSync", "service=MAL op=import http=${resp.code}")
+                                return@withGeneralPacing null to null
+                            }
                             val root = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
                             root?.get("data").asSafeArr() to root?.get("paging").asSafeObj()?.get("next").asSafeStr()
                         }
@@ -1084,7 +1160,11 @@ class TrackerSyncEngine(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "MAL import failed")
+            AppLogger.w("TrackerSync", "service=MAL op=import ex=${e.javaClass.simpleName}")
+            return@withContext TrackerImportResult(imported, updated, skipped, "MAL import failed (${e.javaClass.simpleName})")
+        }
+        if (imported == 0 && updated == 0 && lastHttpError != null) {
+            return@withContext TrackerImportResult(0, 0, skipped, "MyAnimeList HTTP $lastHttpError")
         }
         onStatus("MyAnimeList: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)
@@ -1099,6 +1179,7 @@ class TrackerSyncEngine(
         var imported = 0
         var updated = 0
         var skipped = 0
+        var lastHttpError: Int? = null
         val clientId = TrackerAccountVerifier.TRAKT_CLIENT_ID
         try {
             suspend fun fetchTraktArr(path: String): JsonArray? = NetworkPacer.withGeneralPacing {
@@ -1107,10 +1188,16 @@ class TrackerSyncEngine(
                     .header("Authorization", "Bearer $token")
                     .header("trakt-api-version", "2")
                     .header("trakt-api-key", clientId)
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
                     .get()
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withGeneralPacing null
+                    if (resp.code == 204) return@withGeneralPacing JsonArray(emptyList())
+                    if (!resp.isSuccessful) {
+                        lastHttpError = resp.code
+                        AppLogger.w("TrackerSync", "service=TRAKT op=import http=${resp.code}")
+                        return@withGeneralPacing null
+                    }
                     json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeArr()
                 }
             }
@@ -1205,7 +1292,11 @@ class TrackerSyncEngine(
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "Trakt import failed")
+            AppLogger.w("TrackerSync", "service=TRAKT op=import ex=${e.javaClass.simpleName}")
+            return@withContext TrackerImportResult(imported, updated, skipped, "Trakt import failed (${e.javaClass.simpleName})")
+        }
+        if (imported == 0 && updated == 0 && lastHttpError != null) {
+            return@withContext TrackerImportResult(0, 0, skipped, "Trakt HTTP $lastHttpError")
         }
         onStatus("Trakt: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)
@@ -1220,19 +1311,41 @@ class TrackerSyncEngine(
         var imported = 0
         var updated = 0
         var skipped = 0
+        var httpError: Int? = null
+        var isEmpty204 = false
         try {
             val root = NetworkPacer.withGeneralPacing {
                 val req = Request.Builder()
                     .url("https://api.simkl.com/sync/all-items/")
                     .header("Authorization", "Bearer $token")
                     .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
                     .get()
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withGeneralPacing null
-                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                    if (resp.code == 204) {
+                        isEmpty204 = true
+                        return@withGeneralPacing null
+                    }
+                    if (!resp.isSuccessful) {
+                        httpError = resp.code
+                        AppLogger.w("TrackerSync", "service=SIMKL op=import http=${resp.code}")
+                        return@withGeneralPacing null
+                    }
+                    val rawBody = resp.body?.string().orEmpty()
+                    if (rawBody.isBlank()) null else json.parseToJsonElement(rawBody).asSafeObj()
                 }
-            } ?: return@withContext TrackerImportResult(0, 0, 0, "Failed to read SIMKL library")
+            }
+            if (isEmpty204) {
+                onStatus("SIMKL: 0 items in library")
+                return@withContext TrackerImportResult(0, 0, 0)
+            }
+            if (httpError != null) {
+                return@withContext TrackerImportResult(0, 0, 0, "SIMKL HTTP $httpError")
+            }
+            if (root == null) {
+                return@withContext TrackerImportResult(0, 0, 0, "Failed to read SIMKL library")
+            }
 
             suspend fun processCategory(key: String, mediaObjField: String, defaultType: com.omnitrack.app.data.model.MediaType) {
                 root[key].asSafeArr()?.forEach { el ->
@@ -1283,7 +1396,8 @@ class TrackerSyncEngine(
             processCategory("anime", "show", com.omnitrack.app.data.model.MediaType.ANIME)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "SIMKL import failed")
+            AppLogger.w("TrackerSync", "service=SIMKL op=import ex=${e.javaClass.simpleName}")
+            return@withContext TrackerImportResult(imported, updated, skipped, "SIMKL import failed (${e.javaClass.simpleName})")
         }
         onStatus("SIMKL: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)
@@ -1298,6 +1412,7 @@ class TrackerSyncEngine(
         var imported = 0
         var updated = 0
         var skipped = 0
+        var httpError: Int? = null
         try {
             val username = NetworkPacer.withBangumiPacing {
                 val meReq = Request.Builder()
@@ -1307,23 +1422,36 @@ class TrackerSyncEngine(
                     .get()
                     .build()
                 client.newCall(meReq).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withBangumiPacing null
+                    if (!resp.isSuccessful) {
+                        httpError = resp.code
+                        AppLogger.w("TrackerSync", "service=BANGUMI op=me http=${resp.code}")
+                        return@withBangumiPacing null
+                    }
                     val obj = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
                     obj?.get("username").asSafeStr() ?: obj?.get("id").asSafeStr()
                 }
-            } ?: return@withContext TrackerImportResult(0, 0, 0, "Could not fetch Bangumi profile")
+            } ?: return@withContext TrackerImportResult(
+                0,
+                0,
+                0,
+                httpError?.let { "Bangumi HTTP $it" } ?: "Could not fetch Bangumi profile"
+            )
 
             var offset = 0
-            while (offset < 300) {
+            while (offset < 1000) {
                 val dataArr = NetworkPacer.withBangumiPacing {
                     val colReq = Request.Builder()
-                        .url("https://api.bgm.tv/v0/users/$username/collections?limit=100&offset=$offset")
+                        .url("https://api.bgm.tv/v0/users/$username/collections?limit=50&offset=$offset")
                         .header("Authorization", "Bearer $token")
                         .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                         .get()
                         .build()
                     client.newCall(colReq).execute().use { resp ->
-                        if (!resp.isSuccessful) return@withBangumiPacing null
+                        if (!resp.isSuccessful) {
+                            httpError = resp.code
+                            AppLogger.w("TrackerSync", "service=BANGUMI op=import http=${resp.code}")
+                            return@withBangumiPacing null
+                        }
                         json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("data").asSafeArr()
                     }
                 } ?: break
@@ -1371,12 +1499,16 @@ class TrackerSyncEngine(
                         MergeOutcome.SKIPPED -> skipped++
                     }
                 }
-                if (dataArr.size < 100) break
-                offset += 100
+                if (dataArr.size < 50) break
+                offset += 50
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "Bangumi import failed")
+            AppLogger.w("TrackerSync", "service=BANGUMI op=import ex=${e.javaClass.simpleName}")
+            return@withContext TrackerImportResult(imported, updated, skipped, "Bangumi import failed (${e.javaClass.simpleName})")
+        }
+        if (imported == 0 && updated == 0 && httpError != null) {
+            return@withContext TrackerImportResult(0, 0, skipped, "Bangumi HTTP $httpError")
         }
         onStatus("Bangumi: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)
@@ -1391,71 +1523,108 @@ class TrackerSyncEngine(
         var imported = 0
         var updated = 0
         var skipped = 0
+        var httpError: Int? = null
         try {
             val userId = NetworkPacer.withVndbPacing {
                 val req = Request.Builder()
                     .url("https://api.vndb.org/kana/authinfo")
                     .header("Authorization", "Token $token")
+                    .header("User-Agent", "OmniTrack/1.0 (Android)")
                     .get()
                     .build()
                 client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withVndbPacing null
+                    if (!resp.isSuccessful) {
+                        httpError = resp.code
+                        AppLogger.w("TrackerSync", "service=VNDB op=me http=${resp.code}")
+                        return@withVndbPacing null
+                    }
                     json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("id").asSafeStr()
                 }
-            } ?: return@withContext TrackerImportResult(0, 0, 0, "Could not verify VNDB user")
+            } ?: return@withContext TrackerImportResult(
+                0,
+                0,
+                0,
+                httpError?.let { "VNDB HTTP $it" } ?: "Could not verify VNDB user"
+            )
 
-            val resultsArr = NetworkPacer.withVndbPacing {
-                val payload = buildJsonObject {
-                    put("user", userId)
-                    put("fields", "id,vote,labels.label,vn{id,title,released,image{url}}")
-                    put("results", 100)
-                }.toString()
-                val req = Request.Builder()
-                    .url("https://api.vndb.org/kana/ulist")
-                    .header("Authorization", "Token $token")
-                    .post(payload.toRequestBody("application/json".toMediaType()))
-                    .build()
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withVndbPacing null
-                    json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()?.get("results").asSafeArr()
+            var page = 1
+            while (page <= 20) {
+                val (resultsArr, hasMore) = NetworkPacer.withVndbPacing {
+                    val payload = buildJsonObject {
+                        put("user", userId)
+                        put("fields", "id,vote,labels.label,vn{id,title,released,image{url}}")
+                        put("results", 100)
+                        put("page", page)
+                    }.toString()
+                    val req = Request.Builder()
+                        .url("https://api.vndb.org/kana/ulist")
+                        .header("Authorization", "Token $token")
+                        .header("User-Agent", "OmniTrack/1.0 (Android)")
+                        .post(payload.toRequestBody("application/json".toMediaType()))
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) {
+                            httpError = resp.code
+                            AppLogger.w("TrackerSync", "service=VNDB op=import http=${resp.code}")
+                            return@withVndbPacing null to false
+                        }
+                        val root = json.parseToJsonElement(resp.body?.string().orEmpty()).asSafeObj()
+                        val arr = root?.get("results").asSafeArr()
+                        val more = root?.get("more")?.jsonPrimitive?.booleanOrNull == true
+                        arr to more
+                    }
                 }
-            } ?: return@withContext TrackerImportResult(0, 0, 0, "Failed to read VNDB list")
+                if (resultsArr == null) {
+                    if (page == 1 && imported == 0 && updated == 0) {
+                        return@withContext TrackerImportResult(
+                            0,
+                            0,
+                            skipped,
+                            httpError?.let { "VNDB HTTP $it" } ?: "Failed to read VNDB list"
+                        )
+                    }
+                    break
+                }
 
-            for (el in resultsArr) {
-                val obj = el.asSafeObj() ?: continue
-                val vn = obj["vn"].asSafeObj() ?: continue
-                val vndbId = vn["id"].asSafeStr() ?: obj["id"].asSafeStr() ?: continue
-                val title = vn["title"].asSafeStr() ?: continue
-                val cover = vn["image"].asSafeObj()?.get("url").asSafeStr().orEmpty()
-                val year = vn["released"].asSafeStr()?.take(4)
-                val labels = obj["labels"].asSafeArr()?.mapNotNull { it.asSafeObj()?.get("label").asSafeStr()?.lowercase() }.orEmpty()
-                val status = when {
-                    labels.any { "finished" in it } -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
-                    labels.any { "playing" in it } -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
-                    labels.any { "stalled" in it || "hold" in it } -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
-                    labels.any { "dropped" in it } -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
-                    else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                for (el in resultsArr) {
+                    val obj = el.asSafeObj() ?: continue
+                    val vn = obj["vn"].asSafeObj() ?: continue
+                    val vndbId = vn["id"].asSafeStr() ?: obj["id"].asSafeStr() ?: continue
+                    val title = vn["title"].asSafeStr() ?: continue
+                    val cover = vn["image"].asSafeObj()?.get("url").asSafeStr().orEmpty()
+                    val year = vn["released"].asSafeStr()?.take(4)
+                    val labels = obj["labels"].asSafeArr()?.mapNotNull { it.asSafeObj()?.get("label").asSafeStr()?.lowercase() }.orEmpty()
+                    val status = when {
+                        labels.any { "finished" in it } -> com.omnitrack.app.data.model.TrackingStatus.COMPLETED
+                        labels.any { "playing" in it } -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
+                        labels.any { "stalled" in it || "hold" in it } -> com.omnitrack.app.data.model.TrackingStatus.ON_HOLD
+                        labels.any { "dropped" in it } -> com.omnitrack.app.data.model.TrackingStatus.DROPPED
+                        else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
+                    }
+                    val rating = obj["vote"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
+                    when (smartMergeIncomingItem(
+                        MediaItemEntity(
+                            title = title,
+                            coverUrl = cover,
+                            mediaType = com.omnitrack.app.data.model.MediaType.VISUAL_NOVEL,
+                            status = status,
+                            userRating = rating,
+                            releaseYear = year,
+                            vndbId = vndbId
+                        )
+                    )) {
+                        MergeOutcome.IMPORTED -> imported++
+                        MergeOutcome.UPDATED -> updated++
+                        MergeOutcome.SKIPPED -> skipped++
+                    }
                 }
-                val rating = obj["vote"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
-                when (smartMergeIncomingItem(
-                    MediaItemEntity(
-                        title = title,
-                        coverUrl = cover,
-                        mediaType = com.omnitrack.app.data.model.MediaType.VISUAL_NOVEL,
-                        status = status,
-                        userRating = rating,
-                        releaseYear = year,
-                        vndbId = vndbId
-                    )
-                )) {
-                    MergeOutcome.IMPORTED -> imported++
-                    MergeOutcome.UPDATED -> updated++
-                    MergeOutcome.SKIPPED -> skipped++
-                }
+                if (!hasMore || resultsArr.isEmpty()) break
+                page++
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            return@withContext TrackerImportResult(imported, updated, skipped, e.message ?: "VNDB import failed")
+            AppLogger.w("TrackerSync", "service=VNDB op=import ex=${e.javaClass.simpleName}")
+            return@withContext TrackerImportResult(imported, updated, skipped, "VNDB import failed (${e.javaClass.simpleName})")
         }
         onStatus("VNDB: imported $imported, updated $updated")
         TrackerImportResult(imported, updated, skipped)

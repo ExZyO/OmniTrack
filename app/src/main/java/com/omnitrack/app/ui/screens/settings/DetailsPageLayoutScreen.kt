@@ -81,17 +81,21 @@ fun DetailsPageLayoutScreen(
     val coroutineScope = rememberCoroutineScope()
     val hapticFeedback = LocalHapticFeedback.current
 
-    val savedSections by prefManager.detailsPageSectionOrder.collectAsState(initial = DetailsPageLayoutDefaults.defaultSections)
+    val savedSections by prefManager.detailsPageSectionOrder.collectAsState(initial = null)
 
-    val currentSections = remember {
-        mutableStateListOf<DetailSectionItem>().apply { addAll(savedSections) }
-    }
+    val currentSections = remember { mutableStateListOf<DetailSectionItem>() }
+    var initialized by remember { mutableStateOf(false) }
     var isDraggingAny by remember { mutableStateOf(false) }
 
     LaunchedEffect(savedSections) {
-        if (!isDraggingAny && currentSections.toList() != savedSections) {
+        val loaded = savedSections ?: return@LaunchedEffect
+        if (!initialized) {
             currentSections.clear()
-            currentSections.addAll(savedSections)
+            currentSections.addAll(loaded)
+            initialized = true
+        } else if (!isDraggingAny && currentSections.toList() != loaded) {
+            currentSections.clear()
+            currentSections.addAll(loaded)
         }
     }
 
@@ -186,6 +190,13 @@ fun DetailsPageLayoutScreen(
 
         Spacer(modifier = Modifier.height(6.dp))
 
+        if (!initialized) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            )
+        } else {
         // Reorderable LazyColumn
         LazyColumn(
             state = lazyListState,
@@ -314,6 +325,7 @@ fun DetailsPageLayoutScreen(
                     }
                 }
             }
+        }
         }
     }
 }

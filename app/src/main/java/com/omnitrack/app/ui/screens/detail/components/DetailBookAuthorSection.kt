@@ -72,8 +72,8 @@ fun DetailBookAuthorSection(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(DarkSurfaceElevated)
-                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.09f))
+                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
                 .clickable { onOpenAuthorProfile() }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -182,7 +182,8 @@ fun DetailBookAuthorSection(
                         subtitle = work.releaseYear,
                         rating = work.rating,
                         onClick = { onSelectWork(work) },
-                        cardWidth = 108.dp
+                        cardWidth = 116.dp,
+                        cardHeight = 174.dp
                     )
                 }
             }

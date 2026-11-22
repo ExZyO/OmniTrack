@@ -110,6 +110,7 @@ class ArtworkWaterfallRepository(
         steamAppId: Long? = null,
         openLibraryId: String? = null,
         bookAuthor: String? = null,
+        comicVineId: Long? = null,
         initialCandidates: List<ArtworkCandidate> = emptyList(),
         onPartialResults: ((List<ArtworkCandidate>) -> Unit)? = null
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
@@ -147,7 +148,7 @@ class ArtworkWaterfallRepository(
                         }
                     }
                 )
-                MediaType.VISUAL_NOVEL, MediaType.GAME, MediaType.BOOK -> list.sortedWith(
+                MediaType.VISUAL_NOVEL, MediaType.GAME, MediaType.BOOK, MediaType.COMIC -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
                         .thenBy { cleanArtBannerRank(it) }
                 )
@@ -351,6 +352,13 @@ class ArtworkWaterfallRepository(
                         launchProvider { fetchHardcoverBookArt(title, bookAuthor, hcToken) }
                     }
                     launchProvider { fetchGoogleBooksCovers(title) }
+                }
+
+                MediaType.COMIC -> {
+                    launchProvider {
+                        com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client)
+                            .fetchComicArtworkCandidates(title, comicVineId, openLibraryId)
+                    }
                 }
 
                 MediaType.SHOW, MediaType.MOVIE -> {
@@ -1341,6 +1349,7 @@ class ArtworkWaterfallRepository(
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_600x900.jpg", sourceName = "Steam", description = name, isBanner = false))
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/library_hero.jpg", sourceName = "Steam Hero", description = "$name (Hero Banner)", isBanner = true, isScreenshot = false))
                 candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/header.jpg", sourceName = "Steam", description = "$name (Header)", isBanner = true, isScreenshot = false))
+                candidates.add(ArtworkCandidate(url = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/$id/capsule_616x353.jpg", sourceName = "Steam", description = "$name (Capsule)", isBanner = false))
             }
 
             val detailBatches = matchedApps.take(2).map { (id, name) ->

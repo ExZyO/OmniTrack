@@ -59,15 +59,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.omnitrack.app.util.AppLogger
 import com.omnitrack.app.util.LogLevel
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentJade
-import com.omnitrack.app.ui.theme.AccentRose
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -121,7 +118,7 @@ fun DiagnosticsSheet(
                     )
                     Text(
                         text = "${logs.size} events captured in memory",
-                        color = TextMuted,
+                        color = TextSecondary,
                         fontSize = 12.sp
                     )
                 }
@@ -160,7 +157,7 @@ fun DiagnosticsSheet(
                     )
                     Text(
                         text = if (isLoggingEnabled) "Active · Logging all app events & errors" else "Disabled · Zero log overhead",
-                        color = if (isLoggingEnabled) AccentJade else TextMuted,
+                        color = if (isLoggingEnabled) AccentGold else TextSecondary,
                         fontSize = 11.sp
                     )
                 }
@@ -170,7 +167,7 @@ fun DiagnosticsSheet(
                     onCheckedChange = { AppLogger.setLoggingEnabled(it) },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = AmoledBlack,
-                        checkedTrackColor = AccentArctic,
+                        checkedTrackColor = AccentGold,
                         uncheckedTrackColor = DarkSurfaceCard
                     )
                 )
@@ -245,8 +242,8 @@ fun DiagnosticsSheet(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(AccentJade.copy(alpha = 0.15f)),
-                    colors = ButtonDefaults.textButtonColors(contentColor = AccentJade)
+                        .background(AccentGold.copy(alpha = 0.14f)),
+                    colors = ButtonDefaults.textButtonColors(contentColor = AccentGold)
                 ) {
                     Icon(imageVector = Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
@@ -260,7 +257,7 @@ fun DiagnosticsSheet(
                         .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(DarkSurfaceElevated),
-                    colors = ButtonDefaults.textButtonColors(contentColor = TextMuted)
+                    colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
                 ) {
                     Icon(imageVector = Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -284,7 +281,7 @@ fun DiagnosticsSheet(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             text = "Terminal buffer empty",
-                            color = TextMuted,
+                            color = TextSecondary,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace
                         )
@@ -297,10 +294,10 @@ fun DiagnosticsSheet(
                     ) {
                         items(logs) { entry ->
                             val levelColor = when (entry.level) {
-                                LogLevel.ERROR -> AccentRose
-                                LogLevel.WARN -> Color(0xFFFFB74D)
-                                LogLevel.INFO -> AccentJade
-                                LogLevel.DEBUG -> AccentArctic
+                                LogLevel.ERROR -> Color(0xFFEF4444)
+                                LogLevel.WARN -> Color(0xFFF59E0B)
+                                LogLevel.INFO -> AccentGold
+                                LogLevel.DEBUG -> TextSecondary
                             }
 
                             Column(modifier = Modifier.fillMaxWidth()) {
@@ -310,7 +307,7 @@ fun DiagnosticsSheet(
                                 ) {
                                     Text(
                                         text = entry.timestamp,
-                                        color = TextMuted,
+                                        color = TextSecondary,
                                         fontSize = 10.sp,
                                         fontFamily = FontFamily.Monospace
                                     )
@@ -331,7 +328,7 @@ fun DiagnosticsSheet(
                                 if (entry.stackTrace != null) {
                                     Text(
                                         text = entry.stackTrace,
-                                        color = AccentRose.copy(alpha = 0.85f),
+                                        color = Color(0xFFEF4444).copy(alpha = 0.85f),
                                         fontSize = 9.5.sp,
                                         fontFamily = FontFamily.Monospace,
                                         modifier = Modifier.padding(start = 12.dp, top = 2.dp)

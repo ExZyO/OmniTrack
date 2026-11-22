@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.AnimeTagItem
 import com.omnitrack.app.data.model.BookDetailMeta
+import com.omnitrack.app.data.model.ComicDetailMeta
+import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
@@ -91,6 +93,7 @@ fun DetailGeneralInfoSection(
     vnDetailMeta: VnDetailMeta? = null,
     gameDetailMeta: GameDetailMeta? = null,
     bookDetailMeta: BookDetailMeta? = null,
+    comicDetailMeta: ComicDetailMeta? = null,
     modifier: Modifier = Modifier
 ) {
     val isSeries = item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME
@@ -100,6 +103,7 @@ fun DetailGeneralInfoSection(
         MediaType.GAME -> "Game Details"
         MediaType.VISUAL_NOVEL -> "Visual Novel Details"
         MediaType.BOOK -> "Book Details"
+        MediaType.COMIC -> "Comic Details"
         MediaType.MANGA, MediaType.NOVEL -> "Reading Details"
         else -> "Details"
     }
@@ -183,7 +187,7 @@ fun DetailGeneralInfoSection(
         }
         if (!airedStr.isNullOrBlank()) {
             val dateLabel = when (item.mediaType) {
-                MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK -> "Published"
+                MediaType.MANGA, MediaType.NOVEL, MediaType.BOOK, MediaType.COMIC -> "Published"
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Released"
                 else -> "Aired"
             }
@@ -326,6 +330,23 @@ fun DetailGeneralInfoSection(
             bookDetailMeta?.contentWarnings?.takeIf { it.isNotEmpty() }?.let {
                 add("Content Warnings" to it.joinToString(", "))
             }
+        } else if (item.mediaType == MediaType.COMIC) {
+            (comicDetailMeta?.publisher ?: item.comicPublisher)?.takeIf { it.isNotBlank() }?.let {
+                add("Publisher" to it)
+            }
+            item.comicFormat?.takeIf { it.isNotBlank() }?.let {
+                add("Format" to ComicFormat.fromName(it).label)
+            }
+            val issueTot = item.totalProgress?.toInt()?.takeIf { it > 0 } ?: comicDetailMeta?.issueCount
+            issueTot?.takeIf { it > 0 }?.let { count ->
+                add("Issues" to "$count issues")
+            }
+            (comicDetailMeta?.startYear ?: item.releaseYear)?.takeIf { it.isNotBlank() }?.let {
+                add("Run Started" to it)
+            }
+            if (!comicDetailMeta?.storyArcs.isNullOrEmpty()) {
+                add("Story Arcs" to comicDetailMeta!!.storyArcs.take(4).joinToString(", "))
+            }
         } else if (effRuntime != null && effRuntime > 0) {
             val hrs = effRuntime / 60
             val mins = effRuntime % 60
@@ -363,7 +384,7 @@ fun DetailGeneralInfoSection(
         if (!item.platforms.isNullOrBlank() && (item.mediaType != MediaType.GAME || gameDetailMeta?.supportedPlatforms.isNullOrEmpty())) {
             add("Platform" to item.platforms)
         }
-        if (!item.studioOrNetwork.isNullOrBlank() && !isSeries && item.mediaType != MediaType.BOOK) {
+        if (!item.studioOrNetwork.isNullOrBlank() && !isSeries && item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC) {
             val companyLabel = when (item.mediaType) {
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Developer"
                 MediaType.MANGA, MediaType.NOVEL -> "Serialization"
@@ -692,8 +713,8 @@ fun DetailGenresTagsSection(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(DarkSurfaceElevated)
-                                .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.09f))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                                 .clickable { onGenreOrTagClick?.invoke(genre, false) }
                                 .padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
@@ -718,8 +739,8 @@ fun DetailGenresTagsSection(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.06f))
-                            .border(1.dp, Color.White.copy(alpha = 0.09f), RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.09f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                             .clickable {
                                 if (isSpoilerMasked) {
                                     revealedTagIds = revealedTagIds + tagItem.id
@@ -854,8 +875,8 @@ fun DetailGenresTagsSection(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.09f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                             .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
                             .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
@@ -985,11 +1006,11 @@ fun DetailGenresTagsSection(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
                             .background(
-                                if (isAward) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated
+                                if (isAward) AccentGold.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.09f)
                             )
                             .border(
                                 1.dp,
-                                if (isAward) AccentGold.copy(alpha = 0.35f) else GlassBorder,
+                                if (isAward) AccentGold.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.16f),
                                 RoundedCornerShape(6.dp)
                             )
                             .clickable { onGenreOrTagClick?.invoke(tagItem.name, !isGenre) }
@@ -1048,8 +1069,8 @@ fun DetailGenresTagsSection(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.09f))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(genre, false)
                         }
@@ -1069,8 +1090,8 @@ fun DetailGenresTagsSection(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .background(DarkSurfaceElevated)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.09f))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                         .clickable {
                             onGenreOrTagClick?.invoke(tagItem.name, true)
                         }

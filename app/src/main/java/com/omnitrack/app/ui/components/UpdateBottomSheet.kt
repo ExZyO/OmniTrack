@@ -43,11 +43,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentJade
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.updater.AppRelease
@@ -71,7 +70,7 @@ fun UpdateBottomSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = DarkSurface,
         dragHandle = null
     ) {
         Column(
@@ -95,13 +94,13 @@ fun UpdateBottomSheet(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(AccentJade.copy(alpha = 0.16f)),
+                            .background(AccentGold.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.SystemUpdate,
                             contentDescription = null,
-                            tint = AccentJade,
+                            tint = AccentGold,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -120,19 +119,19 @@ fun UpdateBottomSheet(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(AccentJade.copy(alpha = 0.2f))
+                                    .background(AccentGold.copy(alpha = 0.16f))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
                                     text = "v${release.version}",
-                                    color = AccentJade,
+                                    color = AccentGold,
                                     fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             Text(
                                 text = "Ready to install",
-                                color = TextMuted,
+                                color = TextSecondary,
                                 fontSize = 11.5.sp
                             )
                         }
@@ -143,14 +142,14 @@ fun UpdateBottomSheet(
                     modifier = Modifier
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(Color(0x16FFFFFF))
+                        .background(DarkSurfaceElevated)
                         .clickable { onDismiss() },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Close",
-                        tint = TextMuted,
+                        tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -176,7 +175,7 @@ fun UpdateBottomSheet(
                 ) {
                     Text(
                         text = "WHAT'S NEW",
-                        color = TextMuted,
+                        color = TextSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.2.sp
@@ -207,7 +206,7 @@ fun UpdateBottomSheet(
                         )
                         Text(
                             text = "${(downloadProgress * 100).toInt()}%",
-                            color = AccentArctic,
+                            color = AccentGold,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -218,7 +217,7 @@ fun UpdateBottomSheet(
                             .fillMaxWidth()
                             .height(6.dp)
                             .clip(RoundedCornerShape(3.dp)),
-                        color = AccentArctic,
+                        color = AccentGold,
                         trackColor = DarkSurfaceElevated
                     )
                 }
@@ -257,7 +256,7 @@ fun UpdateBottomSheet(
                     .height(50.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentJade,
+                    containerColor = AccentGold,
                     contentColor = AmoledBlack
                 )
             ) {

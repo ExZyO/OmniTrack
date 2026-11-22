@@ -85,6 +85,7 @@ fun ArtworkPriorityScreen(
         listOf(
             MediaType.ANIME,
             MediaType.MANGA,
+            MediaType.COMIC,
             MediaType.NOVEL,
             MediaType.BOOK,
             MediaType.SHOW,
@@ -252,13 +253,12 @@ private fun CategoryWaterfallList(
     val hapticFeedback = LocalHapticFeedback.current
 
     val initialSources by prefManager.getArtSourcePriority(category)
-        .collectAsState(initial = PreferenceManager.getDefaultSourcesFor(category))
+        .collectAsState(initial = null)
     val disabledSources by prefManager.getDisabledArtSources(category)
         .collectAsState(initial = emptySet())
 
-    val currentSources = remember(category) {
-        mutableStateListOf<String>().apply { addAll(initialSources) }
-    }
+    val currentSources = remember(category) { mutableStateListOf<String>() }
+    var initialized by remember(category) { mutableStateOf(false) }
 
     val lazyListState = rememberLazyListState()
     var isDraggingAny by remember { mutableStateOf(false) }
@@ -273,10 +273,20 @@ private fun CategoryWaterfallList(
     }
 
     LaunchedEffect(initialSources) {
-        if (!isDraggingAny && currentSources.toList() != initialSources) {
+        val loaded = initialSources ?: return@LaunchedEffect
+        if (!initialized) {
             currentSources.clear()
-            currentSources.addAll(initialSources)
+            currentSources.addAll(loaded)
+            initialized = true
+        } else if (!isDraggingAny && currentSources.toList() != loaded) {
+            currentSources.clear()
+            currentSources.addAll(loaded)
         }
+    }
+
+    if (!initialized) {
+        Box(modifier = Modifier.fillMaxSize())
+        return
     }
 
     LazyColumn(

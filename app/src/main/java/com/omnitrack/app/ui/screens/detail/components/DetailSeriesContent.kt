@@ -72,6 +72,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1285,7 +1286,7 @@ private fun EpisodeThumbnailLayer(
     isLightNovelVolumeMode: Boolean = false
 ) {
     val primaryUrl = episode.stillUrl?.takeIf { it.isNotBlank() }
-    val fallbackUrl = if (isMangaMode) fallbackCoverUrl?.takeIf { it.isNotBlank() && it != primaryUrl } else null
+    val fallbackUrl = fallbackCoverUrl?.takeIf { it.isNotBlank() && it != primaryUrl }
     var primaryFailed by remember(primaryUrl) { mutableStateOf(false) }
     var fallbackFailed by remember(fallbackUrl) { mutableStateOf(false) }
 
@@ -1294,18 +1295,39 @@ private fun EpisodeThumbnailLayer(
         fallbackUrl != null && !fallbackFailed -> fallbackUrl
         else -> null
     }
+    val isUsingFallback = activeRaw != null && activeRaw == fallbackUrl && !isMangaMode && !isLightNovelVolumeMode
     val activeModel = remember(activeRaw) { toCoilImageModel(activeRaw) }
 
     if (activeModel != null) {
-        AsyncImage(
-            model = activeModel,
-            contentDescription = episode.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-            onError = {
-                if (activeRaw == primaryUrl) primaryFailed = true else fallbackFailed = true
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                model = activeModel,
+                contentDescription = episode.title,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(if (isUsingFallback) 0.42f else 1f),
+                contentScale = ContentScale.Crop,
+                onError = {
+                    if (activeRaw == primaryUrl) primaryFailed = true else fallbackFailed = true
+                }
+            )
+            if (isUsingFallback) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber),
+                        color = Color.White,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
-        )
+        }
     } else {
         Box(
             modifier = Modifier
@@ -1318,12 +1340,19 @@ private fun EpisodeThumbnailLayer(
                 isMangaMode -> "Ch.${episode.episodeNumber}"
                 else -> formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
             }
-            Text(
-                text = badgeTxt,
-                color = Color.White.copy(alpha = 0.28f),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = badgeTxt,
+                    color = Color.White.copy(alpha = 0.80f),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

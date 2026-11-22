@@ -85,6 +85,9 @@ fun ApiKeyConfigSheet(
     val currentIgdbId by preferenceManager.igdbClientId.collectAsState(initial = "")
     val currentIgdbSecret by preferenceManager.igdbClientSecret.collectAsState(initial = "")
     val currentMdblist by preferenceManager.mdblistApiKey.collectAsState(initial = "")
+    val currentComicVine by preferenceManager.comicVineApiKey.collectAsState(initial = "")
+    val currentMetronUser by preferenceManager.metronUsername.collectAsState(initial = "")
+    val currentMetronPass by preferenceManager.metronPassword.collectAsState(initial = "")
     val aiSearchEnabled by preferenceManager.aiSemanticSearchEnabled.collectAsState(initial = false)
 
     var geminiKey by remember(currentGemini) { mutableStateOf(currentGemini) }
@@ -95,6 +98,9 @@ fun ApiKeyConfigSheet(
     var igdbClientId by remember(currentIgdbId) { mutableStateOf(currentIgdbId) }
     var igdbClientSecret by remember(currentIgdbSecret) { mutableStateOf(currentIgdbSecret) }
     var mdblistKey by remember(currentMdblist) { mutableStateOf(currentMdblist) }
+    var comicVineKey by remember(currentComicVine) { mutableStateOf(currentComicVine) }
+    var metronUsername by remember(currentMetronUser) { mutableStateOf(currentMetronUser) }
+    var metronPassword by remember(currentMetronPass) { mutableStateOf(currentMetronPass) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -290,6 +296,47 @@ fun ApiKeyConfigSheet(
                 onValueChange = { mdblistKey = it }
             )
 
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Section 3: Comics Metadata & Pull List
+            Text(
+                text = "COMICS METADATA & PULL LIST",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = AccentGold
+            )
+
+            Text(
+                text = "Comics search & shelves already work without keys via Apple Books & Open Library. Add Comic Vine or Metron to unlock full issue checklists, creator credits, variant covers & live Wednesday pull lists.",
+                fontSize = 11.5.sp,
+                color = TextSecondary
+            )
+
+            ApiKeyField(
+                label = "Comic Vine API Key (Optional)",
+                unlockNote = "Unlocks full volume issues, creative teams, characters & variant art.",
+                placeholder = "Comic Vine 40-char API key",
+                value = comicVineKey,
+                onValueChange = { comicVineKey = it }
+            )
+
+            ApiKeyField(
+                label = "Metron Username (Optional)",
+                unlockNote = "Free Metron.cloud account username for live Wednesday pull lists.",
+                placeholder = "Metron username",
+                value = metronUsername,
+                onValueChange = { metronUsername = it }
+            )
+
+            ApiKeyField(
+                label = "Metron Password (Optional)",
+                unlockNote = "Pairs with your Metron username via Basic Auth.",
+                placeholder = "Metron password",
+                value = metronPassword,
+                onValueChange = { metronPassword = it }
+            )
+
             Spacer(modifier = Modifier.height(6.dp))
 
             Button(
@@ -302,6 +349,8 @@ fun ApiKeyConfigSheet(
                         preferenceManager.updateSteamGridDbApiKey(steamGridDbKey.trim())
                         preferenceManager.updateIgdbCredentials(igdbClientId.trim(), igdbClientSecret.trim())
                         preferenceManager.updateMdblistApiKey(mdblistKey.trim())
+                        preferenceManager.updateComicVineApiKey(comicVineKey.trim())
+                        preferenceManager.updateMetronCredentials(metronUsername.trim(), metronPassword.trim())
                         onDismiss()
                     }
                 },

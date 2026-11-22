@@ -42,12 +42,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.PreferenceManager
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.AccentJade
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -69,7 +68,7 @@ fun EpisodeLayoutSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = DarkSurface,
         dragHandle = null
     ) {
         Column(
@@ -94,7 +93,7 @@ fun EpisodeLayoutSheet(
                     )
                     Text(
                         text = "Customize series & anime tracking presentation",
-                        color = TextMuted,
+                        color = TextSecondary,
                         fontSize = 12.sp
                     )
                 }
@@ -118,7 +117,7 @@ fun EpisodeLayoutSheet(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 1.sp,
-                color = AccentArctic
+                color = AccentGold
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -133,10 +132,10 @@ fun EpisodeLayoutSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) AccentJade.copy(alpha = 0.15f) else DarkSurfaceElevated)
+                            .background(if (isSelected) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated)
                             .border(
                                 width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) AccentJade else GlassBorder,
+                                color = if (isSelected) AccentGold else GlassBorder,
                                 shape = RoundedCornerShape(14.dp)
                             )
                             .clickable {
@@ -150,7 +149,7 @@ fun EpisodeLayoutSheet(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) AccentJade else Color.White.copy(alpha = 0.08f)),
+                                .background(if (isSelected) AccentGold else Color.White.copy(alpha = 0.08f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -164,13 +163,13 @@ fun EpisodeLayoutSheet(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = title,
-                                color = if (isSelected) Color.White else TextPrimary,
+                                color = TextPrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = mode.description,
-                                color = TextMuted,
+                                color = TextSecondary,
                                 fontSize = 11.sp
                             )
                         }
@@ -189,13 +188,13 @@ fun EpisodeLayoutSheet(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp,
-                    color = AccentArctic
+                    color = AccentGold
                 )
                 Text(
                     text = "${(currentScale * 100).roundToInt()}%",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = AccentJade
+                    color = AccentGold
                 )
             }
 
@@ -215,8 +214,8 @@ fun EpisodeLayoutSheet(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelected) AccentJade else DarkSurfaceElevated)
-                            .border(1.dp, if (isSelected) AccentJade else GlassBorder, RoundedCornerShape(8.dp))
+                            .background(if (isSelected) AccentGold else DarkSurfaceElevated)
+                            .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
                             .clickable {
                                 scope.launch { preferenceManager.updateEpisodeLayoutScale(scaleVal) }
                             }
@@ -240,8 +239,8 @@ fun EpisodeLayoutSheet(
                 },
                 valueRange = 0.80f..1.35f,
                 colors = SliderDefaults.colors(
-                    thumbColor = AccentJade,
-                    activeTrackColor = AccentJade,
+                    thumbColor = AccentGold,
+                    activeTrackColor = AccentGold,
                     inactiveTrackColor = DarkSurfaceElevated
                 )
             )
@@ -261,7 +260,7 @@ fun EpisodeLayoutSheet(
                     )
                     Text(
                         text = "Display season posters rail or compact text chips",
-                        color = TextMuted,
+                        color = TextSecondary,
                         fontSize = 11.sp
                     )
                 }
@@ -272,8 +271,8 @@ fun EpisodeLayoutSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color.White else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) Color.White else GlassBorder, RoundedCornerShape(8.dp))
+                                .background(if (isSelected) AccentGold else DarkSurfaceElevated)
+                                .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
                             .clickable {
                                 scope.launch { preferenceManager.updateSeasonViewMode(mode) }
                             }

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnNsfwFilterMode
@@ -113,7 +114,16 @@ enum class HomeRowKey(val displayName: String, val description: String) {
     RECENT("Recently Updated", "Latest additions and progress updates"),
     PLAN("Plan to Track", "Your queued backlog across all media"),
     FAVORITES("Favorites & Top Rated", "Your highest-rated and favorite titles"),
-    TRENDING("Trending Now", "Live trending anime, shows, movies & books")
+    TRENDING("Trending Now", "Live trending anime, shows, movies & books"),
+    DISCOVER_ANIME("Trending Anime", "Live trending anime from AniList"),
+    DISCOVER_MANGA("Trending Manga", "Live trending manga & manhwa"),
+    DISCOVER_COMICS("Trending Comics", "Acclaimed comic runs & weekly pull list"),
+    DISCOVER_NOVELS("Top Web & Light Novels", "Popular web novels & light novels"),
+    DISCOVER_BOOKS("Trending Books", "Trending fiction, classics & sci-fi"),
+    DISCOVER_SHOWS("Trending TV Shows", "Popular & top-rated TV series"),
+    DISCOVER_MOVIES("Trending Movies", "Popular & top-rated films"),
+    DISCOVER_GAMES("Trending Games", "Trending & acclaimed games"),
+    DISCOVER_VNS("Top Visual Novels", "Popular & top-rated visual novels")
 }
 
 @Serializable
@@ -123,7 +133,23 @@ data class HomeRowItem(
 )
 
 object HomeLayoutDefaults {
-    val defaultRows: List<HomeRowItem> = HomeRowKey.entries.map { HomeRowItem(it, isEnabled = true) }
+    val defaultRows: List<HomeRowItem> = HomeRowKey.entries.map { key ->
+        HomeRowItem(key = key, isEnabled = !key.name.startsWith("DISCOVER_"))
+    }
+}
+
+enum class HomeShelfPosterSize(val displayName: String, val widthDp: Int, val heightDp: Int) {
+    COMPACT("Compact", 96, 144),
+    STANDARD("Standard", 114, 170),
+    LARGE("Large", 136, 204);
+
+    companion object {
+        fun fromName(name: String?): HomeShelfPosterSize = when (name?.uppercase()) {
+            "COMPACT" -> COMPACT
+            "LARGE" -> LARGE
+            else -> STANDARD
+        }
+    }
 }
 
 enum class HomeHeroSource(val displayName: String) {
@@ -141,6 +167,39 @@ enum class HomeHeroSource(val displayName: String) {
         }
     }
 }
+
+enum class ContinueTrackingStyle(val displayName: String, val description: String) {
+    CARD("16:9 Card", "Full-bleed widescreen artwork with overlay & bottom bar"),
+    WIDE("Wide Split", "Left artwork strip with right-side details & progress"),
+    POSTER("Vertical Poster", "2:3 poster with floating progress pill & title below");
+
+    companion object {
+        fun fromName(name: String?): ContinueTrackingStyle = when (name?.uppercase()) {
+            "WIDE" -> WIDE
+            "POSTER" -> POSTER
+            else -> CARD
+        }
+    }
+}
+
+data class HomeHeroSettings(
+    val showHero: Boolean = true,
+    val heroSource: HomeHeroSource = HomeHeroSource.CONTINUE,
+    val autoRotate: Boolean = true,
+    val dimBanner: Boolean = true,
+    val allowCroppedFallback: Boolean = false,
+    val strictMode: Boolean = false,
+    val strictRequirements: Set<String> = setOf("banner", "cover"),
+    val metadataLayout: Int = 0, // 0 = Clean Separation, 1 = Stacked, 2 = Compact, 3 = Button-Integrated
+    val showRatings: Boolean = true,
+    val ratingFormat: Int = 0, // 0 = Golden Star, 1 = Percentage, 2 = Star + Source, 3 = Multi-Source
+    val showUnreadBadge: Boolean = true,
+    val statusFilters: Set<String> = emptySet(),
+    val continueTrackingStyle: ContinueTrackingStyle = ContinueTrackingStyle.CARD,
+    val shelfPosterSize: HomeShelfPosterSize = HomeShelfPosterSize.STANDARD,
+    val shelfItemLimit: Int = 12,
+    val defaultCategory: MediaType = MediaType.ALL
+)
 
 enum class PreferredTitleLanguage(val displayName: String, val description: String) {
     ENGLISH("English", "Prefer official English localization (e.g. The Apothecary Diaries)"),
@@ -165,6 +224,21 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
         val HOME_ROW_ORDER = stringPreferencesKey("home_row_order")
         val HOME_HERO_SOURCE = stringPreferencesKey("home_hero_source")
+        val HOME_HERO_ENABLED = booleanPreferencesKey("home_hero_enabled")
+        val HOME_HERO_AUTO_ROTATE = booleanPreferencesKey("home_hero_auto_rotate")
+        val HOME_HERO_DIM_BANNER = booleanPreferencesKey("home_hero_dim_banner")
+        val HOME_HERO_ALLOW_CROPPED_FALLBACK = booleanPreferencesKey("home_hero_allow_cropped_fallback")
+        val HOME_HERO_STRICT_MODE = booleanPreferencesKey("home_hero_strict_mode")
+        val HOME_HERO_STRICT_REQS = stringSetPreferencesKey("home_hero_strict_reqs")
+        val HOME_HERO_METADATA_LAYOUT = intPreferencesKey("home_hero_metadata_layout")
+        val HOME_HERO_SHOW_RATINGS = booleanPreferencesKey("home_hero_show_ratings")
+        val HOME_HERO_RATING_FORMAT = intPreferencesKey("home_hero_rating_format")
+        val HOME_HERO_SHOW_UNREAD_BADGE = booleanPreferencesKey("home_hero_show_unread_badge")
+        val HOME_HERO_STATUS_FILTERS = stringSetPreferencesKey("home_hero_status_filters")
+        val HOME_CONTINUE_STYLE = stringPreferencesKey("home_continue_style")
+        val HOME_SHELF_POSTER_SIZE = stringPreferencesKey("home_shelf_poster_size")
+        val HOME_SHELF_ITEM_LIMIT = intPreferencesKey("home_shelf_item_limit")
+        val HOME_DEFAULT_CATEGORY = stringPreferencesKey("home_default_category")
         val LIBRARY_VIEW_MODE = stringPreferencesKey("library_view_mode")
         val LIBRARY_SORT_MODE = stringPreferencesKey("library_sort_mode")
 
@@ -179,6 +253,9 @@ class PreferenceManager(private val context: Context) {
         val IGDB_CLIENT_ID = stringPreferencesKey("igdb_client_id")
         val IGDB_CLIENT_SECRET = stringPreferencesKey("igdb_client_secret")
         val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
+        val COMIC_VINE_API_KEY = stringPreferencesKey("comic_vine_api_key")
+        val METRON_USERNAME = stringPreferencesKey("metron_username")
+        val METRON_PASSWORD = stringPreferencesKey("metron_password")
         val AI_SEMANTIC_SEARCH_ENABLED = booleanPreferencesKey("ai_semantic_search_enabled")
 
         val CUSTOM_TRAKT_CLIENT_ID = stringPreferencesKey("custom_trakt_client_id")
@@ -317,6 +394,7 @@ class PreferenceManager(private val context: Context) {
         .map { it[PreferencesKeys.TMDB_API_KEY] ?: "" }
 
     suspend fun updateTmdbApiKey(key: String) {
+        cachedTmdbApiKey = key
         context.dataStore.edit { it[PreferencesKeys.TMDB_API_KEY] = key }
     }
 
@@ -344,6 +422,32 @@ class PreferenceManager(private val context: Context) {
     val igdbClientSecret: Flow<String> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { it[PreferencesKeys.IGDB_CLIENT_SECRET] ?: "" }
+
+    val comicVineApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.COMIC_VINE_API_KEY] ?: "" }
+
+    suspend fun updateComicVineApiKey(key: String) {
+        cachedComicVineApiKey = key
+        context.dataStore.edit { it[PreferencesKeys.COMIC_VINE_API_KEY] = key }
+    }
+
+    val metronUsername: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.METRON_USERNAME] ?: "" }
+
+    val metronPassword: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.METRON_PASSWORD] ?: "" }
+
+    suspend fun updateMetronCredentials(username: String, password: String) {
+        cachedMetronUsername = username
+        cachedMetronPassword = password
+        context.dataStore.edit {
+            it[PreferencesKeys.METRON_USERNAME] = username
+            it[PreferencesKeys.METRON_PASSWORD] = password
+        }
+    }
 
     suspend fun updateIgdbCredentials(clientId: String, clientSecret: String) {
         cachedIgdbClientId = clientId
@@ -665,6 +769,122 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    val continueTrackingStyle: Flow<ContinueTrackingStyle> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> ContinueTrackingStyle.fromName(prefs[PreferencesKeys.HOME_CONTINUE_STYLE]) }
+
+    suspend fun setContinueTrackingStyle(style: ContinueTrackingStyle) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.HOME_CONTINUE_STYLE] = style.name
+        }
+    }
+
+    val homeHeroSettings: Flow<HomeHeroSettings> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            HomeHeroSettings(
+                showHero = prefs[PreferencesKeys.HOME_HERO_ENABLED] ?: true,
+                heroSource = HomeHeroSource.fromName(prefs[PreferencesKeys.HOME_HERO_SOURCE]),
+                autoRotate = prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] ?: true,
+                dimBanner = prefs[PreferencesKeys.HOME_HERO_DIM_BANNER] ?: true,
+                allowCroppedFallback = prefs[PreferencesKeys.HOME_HERO_ALLOW_CROPPED_FALLBACK] ?: false,
+                strictMode = prefs[PreferencesKeys.HOME_HERO_STRICT_MODE] ?: false,
+                strictRequirements = prefs[PreferencesKeys.HOME_HERO_STRICT_REQS] ?: setOf("banner", "cover"),
+                metadataLayout = prefs[PreferencesKeys.HOME_HERO_METADATA_LAYOUT] ?: 0,
+                showRatings = prefs[PreferencesKeys.HOME_HERO_SHOW_RATINGS] ?: true,
+                ratingFormat = prefs[PreferencesKeys.HOME_HERO_RATING_FORMAT] ?: 0,
+                showUnreadBadge = prefs[PreferencesKeys.HOME_HERO_SHOW_UNREAD_BADGE] ?: true,
+                statusFilters = prefs[PreferencesKeys.HOME_HERO_STATUS_FILTERS] ?: emptySet(),
+                continueTrackingStyle = ContinueTrackingStyle.fromName(prefs[PreferencesKeys.HOME_CONTINUE_STYLE]),
+                shelfPosterSize = HomeShelfPosterSize.fromName(prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE]),
+                shelfItemLimit = (prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] ?: 12).let {
+                    if (it in listOf(8, 12, 20)) it else 12
+                },
+                defaultCategory = runCatching {
+                    prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY]?.let { MediaType.valueOf(it) } ?: MediaType.ALL
+                }.getOrDefault(MediaType.ALL)
+            )
+        }
+
+    suspend fun setHomeHeroEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_ENABLED] = enabled }
+    }
+
+    suspend fun setHomeHeroAutoRotate(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = enabled }
+    }
+
+    suspend fun setHomeHeroDimBanner(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_DIM_BANNER] = enabled }
+    }
+
+    suspend fun setHomeHeroAllowCroppedFallback(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_ALLOW_CROPPED_FALLBACK] = enabled }
+    }
+
+    suspend fun setHomeHeroStrictMode(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_STRICT_MODE] = enabled }
+    }
+
+    suspend fun setHomeHeroStrictRequirements(reqs: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_STRICT_REQS] = reqs }
+    }
+
+    suspend fun setHomeHeroMetadataLayout(layout: Int) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_METADATA_LAYOUT] = layout.coerceIn(0, 3) }
+    }
+
+    suspend fun setHomeHeroShowRatings(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_SHOW_RATINGS] = enabled }
+    }
+
+    suspend fun setHomeHeroRatingFormat(format: Int) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_RATING_FORMAT] = format.coerceIn(0, 3) }
+    }
+
+    suspend fun setHomeHeroShowUnreadBadge(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_SHOW_UNREAD_BADGE] = enabled }
+    }
+
+    suspend fun setHomeHeroStatusFilters(statuses: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_HERO_STATUS_FILTERS] = statuses }
+    }
+
+    suspend fun setHomeShelfPosterSize(size: HomeShelfPosterSize) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = size.name }
+    }
+
+    suspend fun setHomeShelfItemLimit(limit: Int) {
+        val safe = if (limit in listOf(8, 12, 20)) limit else 12
+        context.dataStore.edit { it[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = safe }
+    }
+
+    suspend fun setHomeDefaultCategory(category: MediaType) {
+        context.dataStore.edit { it[PreferencesKeys.HOME_DEFAULT_CATEGORY] = category.name }
+    }
+
+    suspend fun resetHomeAndHeroDefaults() {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.HOME_ROW_ORDER] = Json.encodeToString(HomeLayoutDefaults.defaultRows)
+            prefs[PreferencesKeys.HOME_HERO_SOURCE] = HomeHeroSource.CONTINUE.name
+            prefs[PreferencesKeys.HOME_HERO_ENABLED] = true
+            prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = true
+            prefs[PreferencesKeys.HOME_HERO_DIM_BANNER] = true
+            prefs[PreferencesKeys.HOME_HERO_ALLOW_CROPPED_FALLBACK] = false
+            prefs[PreferencesKeys.HOME_HERO_STRICT_MODE] = false
+            prefs[PreferencesKeys.HOME_HERO_STRICT_REQS] = setOf("banner", "cover")
+            prefs[PreferencesKeys.HOME_HERO_METADATA_LAYOUT] = 0
+            prefs[PreferencesKeys.HOME_HERO_SHOW_RATINGS] = true
+            prefs[PreferencesKeys.HOME_HERO_RATING_FORMAT] = 0
+            prefs[PreferencesKeys.HOME_HERO_SHOW_UNREAD_BADGE] = true
+            prefs[PreferencesKeys.HOME_HERO_STATUS_FILTERS] = emptySet()
+            prefs[PreferencesKeys.HOME_CONTINUE_STYLE] = ContinueTrackingStyle.CARD.name
+            prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = HomeShelfPosterSize.STANDARD.name
+            prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = 12
+            prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY] = MediaType.ALL.name
+        }
+    }
+
     val libraryViewMode: Flow<String> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { prefs -> prefs[PreferencesKeys.LIBRARY_VIEW_MODE] ?: "GRID_3" }
@@ -721,14 +941,27 @@ class PreferenceManager(private val context: Context) {
         var cachedSteamGridDbApiKey: String = ""
 
         @Volatile
+        var cachedTmdbApiKey: String = ""
+
+        @Volatile
         var cachedIgdbClientId: String = ""
 
         @Volatile
         var cachedIgdbClientSecret: String = ""
 
+        @Volatile
+        var cachedComicVineApiKey: String = ""
+
+        @Volatile
+        var cachedMetronUsername: String = ""
+
+        @Volatile
+        var cachedMetronPassword: String = ""
+
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")
             MediaType.MANGA -> listOf("MangaDex API", "AniList", "Comick")
+            MediaType.COMIC -> listOf("Comic Vine", "Metron", "Apple Books", "Open Library")
             MediaType.NOVEL -> listOf("Bangumi", "AniList", "NovelUpdates")
             MediaType.BOOK -> listOf("Google Books", "Open Library", "Hardcover")
             MediaType.SHOW -> listOf("TMDb", "TVMaze", "TheTVDB")

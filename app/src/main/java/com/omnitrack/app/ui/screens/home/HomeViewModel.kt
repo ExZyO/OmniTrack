@@ -11,6 +11,8 @@ import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
 import com.omnitrack.app.data.enrichment.ReleaseCalendarRepository
 import com.omnitrack.app.data.model.BookTrackingMode
+import com.omnitrack.app.data.preferences.HomeRowKey
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.util.MockData
@@ -77,6 +79,10 @@ class HomeViewModel(
     val trendingItems: StateFlow<List<SearchResultItem>> = _trendingItems.asStateFlow()
     private val _isLoadingTrending = MutableStateFlow(false)
     val isLoadingTrending: StateFlow<Boolean> = _isLoadingTrending.asStateFlow()
+
+    private val _categoryDiscoverShelves = MutableStateFlow<Map<HomeRowKey, List<SearchResultItem>>>(emptyMap())
+    val categoryDiscoverShelves: StateFlow<Map<HomeRowKey, List<SearchResultItem>>> = _categoryDiscoverShelves.asStateFlow()
+    private val loadingDiscoverShelves = java.util.Collections.synchronizedSet(mutableSetOf<HomeRowKey>())
 
     private val _undoEvent = MutableStateFlow<ProgressUndoEvent?>(null)
     val undoEvent: StateFlow<ProgressUndoEvent?> = _undoEvent.asStateFlow()
@@ -171,10 +177,12 @@ class HomeViewModel(
         val library = state.allMediaSummaries
         val byAnilist = library.filter { it.anilistId != null }.associateBy { it.anilistId }
         val byMal = library.filter { it.malId != null }.associateBy { it.malId }
+        val byMetron = library.filter { it.metronId != null }.associateBy { it.metronId }
         val byTitle = library.associateBy { it.title.trim().lowercase() }
         raw.map { rel ->
             val matched = (rel.anilistId?.let { byAnilist[it] })
                 ?: (rel.malId?.let { byMal[it] })
+                ?: (rel.metronId?.let { byMetron[it] })
                 ?: byTitle[rel.title.trim().lowercase()]
             if (matched != null) rel.copy(localMediaId = matched.id) else rel
         }
@@ -205,19 +213,28 @@ class HomeViewModel(
                     val aniDeferred = async { runCatching { releaseCalendarRepository.fetchTrendingAniList(force) }.getOrDefault(emptyList()) }
                     val booksDeferred = async { runCatching { homeSearchRepository.fetchDiscoverBooksShelves("trending").take(6) }.getOrDefault(emptyList()) }
                     val gamesDeferred = async { runCatching { homeSearchRepository.fetchDiscoverGamesShelves("top_rated").take(6) }.getOrDefault(emptyList()) }
+                    val comicsDeferred = async {
+                        runCatching {
+                            com.omnitrack.app.data.enrichment.ComicEnrichmentSource()
+                                .fetchDiscoverComicsShelves("trending")
+                                .take(6)
+                        }.getOrDefault(emptyList())
+                    }
                     val ani = aniDeferred.await()
                     val books = booksDeferred.await()
                     val games = gamesDeferred.await()
+                    val comics = comicsDeferred.await()
                     val merged = mutableListOf<SearchResultItem>()
-                    val maxLen = maxOf(ani.size, books.size, games.size)
+                    val maxLen = maxOf(ani.size, books.size, games.size, comics.size)
                     for (i in 0 until maxLen) {
                         if (i < ani.size) merged.add(ani[i])
                         if (i < books.size) merged.add(books[i])
                         if (i < games.size) merged.add(games[i])
+                        if (i < comics.size) merged.add(comics[i])
                     }
                     _trendingItems.value = merged
                         .distinctBy { "${it.mediaType}_${it.title.trim().lowercase()}" }
-                        .take(18)
+                        .take(24)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -298,6 +315,7 @@ class HomeViewModel(
                         val deltaLabel = when (mediaType) {
                             MediaType.GAME, MediaType.VISUAL_NOVEL -> "+0.5h"
                             MediaType.BOOK -> if (BookTrackingMode.fromName(entity.bookTrackingMode) == BookTrackingMode.PERCENT) "+5%" else "+10p"
+                            MediaType.COMIC -> "+1 Issue"
                             MediaType.MOVIE -> "Watched"
                             else -> "+1 ${mediaType.unitLabel}"
                         }
@@ -355,6 +373,39 @@ class HomeViewModel(
         incrementProgress(item.id, item.mediaType, item.currentProgress, item.totalProgress)
     }
 
+    fun setMediaStatus(summary: MediaCardSummary, status: TrackingStatus) {
+        viewModelScope.launch {
+            val entity = repository.getMediaById(summary.id).firstOrNull() ?: return@launch
+            val now = System.currentTimeMillis()
+            val nextProgress = if (status == TrackingStatus.COMPLETED && entity.totalProgress != null && entity.totalProgress > 0.0) {
+                entity.totalProgress
+            } else {
+                entity.currentProgress
+            }
+            repository.updateMedia(
+                entity.copy(
+                    status = status,
+                    currentProgress = nextProgress,
+                    lastUpdated = now
+                )
+            )
+            _undoEvent.value = ProgressUndoEvent(
+                mediaId = entity.id,
+                title = entity.title,
+                deltaLabel = status.displayName,
+                previousProgress = entity.currentProgress,
+                previousStatus = entity.status,
+                previousAudioMinutes = entity.bookAudioMinutes,
+                previousPlaytimeHours = entity.playtimeHours,
+                createdAtMs = now
+            )
+        }
+    }
+
+    fun markCompleted(summary: MediaCardSummary) {
+        setMediaStatus(summary, TrackingStatus.COMPLETED)
+    }
+
     fun addMediaFromSearch(searchResult: SearchResultItem, status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK) {
         viewModelScope.launch {
             val entity = searchResult.toMediaItemEntity(status)
@@ -362,6 +413,64 @@ class HomeViewModel(
             if (coverCache != null && diskCache != null) {
                 coverCache.promoteFromDiskCache(entity.coverUrl, diskCache)
             }
+        }
+    }
+
+    fun loadHomeDiscoverShelf(rowKey: HomeRowKey, tmdbApiKey: String? = null) {
+        if (!rowKey.name.startsWith("DISCOVER_")) return
+        if (_categoryDiscoverShelves.value.containsKey(rowKey)) return
+        if (!loadingDiscoverShelves.add(rowKey)) return
+        viewModelScope.launch {
+            try {
+                val effectiveTmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
+                val items = when (rowKey) {
+                    HomeRowKey.DISCOVER_ANIME -> homeSearchRepository.fetchDiscoverAnimeShelves("trending")
+                    HomeRowKey.DISCOVER_MANGA -> homeSearchRepository.fetchDiscoverMangaShelves("trending")
+                    HomeRowKey.DISCOVER_COMICS -> com.omnitrack.app.data.enrichment.ComicEnrichmentSource()
+                        .fetchDiscoverComicsShelves("trending")
+                    HomeRowKey.DISCOVER_NOVELS -> coroutineScope {
+                        val wnDef = async { runCatching { homeSearchRepository.fetchDiscoverNovelsShelves("top_webnovels") }.getOrDefault(emptyList()) }
+                        val lnDef = async { runCatching { homeSearchRepository.fetchDiscoverNovelsShelves("trending_ln") }.getOrDefault(emptyList()) }
+                        val wn = wnDef.await()
+                        val ln = lnDef.await()
+                        val combined = mutableListOf<SearchResultItem>()
+                        val maxLen = maxOf(wn.size, ln.size)
+                        for (i in 0 until maxLen) {
+                            if (i < wn.size) combined.add(wn[i])
+                            if (i < ln.size) combined.add(ln[i])
+                        }
+                        combined.distinctBy { it.title.trim().lowercase() }
+                    }
+                    HomeRowKey.DISCOVER_BOOKS -> homeSearchRepository.fetchDiscoverBooksShelves("trending")
+                    HomeRowKey.DISCOVER_SHOWS -> homeSearchRepository.fetchDiscoverShowsShelves("trending", effectiveTmdbKey)
+                    HomeRowKey.DISCOVER_MOVIES -> homeSearchRepository.fetchDiscoverMoviesShelves("trending", effectiveTmdbKey)
+                    HomeRowKey.DISCOVER_GAMES -> homeSearchRepository.fetchDiscoverGamesShelves("trending")
+                    HomeRowKey.DISCOVER_VNS -> homeSearchRepository.fetchDiscoverVisualNovelsShelves("popular")
+                    else -> emptyList()
+                }
+                if (items.isNotEmpty()) {
+                    _categoryDiscoverShelves.value = _categoryDiscoverShelves.value + (rowKey to items)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            } finally {
+                loadingDiscoverShelves.remove(rowKey)
+            }
+        }
+    }
+
+    fun createCustomMediaEntry(entity: MediaItemEntity, onCreated: (Long) -> Unit = {}) {
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val prepared = entity.copy(
+                isCustomEntry = true,
+                lastUpdated = now
+            )
+            val insertedId = repository.insertMedia(prepared)
+            if (coverCache != null && diskCache != null && prepared.coverUrl.startsWith("http")) {
+                coverCache.promoteFromDiskCache(prepared.coverUrl, diskCache)
+            }
+            onCreated(insertedId)
         }
     }
 

@@ -96,7 +96,16 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     bookFormat = bookFormat,
     bookTrackingMode = bookTrackingMode,
     bookAudioMinutes = bookAudioMinutes,
-    bookTotalAudioMinutes = bookTotalAudioMinutes
+    bookTotalAudioMinutes = bookTotalAudioMinutes,
+    comicVineId = comicVineId,
+    metronId = metronId,
+    comicPublisher = comicPublisher,
+    comicFormat = comicFormat,
+    comicTrackingMode = comicTrackingMode,
+    isCustomEntry = isCustomEntry,
+    bannerFocalX = bannerFocalX,
+    bannerFocalY = bannerFocalY,
+    bannerZoom = bannerZoom
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -429,6 +438,22 @@ fun MediaCard(
                         totalAudioMinutes = item.bookTotalAudioMinutes,
                         bookFormat = item.bookFormat,
                         author = item.bookAuthor
+                    ),
+                    color = TextSecondary,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                )
+            } else if (item.mediaType == MediaType.COMIC) {
+                Text(
+                    text = com.omnitrack.app.data.model.formatComicCardBadge(
+                        publisher = item.comicPublisher,
+                        format = item.comicFormat,
+                        currentProgress = item.currentProgress,
+                        totalProgress = item.totalProgress,
+                        trackingMode = item.comicTrackingMode
                     ),
                     color = TextSecondary,
                     fontSize = 10.5.sp,

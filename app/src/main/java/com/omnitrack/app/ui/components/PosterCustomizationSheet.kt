@@ -69,13 +69,11 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -123,7 +121,7 @@ fun PosterCustomizationSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = AmoledBlack,
+        containerColor = DarkSurface,
         dragHandle = null
     ) {
         Column(
@@ -147,13 +145,13 @@ fun PosterCustomizationSheet(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(CircleShape)
-                            .background(AccentArctic.copy(alpha = 0.15f)),
+                            .background(AccentGold.copy(alpha = 0.14f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.ViewModule,
                             contentDescription = null,
-                            tint = AccentArctic,
+                            tint = AccentGold,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -167,7 +165,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "Customize grid sizing, corner curvature & layout",
                             fontSize = 11.5.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                 }
@@ -180,7 +178,7 @@ fun PosterCustomizationSheet(
                     Icon(
                         imageVector = Icons.Default.RestartAlt,
                         contentDescription = "Reset to Defaults",
-                        tint = TextMuted,
+                        tint = TextSecondary,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -201,7 +199,7 @@ fun PosterCustomizationSheet(
                     text = "LIVE PREVIEW • ${style.widthDp}dp × ${if (style.isLandscape) "16:9" else "2:3"} • ${style.cornerRadiusDp}dp radius",
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = AccentArctic,
+                    color = AccentGold,
                     letterSpacing = 0.5.sp
                 )
 
@@ -265,7 +263,7 @@ fun PosterCustomizationSheet(
                         if (!style.hideLabels) {
                             Text(
                                 text = "Sample Entry",
-                                color = TextMuted,
+                                color = TextSecondary,
                                 fontSize = 9.sp
                             )
                         }
@@ -290,7 +288,7 @@ fun PosterCustomizationSheet(
                         text = "${style.widthDp} dp",
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = AccentArctic
+                        color = AccentGold
                     )
                 }
 
@@ -303,8 +301,8 @@ fun PosterCustomizationSheet(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentArctic else DarkSurfaceElevated)
-                                .border(1.dp, if (isSelected) AccentArctic else GlassBorder, RoundedCornerShape(8.dp))
+                                .background(if (isSelected) AccentGold else DarkSurfaceElevated)
+                                .border(1.dp, if (isSelected) AccentGold else GlassBorder, RoundedCornerShape(8.dp))
                                 .clickable {
                                     scope.launch { preferenceManager.updatePosterWidthDp(preset.value) }
                                 }
@@ -325,8 +323,8 @@ fun PosterCustomizationSheet(
                     onValueChange = { scope.launch { preferenceManager.updatePosterWidthDp(it.toInt()) } },
                     valueRange = 90f..240f,
                     colors = SliderDefaults.colors(
-                        thumbColor = AccentArctic,
-                        activeTrackColor = AccentArctic,
+                        thumbColor = AccentGold,
+                        activeTrackColor = AccentGold,
                         inactiveTrackColor = DarkSurfaceElevated
                     )
                 )
@@ -417,7 +415,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "Switch grid cards from vertical posters to widescreen banners",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                     Switch(
@@ -425,7 +423,7 @@ fun PosterCustomizationSheet(
                         onCheckedChange = { scope.launch { preferenceManager.updatePosterLandscape(it) } },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = AmoledBlack,
-                            checkedTrackColor = AccentJade
+                            checkedTrackColor = AccentGold
                         )
                     )
                 }
@@ -453,7 +451,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "Hide titles & metadata below posters for a pure clean gallery",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                     Switch(
@@ -461,7 +459,7 @@ fun PosterCustomizationSheet(
                         onCheckedChange = { scope.launch { preferenceManager.updatePosterHideLabels(it) } },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = AmoledBlack,
-                            checkedTrackColor = AccentJade
+                            checkedTrackColor = AccentGold
                         )
                     )
                 }
@@ -489,7 +487,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "Overlay transparent clearart title logos on landscape 16:9 cards",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                     Switch(
@@ -497,7 +495,7 @@ fun PosterCustomizationSheet(
                         onCheckedChange = { scope.launch { preferenceManager.updateAlwaysShowLandscapeClearlogo(it) } },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = AmoledBlack,
-                            checkedTrackColor = AccentJade
+                            checkedTrackColor = AccentGold
                         )
                     )
                 }
@@ -525,7 +523,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "1dp specular edge light gradient and curved glass top-sheen reflection",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            color = TextSecondary
                         )
                     }
                     Switch(
@@ -533,7 +531,7 @@ fun PosterCustomizationSheet(
                         onCheckedChange = { scope.launch { preferenceManager.updateCardDepthEnabled(it) } },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = AmoledBlack,
-                            checkedTrackColor = AccentJade
+                            checkedTrackColor = AccentGold
                         )
                     )
                 }
@@ -554,12 +552,12 @@ fun PosterCustomizationSheet(
                                 text = "Depth & Sheen 2D Canvas Pad",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = AccentArctic
+                                color = AccentGold
                             )
                             Text(
                                 text = "Edge: ${draftEdge.roundToInt()}% • Sheen: ${draftSheen.roundToInt()}%",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextSecondary
                             )
                         }
 
@@ -596,10 +594,10 @@ fun PosterCustomizationSheet(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) AccentJade.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                        .background(if (isSelected) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
                                         .border(
                                             1.dp,
-                                            if (isSelected) AccentJade else GlassBorder,
+                                            if (isSelected) AccentGold else GlassBorder,
                                             RoundedCornerShape(8.dp)
                                         )
                                         .clickable {
@@ -615,7 +613,7 @@ fun PosterCustomizationSheet(
                                         text = label,
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) AccentJade else TextSecondary
+                                        color = if (isSelected) AccentGold else TextSecondary
                                     )
                                 }
                             }
@@ -638,12 +636,12 @@ fun PosterCustomizationSheet(
                                 text = "Edge Light Coverage",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = AccentArctic
+                                color = AccentGold
                             )
                             Text(
                                 text = "${draftCoverage.roundToInt()}%",
                                 fontSize = 11.sp,
-                                color = TextMuted
+                                color = TextSecondary
                             )
                         }
 
@@ -660,10 +658,10 @@ fun PosterCustomizationSheet(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(if (isSelected) AccentArctic.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                        .background(if (isSelected) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
                                         .border(
                                             1.dp,
-                                            if (isSelected) AccentArctic else GlassBorder,
+                                            if (isSelected) AccentGold else GlassBorder,
                                             RoundedCornerShape(8.dp)
                                         )
                                         .clickable {
@@ -676,7 +674,7 @@ fun PosterCustomizationSheet(
                                         text = label,
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) AccentArctic else TextSecondary
+                                        color = if (isSelected) AccentGold else TextSecondary
                                     )
                                 }
                             }
@@ -690,8 +688,8 @@ fun PosterCustomizationSheet(
                             },
                             valueRange = 0f..100f,
                             colors = SliderDefaults.colors(
-                                thumbColor = AccentArctic,
-                                activeTrackColor = AccentArctic,
+                                thumbColor = AccentGold,
+                                activeTrackColor = AccentGold,
                                 inactiveTrackColor = DarkSurfaceElevated
                             )
                         )
@@ -738,7 +736,7 @@ fun PosterCustomizationSheet(
                                     },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = AmoledBlack,
-                                        checkedTrackColor = AccentJade
+                                        checkedTrackColor = AccentGold
                                     )
                                 )
                             }
@@ -773,7 +771,7 @@ fun PosterCustomizationSheet(
                             text = "✓ ACTIVE",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = AccentJade
+                            color = AccentGold
                         )
                     }
                 }
@@ -781,7 +779,7 @@ fun PosterCustomizationSheet(
                 Text(
                     text = "Provide a poster URL pattern from an external service (e.g. BetterPosters, RPDB). Default remains standard unadorned art. If a placeholder has no value or an image fails to load, the original poster is used automatically. Manually selected covers and banners always override this template.",
                     fontSize = 11.5.sp,
-                    color = TextMuted,
+                    color = TextSecondary,
                     lineHeight = 16.sp
                 )
 
@@ -793,7 +791,7 @@ fun PosterCustomizationSheet(
                         Text(
                             text = "https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg?tag=none&rs=IM",
                             fontSize = 12.sp,
-                            color = TextMuted.copy(alpha = 0.5f)
+                            color = TextSecondary.copy(alpha = 0.7f)
                         )
                     },
                     textStyle = TextStyle(
@@ -802,7 +800,7 @@ fun PosterCustomizationSheet(
                         color = Color.White
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentJade,
+                        focusedBorderColor = AccentGold,
                         unfocusedBorderColor = GlassBorder,
                         focusedContainerColor = DarkSurfaceElevated,
                         unfocusedContainerColor = DarkSurfaceElevated
@@ -837,7 +835,7 @@ fun PosterCustomizationSheet(
                                 text = token,
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
-                                color = AccentArctic
+                                color = AccentGold
                             )
                         }
                     }
@@ -855,7 +853,7 @@ fun PosterCustomizationSheet(
                         },
                         enabled = editingPattern.trim() != currentCustomPosterPattern,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = AccentJade,
+                            containerColor = AccentGold,
                             contentColor = AmoledBlack
                         ),
                         shape = RoundedCornerShape(8.dp),
@@ -987,7 +985,7 @@ fun CardDepthTuningPad(
             val thumbX = (edgeStrength / 100f) * w
             val thumbY = ((100f - sheenStrength) / 100f) * h
 
-            val guideColor = AccentJade.copy(alpha = 0.35f)
+            val guideColor = AccentGold.copy(alpha = 0.35f)
             drawLine(
                 color = guideColor,
                 start = Offset(thumbX, 0f),
@@ -1003,13 +1001,13 @@ fun CardDepthTuningPad(
 
             // Thumb Outer Glow
             drawCircle(
-                color = AccentJade.copy(alpha = 0.25f),
+                color = AccentGold.copy(alpha = 0.25f),
                 radius = 16.dp.toPx(),
                 center = Offset(thumbX, thumbY)
             )
             // Thumb Accent Ring
             drawCircle(
-                color = AccentJade,
+                color = AccentGold,
                 radius = 9.dp.toPx(),
                 center = Offset(thumbX, thumbY)
             )
@@ -1026,7 +1024,7 @@ fun CardDepthTuningPad(
             text = "Sheen: ${sheenStrength.roundToInt()}% ↑",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            color = TextMuted.copy(alpha = 0.8f),
+            color = TextSecondary,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(start = 10.dp, top = 8.dp)
@@ -1037,7 +1035,7 @@ fun CardDepthTuningPad(
             text = "Edge Light: ${edgeStrength.roundToInt()}% →",
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            color = TextMuted.copy(alpha = 0.8f),
+            color = TextSecondary,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 10.dp, bottom = 8.dp)

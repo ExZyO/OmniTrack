@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.R
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.BookDetailMeta
+import com.omnitrack.app.data.model.ComicDetailMeta
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.VnDetailMeta
@@ -56,7 +57,8 @@ fun NuvioRatingsRow(
     bangumiScore: Float? = null,
     vnDetailMeta: VnDetailMeta? = null,
     gameDetailMeta: GameDetailMeta? = null,
-    bookDetailMeta: BookDetailMeta? = null
+    bookDetailMeta: BookDetailMeta? = null,
+    comicDetailMeta: ComicDetailMeta? = null
 ) {
     val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta, gameDetailMeta, bookDetailMeta) {
         val list = mutableListOf<RatingBadgeData>()
@@ -346,22 +348,28 @@ fun NuvioRatingsRow(
             }
         }
 
-        // 12. Books Ratings (Hardcover, Open Library, Apple Books on crisp 5-star scale)
-        if (item.mediaType == MediaType.BOOK) {
-            bookDetailMeta?.hardcoverRating?.takeIf { it > 0f }?.let { hc ->
-                list.add(
-                    RatingBadgeData(
-                        source = "hardcover",
-                        displayName = "Hardcover",
-                        iconRes = R.drawable.brand_hardcover,
-                        valueText = "${formatSmartRating(hc.toDouble())}/5",
-                        valueColor = Color(0xFFA5B4FC)
+        // 12. Books & Comics Ratings (Hardcover, Open Library, Apple Books on crisp 5-star scale)
+        if (item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC) {
+            if (item.mediaType == MediaType.BOOK) {
+                bookDetailMeta?.hardcoverRating?.takeIf { it > 0f }?.let { hc ->
+                    list.add(
+                        RatingBadgeData(
+                            source = "hardcover",
+                            displayName = "Hardcover",
+                            iconRes = R.drawable.brand_hardcover,
+                            valueText = "${formatSmartRating(hc.toDouble())}/5",
+                            valueColor = Color(0xFFA5B4FC)
+                        )
                     )
-                )
+                }
             }
-            val effOl5 = bookDetailMeta?.openLibraryRating?.takeIf { it > 0f }
-                ?: item.communityScore?.takeIf { it > 0f && bookDetailMeta?.hardcoverRating == null && bookDetailMeta?.appleBooksRating == null }
-                    ?.let { if (it > 5f) it / 2f else it }
+            val effOl5 = (if (item.mediaType == MediaType.COMIC) comicDetailMeta?.openLibraryRating else bookDetailMeta?.openLibraryRating)?.takeIf { it > 0f }
+                ?: item.communityScore?.takeIf {
+                    it > 0f &&
+                        bookDetailMeta?.hardcoverRating == null &&
+                        bookDetailMeta?.appleBooksRating == null &&
+                        comicDetailMeta?.appleBooksRating == null
+                }?.let { if (it > 5f) it / 2f else it }
             effOl5?.let { ol ->
                 list.add(
                     RatingBadgeData(
@@ -373,7 +381,8 @@ fun NuvioRatingsRow(
                     )
                 )
             }
-            bookDetailMeta?.appleBooksRating?.takeIf { it > 0f }?.let { ab ->
+            val effApple5 = (if (item.mediaType == MediaType.COMIC) comicDetailMeta?.appleBooksRating else bookDetailMeta?.appleBooksRating)?.takeIf { it > 0f }
+            effApple5?.let { ab ->
                 list.add(
                     RatingBadgeData(
                         source = "applebooks",

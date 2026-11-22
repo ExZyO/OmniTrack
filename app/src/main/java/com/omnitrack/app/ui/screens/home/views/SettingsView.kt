@@ -216,7 +216,7 @@ fun SettingsView(
         SettingRowEntry(
             icon = Icons.Default.Info,
             title = "About OmniTrack",
-            subtitle = "Version ${BuildConfig.VERSION_NAME} \u00B7 Room Schema v17",
+            subtitle = "Version ${BuildConfig.VERSION_NAME} \u00B7 Room Schema v19",
             keywords = "about schema version database library count",
             onClick = { showAboutDialog = true }
         )
@@ -391,13 +391,13 @@ fun SettingsView(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Room Database Schema v17",
+                        text = "Room Database Schema v18",
                         fontSize = 13.sp,
                         color = AccentGold,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Tracking ${allMedia.size} titles across 8 media categories.",
+                        text = "Tracking ${allMedia.size} titles across 9 media categories.",
                         fontSize = 12.5.sp,
                         color = TextSecondary
                     )

@@ -8,12 +8,16 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.room.withTransaction
 import com.omnitrack.app.BuildConfig
 import com.omnitrack.app.data.cache.CoverCache
 import com.omnitrack.app.data.db.OmniTrackDatabase
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.dataStore
+import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.data.sync.TrackerTokenManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -37,10 +41,9 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * 100% Fidelity Full-App Backup & Atomic Restore Engine (.omnibk).
- * Modeled after Moon+ Reader (.mrpro) and Mihon / Chimanew (.tachibk).
- * Bundles Room SQLite database, DataStore preferences, portable PBKDF2 tokens,
- * and high-resolution binary custom cover artwork into an atomic archive.
+ * 100% Fidelity Full-App & Modular Backup + Atomic Restore Engine (.omnibk).
+ * Bundles selected modules (Room database, sub-entries, DataStore preferences,
+ * tracker tokens/API keys, custom artwork, cached covers) into a portable archive.
  */
 object OmniBackupManager {
 
@@ -51,119 +54,278 @@ object OmniBackupManager {
         encodeDefaults = true
     }
 
+    private fun isSensitiveCredentialKey(key: String): Boolean {
+        val k = key.lowercase(Locale.US)
+        return k.startsWith("token_") ||
+            k.startsWith("pkce_") ||
+            k.contains("api_key") ||
+            k.contains("client_secret") ||
+            k.contains("client_id") ||
+            k.endsWith("_password") ||
+            k.contains("_password") ||
+            k.endsWith("_username") ||
+            k.contains("_username") ||
+            k.endsWith("_token")
+    }
+
     suspend fun createBackup(
         context: Context,
         database: OmniTrackDatabase,
         coverCache: CoverCache,
-        outputStream: OutputStream? = null
+        outputStream: OutputStream? = null,
+        options: BackupModuleOptions = BackupModuleOptions()
     ): BackupResult = withContext(Dispatchers.IO) {
         try {
             val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
             val backupsDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "backups")
-            if (!backupsDir.exists()) backupsDir.mkdirs()
+            if (outputStream == null && !backupsDir.exists()) backupsDir.mkdirs()
 
-            val backupFile = File(backupsDir, "omnitrack_backup_$timestamp.omnibk")
-            val targetStream = outputStream ?: FileOutputStream(backupFile)
+            val localFile = if (outputStream == null) File(backupsDir, "omnitrack_backup_$timestamp.omnibk") else null
+            val targetStream = outputStream ?: FileOutputStream(localFile!!)
 
-            val mediaItems = database.mediaDao().getAllMedia().first()
-            val categories = database.categoryDao().getAllCategories().first()
-            val syncQueue = database.syncQueueDao().getPendingTasksSnapshot()
-            val vnRoutes = database.vnRouteDao().getAllRoutesOnce()
-            val gameEntries = database.gameEntryDao().getAllEntriesOnce()
-            val bookEntries = database.bookEntryDao().getAllEntriesOnce()
-            val bookQuotes = database.bookQuoteDao().getAllQuotesOnce()
+            val mediaItems = if (options.includeLibrary) database.mediaDao().getAllMedia().first() else emptyList()
+            val categories = if (options.includeLibrary) database.categoryDao().getAllCategories().first() else emptyList()
+            val syncQueue = if (options.includeLibrary) database.syncQueueDao().getPendingTasksSnapshot() else emptyList()
 
-            val dbDump = OmniDatabaseDump(
-                mediaItems = mediaItems,
-                categories = categories,
-                syncQueue = syncQueue,
-                vnRoutes = vnRoutes,
-                gameEntries = gameEntries,
-                bookEntries = bookEntries,
-                bookQuotes = bookQuotes
-            )
-            val dbDumpJson = json.encodeToString(dbDump)
-            val checksum = sha256(dbDumpJson)
+            val vnRoutes = if (options.includeSubEntries) database.vnRouteDao().getAllRoutesOnce() else emptyList()
+            val gameEntries = if (options.includeSubEntries) database.gameEntryDao().getAllEntriesOnce() else emptyList()
+            val bookEntries = if (options.includeSubEntries) database.bookEntryDao().getAllEntriesOnce() else emptyList()
+            val bookQuotes = if (options.includeSubEntries) database.bookQuoteDao().getAllQuotesOnce() else emptyList()
+            val episodeProgress = if (options.includeSubEntries) database.episodeProgressDao().getAllProgressOnce() else emptyList()
+            val comicIssues = if (options.includeSubEntries) database.comicIssueDao().getAllIssuesOnce() else emptyList()
 
-            // Gathers DataStore preferences with strict type tracking
-            val rawPrefs = context.dataStore.data.first().asMap()
-            val prefsMap = rawPrefs.mapKeys { it.key.name }.mapValues { it.value.toString() }
-            val typedList = rawPrefs.map { (key, value) ->
-                val typeName = when (value) {
-                    is Int -> "INT"
-                    is Float -> "FLOAT"
-                    is Boolean -> "BOOLEAN"
-                    is Long -> "LONG"
-                    else -> "STRING"
+            val includeDbDump = options.includeLibrary || options.includeSubEntries
+            val dbDumpJson = if (includeDbDump) {
+                json.encodeToString(
+                    OmniDatabaseDump(
+                        mediaItems = mediaItems,
+                        categories = categories,
+                        syncQueue = syncQueue,
+                        vnRoutes = vnRoutes,
+                        gameEntries = gameEntries,
+                        bookEntries = bookEntries,
+                        bookQuotes = bookQuotes,
+                        episodeProgress = episodeProgress,
+                        comicIssues = comicIssues
+                    )
+                )
+            } else null
+            val checksum = dbDumpJson?.let { sha256(it) }.orEmpty()
+
+            val rawPrefs = if (options.includeSettings || options.includeCredentials) {
+                context.dataStore.data.first().asMap()
+            } else emptyMap()
+
+            val settingsEntries = if (options.includeSettings) {
+                rawPrefs.filterKeys { !isSensitiveCredentialKey(it.name) }
+            } else emptyMap()
+
+            val prefsDumpJson = if (options.includeSettings) {
+                val prefsMap = settingsEntries.mapKeys { it.key.name }.mapValues { it.value.toString() }
+                val typedList = settingsEntries.map { (key, value) ->
+                    when (value) {
+                        is Int -> OmniPrefEntry(key = key.name, type = "INT", value = value.toString())
+                        is Float -> OmniPrefEntry(key = key.name, type = "FLOAT", value = value.toString())
+                        is Boolean -> OmniPrefEntry(key = key.name, type = "BOOLEAN", value = value.toString())
+                        is Long -> OmniPrefEntry(key = key.name, type = "LONG", value = value.toString())
+                        is Set<*> -> OmniPrefEntry(
+                            key = key.name,
+                            type = "STRING_SET",
+                            value = "",
+                            stringSet = value.map { it.toString() }
+                        )
+                        else -> OmniPrefEntry(key = key.name, type = "STRING", value = value.toString())
+                    }
                 }
-                OmniPrefEntry(key = key.name, type = typeName, value = value.toString())
-            }
-            val prefsDumpJson = json.encodeToString(OmniPreferencesDump(entries = prefsMap, typedEntries = typedList))
+                json.encodeToString(OmniPreferencesDump(entries = prefsMap, typedEntries = typedList))
+            } else null
 
-            // Build manifest
+            val rawCredentials = if (options.includeCredentials) {
+                rawPrefs.filterKeys { isSensitiveCredentialKey(it.name) }
+                    .mapKeys { it.key.name }
+                    .mapValues { it.value.toString() }
+            } else emptyMap()
+
+            val tokensDumpJson = if (options.includeCredentials) {
+                json.encodeToString(OmniTrackerTokensDump(encryptedTokens = rawCredentials))
+            } else null
+
+            val customFiles = if (options.includeCustomArtwork && coverCache.customCoverDir.exists()) {
+                coverCache.customCoverDir.listFiles()?.filter { it.isFile }.orEmpty()
+            } else emptyList()
+
+            val cachedFiles = if (options.includeCachedCovers && coverCache.cacheDir.exists()) {
+                val allCacheFiles = coverCache.cacheDir.listFiles()?.filter { it.isFile }.orEmpty()
+                if (mediaItems.isNotEmpty()) {
+                    val activeHashes = mediaItems.flatMap { item ->
+                        listOfNotNull(
+                            coverCache.getCoverFile(item.coverUrl)?.name,
+                            coverCache.getCoverFile(item.bannerUrl)?.name
+                        )
+                    }.toSet()
+                    allCacheFiles.filter { it.name in activeHashes }
+                } else {
+                    allCacheFiles
+                }
+            } else emptyList()
+
+            val subEntriesCount = vnRoutes.size + gameEntries.size + bookEntries.size + bookQuotes.size
             val manifest = OmniBackupManifest(
-                version = 1,
+                version = 2,
                 appVersion = BuildConfig.VERSION_NAME,
                 versionCode = BuildConfig.VERSION_CODE,
                 device = "${Build.MANUFACTURER} ${Build.MODEL}",
                 mediaCount = mediaItems.size,
                 categoryCount = categories.size,
-                databaseChecksumSha256 = checksum
+                databaseChecksumSha256 = checksum,
+                episodeProgressCount = episodeProgress.size,
+                comicIssueCount = comicIssues.size,
+                subEntriesCount = subEntriesCount,
+                settingsCount = settingsEntries.size,
+                credentialsCount = rawCredentials.size,
+                customArtworkCount = customFiles.size,
+                cachedArtworkCount = cachedFiles.size,
+                includedModules = options
             )
             val manifestJson = json.encodeToString(manifest)
 
-            // Stream into compressed ZIP
             ZipOutputStream(BufferedOutputStream(targetStream)).use { zipOut ->
                 zipOut.setLevel(Deflater.BEST_COMPRESSION)
 
-                // 1. Manifest
                 writeZipEntry(zipOut, "manifest.json", manifestJson.toByteArray(StandardCharsets.UTF_8))
 
-                // 2. Database Dump
-                writeZipEntry(zipOut, "database_dump.json", dbDumpJson.toByteArray(StandardCharsets.UTF_8))
-
-                // 3. Preferences Dump
-                writeZipEntry(zipOut, "preferences.json", prefsDumpJson.toByteArray(StandardCharsets.UTF_8))
-
-                // 4. Encrypted Tracker Tokens Dump (Portable AES-256-GCM)
-                val rawTokens = context.dataStore.data.first().asMap()
-                    .filterKeys { it.name.startsWith("token_") }
-                    .mapKeys { it.key.name }
-                    .mapValues { it.value.toString() }
-                val tokensDumpJson = json.encodeToString(OmniTrackerTokensDump(encryptedTokens = rawTokens))
-                writeZipEntry(zipOut, "tracker_tokens.json", tokensDumpJson.toByteArray(StandardCharsets.UTF_8))
-
-                // 5. Custom Cover Artwork
-                val customDir = coverCache.customCoverDir
-                if (customDir.exists()) {
-                    customDir.listFiles()?.filter { it.isFile }?.forEach { coverFile ->
-                        zipOut.putNextEntry(ZipEntry("artwork/custom/${coverFile.name}"))
-                        FileInputStream(coverFile).use { it.copyTo(zipOut) }
-                        zipOut.closeEntry()
-                    }
+                if (dbDumpJson != null) {
+                    writeZipEntry(zipOut, "database_dump.json", dbDumpJson.toByteArray(StandardCharsets.UTF_8))
+                }
+                if (prefsDumpJson != null) {
+                    writeZipEntry(zipOut, "preferences.json", prefsDumpJson.toByteArray(StandardCharsets.UTF_8))
+                }
+                if (tokensDumpJson != null) {
+                    writeZipEntry(zipOut, "tracker_tokens.json", tokensDumpJson.toByteArray(StandardCharsets.UTF_8))
                 }
 
-                // 6. Library Cached Covers
-                val cacheDir = coverCache.cacheDir
-                if (cacheDir.exists()) {
-                    val activeHashes = mediaItems.mapNotNull { coverCache.getCoverFile(it.coverUrl)?.name }.toSet()
-                    cacheDir.listFiles()?.filter { it.isFile && it.name in activeHashes }?.forEach { cachedFile ->
-                        zipOut.putNextEntry(ZipEntry("artwork/cache/${cachedFile.name}"))
-                        FileInputStream(cachedFile).use { it.copyTo(zipOut) }
-                        zipOut.closeEntry()
-                    }
+                for (coverFile in customFiles) {
+                    zipOut.putNextEntry(ZipEntry("artwork/custom/${coverFile.name}"))
+                    FileInputStream(coverFile).use { it.copyTo(zipOut) }
+                    zipOut.closeEntry()
+                }
+
+                for (cachedFile in cachedFiles) {
+                    zipOut.putNextEntry(ZipEntry("artwork/cache/${cachedFile.name}"))
+                    FileInputStream(cachedFile).use { it.copyTo(zipOut) }
+                    zipOut.closeEntry()
                 }
             }
 
             BackupResult(
                 success = true,
-                backupFile = backupFile,
+                backupFile = localFile,
                 mediaCount = mediaItems.size
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             BackupResult(
                 success = false,
                 errorMessage = e.message ?: "Failed to generate .omnibk archive"
+            )
+        }
+    }
+
+    suspend fun inspectBackup(inputStream: InputStream): BackupInspectionResult = withContext(Dispatchers.IO) {
+        try {
+            var manifestBytes: ByteArray? = null
+            var dbDumpBytes: ByteArray? = null
+            var prefsBytes: ByteArray? = null
+            var tokensBytes: ByteArray? = null
+            var customCount = 0
+            var cachedCount = 0
+
+            ZipInputStream(BufferedInputStream(inputStream)).use { zipIn ->
+                var entry: ZipEntry? = zipIn.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    when {
+                        name == "manifest.json" -> manifestBytes = zipIn.readBytes()
+                        name == "database_dump.json" -> dbDumpBytes = zipIn.readBytes()
+                        name == "preferences.json" -> prefsBytes = zipIn.readBytes()
+                        name == "tracker_tokens.json" -> tokensBytes = zipIn.readBytes()
+                        name.startsWith("artwork/custom/") && !entry.isDirectory -> customCount++
+                        name.startsWith("artwork/cache/") && !entry.isDirectory -> cachedCount++
+                    }
+                    zipIn.closeEntry()
+                    entry = zipIn.nextEntry
+                }
+            }
+
+            if (manifestBytes == null) {
+                return@withContext BackupInspectionResult(
+                    valid = false,
+                    errorMessage = "Invalid .omnibk archive: missing manifest.json"
+                )
+            }
+
+            val manifest = json.decodeFromString<OmniBackupManifest>(String(manifestBytes!!, StandardCharsets.UTF_8))
+            val dump = if (dbDumpBytes != null) {
+                runCatching {
+                    json.decodeFromString<OmniDatabaseDump>(String(dbDumpBytes!!, StandardCharsets.UTF_8))
+                }.getOrNull()
+            } else null
+
+            val prefsDump = if (prefsBytes != null) {
+                runCatching {
+                    json.decodeFromString<OmniPreferencesDump>(String(prefsBytes!!, StandardCharsets.UTF_8))
+                }.getOrNull()
+            } else null
+
+            val tokensDump = if (tokensBytes != null) {
+                runCatching {
+                    json.decodeFromString<OmniTrackerTokensDump>(String(tokensBytes!!, StandardCharsets.UTF_8))
+                }.getOrNull()
+            } else null
+
+            val mediaCount = dump?.mediaItems?.size ?: manifest.mediaCount
+            val categoryCount = dump?.categories?.size ?: manifest.categoryCount
+            val episodeCount = dump?.episodeProgress?.size ?: manifest.episodeProgressCount
+            val comicCount = dump?.comicIssues?.size ?: manifest.comicIssueCount
+            val subCount = dump?.let {
+                it.vnRoutes.size + it.gameEntries.size + it.bookEntries.size + it.bookQuotes.size
+            } ?: manifest.subEntriesCount
+
+            val nonSensitivePrefCount = prefsDump?.let { p ->
+                val fromTyped = p.typedEntries.count { !isSensitiveCredentialKey(it.key) }
+                if (fromTyped > 0) fromTyped else p.entries.keys.count { !isSensitiveCredentialKey(it) }
+            } ?: manifest.settingsCount
+
+            val legacyCredCount = prefsDump?.let { p ->
+                val fromTyped = p.typedEntries.count { isSensitiveCredentialKey(it.key) }
+                if (fromTyped > 0) fromTyped else p.entries.keys.count { isSensitiveCredentialKey(it) }
+            } ?: 0
+            val totalCredCount = (tokensDump?.encryptedTokens?.size ?: 0) + legacyCredCount
+
+            BackupInspectionResult(
+                valid = true,
+                manifestVersion = manifest.version,
+                appVersion = manifest.appVersion,
+                device = manifest.device,
+                createdAt = manifest.createdAt,
+                mediaCount = mediaCount,
+                categoryCount = categoryCount,
+                episodeProgressCount = episodeCount,
+                comicIssueCount = comicCount,
+                subEntriesCount = subCount,
+                hasDatabase = dbDumpBytes != null,
+                hasSettings = prefsBytes != null,
+                settingsCount = nonSensitivePrefCount,
+                hasCredentials = tokensBytes != null || legacyCredCount > 0,
+                credentialsCount = maxOf(totalCredCount, manifest.credentialsCount.takeIf { tokensBytes != null } ?: 0),
+                customArtworkCount = maxOf(customCount, manifest.customArtworkCount.takeIf { customCount > 0 } ?: 0),
+                cachedArtworkCount = maxOf(cachedCount, manifest.cachedArtworkCount.takeIf { cachedCount > 0 } ?: 0)
+            )
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            BackupInspectionResult(
+                valid = false,
+                errorMessage = e.message ?: "Unable to read .omnibk archive"
             )
         }
     }
@@ -172,7 +334,8 @@ object OmniBackupManager {
         context: Context,
         database: OmniTrackDatabase,
         coverCache: CoverCache,
-        inputStream: InputStream
+        inputStream: InputStream,
+        options: BackupModuleOptions = BackupModuleOptions()
     ): RestoreResult = withContext(Dispatchers.IO) {
         try {
             var manifestBytes: ByteArray? = null
@@ -192,12 +355,16 @@ object OmniBackupManager {
                         name == "preferences.json" -> prefsBytes = zipIn.readBytes()
                         name == "tracker_tokens.json" -> tokensBytes = zipIn.readBytes()
                         name.startsWith("artwork/custom/") && !entry.isDirectory -> {
-                            val fileName = name.substringAfter("artwork/custom/")
-                            customArtworks[fileName] = zipIn.readBytes()
+                            val fileName = File(name.substringAfter("artwork/custom/")).name
+                            if (fileName.isNotBlank()) {
+                                customArtworks[fileName] = zipIn.readBytes()
+                            }
                         }
                         name.startsWith("artwork/cache/") && !entry.isDirectory -> {
-                            val fileName = name.substringAfter("artwork/cache/")
-                            cacheArtworks[fileName] = zipIn.readBytes()
+                            val fileName = File(name.substringAfter("artwork/cache/")).name
+                            if (fileName.isNotBlank()) {
+                                cacheArtworks[fileName] = zipIn.readBytes()
+                            }
                         }
                     }
                     zipIn.closeEntry()
@@ -205,106 +372,157 @@ object OmniBackupManager {
                 }
             }
 
-            if (manifestBytes == null || dbDumpBytes == null) {
+            if (manifestBytes == null) {
                 return@withContext RestoreResult(
                     success = false,
-                    errorMessage = "Invalid .omnibk backup file: manifest or database dump missing"
+                    errorMessage = "Invalid .omnibk backup file: manifest.json missing"
                 )
             }
 
             val manifest = json.decodeFromString<OmniBackupManifest>(String(manifestBytes!!, StandardCharsets.UTF_8))
-            val dbDumpStr = String(dbDumpBytes!!, StandardCharsets.UTF_8)
 
-            // SHA-256 Checksum Verification
-            val calculatedChecksum = sha256(dbDumpStr)
-            if (manifest.databaseChecksumSha256.isNotBlank() && manifest.databaseChecksumSha256 != calculatedChecksum) {
-                return@withContext RestoreResult(
-                    success = false,
-                    errorMessage = "Integrity check failed: database checksum does not match manifest"
+            var dump: OmniDatabaseDump? = null
+            if (dbDumpBytes != null && (options.includeLibrary || options.includeSubEntries)) {
+                val dbDumpStr = String(dbDumpBytes!!, StandardCharsets.UTF_8)
+                val calculatedChecksum = sha256(dbDumpStr)
+                if (manifest.databaseChecksumSha256.isNotBlank() && manifest.databaseChecksumSha256 != calculatedChecksum) {
+                    return@withContext RestoreResult(
+                        success = false,
+                        errorMessage = "Integrity check failed: database checksum does not match manifest"
+                    )
+                }
+                dump = json.decodeFromString<OmniDatabaseDump>(dbDumpStr)
+            }
+
+            var restoredMediaCount = 0
+            var restoredCategoryCount = 0
+            var restoredEpisodeCount = 0
+            var restoredComicCount = 0
+
+            if (dump != null && (options.includeLibrary || options.includeSubEntries)) {
+                database.withTransaction {
+                    if (options.includeLibrary) {
+                        database.mediaDao().deleteAllMedia()
+                        database.categoryDao().deleteAllCategories()
+                        database.syncQueueDao().clearQueue()
+
+                        if (dump.categories.isNotEmpty()) {
+                            database.categoryDao().insertAll(dump.categories)
+                            restoredCategoryCount = dump.categories.size
+                        }
+                        if (dump.mediaItems.isNotEmpty()) {
+                            database.mediaDao().insertAll(dump.mediaItems)
+                            restoredMediaCount = dump.mediaItems.size
+                        }
+                        for (task in dump.syncQueue) {
+                            database.syncQueueDao().enqueue(task)
+                        }
+                    }
+
+                    if (options.includeSubEntries) {
+                        database.episodeProgressDao().deleteAllProgress()
+                        database.comicIssueDao().deleteAllIssues()
+                        database.vnRouteDao().deleteAllRoutes()
+                        database.gameEntryDao().deleteAllEntries()
+                        database.bookEntryDao().deleteAllEntries()
+                        database.bookQuoteDao().deleteAllQuotes()
+
+                        if (dump.episodeProgress.isNotEmpty()) {
+                            database.episodeProgressDao().insertOrUpdateAll(dump.episodeProgress)
+                            restoredEpisodeCount = dump.episodeProgress.size
+                        }
+                        if (dump.comicIssues.isNotEmpty()) {
+                            database.comicIssueDao().insertIssues(dump.comicIssues)
+                            restoredComicCount = dump.comicIssues.size
+                        }
+                        if (dump.vnRoutes.isNotEmpty()) {
+                            database.vnRouteDao().insertRoutes(dump.vnRoutes)
+                        }
+                        if (dump.gameEntries.isNotEmpty()) {
+                            database.gameEntryDao().insertEntries(dump.gameEntries)
+                        }
+                        if (dump.bookEntries.isNotEmpty()) {
+                            database.bookEntryDao().insertEntries(dump.bookEntries)
+                        }
+                        if (dump.bookQuotes.isNotEmpty()) {
+                            database.bookQuoteDao().insertQuotes(dump.bookQuotes)
+                        }
+                    }
+                }
+            }
+
+            var restoredArtworkCount = 0
+            if (options.includeCustomArtwork && customArtworks.isNotEmpty()) {
+                val customDir = coverCache.customCoverDir
+                if (!customDir.exists()) customDir.mkdirs()
+                for ((fileName, bytes) in customArtworks) {
+                    File(customDir, fileName).writeBytes(bytes)
+                    restoredArtworkCount++
+                }
+            }
+
+            if (options.includeCachedCovers && cacheArtworks.isNotEmpty()) {
+                val cacheDir = coverCache.cacheDir
+                if (!cacheDir.exists()) cacheDir.mkdirs()
+                for ((fileName, bytes) in cacheArtworks) {
+                    File(cacheDir, fileName).writeBytes(bytes)
+                    restoredArtworkCount++
+                }
+            }
+
+            val prefsDump = if (prefsBytes != null) {
+                runCatching {
+                    json.decodeFromString<OmniPreferencesDump>(String(prefsBytes!!, StandardCharsets.UTF_8))
+                }.getOrNull()
+            } else null
+
+            val tokensDump = if (tokensBytes != null) {
+                runCatching {
+                    json.decodeFromString<OmniTrackerTokensDump>(String(tokensBytes!!, StandardCharsets.UTF_8))
+                }.getOrNull()
+            } else null
+
+            var restoredSettings = false
+            var restoredCredentials = false
+
+            if ((options.includeSettings && prefsDump != null) || (options.includeCredentials && (tokensDump != null || prefsDump != null))) {
+                val knownBooleanKeys = setOf(
+                    "ai_semantic_search_enabled",
+                    "poster_card_landscape",
+                    "poster_card_hide_labels",
+                    "poster_always_landscape_clearlogo",
+                    "poster_card_depth_enabled",
+                    "poster_card_depth_posters",
+                    "poster_card_depth_continue_watching",
+                    "poster_card_depth_episodes",
+                    "poster_card_depth_cast",
+                    "poster_card_depth_trailers"
                 )
-            }
+                val knownIntKeys = setOf(
+                    "poster_card_width_dp",
+                    "poster_card_corner_radius_dp",
+                    "poster_card_depth_edge_strength",
+                    "poster_card_depth_sheen_strength",
+                    "poster_card_depth_edge_coverage",
+                    "vn_spoiler_level"
+                )
+                val knownFloatKeys = setOf("episode_layout_scale")
 
-            val dump = json.decodeFromString<OmniDatabaseDump>(dbDumpStr)
-
-            // Atomic Room Transaction (Rollback safety guaranteed)
-            database.withTransaction {
-                database.mediaDao().deleteAllMedia()
-                database.categoryDao().deleteAllCategories()
-                database.syncQueueDao().clearQueue()
-                database.vnRouteDao().deleteAllRoutes()
-                database.gameEntryDao().deleteAllEntries()
-                database.bookEntryDao().deleteAllEntries()
-                database.bookQuoteDao().deleteAllQuotes()
-
-                if (dump.categories.isNotEmpty()) {
-                    database.categoryDao().insertAll(dump.categories)
-                }
-                if (dump.mediaItems.isNotEmpty()) {
-                    database.mediaDao().insertAll(dump.mediaItems)
-                }
-                for (task in dump.syncQueue) {
-                    database.syncQueueDao().enqueue(task)
-                }
-                if (dump.vnRoutes.isNotEmpty()) {
-                    database.vnRouteDao().insertRoutes(dump.vnRoutes)
-                }
-                if (dump.gameEntries.isNotEmpty()) {
-                    database.gameEntryDao().insertEntries(dump.gameEntries)
-                }
-                if (dump.bookEntries.isNotEmpty()) {
-                    database.bookEntryDao().insertEntries(dump.bookEntries)
-                }
-                if (dump.bookQuotes.isNotEmpty()) {
-                    database.bookQuoteDao().insertQuotes(dump.bookQuotes)
-                }
-            }
-
-            // Restore Artwork Binaries
-            val customDir = coverCache.customCoverDir
-            if (!customDir.exists()) customDir.mkdirs()
-            for ((fileName, bytes) in customArtworks) {
-                File(customDir, fileName).writeBytes(bytes)
-            }
-
-            val cacheDir = coverCache.cacheDir
-            if (!cacheDir.exists()) cacheDir.mkdirs()
-            for ((fileName, bytes) in cacheArtworks) {
-                File(cacheDir, fileName).writeBytes(bytes)
-            }
-
-            // Restore DataStore Preferences with Type-Safe Deserialization
-            if (prefsBytes != null) {
-                try {
-                    val prefsDump = json.decodeFromString<OmniPreferencesDump>(String(prefsBytes!!, StandardCharsets.UTF_8))
-                    val knownBooleanKeys = setOf(
-                        "ai_semantic_search_enabled",
-                        "poster_card_landscape",
-                        "poster_card_hide_labels",
-                        "poster_always_landscape_clearlogo",
-                        "poster_card_depth_enabled",
-                        "poster_card_depth_posters",
-                        "poster_card_depth_continue_watching",
-                        "poster_card_depth_episodes",
-                        "poster_card_depth_cast",
-                        "poster_card_depth_trailers"
-                    )
-                    val knownIntKeys = setOf(
-                        "poster_card_width_dp",
-                        "poster_card_corner_radius_dp",
-                        "poster_card_depth_edge_strength",
-                        "poster_card_depth_sheen_strength",
-                        "poster_card_depth_edge_coverage",
-                        "vn_spoiler_level"
-                    )
-                    val knownFloatKeys = setOf("episode_layout_scale")
-
-                    context.dataStore.edit { prefs ->
-                        // Clear existing to avoid type collisions across versions
-                        prefs.clear()
+                context.dataStore.edit { prefs ->
+                    if (options.includeSettings && prefsDump != null) {
+                        prefs.asMap().keys.toList().forEach { k ->
+                            if (!isSensitiveCredentialKey(k.name)) {
+                                prefs.remove(k)
+                            }
+                        }
                         if (prefsDump.typedEntries.isNotEmpty()) {
                             for (entry in prefsDump.typedEntries) {
                                 val key = entry.key
+                                if (isSensitiveCredentialKey(key)) continue
                                 when {
+                                    entry.type == "STRING_SET" -> {
+                                        prefs[stringSetPreferencesKey(key)] = (entry.stringSet ?: emptyList()).toSet()
+                                    }
                                     key in knownBooleanKeys || entry.type == "BOOLEAN" -> {
                                         prefs[booleanPreferencesKey(key)] = entry.value.toBoolean()
                                     }
@@ -323,8 +541,8 @@ object OmniBackupManager {
                                 }
                             }
                         } else {
-                            // Smart legacy fallback: prevents ClassCastException on startup
                             for ((key, value) in prefsDump.entries) {
+                                if (isSensitiveCredentialKey(key)) continue
                                 when {
                                     key in knownBooleanKeys || value.equals("true", ignoreCase = true) || value.equals("false", ignoreCase = true) -> {
                                         prefs[booleanPreferencesKey(key)] = value.toBoolean()
@@ -343,37 +561,76 @@ object OmniBackupManager {
                                 }
                             }
                         }
+                        restoredSettings = true
                     }
-                } catch (_: Exception) {
-                    // Non-fatal preferences parse fallback
-                }
-            }
 
-            // Restore Encrypted Tracker Tokens
-            if (tokensBytes != null) {
-                try {
-                    val tokensDump = json.decodeFromString<OmniTrackerTokensDump>(String(tokensBytes!!, StandardCharsets.UTF_8))
-                    context.dataStore.edit { prefs ->
-                        for ((key, value) in tokensDump.encryptedTokens) {
-                            prefs[stringPreferencesKey(key)] = value
+                    if (options.includeCredentials) {
+                        val legacyTyped = prefsDump?.typedEntries?.filter { isSensitiveCredentialKey(it.key) }.orEmpty()
+                        val legacyMap = prefsDump?.entries?.filterKeys { isSensitiveCredentialKey(it) }.orEmpty()
+                        val tokenEntries = tokensDump?.encryptedTokens.orEmpty()
+                        if (tokenEntries.isNotEmpty() || legacyTyped.isNotEmpty() || legacyMap.isNotEmpty()) {
+                            prefs.asMap().keys.toList().forEach { k ->
+                                if (isSensitiveCredentialKey(k.name)) {
+                                    prefs.remove(k)
+                                }
+                            }
+                            for ((key, value) in legacyMap) {
+                                prefs[stringPreferencesKey(key)] = value
+                            }
+                            for (entry in legacyTyped) {
+                                prefs[stringPreferencesKey(entry.key)] = entry.value
+                            }
+                            for ((key, value) in tokenEntries) {
+                                prefs[stringPreferencesKey(key)] = value
+                            }
+                            restoredCredentials = true
                         }
                     }
-                } catch (_: Exception) {
-                    // Non-fatal tokens restore fallback
                 }
+
+                rehydrateCaches(context)
             }
 
             RestoreResult(
                 success = true,
-                mediaCount = dump.mediaItems.size,
-                categoryCount = dump.categories.size
+                mediaCount = restoredMediaCount,
+                categoryCount = restoredCategoryCount,
+                episodeProgressCount = restoredEpisodeCount,
+                comicIssueCount = restoredComicCount,
+                restoredSettings = restoredSettings,
+                restoredCredentials = restoredCredentials,
+                restoredArtworkCount = restoredArtworkCount
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             RestoreResult(
                 success = false,
                 errorMessage = e.message ?: "Failed to restore .omnibk backup"
             )
         }
+    }
+
+    private suspend fun rehydrateCaches(context: Context) {
+        val pm = PreferenceManager(context)
+        PreferenceManager.cachedPreferredTitleLanguage = pm.preferredTitleLanguage.first()
+        PreferenceManager.cachedVnSpoilerLevel = pm.vnSpoilerLevel.first()
+        PreferenceManager.cachedVnNsfwFilterMode = pm.vnNsfwFilterMode.first()
+        PreferenceManager.cachedTmdbApiKey = pm.tmdbApiKey.first()
+        PreferenceManager.cachedSteamGridDbApiKey = pm.steamGridDbApiKey.first()
+        PreferenceManager.cachedIgdbClientId = pm.igdbClientId.first()
+        PreferenceManager.cachedIgdbClientSecret = pm.igdbClientSecret.first()
+        PreferenceManager.cachedComicVineApiKey = pm.comicVineApiKey.first()
+        PreferenceManager.cachedMetronUsername = pm.metronUsername.first()
+        PreferenceManager.cachedMetronPassword = pm.metronPassword.first()
+
+        TrackerAccountVerifier.customTraktClientId = pm.customTraktClientId.first()
+        TrackerAccountVerifier.customTraktClientSecret = pm.customTraktClientSecret.first()
+        TrackerAccountVerifier.customMalClientId = pm.customMalClientId.first()
+        TrackerAccountVerifier.customSimklClientId = pm.customSimklClientId.first()
+        TrackerAccountVerifier.customSimklClientSecret = pm.customSimklClientSecret.first()
+
+        TrackerTokenManager.cachedHardcoverToken =
+            TrackerTokenManager(context).tokens.first().hardcoverToken.orEmpty().trim()
     }
 
     private fun writeZipEntry(zipOut: ZipOutputStream, name: String, data: ByteArray) {

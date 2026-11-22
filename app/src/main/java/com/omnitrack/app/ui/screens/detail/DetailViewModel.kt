@@ -5,11 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.omnitrack.app.data.db.entity.BookEntryEntity
 import com.omnitrack.app.data.db.entity.BookQuoteEntity
+import com.omnitrack.app.data.db.entity.ComicIssueEntity
 import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.enrichment.BookEnrichmentSource
+import com.omnitrack.app.data.enrichment.ComicEnrichmentSource
+import com.omnitrack.app.data.enrichment.ComicIssueSeed
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.enrichment.GameEnrichmentSource
 import com.omnitrack.app.data.enrichment.VisualNovelEnrichmentSource
@@ -19,6 +22,10 @@ import com.omnitrack.app.data.model.BookEntryType
 import com.omnitrack.app.data.model.BookFormat
 import com.omnitrack.app.data.model.BookLiteraryForm
 import com.omnitrack.app.data.model.BookTrackingMode
+import com.omnitrack.app.data.model.ComicDetailMeta
+import com.omnitrack.app.data.model.ComicEntryType
+import com.omnitrack.app.data.model.ComicFormat
+import com.omnitrack.app.data.model.ComicTrackingMode
 import com.omnitrack.app.data.model.GameCompletionTier
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.GameEntryType
@@ -161,6 +168,8 @@ data class DetailUiState(
     val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     val bookEntries: List<BookEntryEntity> = emptyList(),
     val bookQuotes: List<BookQuoteEntity> = emptyList(),
+    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    val comicIssues: List<ComicIssueEntity> = emptyList(),
     val episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap()
 )
 
@@ -209,7 +218,8 @@ private data class PreviewAndAux(
     val novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
-    val bookDetailMeta: BookDetailMeta = BookDetailMeta()
+    val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
+    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta()
 )
 
 class DetailViewModel(
@@ -224,6 +234,7 @@ class DetailViewModel(
     private val visualNovelEnrichmentSource = VisualNovelEnrichmentSource()
     private val gameEnrichmentSource = GameEnrichmentSource()
     private val bookEnrichmentSource = BookEnrichmentSource()
+    private val comicEnrichmentSource = ComicEnrichmentSource()
     private val _mediaId = MutableStateFlow(mediaId)
     private val _previewStack = MutableStateFlow<List<MediaItemEntity>>(emptyList())
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
@@ -284,6 +295,7 @@ class DetailViewModel(
     private val _vnDetailMeta = MutableStateFlow(VnDetailMeta())
     private val _gameDetailMeta = MutableStateFlow(GameDetailMeta())
     private val _bookDetailMeta = MutableStateFlow(BookDetailMeta())
+    private val _comicDetailMeta = MutableStateFlow(ComicDetailMeta())
     private val _fillerInfoMap = MutableStateFlow<Map<Long, Map<Int, com.omnitrack.app.data.model.EpisodeFillerInfo>>>(emptyMap())
     private val allSeasonCommentsCache = java.util.concurrent.ConcurrentHashMap<Long, List<DiscussionComment>>()
     private var rootAniListId: Long? = null
@@ -299,6 +311,8 @@ class DetailViewModel(
     private val latestBookEntriesCache = java.util.concurrent.ConcurrentHashMap<Long, List<BookEntryEntity>>()
     private val latestBookQuotesCache = java.util.concurrent.ConcurrentHashMap<Long, List<BookQuoteEntity>>()
     private val bookAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
+    private val latestComicIssuesCache = java.util.concurrent.ConcurrentHashMap<Long, List<ComicIssueEntity>>()
+    private val comicAutoSeededMediaIds = Collections.synchronizedSet(mutableSetOf<Long>())
     private val previewMetaCache = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, EpisodeProgressEntity>>()
     private val _previewEpisodeMeta = MutableStateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>>(emptyMap())
     val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
@@ -639,6 +653,7 @@ class DetailViewModel(
             _vnDetailMeta.value = cachedAux.vnDetailMeta
             _gameDetailMeta.value = cachedAux.gameDetailMeta
             _bookDetailMeta.value = cachedAux.bookDetailMeta
+            _comicDetailMeta.value = cachedAux.comicDetailMeta
             if (cachedAux.vnDiscussionComments.isNotEmpty() && _discussionComments.value.isEmpty()) {
                 _discussionComments.value = cachedAux.vnDiscussionComments
             }
@@ -749,6 +764,10 @@ class DetailViewModel(
             hasStaleRatings
         )
         val gen = activeTransitionGen
+        if (item.isCustomEntry && !force) {
+            markTransitionEnrichReady(gen)
+            return
+        }
         if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) {
             markTransitionEnrichReady(gen)
             return
@@ -897,7 +916,8 @@ class DetailViewModel(
         val vnRoutes: List<VnRouteEntity> = emptyList(),
         val gameEntries: List<GameEntryEntity> = emptyList(),
         val bookEntries: List<BookEntryEntity> = emptyList(),
-        val bookQuotes: List<BookQuoteEntity> = emptyList()
+        val bookQuotes: List<BookQuoteEntity> = emptyList(),
+        val comicIssues: List<ComicIssueEntity> = emptyList()
     )
 
     private val auxFlow: Flow<PreviewAndAux> = combine(
@@ -947,7 +967,8 @@ class DetailViewModel(
             _novelDetailMeta,
             _vnDetailMeta,
             _gameDetailMeta,
-            _bookDetailMeta
+            _bookDetailMeta,
+            _comicDetailMeta
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -996,7 +1017,8 @@ class DetailViewModel(
             novelDetailMeta = (args[42] as? NovelDetailMeta) ?: NovelDetailMeta(),
             vnDetailMeta = (args[43] as? VnDetailMeta) ?: VnDetailMeta(),
             gameDetailMeta = (args[44] as? GameDetailMeta) ?: GameDetailMeta(),
-            bookDetailMeta = (args[45] as? BookDetailMeta) ?: BookDetailMeta()
+            bookDetailMeta = (args[45] as? BookDetailMeta) ?: BookDetailMeta(),
+            comicDetailMeta = (args[46] as? ComicDetailMeta) ?: ComicDetailMeta()
         )
     }
 
@@ -1019,15 +1041,21 @@ class DetailViewModel(
                     repository.getBookEntries(currentId)
                         .onStart { emit(latestBookEntriesCache[currentId] ?: emptyList()) }
                         .distinctUntilChanged(),
-                    repository.getBookQuotes(currentId)
-                        .onStart { emit(latestBookQuotesCache[currentId] ?: emptyList()) }
-                        .distinctUntilChanged()
-                ) { progressList, vnRoutes, gameEntries, bookEntries, bookQuotes ->
+                    combine(
+                        repository.getBookQuotes(currentId)
+                            .onStart { emit(latestBookQuotesCache[currentId] ?: emptyList()) }
+                            .distinctUntilChanged(),
+                        repository.getComicIssues(currentId)
+                            .onStart { emit(latestComicIssuesCache[currentId] ?: emptyList()) }
+                            .distinctUntilChanged()
+                    ) { q, c -> q to c }
+                ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues) ->
                     latestEpisodeProgressCache[currentId] = progressList
                     latestVnRoutesCache[currentId] = vnRoutes
                     latestGameEntriesCache[currentId] = gameEntries
                     latestBookEntriesCache[currentId] = bookEntries
                     latestBookQuotesCache[currentId] = bookQuotes
+                    latestComicIssuesCache[currentId] = comicIssues
                     ActiveRoomSnapshot(
                         currentId = currentId,
                         isPreview = true,
@@ -1036,7 +1064,8 @@ class DetailViewModel(
                         vnRoutes = vnRoutes,
                         gameEntries = gameEntries,
                         bookEntries = bookEntries,
-                        bookQuotes = bookQuotes
+                        bookQuotes = bookQuotes,
+                        comicIssues = comicIssues
                     )
                 }
             } else {
@@ -1085,18 +1114,26 @@ class DetailViewModel(
                                     emit(latestBookEntriesCache[currentItem.id] ?: emptyList())
                                 }
                                 .distinctUntilChanged(),
-                            repository.getBookQuotes(currentItem.id)
-                                .onStart {
-                                    emit(latestBookQuotesCache[currentItem.id] ?: emptyList())
-                                }
-                                .distinctUntilChanged()
-                        ) { progressList, vnRoutes, gameEntries, bookEntries, bookQuotes ->
+                            combine(
+                                repository.getBookQuotes(currentItem.id)
+                                    .onStart {
+                                        emit(latestBookQuotesCache[currentItem.id] ?: emptyList())
+                                    }
+                                    .distinctUntilChanged(),
+                                repository.getComicIssues(currentItem.id)
+                                    .onStart {
+                                        emit(latestComicIssuesCache[currentItem.id] ?: emptyList())
+                                    }
+                                    .distinctUntilChanged()
+                            ) { q, c -> q to c }
+                        ) { progressList, vnRoutes, gameEntries, bookEntries, (bookQuotes, comicIssues) ->
                             if (currentItem.id > 0L) {
                                 latestEpisodeProgressCache[currentItem.id] = progressList
                                 latestVnRoutesCache[currentItem.id] = vnRoutes
                                 latestGameEntriesCache[currentItem.id] = gameEntries
                                 latestBookEntriesCache[currentItem.id] = bookEntries
                                 latestBookQuotesCache[currentItem.id] = bookQuotes
+                                latestComicIssuesCache[currentItem.id] = comicIssues
                             }
                             ActiveRoomSnapshot(
                                 currentId = currentItem.id,
@@ -1106,7 +1143,8 @@ class DetailViewModel(
                                 vnRoutes = vnRoutes,
                                 gameEntries = gameEntries,
                                 bookEntries = bookEntries,
-                                bookQuotes = bookQuotes
+                                bookQuotes = bookQuotes,
+                                comicIssues = comicIssues
                             )
                         }
                     } else {
@@ -1178,6 +1216,13 @@ class DetailViewModel(
             } else {
                 emptyList()
             }
+            val previewComicIssues = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
+                room.comicIssues
+            } else if (aux.previewItem.id > 0L) {
+                latestComicIssuesCache[aux.previewItem.id] ?: emptyList()
+            } else {
+                emptyList()
+            }
             DetailUiState(
                 item = displayPreviewItem,
                 previousItem = null,
@@ -1246,7 +1291,9 @@ class DetailViewModel(
                 gameEntries = previewGameEntries,
                 bookDetailMeta = aux.bookDetailMeta,
                 bookEntries = previewBookEntries,
-                bookQuotes = previewBookQuotes
+                bookQuotes = previewBookQuotes,
+                comicDetailMeta = aux.comicDetailMeta,
+                comicIssues = previewComicIssues
             )
         } else {
             val targetId = _mediaId.value
@@ -1277,6 +1324,11 @@ class DetailViewModel(
                     room.bookQuotes
                 } else {
                     latestBookQuotesCache[effectiveItem.id] ?: emptyList()
+                }
+                val itemComicIssues = if (!room.isPreview && room.currentId == effectiveItem.id) {
+                    room.comicIssues
+                } else {
+                    latestComicIssuesCache[effectiveItem.id] ?: emptyList()
                 }
                 val siblings = _stableSiblingIds.value.ifEmpty {
                     ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
@@ -1365,7 +1417,9 @@ class DetailViewModel(
                     gameEntries = itemGameEntries,
                     bookDetailMeta = aux.bookDetailMeta,
                     bookEntries = itemBookEntries,
-                    bookQuotes = itemBookQuotes
+                    bookQuotes = itemBookQuotes,
+                    comicDetailMeta = aux.comicDetailMeta,
+                    comicIssues = itemComicIssues
                 )
             } else {
                 DetailUiState(isLoading = false)
@@ -1432,6 +1486,7 @@ class DetailViewModel(
         _vnDetailMeta.value = VnDetailMeta()
         _gameDetailMeta.value = GameDetailMeta()
         _bookDetailMeta.value = BookDetailMeta()
+        _comicDetailMeta.value = ComicDetailMeta()
     }
 
     fun isPreviewActive(): Boolean =
@@ -1980,7 +2035,13 @@ class DetailViewModel(
     private var recommendationFetchJob: kotlinx.coroutines.Job? = null
     private var seriesFetchJob: kotlinx.coroutines.Job? = null
 
-    private fun loadRecommendationsAndReviews(item: MediaItemEntity) {
+    private fun loadRecommendationsAndReviews(item: MediaItemEntity, force: Boolean = false) {
+        if (item.isCustomEntry && !force) {
+            val gen = activeTransitionGen
+            markTransitionAuxReady(gen)
+            markTransitionSeriesReady(gen)
+            return
+        }
         if (_activeDiscussionAniListId.value == null) {
             _discussionComments.value = emptyList()
         }
@@ -2159,7 +2220,8 @@ class DetailViewModel(
                     vnDetailMeta = _vnDetailMeta.value,
                     gameDetailMeta = _gameDetailMeta.value,
                     bookDetailMeta = _bookDetailMeta.value,
-                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) _discussionComments.value else emptyList()
+                    comicDetailMeta = _comicDetailMeta.value,
+                    vnDiscussionComments = if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC) _discussionComments.value else emptyList()
                 )
                 if (!isStillCurrentItem()) return
                 if (cacheKey != null) DetailAuxMemoryCache.cache[cacheKey] = aux
@@ -2495,6 +2557,76 @@ class DetailViewModel(
                             _previewStack.update { stack ->
                                 if (stack.isNotEmpty()) stack.dropLast(1) + updatedPreview else listOf(updatedPreview)
                             }
+                        }
+                    }
+                }
+                markTransitionAuxReady(auxGen)
+                persistAuxCache()
+                return@launch
+            }
+
+            if (item.mediaType == MediaType.COMIC) {
+                val comicData = comicEnrichmentSource.fetchFullComicData(item)
+                if (!isStillCurrentItem()) return@launch
+                _comicDetailMeta.value = comicData.comicDetailMeta
+                if (comicData.tags.isNotEmpty()) _tags.value = comicData.tags
+                if (comicData.similarComics.isNotEmpty()) _recommendations.value = comicData.similarComics
+                if (comicData.externalLinks.isNotEmpty()) _externalLinks.value = comicData.externalLinks
+                if (item.id > 0L) {
+                    val latest = repository.getMediaById(item.id).firstOrNull() ?: item
+                    val excluded = latest.excludedArtSet()
+                    val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+                    val allowedComicCover = comicData.coverUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
+                    val allowedComicBanner = comicData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
+                    val nextBanner = if (!bannerDisabled && latest.customBannerPath.isNullOrBlank() && latest.bannerUrl.isNullOrBlank()) {
+                        allowedComicBanner
+                    } else {
+                        latest.bannerUrl
+                    }
+                    val nextCover = latest.coverUrl.takeIf { it.isNotBlank() } ?: allowedComicCover.orEmpty()
+                    val updated = latest.copy(
+                        comicVineId = latest.comicVineId ?: comicData.resolvedComicVineId,
+                        metronId = latest.metronId ?: comicData.resolvedMetronId,
+                        openLibraryId = latest.openLibraryId?.takeIf { it.isNotBlank() } ?: comicData.resolvedOpenLibraryId,
+                        comicPublisher = latest.comicPublisher?.takeIf { it.isNotBlank() } ?: comicData.publisher,
+                        studioOrNetwork = latest.studioOrNetwork?.takeIf { it.isNotBlank() } ?: comicData.publisher,
+                        synopsis = latest.synopsis?.takeIf { it.isNotBlank() && it.length >= (comicData.synopsis?.length ?: 0) }
+                            ?: comicData.synopsis
+                            ?: latest.synopsis,
+                        coverUrl = nextCover,
+                        bannerUrl = nextBanner,
+                        releaseYear = latest.releaseYear?.takeIf { it.isNotBlank() } ?: comicData.releaseYear,
+                        totalProgress = latest.totalProgress ?: comicData.totalIssues?.toDouble(),
+                        communityScore = comicData.communityScore ?: latest.communityScore
+                    )
+                    if (isStillCurrentItem() && updated != latest) {
+                        repository.updateMedia(updated)
+                    }
+                    if (isStillCurrentItem()) {
+                        autoSeedComicIssuesIfEmpty(
+                            mediaId = latest.id,
+                            seedIssues = comicData.seedIssues
+                        )
+                    }
+                } else if (isStillCurrentItem()) {
+                    val currentPreview = _previewItem.value
+                    if (currentPreview != null) {
+                        val updatedPreview = currentPreview.copy(
+                            comicVineId = currentPreview.comicVineId ?: comicData.resolvedComicVineId,
+                            metronId = currentPreview.metronId ?: comicData.resolvedMetronId,
+                            openLibraryId = currentPreview.openLibraryId ?: comicData.resolvedOpenLibraryId,
+                            comicPublisher = currentPreview.comicPublisher ?: comicData.publisher,
+                            studioOrNetwork = currentPreview.studioOrNetwork ?: comicData.publisher,
+                            synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: comicData.synopsis,
+                            coverUrl = currentPreview.coverUrl.takeIf { it.isNotBlank() } ?: comicData.coverUrl.orEmpty(),
+                            bannerUrl = currentPreview.bannerUrl?.takeIf { it.isNotBlank() } ?: comicData.bannerUrl,
+                            releaseYear = currentPreview.releaseYear ?: comicData.releaseYear,
+                            totalProgress = currentPreview.totalProgress ?: comicData.totalIssues?.toDouble(),
+                            communityScore = comicData.communityScore ?: currentPreview.communityScore
+                        )
+                        _previewItem.value = updatedPreview
+                        _previewStack.update { stack ->
+                            if (stack.isNotEmpty()) stack.dropLast(1) + updatedPreview else listOf(updatedPreview)
                         }
                     }
                 }
@@ -3564,12 +3696,12 @@ class DetailViewModel(
                     // Concurrently resolve seasons and prefetch target season episodes over multiplexed HTTP/2 sockets
                     val (seasons, preloadedEps) = coroutineScope {
                         val seasonsDeferred = async(Dispatchers.IO) {
-                            enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title, resolvedImdbId)
+                            enrichmentRepository.fetchTvSeasons(tmdbId, tmdbKey, item.title, resolvedImdbId, effectiveAnilistId)
                         }
                         val epsDeferred = async(Dispatchers.IO) {
                             val cached = SeriesContentMemoryCache.findSeasonEpisodes(item, tmdbId, targetSeasonToPreload, item.id, effectiveAnilistId)
                             if (!cached.isNullOrEmpty()) cached
-                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, targetSeasonToPreload, tmdbKey, resolvedImdbId, item.title)
+                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, targetSeasonToPreload, tmdbKey, resolvedImdbId, item.title, effectiveAnilistId)
                         }
                         seasonsDeferred.await() to epsDeferred.await()
                     }
@@ -3597,7 +3729,7 @@ class DetailViewModel(
                         } else {
                             val selectedCached = SeriesContentMemoryCache.findSeasonEpisodes(item, tmdbId, seasonToSelect, item.id, effectiveAnilistId)
                             if (!selectedCached.isNullOrEmpty()) selectedCached
-                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title)
+                            else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, seasonToSelect, tmdbKey, resolvedImdbId, item.title, effectiveAnilistId)
                         }
 
                         // Bleach / Anime large season fallback: if TMDb episodes are empty, query AniZip
@@ -3628,7 +3760,7 @@ class DetailViewModel(
                                 currentCoroutineContext().ensureActive()
                                 val cached = SeriesContentMemoryCache.findSeasonEpisodes(item, tmdbId, s.seasonNumber, item.id, effectiveAnilistId)
                                 val eps = if (!cached.isNullOrEmpty()) cached
-                                else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId, item.title)
+                                else enrichmentRepository.fetchTvSeasonEpisodes(tmdbId, s.seasonNumber, tmdbKey, resolvedImdbId, item.title, effectiveAnilistId)
                                 if (eps.isNotEmpty()) {
                                     currentCoroutineContext().ensureActive()
                                     SeriesContentMemoryCache.putSeasonEpisodes(item, tmdbId, s.seasonNumber, eps, effectiveAnilistId)
@@ -3834,7 +3966,8 @@ class DetailViewModel(
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val currentTitle = dbItem?.title
             val resolvedImdbId = dbItem?.imdbId
-            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, resolvedImdbId, currentTitle)
+            val resolvedAnilistId = dbItem?.anilistId
+            val eps = enrichmentRepository.fetchTvSeasonEpisodes(resolvedTmdbId, seasonNumber, tmdbKey, resolvedImdbId, currentTitle, resolvedAnilistId)
             if (eps.isNotEmpty()) {
                 val enrichedEps = decorateEpisodesWithFillers(seasonNumber, eps, malIdForSeason)
                 SeriesContentMemoryCache.putSeasonEpisodes(dbItem, resolvedTmdbId, seasonNumber, enrichedEps)
@@ -4912,6 +5045,37 @@ class DetailViewModel(
         }
     }
 
+    fun updateBannerFraming(focalX: Float, focalY: Float, zoom: Float) {
+        val fx = focalX.coerceIn(-1f, 1f)
+        val fy = focalY.coerceIn(-1f, 1f)
+        val z = zoom.coerceIn(1f, 2.5f)
+        viewModelScope.launch {
+            val item = _previewItem.value ?: uiState.value.item ?: return@launch
+            if (item.id > 0L) {
+                repository.updateBannerFraming(item.id, fx, fy, z)
+            }
+            updatePreviewEntity { it.copy(bannerFocalX = fx, bannerFocalY = fy, bannerZoom = z) }
+        }
+    }
+
+    fun updateCustomEntryDetails(updated: MediaItemEntity) {
+        viewModelScope.launch {
+            val withTs = updated.copy(lastUpdated = System.currentTimeMillis())
+            if (withTs.id > 0L) {
+                repository.updateMedia(withTs)
+                latestRoomItemCache[withTs.id] = withTs
+            }
+            updatePreviewEntity { withTs }
+        }
+    }
+
+    fun forceMatchAndEnrich() {
+        val current = _previewItem.value ?: uiState.value.item ?: return
+        activeSeriesFetchKey = null
+        maybeEnrich(current, force = true)
+        loadRecommendationsAndReviews(current, force = true)
+    }
+
     fun deleteItem() {
         viewModelScope.launch {
             val item = uiState.value.item ?: return@launch
@@ -5649,6 +5813,195 @@ class DetailViewModel(
         }
     }
 
+    private suspend fun autoSeedComicIssuesIfEmpty(
+        mediaId: Long,
+        seedIssues: List<ComicIssueSeed>
+    ) {
+        if (mediaId <= 0L || seedIssues.isEmpty()) return
+        if (!comicAutoSeededMediaIds.add(mediaId)) return
+        val existing = repository.getComicIssuesOnce(mediaId)
+        if (existing.isNotEmpty()) return
+        val mapped = seedIssues.take(50).mapIndexed { idx, s ->
+            ComicIssueEntity(
+                mediaId = mediaId,
+                issueNumber = s.issueNumber,
+                issueTitle = s.issueTitle,
+                entryType = s.entryType,
+                storyArc = s.storyArc,
+                coverUrl = s.coverUrl,
+                storeDate = s.storeDate,
+                coverDate = s.coverDate,
+                sortOrder = idx
+            )
+        }
+        repository.insertComicIssues(mapped)
+    }
+
+    fun stepComicProgress(delta: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val cap = latest.totalProgress?.takeIf { it > 0.0 }
+            val nextRaw = latest.currentProgress + delta.toDouble()
+            val clamped = if (cap != null) nextRaw.coerceIn(0.0, cap) else nextRaw.coerceAtLeast(0.0)
+            val newStatus = if (latest.autoStatusEnabled) {
+                when {
+                    cap != null && clamped >= cap -> TrackingStatus.COMPLETED
+                    clamped > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    currentProgress = clamped,
+                    status = newStatus,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun setComicProgressExact(current: Double, total: Double? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val effTotal = total?.takeIf { it > 0.0 } ?: latest.totalProgress
+            val clamped = if (effTotal != null && effTotal > 0.0) current.coerceIn(0.0, effTotal) else current.coerceAtLeast(0.0)
+            val newStatus = if (latest.autoStatusEnabled) {
+                when {
+                    effTotal != null && effTotal > 0.0 && clamped >= effTotal -> TrackingStatus.COMPLETED
+                    clamped > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    currentProgress = clamped,
+                    totalProgress = effTotal,
+                    status = newStatus,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun updateComicFormat(format: ComicFormat) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            repository.updateMedia(
+                latest.copy(
+                    comicFormat = format.name,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun switchComicTrackingMode(mode: ComicTrackingMode) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            repository.updateMedia(
+                latest.copy(
+                    comicTrackingMode = mode.name,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun toggleComicIssueRead(issue: ComicIssueEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val nextRead = !issue.isRead
+            repository.updateComicIssue(
+                issue.copy(
+                    isRead = nextRead,
+                    readAtMs = if (nextRead) System.currentTimeMillis() else null
+                )
+            )
+            val allIssues = repository.getComicIssuesOnce(mediaId)
+            val readCount = allIssues.count { it.isRead }.toDouble()
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val cap = latest.totalProgress?.takeIf { it > 0.0 }
+            val newStatus = if (latest.autoStatusEnabled) {
+                when {
+                    cap != null && readCount >= cap -> TrackingStatus.COMPLETED
+                    readCount > 0.0 && latest.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                    else -> latest.status
+                }
+            } else latest.status
+            repository.updateMedia(
+                latest.copy(
+                    currentProgress = readCount,
+                    status = newStatus,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun addCustomComicIssue(
+        issueNumber: String,
+        issueTitle: String? = null,
+        entryType: ComicEntryType = ComicEntryType.ISSUE,
+        storyArc: String? = null
+    ) {
+        val cleanNum = issueNumber.trim()
+        if (cleanNum.isBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val existing = repository.getComicIssuesOnce(mediaId)
+            val nextOrder = (existing.maxOfOrNull { it.sortOrder } ?: -1) + 1
+            repository.insertComicIssue(
+                ComicIssueEntity(
+                    mediaId = mediaId,
+                    issueNumber = cleanNum,
+                    issueTitle = issueTitle,
+                    entryType = entryType.name,
+                    storyArc = storyArc,
+                    sortOrder = nextOrder
+                )
+            )
+        }
+    }
+
+    fun deleteComicIssue(issueId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteComicIssueById(issueId)
+        }
+    }
+
+    fun seedComicIssuesRange(count: Int) {
+        val capped = count.coerceIn(1, 50)
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            val existing = repository.getComicIssuesOnce(mediaId)
+            if (existing.isNotEmpty()) return@launch
+            val entities = (1..capped).map { num ->
+                ComicIssueEntity(
+                    mediaId = mediaId,
+                    issueNumber = num.toString(),
+                    entryType = ComicEntryType.ISSUE.name,
+                    sortOrder = num - 1
+                )
+            }
+            repository.insertComicIssues(entities)
+        }
+    }
+
+    fun setComicCoverAsArtwork(url: String, asBanner: Boolean) {
+        if (asBanner) updateBanner(url) else updateCover(url)
+    }
+
     private fun generateMockSeasons(item: MediaItemEntity): List<Season> {
         val total = item.totalProgress?.toInt() ?: return emptyList()
         val watched = item.currentProgress.toInt()
@@ -5863,7 +6216,8 @@ data class CachedDetailAux(
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     val vnDiscussionComments: List<DiscussionComment> = emptyList(),
     val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
-    val bookDetailMeta: BookDetailMeta = BookDetailMeta()
+    val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
+    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta()
 )
 
 internal object DetailAuxMemoryCache {
@@ -5871,6 +6225,8 @@ internal object DetailAuxMemoryCache {
 
     fun getCacheKey(item: MediaItemEntity): String? {
         if (item.id > 0L) return "id_${item.id}"
+        if (item.mediaType == MediaType.COMIC && item.comicVineId != null && item.comicVineId > 0L) return "cv_${item.comicVineId}"
+        if (item.mediaType == MediaType.COMIC && item.metronId != null && item.metronId > 0L) return "metron_${item.metronId}"
         if (item.mediaType == MediaType.BOOK && !item.openLibraryId.isNullOrBlank()) return "ol_${item.openLibraryId}"
         if (item.mediaType == MediaType.BOOK && !item.hardcoverId.isNullOrBlank()) return "hc_${item.hardcoverId}"
         if (item.mediaType == MediaType.GAME && item.igdbId != null && item.igdbId > 0L) return "igdb_${item.igdbId}"

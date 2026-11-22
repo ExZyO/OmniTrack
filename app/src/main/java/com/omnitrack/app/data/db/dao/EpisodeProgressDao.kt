@@ -18,6 +18,9 @@ interface EpisodeProgressDao {
     @Query("SELECT * FROM episode_progress WHERE mediaId = :mediaId")
     suspend fun getAllProgressForMediaOnce(mediaId: Long): List<EpisodeProgressEntity>
 
+    @Query("SELECT * FROM episode_progress")
+    suspend fun getAllProgressOnce(): List<EpisodeProgressEntity>
+
     @Query("SELECT watchedAtMs FROM episode_progress WHERE isWatched = 1 AND watchedAtMs IS NOT NULL AND watchedAtMs >= :sinceMs")
     fun getWatchedTimestampsSince(sinceMs: Long): Flow<List<Long>>
 
@@ -32,4 +35,7 @@ interface EpisodeProgressDao {
 
     @Query("DELETE FROM episode_progress WHERE mediaId = :mediaId")
     suspend fun clearProgressForMedia(mediaId: Long)
+
+    @Query("DELETE FROM episode_progress")
+    suspend fun deleteAllProgress()
 }

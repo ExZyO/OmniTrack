@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -47,6 +48,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -90,6 +92,7 @@ import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -162,7 +165,7 @@ fun TrackerAccountsSheet(
                 TrackerServiceId.VNDB -> tokenSnapshot.vndbToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyVndb(it) }
                 TrackerServiceId.HARDCOVER -> tokenSnapshot.hardcoverToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyHardcover(it) }
                 TrackerServiceId.STEAM -> if (!tokenSnapshot.steamApiKey.isNullOrBlank() && !tokenSnapshot.steamId64.isNullOrBlank()) {
-                    TrackerAccountVerifier.verifySteam(tokenSnapshot.steamId64, tokenSnapshot.steamApiKey)
+                    TrackerAccountVerifier.verifySteam(tokenSnapshot.steamApiKey, tokenSnapshot.steamId64)
                 } else null
             } ?: VerificationState.Idle
             verifiedNames = verifiedNames + (service to state)
@@ -193,6 +196,8 @@ fun TrackerAccountsSheet(
                     try {
                         val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
                         BookCsvImporter.importCsv(text, app.repository)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         BookImportSummary(0, 0, e.message ?: "CSV read failed")
                     }
@@ -212,6 +217,8 @@ fun TrackerAccountsSheet(
                     try {
                         val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
                         BookCsvImporter.importLetterboxdCsv(text, app.repository)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         BookImportSummary(0, 0, e.message ?: "Letterboxd CSV failed")
                     }
@@ -231,6 +238,8 @@ fun TrackerAccountsSheet(
                     try {
                         val text = context.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }.orEmpty()
                         BookCsvImporter.importMalXml(text, app.repository)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         BookImportSummary(0, 0, e.message ?: "MAL XML read failed")
                     }
@@ -246,8 +255,22 @@ fun TrackerAccountsSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = DarkSurface,
-        dragHandle = null
+        dragHandle = null,
+        properties = ModalBottomSheetProperties(shouldDismissOnBackPress = false)
     ) {
+        BackHandler {
+            if (selectedService != null) {
+                selectedService = null
+            } else {
+                scope.launch {
+                    try {
+                        sheetState.hide()
+                    } finally {
+                        onDismiss()
+                    }
+                }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -311,6 +334,8 @@ fun TrackerAccountsSheet(
                                                 syncStatusNote = status
                                             }
                                             Toast.makeText(context, "Sync complete ($count updated/imported)", Toast.LENGTH_SHORT).show()
+                                        } catch (e: CancellationException) {
+                                            throw e
                                         } catch (e: Exception) {
                                             syncStatusNote = "Sync error: ${e.message}"
                                             Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -575,6 +600,8 @@ fun TrackerAccountsSheet(
                             try {
                                 syncEngine.drainQueue()
                                 Toast.makeText(context, "Synced queued changes", Toast.LENGTH_SHORT).show()
+                            } catch (e: CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
@@ -898,8 +925,15 @@ private fun TrackerAccountDetailView(
                         if (!isImporting) {
                             scope.launch {
                                 isImporting = true
-                                lastImportResult = onImportLibrary()
-                                isImporting = false
+                                try {
+                                    lastImportResult = onImportLibrary()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    lastImportResult = TrackerImportResult(0, 0, 0, e.message ?: "Import failed")
+                                } finally {
+                                    isImporting = false
+                                }
                             }
                         }
                     },

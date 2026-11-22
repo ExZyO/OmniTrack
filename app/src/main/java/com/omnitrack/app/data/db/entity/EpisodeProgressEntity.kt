@@ -1,7 +1,9 @@
 package com.omnitrack.app.data.db.entity
 
 import androidx.room.Entity
+import kotlinx.serialization.Serializable
 
+@Serializable
 @Entity(
     tableName = "episode_progress",
     primaryKeys = ["mediaId", "seasonNumber", "episodeNumber"]

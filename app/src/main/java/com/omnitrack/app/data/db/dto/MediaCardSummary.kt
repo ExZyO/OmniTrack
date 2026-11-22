@@ -42,5 +42,14 @@ data class MediaCardSummary(
     val bookFormat: String? = null,
     val bookTrackingMode: String? = null,
     val bookAudioMinutes: Int? = null,
-    val bookTotalAudioMinutes: Int? = null
+    val bookTotalAudioMinutes: Int? = null,
+    val comicVineId: Long? = null,
+    val metronId: Long? = null,
+    val comicPublisher: String? = null,
+    val comicFormat: String? = null,
+    val comicTrackingMode: String? = null,
+    val isCustomEntry: Boolean = false,
+    val bannerFocalX: Float = 0f,
+    val bannerFocalY: Float = 0f,
+    val bannerZoom: Float = 1f
 )

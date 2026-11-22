@@ -62,13 +62,10 @@ import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -128,7 +125,7 @@ fun VisualPresentationScreen(
                 )
                 Text(
                     text = "Interactive layout styles & atmospheric canvas options",
-                    color = TextMuted,
+                    color = TextSecondary,
                     fontSize = 12.sp
                 )
             }
@@ -322,7 +319,7 @@ fun VisualPresentationScreen(
                     )
                     Text(
                         text = "${(episodeLayoutScale * 100).roundToInt()}%",
-                        color = AccentJade,
+                        color = AccentGold,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -334,8 +331,8 @@ fun VisualPresentationScreen(
                     },
                     valueRange = 0.80f..1.35f,
                     colors = SliderDefaults.colors(
-                        thumbColor = AccentJade,
-                        activeTrackColor = AccentJade,
+                        thumbColor = AccentGold,
+                        activeTrackColor = AccentGold,
                         inactiveTrackColor = Color.White.copy(alpha = 0.15f)
                     )
                 )
@@ -343,9 +340,9 @@ fun VisualPresentationScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("80% Compact", color = TextMuted, fontSize = 11.sp)
-                    Text("100% Default", color = TextMuted, fontSize = 11.sp)
-                    Text("135% Large", color = TextMuted, fontSize = 11.sp)
+                    Text("80% Compact", color = TextSecondary, fontSize = 11.sp)
+                    Text("100% Default", color = TextSecondary, fontSize = 11.sp)
+                    Text("135% Large", color = TextSecondary, fontSize = 11.sp)
                 }
             }
 
@@ -586,13 +583,13 @@ private fun LivePresentationMockup(
                         .padding(10.dp)
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color.Black.copy(alpha = 0.70f))
-                        .border(0.8.dp, AccentArctic.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                        .border(0.8.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
                         .padding(horizontal = 7.dp, vertical = 2.5.dp)
                 ) {
                     Text(
                         text = "FULL-BLEED HERO (EDGE-TO-EDGE)",
                         fontSize = 8.5.sp,
-                        color = AccentArctic,
+                        color = AccentGold,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -678,7 +675,7 @@ private fun LivePresentationMockup(
             Text(
                 text = if (isSolidBlack) "AMOLED #000000" else "CINEMATIC BLUR AURA",
                 fontSize = 8.5.sp,
-                color = if (isSolidBlack) TextMuted else AccentJade,
+                color = if (isSolidBlack) TextSecondary else AccentGold,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -731,7 +728,7 @@ private fun LivePresentationMockup(
             )
             Text(
                 text = "ANIME • 2022 • STUDIO TRIGGER",
-                color = TextMuted,
+                color = TextSecondary,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.5.sp
@@ -765,10 +762,10 @@ private fun LivePresentationMockup(
                     modifier = Modifier
                         .size(20.dp)
                         .clip(CircleShape)
-                        .background(AccentArctic.copy(alpha = 0.2f)),
+                        .background(AccentGold.copy(alpha = 0.2f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("+1", color = AccentArctic, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                    Text("+1", color = AccentGold, fontSize = 9.sp, fontWeight = FontWeight.Black)
                 }
                 Text("10 / 10 EP", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
@@ -781,9 +778,9 @@ private fun LivePresentationMockup(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(AccentJade)
+                        .background(AccentGold)
                 )
-                Text("COMPLETED", color = AccentJade, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Text("COMPLETED", color = AccentGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
 
             Row(
@@ -823,12 +820,12 @@ private fun PresentationChoiceCard(
     modifier: Modifier = Modifier
 ) {
     val bgColor by animateColorAsState(
-        targetValue = if (isSelected) AccentArctic.copy(alpha = 0.12f) else Color(0xFF0F1420),
+        targetValue = if (isSelected) AccentGold.copy(alpha = 0.14f) else DarkSurfaceElevated,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "cardBg"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isSelected) AccentArctic.copy(alpha = 0.60f) else Color.White.copy(alpha = 0.08f),
+        targetValue = if (isSelected) AccentGold else GlassBorder,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "cardBorder"
     )
@@ -851,7 +848,7 @@ private fun PresentationChoiceCard(
             ) {
                 Text(
                     text = title,
-                    color = if (isSelected) AccentArctic else TextPrimary,
+                    color = if (isSelected) AccentGold else TextPrimary,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -860,13 +857,13 @@ private fun PresentationChoiceCard(
                         modifier = Modifier
                             .size(16.dp)
                             .clip(CircleShape)
-                            .background(AccentArctic),
+                            .background(AccentGold),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Selected",
-                            tint = Color.Black,
+                            tint = AmoledBlack,
                             modifier = Modifier.size(11.dp)
                         )
                     }
@@ -874,7 +871,7 @@ private fun PresentationChoiceCard(
             }
             Text(
                 text = description,
-                color = TextMuted,
+                color = TextSecondary,
                 fontSize = 11.sp,
                 lineHeight = 15.sp
             )

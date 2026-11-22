@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes, comicVineId, metronId, comicPublisher, comicFormat, comicTrackingMode, isCustomEntry, bannerFocalX, bannerFocalY, bannerZoom FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
@@ -60,6 +60,12 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE isbn = :isbn AND mediaType = :type LIMIT 1")
     suspend fun findByIsbn(isbn: String, type: MediaType = MediaType.BOOK): MediaItemEntity?
 
+    @Query("SELECT * FROM media_items WHERE comicVineId = :comicVineId AND mediaType = :type LIMIT 1")
+    suspend fun findByComicVineId(comicVineId: Long, type: MediaType = MediaType.COMIC): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE metronId = :metronId AND mediaType = :type LIMIT 1")
+    suspend fun findByMetronId(metronId: Long, type: MediaType = MediaType.COMIC): MediaItemEntity?
+
     @Query("SELECT * FROM media_items WHERE LOWER(TRIM(title)) = LOWER(TRIM(:title)) AND mediaType = :type LIMIT 1")
     suspend fun findByTitleAndType(title: String, type: MediaType): MediaItemEntity?
 
@@ -80,6 +86,9 @@ interface MediaDao {
 
     @Query("UPDATE media_items SET artworkRole = :role, lastUpdated = :updated WHERE id = :id")
     suspend fun updateArtworkRole(id: Long, role: String, updated: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET bannerFocalX = :focalX, bannerFocalY = :focalY, bannerZoom = :zoom, lastUpdated = :updated WHERE id = :id")
+    suspend fun updateBannerFraming(id: Long, focalX: Float, focalY: Float, zoom: Float, updated: Long = System.currentTimeMillis())
 
     @Query("UPDATE media_items SET clearartUrl = :clearart, communityScore = :score, imdbScore = :imdb, rtScore = :rt, metacriticScore = :meta, traktScore = :trakt, audienceScore = :audience WHERE id = :id")
     suspend fun updateEnrichment(id: Long, clearart: String?, score: Float?, imdb: Float?, rt: Int?, meta: Int?, trakt: Int? = null, audience: Int? = null)
