@@ -269,21 +269,21 @@ fun DiscoverCustomizerSheet(
                             }
                         }
 
-                        val uiToggles: List<Triple<String, String, Pair<Boolean, suspend (Boolean) -> Unit>>> = listOf(
-                            Triple("Spotlight / Hero Banner", "Featured visual showcase above shelves (Layouts A & B)", settings.showSpotlightBanner to { v: Boolean -> preferenceManager.setDiscoverShowSpotlight(v) }),
-                            Triple("Quick-Search Inspiration Chips", "Curated one-tap search pills below category tabs", settings.showQuickSearchChips to { v: Boolean -> preferenceManager.setDiscoverShowQuickChips(v) }),
-                            Triple("Secondary Sub-Filter Bars", "Format, origin, publisher & platform sub-filters", settings.showSubFilters to { v: Boolean -> preferenceManager.setDiscoverShowSubFilters(v) }),
-                            Triple("\"In Your Library\" Spotlight Rail", "Bottom rail highlighting entries you already track", settings.showInYourLibraryShelf to { v: Boolean -> preferenceManager.setDiscoverShowInLibrary(v) }),
-                            Triple("\"Create Custom Entry\" Card", "Manual entry fallback inside search results", settings.showCustomEntryCard to { v: Boolean -> preferenceManager.setDiscoverShowCustomEntry(v) }),
-                            Triple("AI Smart Search Toggle Pill", "Inline AI natural-language search switch in search bar", settings.showAiToggle to { v: Boolean -> preferenceManager.setDiscoverShowAiToggle(v) })
+                        val uiToggles: List<Triple<String, String, Pair<Boolean, (Boolean) -> Unit>>> = listOf(
+                            Triple("Spotlight / Hero Banner", "Featured visual showcase above shelves (Layouts A & B)", settings.showSpotlightBanner to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSpotlight(v) } }),
+                            Triple("Quick-Search Inspiration Chips", "Curated one-tap search pills below category tabs", settings.showQuickSearchChips to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowQuickChips(v) } }),
+                            Triple("Secondary Sub-Filter Bars", "Format, origin, publisher & platform sub-filters", settings.showSubFilters to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSubFilters(v) } }),
+                            Triple("\"In Your Library\" Spotlight Rail", "Bottom rail highlighting entries you already track", settings.showInYourLibraryShelf to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowInLibrary(v) } }),
+                            Triple("\"Create Custom Entry\" Card", "Manual entry fallback inside search results", settings.showCustomEntryCard to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowCustomEntry(v) } }),
+                            Triple("AI Smart Search Toggle Pill", "Inline AI natural-language search switch in search bar", settings.showAiToggle to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowAiToggle(v) } })
                         )
                         items(uiToggles, key = { "uitog_${it.first}" }) { (title, subtitle, statePair) ->
-                            val (checked, setter) = statePair
+                            val (checked, onToggle) = statePair
                             DiscoverSwitchRow(
                                 title = title,
                                 subtitle = subtitle,
                                 checked = checked,
-                                onCheckedChange = { next -> scope.launch { setter(next) } }
+                                onCheckedChange = onToggle
                             )
                             HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.5.dp)
                         }
