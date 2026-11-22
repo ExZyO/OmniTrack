@@ -8,7 +8,15 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.repository.MediaRepository
+import com.omnitrack.app.data.enrichment.CalendarReleaseItem
+import com.omnitrack.app.data.enrichment.ReleaseCalendarRepository
+import com.omnitrack.app.data.model.BookTrackingMode
+import com.omnitrack.app.data.search.OmniSearchRepository
+import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.util.MockData
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,8 +24,20 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+data class ProgressUndoEvent(
+    val mediaId: Long,
+    val title: String,
+    val deltaLabel: String,
+    val previousProgress: Double,
+    val previousStatus: TrackingStatus,
+    val previousAudioMinutes: Int? = null,
+    val previousPlaytimeHours: Double = 0.0,
+    val createdAtMs: Long = System.currentTimeMillis()
+)
 
 data class HomeUiState(
     val mediaSummaries: List<MediaCardSummary> = emptyList(),
@@ -45,6 +65,25 @@ class HomeViewModel(
     val discoverIsSearching = MutableStateFlow(false)
     val discoverAiResolutionBanner = MutableStateFlow<String?>(null)
     val discoverUseAiSearch = MutableStateFlow<Boolean?>(null)
+
+    private val releaseCalendarRepository = ReleaseCalendarRepository()
+    private val homeSearchRepository = OmniSearchRepository()
+
+    private val _rawCalendarReleases = MutableStateFlow<List<CalendarReleaseItem>>(emptyList())
+    private val _isLoadingCalendar = MutableStateFlow(false)
+    val isLoadingCalendar: StateFlow<Boolean> = _isLoadingCalendar.asStateFlow()
+
+    private val _trendingItems = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val trendingItems: StateFlow<List<SearchResultItem>> = _trendingItems.asStateFlow()
+    private val _isLoadingTrending = MutableStateFlow(false)
+    val isLoadingTrending: StateFlow<Boolean> = _isLoadingTrending.asStateFlow()
+
+    private val _undoEvent = MutableStateFlow<ProgressUndoEvent?>(null)
+    val undoEvent: StateFlow<ProgressUndoEvent?> = _undoEvent.asStateFlow()
+
+    val watchedTimestamps90d: StateFlow<List<Long>> = repository
+        .getWatchedTimestampsSince(System.currentTimeMillis() - 90L * 24L * 60L * 60L * 1000L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     var discoverLastDebounceQuery: String? = null
     var discoverLastExecutedQuery: String? = null
     var discoverLastExecutedFilter: MediaType? = null
@@ -125,17 +164,187 @@ class HomeViewModel(
         _selectedStatus.value = status
     }
 
+    val calendarReleases: StateFlow<List<CalendarReleaseItem>> = combine(
+        _rawCalendarReleases,
+        uiState
+    ) { raw, state ->
+        val library = state.allMediaSummaries
+        val byAnilist = library.filter { it.anilistId != null }.associateBy { it.anilistId }
+        val byMal = library.filter { it.malId != null }.associateBy { it.malId }
+        val byTitle = library.associateBy { it.title.trim().lowercase() }
+        raw.map { rel ->
+            val matched = (rel.anilistId?.let { byAnilist[it] })
+                ?: (rel.malId?.let { byMal[it] })
+                ?: byTitle[rel.title.trim().lowercase()]
+            if (matched != null) rel.copy(localMediaId = matched.id) else rel
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun loadReleaseCalendar(force: Boolean = false) {
+        if (_isLoadingCalendar.value) return
+        if (!force && _rawCalendarReleases.value.isNotEmpty()) return
+        viewModelScope.launch {
+            _isLoadingCalendar.value = true
+            try {
+                _rawCalendarReleases.value = releaseCalendarRepository.fetchWeeklyAiringSchedule(force = force)
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            } finally {
+                _isLoadingCalendar.value = false
+            }
+        }
+    }
+
+    fun loadHomeTrending(force: Boolean = false) {
+        if (_isLoadingTrending.value) return
+        if (!force && _trendingItems.value.isNotEmpty()) return
+        viewModelScope.launch {
+            _isLoadingTrending.value = true
+            try {
+                coroutineScope {
+                    val aniDeferred = async { runCatching { releaseCalendarRepository.fetchTrendingAniList(force) }.getOrDefault(emptyList()) }
+                    val booksDeferred = async { runCatching { homeSearchRepository.fetchDiscoverBooksShelves("trending").take(6) }.getOrDefault(emptyList()) }
+                    val gamesDeferred = async { runCatching { homeSearchRepository.fetchDiscoverGamesShelves("top_rated").take(6) }.getOrDefault(emptyList()) }
+                    val ani = aniDeferred.await()
+                    val books = booksDeferred.await()
+                    val games = gamesDeferred.await()
+                    val merged = mutableListOf<SearchResultItem>()
+                    val maxLen = maxOf(ani.size, books.size, games.size)
+                    for (i in 0 until maxLen) {
+                        if (i < ani.size) merged.add(ani[i])
+                        if (i < books.size) merged.add(books[i])
+                        if (i < games.size) merged.add(games[i])
+                    }
+                    _trendingItems.value = merged
+                        .distinctBy { "${it.mediaType}_${it.title.trim().lowercase()}" }
+                        .take(18)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            } finally {
+                _isLoadingTrending.value = false
+            }
+        }
+    }
+
     fun incrementProgress(id: Long, mediaType: MediaType, currentProgress: Double, totalProgress: Double?) {
         viewModelScope.launch {
-            val increment = when (mediaType) {
-                MediaType.GAME, MediaType.VISUAL_NOVEL -> 0.5
-                else -> 1.0
+            val entity = repository.getMediaById(id).firstOrNull()
+            if (entity != null) {
+                val now = System.currentTimeMillis()
+                when {
+                    mediaType == MediaType.BOOK && BookTrackingMode.fromName(entity.bookTrackingMode) == BookTrackingMode.AUDIO_MINUTES -> {
+                        val prevMins = entity.bookAudioMinutes ?: 0
+                        val totalMins = entity.bookTotalAudioMinutes
+                        val nextMins = if (totalMins != null && totalMins > 0) (prevMins + 15).coerceAtMost(totalMins) else (prevMins + 15)
+                        val newStatus = when {
+                            totalMins != null && totalMins > 0 && nextMins >= totalMins -> TrackingStatus.COMPLETED
+                            entity.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> entity.status
+                        }
+                        repository.updateMedia(
+                            entity.copy(
+                                bookAudioMinutes = nextMins,
+                                status = newStatus,
+                                lastUpdated = now
+                            )
+                        )
+                        _undoEvent.value = ProgressUndoEvent(
+                            mediaId = id,
+                            title = entity.title,
+                            deltaLabel = "+15m",
+                            previousProgress = entity.currentProgress,
+                            previousStatus = entity.status,
+                            previousAudioMinutes = entity.bookAudioMinutes,
+                            previousPlaytimeHours = entity.playtimeHours,
+                            createdAtMs = now
+                        )
+                    }
+                    else -> {
+                        val isHoursMedia = mediaType == MediaType.GAME || mediaType == MediaType.VISUAL_NOVEL
+                        val baseValue = if (isHoursMedia && entity.playtimeHours > 0.0) {
+                            entity.playtimeHours
+                        } else {
+                            entity.currentProgress
+                        }
+                        val increment = when (mediaType) {
+                            MediaType.GAME, MediaType.VISUAL_NOVEL -> 0.5
+                            MediaType.BOOK -> {
+                                if (BookTrackingMode.fromName(entity.bookTrackingMode) == BookTrackingMode.PERCENT) 5.0 else 10.0
+                            }
+                            else -> 1.0
+                        }
+                        val cap = if (mediaType == MediaType.BOOK && BookTrackingMode.fromName(entity.bookTrackingMode) == BookTrackingMode.PERCENT) {
+                            100.0
+                        } else {
+                            entity.totalProgress
+                        }
+                        val nextRaw = baseValue + increment
+                        val clamped = if (cap != null && cap > 0.0) nextRaw.coerceAtMost(cap) else nextRaw
+                        val newStatus = when {
+                            mediaType == MediaType.MOVIE -> TrackingStatus.COMPLETED
+                            cap != null && cap > 0.0 && clamped >= cap -> TrackingStatus.COMPLETED
+                            entity.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                            else -> entity.status
+                        }
+                        repository.updateMedia(
+                            entity.copy(
+                                currentProgress = clamped,
+                                playtimeHours = if (isHoursMedia) clamped else entity.playtimeHours,
+                                status = newStatus,
+                                lastUpdated = now
+                            )
+                        )
+                        val deltaLabel = when (mediaType) {
+                            MediaType.GAME, MediaType.VISUAL_NOVEL -> "+0.5h"
+                            MediaType.BOOK -> if (BookTrackingMode.fromName(entity.bookTrackingMode) == BookTrackingMode.PERCENT) "+5%" else "+10p"
+                            MediaType.MOVIE -> "Watched"
+                            else -> "+1 ${mediaType.unitLabel}"
+                        }
+                        _undoEvent.value = ProgressUndoEvent(
+                            mediaId = id,
+                            title = entity.title,
+                            deltaLabel = deltaLabel,
+                            previousProgress = entity.currentProgress,
+                            previousStatus = entity.status,
+                            previousAudioMinutes = entity.bookAudioMinutes,
+                            previousPlaytimeHours = entity.playtimeHours,
+                            createdAtMs = now
+                        )
+                    }
+                }
+            } else {
+                val increment = when (mediaType) {
+                    MediaType.GAME, MediaType.VISUAL_NOVEL -> 0.5
+                    MediaType.BOOK -> 10.0
+                    else -> 1.0
+                }
+                val newProgress = currentProgress + increment
+                val clamped = if (totalProgress != null) newProgress.coerceAtMost(totalProgress) else newProgress
+                repository.updateProgress(id, clamped)
             }
-            val newProgress = currentProgress + increment
-            val clamped = if (totalProgress != null)
-                newProgress.coerceAtMost(totalProgress) else newProgress
-            repository.updateProgress(id, clamped)
         }
+    }
+
+    fun undoLastProgress() {
+        val event = _undoEvent.value ?: return
+        _undoEvent.value = null
+        viewModelScope.launch {
+            val entity = repository.getMediaById(event.mediaId).firstOrNull() ?: return@launch
+            repository.updateMedia(
+                entity.copy(
+                    currentProgress = event.previousProgress,
+                    status = event.previousStatus,
+                    bookAudioMinutes = event.previousAudioMinutes,
+                    playtimeHours = event.previousPlaytimeHours,
+                    lastUpdated = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun dismissUndoEvent() {
+        _undoEvent.value = null
     }
 
     fun incrementProgress(summary: MediaCardSummary) {
@@ -146,7 +355,7 @@ class HomeViewModel(
         incrementProgress(item.id, item.mediaType, item.currentProgress, item.totalProgress)
     }
 
-    fun addMediaFromSearch(searchResult: com.omnitrack.app.data.search.SearchResultItem, status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK) {
+    fun addMediaFromSearch(searchResult: SearchResultItem, status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK) {
         viewModelScope.launch {
             val entity = searchResult.toMediaItemEntity(status)
             repository.insertMedia(entity)

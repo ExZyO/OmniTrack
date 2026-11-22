@@ -24,10 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.Icon
@@ -82,8 +84,9 @@ import com.omnitrack.app.ui.components.jelly.JellyMotion
 import com.omnitrack.app.ui.components.jelly.drawJellyGlow
 import com.omnitrack.app.ui.components.jelly.drawJellyPill
 import com.omnitrack.app.ui.components.jelly.jellyPillPath
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.TextMuted
+import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.TextPrimary
+import com.omnitrack.app.ui.theme.TextSecondary
 import dev.chrisbanes.haze.HazeState
 import kotlin.math.abs
 import kotlin.math.max
@@ -93,6 +96,7 @@ enum class NavDestination(
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
+    HOME("Home", Icons.Filled.Home, Icons.Outlined.Home),
     LIBRARY("Library", Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary),
     DISCOVER("Discover", Icons.Filled.Explore, Icons.Outlined.Explore),
     HISTORY("History", Icons.Filled.History, Icons.Outlined.History),
@@ -217,8 +221,8 @@ fun OmniFloatingNavBar(
     )
 
     val trackHeight = 48.dp + 16.dp * labelFraction
-    val horizontalPadding = 58.dp - 30.dp * labelFraction
-    val selectedSurface = AccentArctic.copy(alpha = 0.18f)
+    val horizontalPadding = 42.dp - 26.dp * labelFraction
+    val selectedSurface = AccentGold.copy(alpha = 0.16f)
 
     // Double-tap & re-tap detection (380ms window)
     var lastTapTime by remember { mutableLongStateOf(0L) }
@@ -250,7 +254,7 @@ fun OmniFloatingNavBar(
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 400.dp)
+                .widthIn(max = 440.dp)
                 .fillMaxWidth()
                 .height(trackHeight)
                 .onSizeChanged {
@@ -301,14 +305,14 @@ fun OmniFloatingNavBar(
                                 translationX = motion.frame.panelOffset * density
                             }
                     ) {
-                        // 1. Liquid Glass Surface with Refraction & Ambient Cyan Glow
+                        // 1. Liquid Glass Surface with Warm Gold Specular Rim
                         Box(
                             modifier = Modifier
                                 .matchParentSize()
                                 .clip(RoundedCornerShape(50))
                                 .drawWithContent {
                                     drawContent()
-                                    drawJellyGlow(motion.frame, AccentArctic.copy(alpha = glowStrength))
+                                    drawJellyGlow(motion.frame, AccentGold.copy(alpha = glowStrength))
                                 }
                         ) {
                             GlassBarSurface(hazeState, Modifier.matchParentSize(), glowStrength)
@@ -338,7 +342,7 @@ fun OmniFloatingNavBar(
                             )
                         }
 
-                        // 3. Active Tab Row (clipped inside active jelly pill with glowing background)
+                        // 3. Active Tab Row (clipped inside active jelly pill)
                         if (selectedIndex >= 0) {
                             Box(
                                 modifier = Modifier
@@ -349,7 +353,7 @@ fun OmniFloatingNavBar(
                                             motion.frame,
                                             items.size,
                                             selectedSurface,
-                                            AccentArctic.copy(alpha = glowStrength)
+                                            AccentGold.copy(alpha = glowStrength)
                                         ) { drawContent() }
                                     }
                             ) {
@@ -388,10 +392,10 @@ private fun JellyTabRow(
     active: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val color = if (active) AccentArctic else TextMuted
+    val color = if (active) AccentGold else TextSecondary
     val iconSize = 24.dp
     val labelHeight = 15.dp
-    val iconTint = if (active) Color.White else color
+    val iconTint = if (active) AccentGold else color
 
     Row(
         modifier = modifier
@@ -437,14 +441,15 @@ private fun JellyTabRow(
                     ) {
                         Text(
                             text = destination.title,
-                            color = color,
+                            color = if (active) AccentGold else TextSecondary,
                             style = TextStyle(
-                                fontSize = 11.5.sp,
+                                fontSize = 11.sp,
                                 lineHeight = 14.sp,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                 textAlign = TextAlign.Center
                             ),
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .fillMaxWidth()

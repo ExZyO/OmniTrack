@@ -3,7 +3,6 @@ package com.omnitrack.app.ui.screens.home.views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,73 +13,76 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ViewModule
 import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewCarousel
+import androidx.compose.material.icons.filled.ViewModule
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.BuildConfig
 import com.omnitrack.app.data.db.dto.MediaCardSummary
-import com.omnitrack.app.data.model.MediaType
-import com.omnitrack.app.data.model.TrackingStatus
-import com.omnitrack.app.data.preferences.BannerSizing
-import com.omnitrack.app.data.preferences.DetailsBackdropStyle
-import com.omnitrack.app.data.preferences.DetailsPagePresentation
-import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.data.sync.TrackerTokenManager
+import com.omnitrack.app.data.sync.TrackerTokens
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
-import com.omnitrack.app.ui.components.DetailsPageLayoutSheet
 import com.omnitrack.app.ui.components.PosterCustomizationSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.screens.detail.components.EpisodeLayoutSheet
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
+import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
-import kotlinx.coroutines.launch
+
+private data class SettingRowEntry(
+    val icon: ImageVector,
+    val title: String,
+    val subtitle: String,
+    val keywords: String,
+    val trailingText: String? = null,
+    val accentIcon: Boolean = false,
+    val onClick: () -> Unit
+)
 
 @Composable
 fun SettingsView(
@@ -90,197 +92,246 @@ fun SettingsView(
     onNavigateToArtworkPriority: () -> Unit = {},
     onNavigateToVisualPresentation: () -> Unit = {},
     onNavigateToDetailsPageLayout: () -> Unit = {},
+    onOpenHomeCustomizer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val prefManager = remember { PreferenceManager(context) }
-    val scope = rememberCoroutineScope()
+    val tokenManager = remember { TrackerTokenManager(context) }
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
+
+    val connectedCount = remember(tokens) {
+        listOf(
+            tokens.anilistToken,
+            tokens.malToken,
+            tokens.traktToken,
+            tokens.simklToken,
+            tokens.comickToken,
+            tokens.vndbToken,
+            tokens.steamApiKey ?: tokens.steamId64,
+            tokens.bangumiToken,
+            tokens.tmdbToken,
+            tokens.igdbToken,
+            tokens.hardcoverToken
+        ).count { !it.isNullOrBlank() }
+    }
+
+    var searchQuery by remember { mutableStateOf("") }
     var showApiConfigSheet by remember { mutableStateOf(false) }
     var showBackupRestoreSheet by remember { mutableStateOf(false) }
     var showTrackerAccountsSheet by remember { mutableStateOf(false) }
     var showPosterCustomizationSheet by remember { mutableStateOf(false) }
     var showEpisodeLayoutSheet by remember { mutableStateOf(false) }
-    var showDetailsPageLayoutSheet by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+
+    val accountRows = listOf(
+        SettingRowEntry(
+            icon = Icons.Default.CloudSync,
+            title = "Tracker Accounts",
+            subtitle = "Connect AniList, MAL, Trakt, Simkl, Bangumi & more",
+            keywords = "anilist mal trakt simkl bangumi vndb steam hardcover sync import login",
+            trailingText = "$connectedCount linked",
+            accentIcon = connectedCount > 0,
+            onClick = { showTrackerAccountsSheet = true }
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Key,
+            title = "API Keys & Integrations",
+            subtitle = "TMDb, IGDB, Gemini AI & SteamGridDB keys",
+            keywords = "api key tmdb igdb gemini steamgriddb secret",
+            onClick = { showApiConfigSheet = true }
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Archive,
+            title = "Backup & Restore",
+            subtitle = "Export library JSON, progress & custom artwork links",
+            keywords = "backup restore export import json csv xml",
+            onClick = { showBackupRestoreSheet = true }
+        )
+    )
+
+    val appearanceRows = listOf(
+        SettingRowEntry(
+            icon = Icons.Default.Home,
+            title = "Home & Hero Layout",
+            subtitle = "Choose hero source, reorder 7 shelves & toggle rows",
+            keywords = "home hero carousel customize reorder shelves layout",
+            accentIcon = true,
+            onClick = onOpenHomeCustomizer
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Palette,
+            title = "Visual Presentation",
+            subtitle = "${presentationSettings.detailsPagePresentation.displayName} \u00B7 Backdrop & blur depth",
+            keywords = "theme presentation hero classic backdrop blur",
+            onClick = onNavigateToVisualPresentation
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.ViewCarousel,
+            title = "Details Page Layout",
+            subtitle = "Reorder sections and toggle visibility on detail pages",
+            keywords = "details layout sections reorder drag",
+            onClick = onNavigateToDetailsPageLayout
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.ViewModule,
+            title = "Poster Card Customization",
+            subtitle = "Card dimensions, corners, landscape mode & sheen",
+            keywords = "poster card size corner radius depth landscape",
+            onClick = { showPosterCustomizationSheet = true }
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Image,
+            title = "Artwork Priority",
+            subtitle = "Configure preferred cover & banner sources per vertical",
+            keywords = "artwork priority cover banner provider anilist tmdb openlibrary",
+            onClick = onNavigateToArtworkPriority
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.ViewCarousel,
+            title = "Episode & Volume Layout",
+            subtitle = "List, horizontal strip, vertical cards & volume grid",
+            keywords = "episode chapter volume layout grid card list",
+            onClick = { showEpisodeLayoutSheet = true }
+        )
+    )
+
+    val systemRows = listOf(
+        SettingRowEntry(
+            icon = Icons.Default.SystemUpdate,
+            title = "Check for Updates",
+            subtitle = "Installed: v${BuildConfig.VERSION_NAME} (b${BuildConfig.VERSION_CODE})",
+            keywords = "update version release github apk",
+            accentIcon = true,
+            onClick = onCheckUpdate
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.BugReport,
+            title = "Diagnostics & Logs",
+            subtitle = "Inspect network status, cache footprint & logs",
+            keywords = "diagnostics logs debug crash cache",
+            onClick = onOpenDiagnostics
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Info,
+            title = "About OmniTrack",
+            subtitle = "Version ${BuildConfig.VERSION_NAME} \u00B7 Room Schema v17",
+            keywords = "about schema version database library count",
+            onClick = { showAboutDialog = true }
+        )
+    )
+
+    val q = searchQuery.trim()
+    val filteredGroups = remember(q, accountRows, appearanceRows, systemRows) {
+        val raw = listOf(
+            "ACCOUNTS & SYNC" to accountRows,
+            "APPEARANCE & LAYOUT" to appearanceRows,
+            "SYSTEM & UPDATES" to systemRows
+        )
+        if (q.isEmpty()) raw
+        else raw.mapNotNull { (header, rows) ->
+            val matched = rows.filter { row ->
+                row.title.contains(q, ignoreCase = true) ||
+                    row.subtitle.contains(q, ignoreCase = true) ||
+                    row.keywords.contains(q, ignoreCase = true)
+            }
+            if (matched.isNotEmpty()) header to matched else null
+        }
+    }
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 16.dp)
-            .padding(bottom = 110.dp),
-        verticalArrangement = Arrangement.spacedBy(28.dp)
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 120.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // App Identity Header
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
+        // Header
+        Column(modifier = Modifier.padding(top = 14.dp)) {
             Text(
                 text = "Settings",
-                fontWeight = FontWeight.Bold,
                 fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
             Text(
-                text = "OmniTrack Universal Media Tracker",
-                fontSize = 12.5.sp,
-                color = TextMuted
+                text = "${allMedia.size} tracked items \u00B7 $connectedCount connected trackers",
+                fontSize = 12.sp,
+                color = TextSecondary
             )
         }
 
-        // Section: Library Overview
-        SettingsSection(title = "LIBRARY OVERVIEW") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp, horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StatMetric(
-                    count = allMedia.size.toString(),
-                    label = "Total Items",
-                    accentColor = AccentArctic
+        // Inline Search Settings Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = null,
+                tint = AccentGold,
+                modifier = Modifier.size(16.dp)
+            )
+            Box(modifier = Modifier.weight(1f)) {
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
+                    cursorBrush = SolidColor(AccentGold),
+                    modifier = Modifier.fillMaxWidth()
                 )
-                StatDivider()
-                StatMetric(
-                    count = allMedia.count { it.status == TrackingStatus.IN_PROGRESS }.toString(),
-                    label = "In Progress",
-                    accentColor = AccentJade
-                )
-                StatDivider()
-                StatMetric(
-                    count = allMedia.count { it.status == TrackingStatus.COMPLETED }.toString(),
-                    label = "Completed",
-                    accentColor = AccentGold
+                if (searchQuery.isEmpty()) {
+                    Text(
+                        text = "Search settings...",
+                        color = TextSecondary.copy(alpha = 0.7f),
+                        fontSize = 13.5.sp
+                    )
+                }
+            }
+            if (searchQuery.isNotEmpty()) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Clear",
+                    tint = TextSecondary,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { searchQuery = "" }
                 )
             }
         }
 
-        // Section: Visual Presentation & Themes (Dedicated Screen with Live Mockup)
-        SettingsSection(title = "VISUAL PRESENTATION & THEMES") {
-            GroupedSettingRow(
-                icon = Icons.Default.ViewCarousel,
-                iconTint = AccentGold,
-                title = "Visual Presentation & Themes",
-                subtitle = "Interactive preview & customization for hero layouts, banner sizing & ambient auras",
-                onClick = onNavigateToVisualPresentation
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.ViewModule,
-                iconTint = AccentArctic,
-                title = "Poster Card Style",
-                subtitle = "Configure grid density (104–140dp), corner radius (0–24dp), 16:9 mode & labels",
-                onClick = { showPosterCustomizationSheet = true }
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.ViewCarousel,
-                iconTint = AccentJade,
-                title = "Episode Layout & Sizing",
-                subtitle = "Horizontal carousel, compact list, or vertical cards with adjustable size",
-                onClick = { showEpisodeLayoutSheet = true }
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Tune,
-                iconTint = AccentArctic,
-                title = "Details Page Sections & Order",
-                subtitle = "Reorder sections and toggle visibility: Airing, Episodes, Cast, Genres & Tags, Details, Synonyms, Reviews",
-                onClick = onNavigateToDetailsPageLayout
-            )
-        }
-
-        // Section: Artwork & Metadata Sources (Dedicated Fullscreen Waterfall)
-        SettingsSection(title = "ARTWORK & METADATA SOURCES") {
-            GroupedSettingRow(
-                icon = Icons.Default.Palette,
-                iconTint = AccentArctic,
-                title = "Artwork Priority & Waterfall",
-                subtitle = "Fluid drag-to-reorder & toggle upstream fallbacks per category",
-                onClick = onNavigateToArtworkPriority
-            )
-        }
-
-        // Section: External APIs & AI Engine
-        SettingsSection(title = "EXTERNAL APIS & ENRICHMENT") {
-            GroupedSettingRow(
-                icon = Icons.Default.Key,
-                iconTint = AccentGold,
-                title = "API Keys & AI Query Engine",
-                subtitle = "Configure Google Gemini, OpenRouter, TMDb, Fanart.tv & MdbList",
-                onClick = { showApiConfigSheet = true }
-            )
-        }
-
-        // Section: Tracker Accounts & Cloud Sync
-        SettingsSection(title = "TRACKER ACCOUNTS & CLOUD SYNC") {
-            GroupedSettingRow(
-                icon = Icons.Default.CloudSync,
-                iconTint = AccentArctic,
-                title = "Tracker Accounts & Live Sync",
-                subtitle = "Connect AniList, MAL, Trakt, SIMKL, Comick, VNDB & Steam for two-way library sync",
-                onClick = { showTrackerAccountsSheet = true }
-            )
-        }
-
-        // Section: Backup & Restoration (.omnibk)
-        SettingsSection(title = "BACKUP & RESTORATION (.OMNIBK)") {
-            GroupedSettingRow(
-                icon = Icons.Default.Archive,
-                iconTint = AccentJade,
-                title = "Universal App Backup (.omnibk)",
-                subtitle = "Export or restore library, custom covers, categories, and settings in .omnibk format",
-                onClick = { showBackupRestoreSheet = true }
-            )
-        }
-
-        // Section: Updates & Maintenance
-        SettingsSection(title = "UPDATES & MAINTENANCE") {
-            GroupedSettingRow(
-                icon = Icons.Default.SystemUpdate,
-                iconTint = AccentJade,
-                title = "Check for Updates",
-                subtitle = "Installed: v${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
-                onClick = onCheckUpdate
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.BugReport,
-                iconTint = AccentArctic,
-                title = "Diagnostics & System Logs",
-                subtitle = "Inspect live logs, HTTP requests, and update logs",
-                onClick = onOpenDiagnostics
-            )
-        }
-
-        // Section: Engine & Security Integrity
-        SettingsSection(title = "SYSTEM & ENGINE INTEGRITY") {
-            GroupedSettingRow(
-                icon = Icons.Default.Lock,
-                iconTint = AccentGold,
-                title = "Release Keystore Signing",
-                subtitle = "Deterministic GitHub Actions keystore verified"
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Storage,
-                iconTint = AccentArctic,
-                title = "Local Database Engine",
-                subtitle = "Room 2.6.1 with SQLite Write-Ahead Logging (WAL) & Schema v5"
-            )
-            SectionDivider()
-            GroupedSettingRow(
-                icon = Icons.Default.Info,
-                iconTint = TextMuted,
-                title = "About OmniTrack",
-                subtitle = "Unified native media tracker for Anime, Manga, Novels, Shows, Movies, Games & VNs"
-            )
+        // Grouped Sections
+        if (filteredGroups.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 40.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No matching settings for \"$searchQuery\"",
+                    fontSize = 14.sp,
+                    color = TextSecondary
+                )
+            }
+        } else {
+            filteredGroups.forEach { (sectionTitle, rows) ->
+                SettingsCardGroup(
+                    title = sectionTitle,
+                    rows = rows
+                )
+            }
         }
     }
 
@@ -317,137 +368,136 @@ fun SettingsView(
         )
     }
 
-    if (showDetailsPageLayoutSheet) {
-        DetailsPageLayoutSheet(
-            preferenceManager = prefManager,
-            onDismiss = { showDetailsPageLayoutSheet = false }
+    if (showAboutDialog) {
+        AlertDialog(
+            onDismissRequest = { showAboutDialog = false },
+            containerColor = DarkSurface,
+            titleContentColor = TextPrimary,
+            textContentColor = TextSecondary,
+            title = {
+                Text(
+                    text = "About OmniTrack",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Version ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})",
+                        fontSize = 13.5.sp,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Room Database Schema v17",
+                        fontSize = 13.sp,
+                        color = AccentGold,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Tracking ${allMedia.size} titles across 8 media categories.",
+                        fontSize = 12.5.sp,
+                        color = TextSecondary
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutDialog = false }) {
+                    Text(
+                        text = "Close",
+                        color = AccentGold,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun SettingsSection(
+private fun SettingsCardGroup(
     title: String,
-    content: @Composable () -> Unit
+    rows: List<SettingRowEntry>
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
             text = title,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = TextSecondary,
-            letterSpacing = 1.3.sp,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            letterSpacing = 1.1.sp,
+            modifier = Modifier.padding(horizontal = 4.dp)
         )
         Column(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SectionDivider() {
-    Spacer(modifier = Modifier.height(2.dp))
-}
-
-@Composable
-private fun StatDivider() {
-    Box(
-        modifier = Modifier
-            .height(28.dp)
-            .width(0.8.dp)
-            .background(Color.White.copy(alpha = 0.08f))
-    )
-}
-
-@Composable
-private fun StatMetric(
-    count: String,
-    label: String,
-    accentColor: Color
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = count,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = accentColor
-        )
-        Text(
-            text = label,
-            fontSize = 11.5.sp,
-            color = TextMuted
-        )
-    }
-}
-
-@Composable
-private fun GroupedSettingRow(
-    icon: ImageVector,
-    iconTint: Color,
-    title: String,
-    subtitle: String,
-    badge: String? = null,
-    onClick: (() -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(enabled = onClick != null, onClick = { onClick?.invoke() })
-            .padding(horizontal = 8.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Box(
             modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(iconTint.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(DarkSurface)
+                .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(19.dp)
-            )
-        }
+            rows.forEachIndexed { index, row ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = row.onClick)
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = row.icon,
+                        contentDescription = null,
+                        tint = if (row.accentIcon) AccentGold else TextPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
 
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = subtitle,
-                fontSize = 11.5.sp,
-                color = TextMuted,
-                lineHeight = 16.sp
-            )
-        }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = row.title,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = row.subtitle,
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
 
-        if (badge != null) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(iconTint.copy(alpha = 0.16f))
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
-            ) {
-                Text(
-                    text = badge,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = iconTint
-                )
+                    if (!row.trailingText.isNullOrBlank()) {
+                        Text(
+                            text = row.trailingText,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold
+                        )
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                if (index < rows.lastIndex) {
+                    HorizontalDivider(
+                        color = GlassBorder,
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(start = 46.dp)
+                    )
+                }
             }
         }
     }

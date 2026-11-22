@@ -55,7 +55,7 @@ import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
-import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
@@ -115,7 +115,7 @@ fun MediaCard(
     cardDepthSheenStrength: Float = 35f,
     cardDepthEdgeCoverage: Float = 100f,
     badgeText: String? = null,
-    badgeColor: Color = AccentArctic
+    badgeColor: Color = AccentGold
 ) {
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
@@ -381,7 +381,7 @@ fun MediaCard(
                         .fillMaxWidth()
                         .height(3.dp)
                         .align(Alignment.BottomCenter),
-                    color = if (progress >= 1f) AccentJade else AccentArctic,
+                    color = AccentGold,
                     trackColor = DarkSurfaceCard.copy(alpha = 0.5f),
                 )
             }
@@ -402,7 +402,7 @@ fun MediaCard(
             if (item.mediaType == MediaType.VISUAL_NOVEL) {
                 Text(
                     text = com.omnitrack.app.data.model.formatVnCardBadge(item.originCountry, item.runtimeMinutes),
-                    color = Color.White.copy(alpha = 0.56f),
+                    color = TextSecondary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -412,7 +412,7 @@ fun MediaCard(
             } else if (item.mediaType == MediaType.GAME) {
                 Text(
                     text = com.omnitrack.app.data.model.formatGameCardBadge(item.platforms, item.platform, item.playtimeHours, item.runtimeMinutes),
-                    color = Color.White.copy(alpha = 0.56f),
+                    color = TextSecondary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -430,7 +430,7 @@ fun MediaCard(
                         bookFormat = item.bookFormat,
                         author = item.bookAuthor
                     ),
-                    color = Color.White.copy(alpha = 0.56f),
+                    color = TextSecondary,
                     fontSize = 10.5.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -452,7 +452,7 @@ fun MediaCard(
     isLandscape: Boolean = false,
     hideLabels: Boolean = false,
     badgeText: String? = null,
-    badgeColor: Color = AccentArctic
+    badgeColor: Color = AccentGold
 ) {
     MediaCard(
         item = item.toSummary(),
@@ -506,14 +506,14 @@ private fun formatProgress(item: MediaCardSummary): String {
         item.currentProgress
     }
     val current = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-        String.format(java.util.Locale.US, "%.1f", effValue)
+        com.omnitrack.app.ui.screens.detail.components.formatSmartRating(effValue)
     } else {
         effValue.toInt().toString()
     }
 
     return if (item.totalProgress != null && item.totalProgress > 0) {
         val total = if (item.mediaType == MediaType.GAME || item.mediaType == MediaType.VISUAL_NOVEL) {
-            String.format(java.util.Locale.US, "%.1f", item.totalProgress)
+            com.omnitrack.app.ui.screens.detail.components.formatSmartRating(item.totalProgress)
         } else {
             item.totalProgress.toInt().toString()
         }

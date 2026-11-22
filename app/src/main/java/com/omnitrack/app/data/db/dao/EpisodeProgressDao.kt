@@ -18,6 +18,9 @@ interface EpisodeProgressDao {
     @Query("SELECT * FROM episode_progress WHERE mediaId = :mediaId")
     suspend fun getAllProgressForMediaOnce(mediaId: Long): List<EpisodeProgressEntity>
 
+    @Query("SELECT watchedAtMs FROM episode_progress WHERE isWatched = 1 AND watchedAtMs IS NOT NULL AND watchedAtMs >= :sinceMs")
+    fun getWatchedTimestampsSince(sinceMs: Long): Flow<List<Long>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(progress: EpisodeProgressEntity)
 

@@ -16,6 +16,7 @@ import com.omnitrack.app.data.model.VnSpoilerLevel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -104,6 +105,43 @@ enum class EpisodeLayoutMode(val displayName: String, val description: String) {
     }
 }
 
+@Serializable
+enum class HomeRowKey(val displayName: String, val description: String) {
+    CONTINUE("Continue Tracking", "Active items you are watching, reading, or playing"),
+    UP_NEXT("Up Next & Release Radar", "Live airing episodes & upcoming calendar releases"),
+    STATS("Compact Stats Strip", "Active count, streak & tap for 90-day insights"),
+    RECENT("Recently Updated", "Latest additions and progress updates"),
+    PLAN("Plan to Track", "Your queued backlog across all media"),
+    FAVORITES("Favorites & Top Rated", "Your highest-rated and favorite titles"),
+    TRENDING("Trending Now", "Live trending anime, shows, movies & books")
+}
+
+@Serializable
+data class HomeRowItem(
+    val key: HomeRowKey,
+    val isEnabled: Boolean = true
+)
+
+object HomeLayoutDefaults {
+    val defaultRows: List<HomeRowItem> = HomeRowKey.entries.map { HomeRowItem(it, isEnabled = true) }
+}
+
+enum class HomeHeroSource(val displayName: String) {
+    CONTINUE("Continue Tracking"),
+    FAVORITES("Favorites"),
+    PLAN_TO_TRACK("Plan to Track"),
+    TRENDING("Trending");
+
+    companion object {
+        fun fromName(name: String?): HomeHeroSource = when (name?.uppercase()) {
+            "FAVORITES" -> FAVORITES
+            "PLAN_TO_TRACK" -> PLAN_TO_TRACK
+            "TRENDING" -> TRENDING
+            else -> CONTINUE
+        }
+    }
+}
+
 enum class PreferredTitleLanguage(val displayName: String, val description: String) {
     ENGLISH("English", "Prefer official English localization (e.g. The Apothecary Diaries)"),
     ROMAJI("Romaji", "Prefer Japanese romanized titles (e.g. Kusuriya no Hitorigoto)"),
@@ -125,6 +163,10 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
+        val HOME_ROW_ORDER = stringPreferencesKey("home_row_order")
+        val HOME_HERO_SOURCE = stringPreferencesKey("home_hero_source")
+        val LIBRARY_VIEW_MODE = stringPreferencesKey("library_view_mode")
+        val LIBRARY_SORT_MODE = stringPreferencesKey("library_sort_mode")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
@@ -586,6 +628,60 @@ class PreferenceManager(private val context: Context) {
     suspend fun setDetailsPageSectionOrder(items: List<DetailSectionItem>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER] = Json.encodeToString(items)
+        }
+    }
+
+    val homeRowOrder: Flow<List<HomeRowItem>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.HOME_ROW_ORDER]
+            if (raw.isNullOrBlank()) {
+                HomeLayoutDefaults.defaultRows
+            } else {
+                try {
+                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<HomeRowItem>>(raw)
+                    val existingKeys = parsed.map { it.key }.toSet()
+                    val missing = HomeLayoutDefaults.defaultRows.filter { it.key !in existingKeys }
+                    parsed + missing
+                } catch (_: Exception) {
+                    HomeLayoutDefaults.defaultRows
+                }
+            }
+        }
+
+    suspend fun setHomeRowOrder(items: List<HomeRowItem>) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.HOME_ROW_ORDER] = Json.encodeToString(items)
+        }
+    }
+
+    val homeHeroSource: Flow<HomeHeroSource> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> HomeHeroSource.fromName(prefs[PreferencesKeys.HOME_HERO_SOURCE]) }
+
+    suspend fun setHomeHeroSource(source: HomeHeroSource) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.HOME_HERO_SOURCE] = source.name
+        }
+    }
+
+    val libraryViewMode: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> prefs[PreferencesKeys.LIBRARY_VIEW_MODE] ?: "GRID_3" }
+
+    suspend fun setLibraryViewMode(mode: String) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.LIBRARY_VIEW_MODE] = mode
+        }
+    }
+
+    val librarySortMode: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> prefs[PreferencesKeys.LIBRARY_SORT_MODE] ?: "RECENT" }
+
+    suspend fun setLibrarySortMode(mode: String) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.LIBRARY_SORT_MODE] = mode
         }
     }
 

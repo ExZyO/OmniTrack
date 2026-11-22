@@ -114,6 +114,9 @@ class MediaRepository(
     fun getEpisodeProgress(mediaId: Long): Flow<List<EpisodeProgressEntity>> =
         (episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
+    fun getWatchedTimestampsSince(sinceMs: Long): Flow<List<Long>> =
+        (episodeProgressDao?.getWatchedTimestampsSince(sinceMs) ?: emptyFlow()).distinctUntilChanged()
+
     suspend fun setEpisodeWatched(mediaId: Long, seasonNumber: Int, episodeNumber: Int, isWatched: Boolean) {
         if (episodeProgressDao == null) return
         val existing = episodeProgressDao.getEpisodeProgressOnce(mediaId, seasonNumber, episodeNumber)

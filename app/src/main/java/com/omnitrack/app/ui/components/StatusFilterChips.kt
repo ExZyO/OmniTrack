@@ -24,10 +24,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.model.TrackingStatus
-import com.omnitrack.app.ui.theme.AccentArctic
+import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.GlassBorder
-import com.omnitrack.app.ui.theme.TextMuted
+import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.ui.theme.TextPrimary
 
 @Composable
@@ -44,14 +44,14 @@ fun StatusFilterChips(
             val isSelected = status == selectedStatus
 
             val backgroundColor by animateColorAsState(
-                targetValue = if (isSelected) AccentArctic.copy(alpha = 0.12f)
+                targetValue = if (isSelected) AccentGold.copy(alpha = 0.14f)
                 else DarkSurfaceCard.copy(alpha = 0.6f),
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "chipBg"
             )
 
             val textColor by animateColorAsState(
-                targetValue = if (isSelected) AccentArctic else TextMuted,
+                targetValue = if (isSelected) AccentGold else TextSecondary,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "chipText"
             )
@@ -66,7 +66,7 @@ fun StatusFilterChips(
                     ),
                 shape = RoundedCornerShape(24.dp),
                 backgroundColor = backgroundColor,
-                borderColor = if (isSelected) AccentArctic.copy(alpha = 0.3f) else GlassBorder
+                borderColor = if (isSelected) AccentGold.copy(alpha = 0.35f) else GlassBorder
             ) {
                 Text(
                     text = status.displayName,

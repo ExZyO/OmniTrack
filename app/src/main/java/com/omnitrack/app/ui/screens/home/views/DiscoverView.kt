@@ -81,9 +81,7 @@ import com.omnitrack.app.ui.components.GeminiModelSelectorSection
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.home.HomeViewModel
-import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
@@ -390,7 +388,7 @@ fun DiscoverView(
             Icon(
                 imageVector = Icons.Default.Search,
                 contentDescription = null,
-                tint = if (useAiSearch) AccentArctic else TextMuted,
+                tint = if (useAiSearch) AccentGold else TextMuted,
                 modifier = Modifier.size(20.dp)
             )
             BasicTextField(
@@ -399,7 +397,7 @@ fun DiscoverView(
                 modifier = Modifier.weight(1f),
                 singleLine = true,
                 textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
-                cursorBrush = SolidColor(AccentArctic),
+                cursorBrush = SolidColor(AccentGold),
                 decorationBox = { innerTextField ->
                     if (searchQuery.isEmpty()) {
                         Text(
@@ -424,7 +422,7 @@ fun DiscoverView(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (useAiSearch) AccentArctic.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
+                    .background(if (useAiSearch) AccentGold.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.06f))
                     .combinedClickable(
                         onClick = {
                             val nextAi = !useAiSearch
@@ -449,19 +447,19 @@ fun DiscoverView(
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = "AI Mode",
-                    tint = if (useAiSearch) AccentArctic else TextMuted,
+                    tint = if (useAiSearch) AccentGold else TextMuted,
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
                     text = if (useAiSearch) "AI · $shortModelLabel" else "AI",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (useAiSearch) AccentArctic else TextMuted
+                    color = if (useAiSearch) AccentGold else TextMuted
                 )
                 Icon(
                     imageVector = Icons.Default.ExpandMore,
                     contentDescription = "Select AI Model",
-                    tint = if (useAiSearch) AccentArctic else TextMuted,
+                    tint = if (useAiSearch) AccentGold else TextMuted,
                     modifier = Modifier
                         .size(14.dp)
                         .clip(CircleShape)
@@ -506,7 +504,7 @@ fun DiscoverView(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (isSelected) AccentArctic else DarkSurfaceElevated)
+                        .background(if (isSelected) AccentGold else DarkSurfaceElevated)
                         .clickable { filterFlow.value = type }
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
@@ -626,7 +624,7 @@ fun DiscoverView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(AccentArctic.copy(alpha = 0.12f))
+                    .background(AccentGold.copy(alpha = 0.12f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -634,13 +632,13 @@ fun DiscoverView(
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = null,
-                    tint = AccentArctic,
+                    tint = AccentGold,
                     modifier = Modifier.size(16.dp)
                 )
                 Text(
                     text = aiResolutionBanner!!,
                     fontSize = 11.5.sp,
-                    color = AccentArctic,
+                    color = AccentGold,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -683,7 +681,7 @@ fun DiscoverView(
 
         if (isSearching && visibleResults.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
             }
         } else if (visibleResults.isNotEmpty()) {
             Row(
@@ -699,7 +697,7 @@ fun DiscoverView(
                 )
                 if (isSearching) {
                     CircularProgressIndicator(
-                        color = AccentArctic,
+                        color = AccentGold,
                         strokeWidth = 1.8.dp,
                         modifier = Modifier.size(13.dp)
                     )
@@ -779,7 +777,7 @@ fun DiscoverView(
                         isLandscape = posterStyle.isLandscape,
                         hideLabels = posterStyle.hideLabels,
                         badgeText = cardBadgeText,
-                        badgeColor = if (existingInLibrary != null) AccentJade else AccentArctic,
+                        badgeColor = AccentGold,
                         onCardClick = {
                             if (existingInLibrary != null) {
                                 onItemClick(existingInLibrary.id)
@@ -820,7 +818,7 @@ fun DiscoverView(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
                     }
                 }
                 gameShelves.forEach { (shelfTitle, shelfItems) ->
@@ -905,7 +903,7 @@ fun DiscoverView(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = AccentArctic, strokeWidth = 2.dp)
+                        CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp)
                     }
                 }
                 bookShelves.forEach { (shelfTitle, shelfItems) ->
@@ -989,6 +987,34 @@ fun DiscoverView(
                 }
             }
         } else {
+            // Suggested Quick Searches when search box is empty
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf("Audiobook", "Dune", "Paradise Lost", "Frieren", "Elden Ring").forEach { chip ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(DarkSurfaceElevated)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
+                            .clickable { queryFlow.value = chip }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = chip,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
             // Spotlight from library when search box is empty
             Text(
                 text = "Spotlight Titles in Library",
@@ -1049,7 +1075,7 @@ fun DiscoverView(
                         Icon(
                             imageVector = Icons.Default.AutoAwesome,
                             contentDescription = null,
-                            tint = AccentArctic,
+                            tint = AccentGold,
                             modifier = Modifier.size(20.dp)
                         )
                         Text(

@@ -33,8 +33,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.model.MediaType
-import com.omnitrack.app.ui.theme.AccentArctic
-import com.omnitrack.app.ui.theme.TextMuted
+import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.TextSecondary
 import com.omnitrack.app.ui.theme.TextPrimary
 
 @Composable
@@ -63,14 +63,14 @@ fun MediaTypeTabRow(
             val isSelected = type == selectedType
 
             val backgroundColor by animateColorAsState(
-                targetValue = if (isSelected) AccentArctic.copy(alpha = 0.15f)
+                targetValue = if (isSelected) AccentGold.copy(alpha = 0.16f)
                 else Color.Transparent,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "tabBg"
             )
 
             val textColor by animateColorAsState(
-                targetValue = if (isSelected) AccentArctic else TextMuted,
+                targetValue = if (isSelected) AccentGold else TextSecondary,
                 animationSpec = spring(stiffness = Spring.StiffnessMedium),
                 label = "tabText"
             )

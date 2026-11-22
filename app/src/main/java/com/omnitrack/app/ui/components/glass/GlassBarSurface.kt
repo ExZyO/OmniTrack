@@ -24,7 +24,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
-private val GlassSurfaceColor = Color(0xFF1C1C1E)
+private val GlassSurfaceColor = Color(0xFF12110E)
 
 @Composable
 fun GlassBarSurface(
