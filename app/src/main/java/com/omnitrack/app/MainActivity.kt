@@ -14,7 +14,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
+import com.omnitrack.app.util.AppLogger
 import com.omnitrack.app.ui.navigation.OmniTrackNavigation
 import com.omnitrack.app.ui.theme.OmniThemeSettings
 import com.omnitrack.app.ui.theme.OmniThemeState
@@ -85,6 +87,7 @@ class MainActivity : ComponentActivity() {
             uriStr.contains("myanimelist") || uriStr.contains("mal") -> "mal"
             uriStr.contains("trakt") -> "trakt"
             uriStr.contains("vndb") -> "vndb"
+            uriStr.contains("tmdb") -> "tmdb"
             else -> ""
         }
 
@@ -99,6 +102,7 @@ class MainActivity : ComponentActivity() {
         }
 
         var token: String? = null
+        var fragmentRefresh: String? = null
         val fragment = data.fragment
         if (!fragment.isNullOrBlank()) {
             val params = fragment.split("&").associate {
@@ -106,16 +110,68 @@ class MainActivity : ComponentActivity() {
                 if (parts.size == 2) parts[0] to parts[1] else parts[0] to ""
             }
             token = params["access_token"]
+            fragmentRefresh = params["refresh_token"]
         }
 
         val code = data.getQueryParameter("code")
+        val oauthState = data.getQueryParameter("state")
+        val tmdbRequestToken = data.getQueryParameter("request_token")
+        val tmdbApproved = data.getQueryParameter("approved")
+        val queryRefresh = data.getQueryParameter("refresh_token")
         if (token == null && code == null) {
             token = data.getQueryParameter("access_token")
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
+            // TMDb v3 User Session callback (omnitrack://auth/tmdb?request_token=...&approved=true)
+            if (service == "tmdb" && !tmdbRequestToken.isNullOrBlank()) {
+                if (tmdbApproved == "false") {
+                    tokenManager.savePendingTmdbRequestToken(null)
+                    launch(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "TMDb authorization declined", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                val currentTokens = tokenManager.tokens.firstOrNull()
+                val apiKeyOrBearer = currentTokens?.tmdbToken?.takeIf { it.isNotBlank() }
+                    ?: PreferenceManager.cachedTmdbApiKey.takeIf { it.isNotBlank() }
+                val effectiveReqTok = tmdbRequestToken.ifBlank { tokenManager.getPendingTmdbRequestToken().orEmpty() }
+                if (!apiKeyOrBearer.isNullOrBlank() && effectiveReqTok.isNotBlank()) {
+                    val sessionPair = TrackerAccountVerifier.exchangeTmdbSession(apiKeyOrBearer, effectiveReqTok)
+                    tokenManager.savePendingTmdbRequestToken(null)
+                    if (sessionPair != null) {
+                        tokenManager.saveTmdbSession(sessionPair.first, sessionPair.second?.toString())
+                        launch(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "TMDb write sync activated!", Toast.LENGTH_SHORT).show()
+                        }
+                        return@launch
+                    }
+                }
+                launch(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Failed to activate TMDb session", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            // OAuth2 CSRF state verification for authorization-code redirects
+            val authCodeServices = setOf("mal", "myanimelist", "trakt", "bangumi", "bgm", "comick")
+            if (!code.isNullOrBlank() && service in authCodeServices) {
+                val expectedState = TrackerAccountVerifier.pendingOAuthState?.takeIf { it.isNotBlank() }
+                    ?: tokenManager.getOAuthState()
+                TrackerAccountVerifier.pendingOAuthState = null
+                tokenManager.saveOAuthState(null)
+                if (!expectedState.isNullOrBlank() && oauthState != expectedState) {
+                    AppLogger.w("OAuth", "Rejected callback for $service: state mismatch")
+                    launch(Dispatchers.Main) {
+                        Toast.makeText(this@MainActivity, "OAuth verification failed — please sign in again", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+            }
+
             val client = OkHttpClient()
             var finalAccessToken: String? = token
+            var finalRefreshToken: String? = fragmentRefresh ?: queryRefresh
 
             if (finalAccessToken.isNullOrBlank() && !code.isNullOrBlank()) {
                 when (service) {
@@ -138,7 +194,8 @@ class MainActivity : ComponentActivity() {
                                 if (resp.isSuccessful) {
                                     val body = resp.body?.string().orEmpty()
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
+                                    finalRefreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull ?: finalRefreshToken
                                 }
                             }
                         } catch (_: Exception) {}
@@ -161,7 +218,8 @@ class MainActivity : ComponentActivity() {
                                 if (resp.isSuccessful) {
                                     val body = resp.body?.string().orEmpty()
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
+                                    finalRefreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull ?: finalRefreshToken
                                 }
                             }
                         } catch (_: Exception) {}
@@ -187,7 +245,8 @@ class MainActivity : ComponentActivity() {
                                 if (resp.isSuccessful) {
                                     val body = resp.body?.string().orEmpty()
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
+                                    finalRefreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull ?: finalRefreshToken
                                 }
                             }
                         } catch (_: Exception) {}
@@ -200,9 +259,9 @@ class MainActivity : ComponentActivity() {
                             val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
                                 ?: tokenManager.getMalVerifier().orEmpty()
                             val malRedirectUri = if (customMal != null) effectiveRedirectUri else "chimahon://myanimelist-auth"
-                            
-                            android.util.Log.d("OmniTrack-MAL", "Starting MAL token exchange: clientId=$effectiveClientId, verifierLen=${verifier.length}, redirect=$malRedirectUri, codeLen=${code.length}")
-                            
+
+                            AppLogger.i("OAuth", "Exchanging MAL auth code (redirect=$malRedirectUri)")
+
                             val form = FormBody.Builder()
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", effectiveClientId)
@@ -219,16 +278,17 @@ class MainActivity : ComponentActivity() {
 
                             client.newCall(req).execute().use { resp ->
                                 val body = resp.body?.string().orEmpty()
-                                android.util.Log.d("OmniTrack-MAL", "MAL token response code=${resp.code}, body=$body")
+                                AppLogger.i("OAuth", "MAL token exchange HTTP ${resp.code}")
                                 if (resp.isSuccessful) {
                                     val parsed = Json { ignoreUnknownKeys = true }.parseToJsonElement(body).jsonObject
-                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.content
+                                    finalAccessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
+                                    finalRefreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull ?: finalRefreshToken
                                 } else {
-                                    android.util.Log.e("OmniTrack-MAL", "MAL token exchange failed with code ${resp.code}: $body")
+                                    AppLogger.w("OAuth", "MAL token exchange failed with HTTP ${resp.code}")
                                 }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.e("OmniTrack-MAL", "Exception during MAL token exchange", e)
+                            AppLogger.e("OAuth", "Exception during MAL token exchange", e)
                         }
                     }
                     "trakt" -> {
@@ -263,8 +323,12 @@ class MainActivity : ComponentActivity() {
                                     finalAccessToken = (parsed?.get("access_token") as? JsonPrimitive)
                                         ?.takeIf { it !is JsonNull }
                                         ?.contentOrNull
+                                    finalRefreshToken = (parsed?.get("refresh_token") as? JsonPrimitive)
+                                        ?.takeIf { it !is JsonNull }
+                                        ?.contentOrNull
+                                        ?: finalRefreshToken
                                 } else {
-                                    android.util.Log.e("OmniTrack-Trakt", "Trakt token exchange failed: HTTP ${resp.code} $body")
+                                    AppLogger.w("OAuth", "Trakt token exchange failed: HTTP ${resp.code}")
                                 }
                             }
                             TrackerAccountVerifier.pendingTraktVerifier = null
@@ -278,12 +342,12 @@ class MainActivity : ComponentActivity() {
                 val tokenToSave = finalAccessToken!!
                 when (service) {
                     "anilist" -> tokenManager.saveAnilistToken(tokenToSave)
-                    "mal", "myanimelist" -> tokenManager.saveMalToken(tokenToSave)
-                    "trakt" -> tokenManager.saveTraktToken(tokenToSave)
-                    "simkl" -> tokenManager.saveSimklToken(tokenToSave)
-                    "comick" -> tokenManager.saveComickToken(tokenToSave)
+                    "mal", "myanimelist" -> tokenManager.saveMalTokens(tokenToSave, finalRefreshToken)
+                    "trakt" -> tokenManager.saveTraktTokens(tokenToSave, finalRefreshToken)
+                    "simkl" -> tokenManager.saveSimklTokens(tokenToSave, finalRefreshToken)
+                    "comick" -> tokenManager.saveComickTokens(tokenToSave, finalRefreshToken)
                     "vndb" -> tokenManager.saveVndbToken(tokenToSave)
-                    "bangumi", "bgm" -> tokenManager.saveBangumiToken(tokenToSave)
+                    "bangumi", "bgm" -> tokenManager.saveBangumiTokens(tokenToSave, finalRefreshToken)
                     "tmdb" -> tokenManager.saveTmdbToken(tokenToSave)
                     "igdb" -> tokenManager.saveIgdbToken(tokenToSave)
                 }

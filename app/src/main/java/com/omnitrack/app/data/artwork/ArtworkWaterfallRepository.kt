@@ -130,7 +130,7 @@ class ArtworkWaterfallRepository(
             val src = normalizeSource(candidateSource)
             val cfg = normalizeSource(settingSource)
             if (src.isEmpty() || cfg.isEmpty()) return false
-            return src == cfg || src.startsWith("$cfg ") || (cfg == "steam" && src.startsWith("steam"))
+            return src == cfg || src.startsWith("$cfg ")
         }
 
         fun userPriorityIndex(candidateSource: String): Int {

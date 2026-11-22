@@ -53,6 +53,7 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.model.VnSpoilerLevel
+import com.omnitrack.app.ui.components.repeatingClickable
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -157,8 +158,8 @@ fun DetailVnRoutesSection(
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.85f),
                     modifier = Modifier
-                        .clickable { onStepPlaytime(-0.5) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(-0.5) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
                 Text(
                     text = "+0.5h",
@@ -166,8 +167,8 @@ fun DetailVnRoutesSection(
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.90f),
                     modifier = Modifier
-                        .clickable { onStepPlaytime(0.5) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(0.5) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
                 Text(
                     text = "+1h",
@@ -175,8 +176,8 @@ fun DetailVnRoutesSection(
                     fontWeight = FontWeight.Bold,
                     color = AccentGold,
                     modifier = Modifier
-                        .clickable { onStepPlaytime(1.0) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(1.0) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
             }
         }

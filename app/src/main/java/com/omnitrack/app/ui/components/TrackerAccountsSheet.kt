@@ -154,20 +154,11 @@ fun TrackerAccountsSheet(
 
     fun refreshVerification(service: TrackerServiceId, tokenSnapshot: TrackerTokens) {
         scope.launch {
-            val state = when (service) {
-                TrackerServiceId.ANILIST -> tokenSnapshot.anilistToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyAnilist(it) }
-                TrackerServiceId.MAL -> tokenSnapshot.malToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyMal(it) }
-                TrackerServiceId.BANGUMI -> tokenSnapshot.bangumiToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyBangumi(it) }
-                TrackerServiceId.COMICK -> tokenSnapshot.comickToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyComick(it) }
-                TrackerServiceId.TRAKT -> tokenSnapshot.traktToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyTrakt(it, customTraktClientId) }
-                TrackerServiceId.SIMKL -> tokenSnapshot.simklToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifySimkl(it) }
-                TrackerServiceId.TMDB -> tokenSnapshot.tmdbToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyTmdb(it) }
-                TrackerServiceId.VNDB -> tokenSnapshot.vndbToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyVndb(it) }
-                TrackerServiceId.HARDCOVER -> tokenSnapshot.hardcoverToken?.takeIf { it.isNotBlank() }?.let { TrackerAccountVerifier.verifyHardcover(it) }
-                TrackerServiceId.STEAM -> if (!tokenSnapshot.steamApiKey.isNullOrBlank() && !tokenSnapshot.steamId64.isNullOrBlank()) {
-                    TrackerAccountVerifier.verifySteam(tokenSnapshot.steamApiKey, tokenSnapshot.steamId64)
-                } else null
-            } ?: VerificationState.Idle
+            val state = TrackerAccountVerifier.verifyWithAutoRefresh(
+                serviceKey = service.name,
+                tokenManager = tokenManager,
+                customTraktClientId = customTraktClientId
+            )
             verifiedNames = verifiedNames + (service to state)
         }
     }
@@ -176,7 +167,11 @@ fun TrackerAccountsSheet(
         TrackerServiceId.entries.forEach { svc ->
             if (isServiceConnected(svc, tokens)) {
                 val existing = verifiedNames[svc]
-                if (existing !is VerificationState.Verified) {
+                val needsTmdbReverify = svc == TrackerServiceId.TMDB &&
+                    existing is VerificationState.Verified &&
+                    existing.username.contains("Read-only", ignoreCase = true) &&
+                    !tokens.tmdbSessionId.isNullOrBlank()
+                if (existing !is VerificationState.Verified || needsTmdbReverify) {
                     refreshVerification(svc, tokens)
                 }
             } else {
@@ -492,12 +487,15 @@ fun TrackerAccountsSheet(
                             TrackerServiceId.MAL -> {
                                 scope.launch {
                                     val verifier = PkceUtil.generateCodeVerifier()
+                                    val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingMalVerifier = verifier
+                                    TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveMalVerifier(verifier)
+                                    tokenManager.saveOAuthState(state)
                                     val customMal = customMalClientId.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
                                     val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
                                     val redirectUri = if (customMal != null) "omnitrack://auth/mal" else "chimahon://myanimelist-auth"
-                                    val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri"
+                                    val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri&state=$state"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
                             }
@@ -506,10 +504,13 @@ fun TrackerAccountsSheet(
                                     val effectiveClientId = customTraktClientId.takeIf { it.isNotBlank() } ?: TrackerAccountVerifier.TRAKT_CLIENT_ID
                                     val verifier = TrackerAccountVerifier.generatePkceVerifier()
                                     val challenge = TrackerAccountVerifier.generatePkceS256Challenge(verifier)
+                                    val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingTraktVerifier = verifier
+                                    TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveTraktVerifier(verifier)
+                                    tokenManager.saveOAuthState(state)
                                     val authUri = Uri.parse(
-                                        "https://trakt.tv/oauth/authorize?response_type=code&client_id=$effectiveClientId&redirect_uri=omnitrack://auth/trakt&code_challenge=$challenge&code_challenge_method=S256"
+                                        "https://trakt.tv/oauth/authorize?response_type=code&client_id=$effectiveClientId&redirect_uri=omnitrack://auth/trakt&code_challenge=$challenge&code_challenge_method=S256&state=$state"
                                     )
                                     context.startActivity(Intent(Intent.ACTION_VIEW, authUri))
                                 }
@@ -526,19 +527,27 @@ fun TrackerAccountsSheet(
                                 }
                             }
                             TrackerServiceId.BANGUMI -> {
-                                context.startActivity(
-                                    Intent(
-                                        Intent.ACTION_VIEW,
-                                        Uri.parse("https://bgm.tv/oauth/authorize?client_id=bgm31586666817a5d03b&response_type=code&redirect_uri=komikku://bangumi-auth")
+                                scope.launch {
+                                    val state = TrackerAccountVerifier.generateOAuthState()
+                                    TrackerAccountVerifier.pendingOAuthState = state
+                                    tokenManager.saveOAuthState(state)
+                                    context.startActivity(
+                                        Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("https://bgm.tv/oauth/authorize?client_id=${TrackerAccountVerifier.BANGUMI_CLIENT_ID}&response_type=code&redirect_uri=komikku://bangumi-auth&state=$state")
+                                        )
                                     )
-                                )
+                                }
                             }
                             TrackerServiceId.COMICK -> {
                                 scope.launch {
                                     val pkce = PkceUtil.generateS256Codes()
+                                    val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
+                                    TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveComickVerifier(pkce.codeVerifier)
-                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256"
+                                    tokenManager.saveOAuthState(state)
+                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=${TrackerAccountVerifier.COMICK_CLIENT_ID}&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256&state=$state"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
                             }
@@ -609,22 +618,27 @@ fun TrackerAccountsSheet(
                     },
                     onDisconnect = {
                         scope.launch {
-                            when (activeService) {
-                                TrackerServiceId.ANILIST -> tokenManager.saveAnilistToken(null)
-                                TrackerServiceId.MAL -> tokenManager.saveMalToken(null)
-                                TrackerServiceId.TRAKT -> tokenManager.saveTraktToken(null)
-                                TrackerServiceId.SIMKL -> tokenManager.saveSimklToken(null)
-                                TrackerServiceId.BANGUMI -> tokenManager.saveBangumiToken(null)
-                                TrackerServiceId.COMICK -> tokenManager.saveComickToken(null)
-                                TrackerServiceId.VNDB -> tokenManager.saveVndbToken(null)
-                                TrackerServiceId.TMDB -> tokenManager.saveTmdbToken(null)
-                                TrackerServiceId.HARDCOVER -> tokenManager.saveHardcoverToken(null)
-                                TrackerServiceId.STEAM -> {
-                                    tokenManager.saveSteamApiKey(null)
-                                    tokenManager.saveSteamId64(null)
+                            tokenManager.clearTrackerToken(activeService.name)
+                            Toast.makeText(context, "${activeService.title} disconnected", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onTmdbSignIn = {
+                        val key = tokens.tmdbToken?.trim().orEmpty()
+                        if (key.isBlank()) {
+                            Toast.makeText(context, "Save your TMDb API Key first", Toast.LENGTH_SHORT).show()
+                        } else {
+                            scope.launch {
+                                val reqToken = TrackerAccountVerifier.createTmdbRequestToken(key)
+                                if (!reqToken.isNullOrBlank()) {
+                                    tokenManager.savePendingTmdbRequestToken(reqToken)
+                                    val authUri = Uri.parse(
+                                        "https://www.themoviedb.org/authenticate/$reqToken?redirect_to=omnitrack://auth/tmdb"
+                                    )
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, authUri))
+                                } else {
+                                    Toast.makeText(context, "Could not start TMDb login — check your API key", Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            Toast.makeText(context, "${activeService.title} disconnected", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
@@ -639,9 +653,9 @@ fun TrackerAccountsSheet(
             isPollingSimkl = true
             while (isPollingSimkl) {
                 delay(info.intervalSeconds * 1000L)
-                val token = TrackerAccountVerifier.pollSimklPinToken(info.userCode, info.deviceCode)
-                if (!token.isNullOrBlank()) {
-                    tokenManager.saveSimklToken(token)
+                val tokenPair = TrackerAccountVerifier.pollSimklPinToken(info.userCode, info.deviceCode)
+                if (tokenPair != null) {
+                    tokenManager.saveSimklTokens(tokenPair.accessToken, tokenPair.refreshToken)
                     Toast.makeText(context, "SIMKL connected", Toast.LENGTH_LONG).show()
                     isPollingSimkl = false
                     showSimklPinDialog = false
@@ -675,13 +689,13 @@ fun TrackerAccountsSheet(
             isPollingTrakt = true
             while (isPollingTrakt) {
                 delay(info.intervalSeconds * 1000L)
-                val token = TrackerAccountVerifier.pollTraktDeviceToken(
+                val tokenPair = TrackerAccountVerifier.pollTraktDeviceToken(
                     deviceCode = info.deviceCode,
                     customClientId = customTraktClientId,
                     customClientSecret = customTraktClientSecret
                 )
-                if (!token.isNullOrBlank()) {
-                    tokenManager.saveTraktToken(token)
+                if (tokenPair != null) {
+                    tokenManager.saveTraktTokens(tokenPair.accessToken, tokenPair.refreshToken)
                     Toast.makeText(context, "Trakt.tv connected", Toast.LENGTH_LONG).show()
                     isPollingTrakt = false
                     showTraktDeviceDialog = false
@@ -820,7 +834,8 @@ private fun TrackerAccountDetailView(
     onSaveSteam: (String, String) -> Unit,
     onImportLibrary: suspend () -> TrackerImportResult?,
     onSyncNow: () -> Unit,
-    onDisconnect: () -> Unit
+    onDisconnect: () -> Unit,
+    onTmdbSignIn: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -910,15 +925,52 @@ private fun TrackerAccountDetailView(
             }
 
             if (service == TrackerServiceId.TMDB || service == TrackerServiceId.COMICK) {
-                Text(
-                    text = if (service == TrackerServiceId.TMDB) {
-                        "Used automatically for Movie & Show metadata, ratings and screen adaptations."
-                    } else {
-                        "Connected for chapter progress syncing while reading Manga."
-                    },
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
+                if (service == TrackerServiceId.TMDB) {
+                    val hasTmdbSession = !tokens.tmdbSessionId.isNullOrBlank()
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (hasTmdbSession) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.06f))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (hasTmdbSession) "Write sync active" else "Read-only API key",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (hasTmdbSession) AccentGold else TextSecondary
+                        )
+                    }
+                    Text(
+                        text = if (hasTmdbSession) {
+                            "Signed in with TMDb user session — ratings push automatically and metadata/adaptations stay synced."
+                        } else {
+                            "API key handles Movie & Show metadata automatically. Sign in to TMDb to push personal ratings."
+                        },
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    Button(
+                        onClick = onTmdbSignIn,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasTmdbSession) DarkSurfaceCard else AccentGold,
+                            contentColor = if (hasTmdbSession) TextPrimary else AmoledBlack
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().height(42.dp)
+                    ) {
+                        Text(
+                            text = if (hasTmdbSession) "Re-authorize TMDb Session" else "Sign in to TMDb (Enable Sync)",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Connected for chapter progress syncing while reading Manga.",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
             } else {
                 Button(
                     onClick = {
@@ -970,6 +1022,29 @@ private fun TrackerAccountDetailView(
                     fontWeight = FontWeight.Medium,
                     color = if (res.error != null) Color(0xFFFCA5A5) else AccentGold
                 )
+            }
+
+            if (verificationState is VerificationState.Failed &&
+                (verificationState.message.contains("expired", ignoreCase = true) ||
+                    verificationState.message.contains("401") ||
+                    verificationState.message.contains("403")) &&
+                service in listOf(
+                    TrackerServiceId.ANILIST,
+                    TrackerServiceId.MAL,
+                    TrackerServiceId.TRAKT,
+                    TrackerServiceId.SIMKL,
+                    TrackerServiceId.BANGUMI,
+                    TrackerServiceId.COMICK
+                )
+            ) {
+                Button(
+                    onClick = onLaunchOAuth,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().height(42.dp)
+                ) {
+                    Text("Reconnect ${service.title}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Row(

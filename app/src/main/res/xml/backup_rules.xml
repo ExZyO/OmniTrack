@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="datastore/omnitrack_settings.preferences_pb" />
+    <exclude domain="sharedpref" path="omnitrack_diagnostics.xml" />
+    <exclude domain="file" path="omnitrack_diagnostics.log" />
+</full-backup-content>

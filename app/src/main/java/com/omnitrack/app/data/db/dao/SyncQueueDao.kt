@@ -25,6 +25,12 @@ interface SyncQueueDao {
     @Query("DELETE FROM sync_queue WHERE id = :id")
     suspend fun deleteTask(id: Long)
 
+    @Query("UPDATE sync_queue SET retryCount = retryCount + 1 WHERE id = :id")
+    suspend fun incrementRetryCount(id: Long)
+
+    @Query("DELETE FROM sync_queue WHERE trackerType = :trackerType")
+    suspend fun deleteAllForTracker(trackerType: String)
+
     @Query("DELETE FROM sync_queue")
     suspend fun clearQueue()
 }

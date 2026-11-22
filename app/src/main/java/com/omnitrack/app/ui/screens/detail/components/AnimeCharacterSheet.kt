@@ -284,7 +284,7 @@ fun AnimeCharacterSheet(
                         detail?.gender?.takeIf { it.isNotBlank() }?.let { add(it) }
                         detail?.dateOfBirth?.takeIf { it.isNotBlank() }?.let { add(it) }
                         detail?.bloodType?.takeIf { it.isNotBlank() }?.let { add("Blood $it") }
-                        formatCompactNumber(detail?.favourites)?.let { add("$it ♥") }
+                        formatCompactNumber(detail?.favourites)?.let { add("$it favorites") }
                     }
                 }
                 if (vitalsList.isNotEmpty()) {
@@ -881,7 +881,7 @@ private fun StaffDetailContent(
             detail?.yearsActive?.takeIf { it.isNotBlank() }?.let { add("Active $it") }
             detail?.bloodType?.takeIf { it.isNotBlank() }?.let { add("Blood $it") }
             detail?.language?.takeIf { it.isNotBlank() }?.let { add(it) }
-            formatCompactNumber(detail?.favourites)?.let { add("$it ♥") }
+            formatCompactNumber(detail?.favourites)?.let { add("$it favorites") }
         }
         if (vitalsList.isNotEmpty()) {
             Column(

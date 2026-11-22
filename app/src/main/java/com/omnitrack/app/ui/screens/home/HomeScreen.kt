@@ -175,6 +175,7 @@ fun HomeScreen(
     val librarySortMode by prefManager.librarySortMode.collectAsState(initial = "RECENT")
     val calendarReleases by viewModel.calendarReleases.collectAsState()
     val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
+    val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
     val trendingItems by viewModel.trendingItems.collectAsState()
     val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
     val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
@@ -335,7 +336,12 @@ fun HomeScreen(
                         },
                         onNavigateToDiscover = { currentNavDestination = NavDestination.DISCOVER },
                         onNavigateToHistory = { currentNavDestination = NavDestination.HISTORY },
-                        posterStyle = posterStyle
+                        posterStyle = posterStyle,
+                        isRefreshing = isLoadingTrending || isLoadingCalendar,
+                        onRefresh = {
+                            viewModel.loadHomeTrending(force = true)
+                            viewModel.loadReleaseCalendar(force = true)
+                        }
                     )
                 }
 
@@ -745,7 +751,8 @@ fun HomeScreen(
                                         ) {
                                             Column(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.padding(horizontal = 32.dp)
                                             ) {
                                                 Icon(
                                                     imageVector = Icons.Outlined.VideoLibrary,
@@ -754,10 +761,23 @@ fun HomeScreen(
                                                     modifier = Modifier.size(48.dp)
                                                 )
                                                 Text(
-                                                    text = if (searchQuery.isNotEmpty()) "No results matching \"$searchQuery\"" else "No items in ${pageMediaType.displayName}",
-                                                    color = TextMuted,
-                                                    fontSize = 14.sp
+                                                    text = when {
+                                                        searchQuery.isNotEmpty() -> "No results matching \"$searchQuery\""
+                                                        uiState.allMediaSummaries.isEmpty() -> "Your library is empty"
+                                                        else -> "No items in ${pageMediaType.displayName}"
+                                                    },
+                                                    color = TextPrimary.copy(alpha = 0.85f),
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.SemiBold
                                                 )
+                                                if (searchQuery.isEmpty() && uiState.allMediaSummaries.isEmpty()) {
+                                                    Text(
+                                                        text = "Add titles from Discover or import from a tracker in Settings",
+                                                        color = TextMuted,
+                                                        fontSize = 12.5.sp,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
                                             }
                                         }
                                     } else if (libraryViewMode == "LIST") {

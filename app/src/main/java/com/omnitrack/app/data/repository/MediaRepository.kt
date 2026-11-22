@@ -335,5 +335,12 @@ class MediaRepository(
 
     suspend fun deleteSyncTask(id: Long) = syncQueueDao?.deleteTask(id)
 
+    suspend fun incrementSyncTaskRetryCount(id: Long) = syncQueueDao?.incrementRetryCount(id)
+
+    suspend fun deleteAllSyncTasksForTracker(trackerType: String) = syncQueueDao?.deleteAllForTracker(trackerType)
+
+    suspend fun getAllEpisodeProgressOnce(mediaId: Long): List<EpisodeProgressEntity> =
+        episodeProgressDao?.getAllProgressForMediaOnce(mediaId) ?: emptyList()
+
     suspend fun clearSyncQueue() = syncQueueDao?.clearQueue()
 }

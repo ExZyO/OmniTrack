@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -179,6 +180,8 @@ class TrackerSyncEngine(
             return@withContext
         }
 
+        val tokens = tokenManager.tokens.firstOrNull() ?: return@withContext
+
         suspend fun enqueueCoalesced(trackerType: String) {
             syncQueueDao.deletePendingFor(item.id, trackerType)
             syncQueueDao.enqueue(
@@ -191,16 +194,18 @@ class TrackerSyncEngine(
             )
         }
 
-        if (item.anilistId != null) enqueueCoalesced("ANILIST")
-        if (item.malId != null) enqueueCoalesced("MAL")
-        if (item.traktId != null || (item.tmdbId != null && (item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.SHOW))) {
+        if (item.anilistId != null && !tokens.anilistToken.isNullOrBlank()) enqueueCoalesced("ANILIST")
+        if (item.malId != null && !tokens.malToken.isNullOrBlank()) enqueueCoalesced("MAL")
+        if (!tokens.traktToken.isNullOrBlank() && (item.traktId != null || (item.tmdbId != null && (item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.SHOW)))) {
             enqueueCoalesced("TRAKT")
         }
-        if (item.simklId != null || item.tmdbId != null || item.malId != null) enqueueCoalesced("SIMKL")
-        if (item.bangumiId != null) enqueueCoalesced("BANGUMI")
-        if (!item.vndbId.isNullOrBlank()) enqueueCoalesced("VNDB")
-        if (item.tmdbId != null) enqueueCoalesced("TMDB")
-        if (!item.hardcoverId.isNullOrBlank()) enqueueCoalesced("HARDCOVER")
+        if (!tokens.simklToken.isNullOrBlank() && (item.simklId != null || item.tmdbId != null || item.malId != null)) {
+            enqueueCoalesced("SIMKL")
+        }
+        if (item.bangumiId != null && !tokens.bangumiToken.isNullOrBlank()) enqueueCoalesced("BANGUMI")
+        if (!item.vndbId.isNullOrBlank() && !tokens.vndbToken.isNullOrBlank()) enqueueCoalesced("VNDB")
+        if (item.tmdbId != null && !tokens.tmdbToken.isNullOrBlank() && !tokens.tmdbSessionId.isNullOrBlank()) enqueueCoalesced("TMDB")
+        if (!item.hardcoverId.isNullOrBlank() && !tokens.hardcoverToken.isNullOrBlank()) enqueueCoalesced("HARDCOVER")
     }
 
     suspend fun drainQueue() = withContext(Dispatchers.IO) {
@@ -208,23 +213,59 @@ class TrackerSyncEngine(
             val tasks = syncQueueDao.getPendingTasksSnapshot()
             if (tasks.isEmpty()) return@withLock
 
-            val tokens = tokenManager.tokens.firstOrNull() ?: return@withLock
+            var activeTokens = tokenManager.tokens.firstOrNull() ?: return@withLock
+            val refreshableServices = setOf("MAL", "TRAKT", "SIMKL", "BANGUMI", "COMICK")
+            val expiredTrackers = mutableSetOf<String>()
 
             for (task in tasks) {
+                val key = task.trackerType.uppercase()
+                if (key in expiredTrackers) continue
+
+                if (key == "TMDB" && activeTokens.tmdbSessionId.isNullOrBlank()) {
+                    expiredTrackers.add(key)
+                    syncQueueDao.deleteAllForTracker(key)
+                    AppLogger.w("TrackerSync", "TMDb write session inactive — cleared stale queued TMDB tasks")
+                    continue
+                }
+
                 val mediaItem = repository.getMediaById(task.mediaId).firstOrNull()
                 if (mediaItem == null) {
                     syncQueueDao.deleteTask(task.id)
                     continue
                 }
 
-                val outcome = pushSingleTrackerInternal(
-                    trackerKey = task.trackerType,
+                var outcome = pushSingleTrackerInternal(
+                    trackerKey = key,
                     item = mediaItem,
-                    tokens = tokens,
+                    tokens = activeTokens,
                     progressOverride = task.progressValue
                 )
-                if (outcome.success) {
-                    syncQueueDao.deleteTask(task.id)
+
+                if (!outcome.success && (outcome.httpCode == 401 || outcome.httpCode == 403) && key in refreshableServices) {
+                    val refreshed = TrackerAccountVerifier.refreshAccessToken(key, tokenManager)
+                    if (!refreshed.isNullOrBlank()) {
+                        activeTokens = tokenManager.tokens.firstOrNull() ?: activeTokens
+                        outcome = pushSingleTrackerInternal(
+                            trackerKey = key,
+                            item = mediaItem,
+                            tokens = activeTokens,
+                            progressOverride = task.progressValue
+                        )
+                    }
+                }
+
+                when {
+                    outcome.success -> syncQueueDao.deleteTask(task.id)
+                    outcome.httpCode == 401 || outcome.httpCode == 403 -> {
+                        expiredTrackers.add(key)
+                        syncQueueDao.deleteAllForTracker(key)
+                        AppLogger.w("TrackerSync", "Auth expired for $key — reconnect in Tracker Accounts")
+                    }
+                    task.retryCount >= 4 -> {
+                        syncQueueDao.deleteTask(task.id)
+                        AppLogger.w("TrackerSync", "Dropped queued $key task after max retries (code=${outcome.httpCode})")
+                    }
+                    else -> syncQueueDao.incrementRetryCount(task.id)
                 }
             }
         }
@@ -246,7 +287,7 @@ class TrackerSyncEngine(
                     if (item.simklId != null || item.tmdbId != null || item.malId != null) add("SIMKL")
                     if (item.bangumiId != null) add("BANGUMI")
                     if (!item.vndbId.isNullOrBlank()) add("VNDB")
-                    if (item.tmdbId != null && item.userRating != null) add("TMDB")
+                    if (item.tmdbId != null && item.userRating != null && !tokens.tmdbSessionId.isNullOrBlank()) add("TMDB")
                     if (!item.hardcoverId.isNullOrBlank()) add("HARDCOVER")
                     if (!item.comickId.isNullOrBlank()) add("COMICK")
                 }
@@ -272,7 +313,7 @@ class TrackerSyncEngine(
         "SIMKL" -> pushSimkl(item, tokens.simklToken)
         "BANGUMI" -> pushBangumi(item, tokens.bangumiToken, progressOverride)
         "VNDB" -> pushVndb(item, tokens.vndbToken)
-        "TMDB" -> pushTmdb(item, tokens.tmdbToken)
+        "TMDB" -> pushTmdb(item, tokens.tmdbToken, tokens.tmdbSessionId)
         "HARDCOVER" -> pushHardcover(item, tokens.hardcoverToken)
         "COMICK" -> if (tokens.comickToken.isNullOrBlank()) {
             TrackerSyncOutcome("COMICK", false, null, "Comick not signed in")
@@ -296,6 +337,60 @@ class TrackerSyncEngine(
             val d = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
             Triple(d.year, d.monthValue, d.dayOfMonth)
         }.getOrNull()
+    }
+
+    private fun parseYmdToEpochMs(ymd: String?): Long? {
+        val clean = ymd?.trim()?.takeIf { it.length >= 10 }?.take(10) ?: return null
+        return runCatching {
+            LocalDate.parse(clean, DateTimeFormatter.ISO_LOCAL_DATE)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        }.getOrNull()
+    }
+
+    private fun parseFuzzyDateToEpochMs(obj: JsonObject?): Long? {
+        val y = obj?.get("year").asSafeInt() ?: return null
+        val m = (obj["month"].asSafeInt() ?: 1).coerceIn(1, 12)
+        val d = (obj["day"].asSafeInt() ?: 1).coerceIn(1, 28)
+        return runCatching {
+            LocalDate.of(y, m, d).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        }.getOrNull()
+    }
+
+    private suspend fun buildWatchedSeasonsArray(item: MediaItemEntity): JsonArray? {
+        val watchedEps = if (item.id > 0L) {
+            repository.getAllEpisodeProgressOnce(item.id).filter { it.isWatched && it.episodeNumber > 0 }
+        } else {
+            emptyList()
+        }
+        return if (watchedEps.isNotEmpty()) {
+            val grouped = watchedEps.groupBy { it.seasonNumber.coerceAtLeast(1) }
+            buildJsonArray {
+                grouped.toSortedMap().forEach { (seasonNum, eps) ->
+                    add(buildJsonObject {
+                        put("number", seasonNum)
+                        put("episodes", buildJsonArray {
+                            eps.map { it.episodeNumber }.distinct().sorted().forEach { epNum ->
+                                add(buildJsonObject { put("number", epNum) })
+                            }
+                        })
+                    })
+                }
+            }
+        } else {
+            val count = item.currentProgress.toInt().coerceIn(0, 500)
+            if (count <= 0) null else buildJsonArray {
+                add(buildJsonObject {
+                    put("number", 1)
+                    put("episodes", buildJsonArray {
+                        for (ep in 1..count) {
+                            add(buildJsonObject { put("number", ep) })
+                        }
+                    })
+                })
+            }
+        }
     }
 
     private suspend fun pushAniList(
@@ -410,23 +505,38 @@ class TrackerSyncEngine(
                 }
             }
 
-            // Best-effort favorite sync when enabled
-            if (mainOutcome.success && item.anilistFavorite) {
+            // Best-effort favorite sync (handles both favoriting and unfavoriting cleanly)
+            val nextSnaps = TrackerMetadataCodec.decodeMatchedSnapshots(item.matchedTrackerMetaJson).toMutableMap()
+            val prevSnap = nextSnaps["ANILIST"]
+            if (mainOutcome.success && item.anilistFavorite != (prevSnap?.isFavorite == true)) {
                 val idField = if (item.mediaType == MediaType.ANIME) "animeId" else "mangaId"
                 val favPayload = buildJsonObject {
-                    put("query", "mutation(${'$'}id: Int) { ToggleFavourite($idField: ${'$'}id) { anime { nodes { id } } } }")
+                    put("query", "mutation(${'$'}id: Int) { ToggleFavourite($idField: ${'$'}id) { anime { nodes { id } } manga { nodes { id } } } }")
                     putJsonObject("variables") { put("id", alId.toInt()) }
                 }
-                val snap = TrackerMetadataCodec.decodeMatchedSnapshots(item.matchedTrackerMetaJson)["ANILIST"]
-                if (snap?.isFavorite != true) {
-                    runCatching {
-                        client.newCall(
-                            Request.Builder()
-                                .url("https://graphql.anilist.co")
-                                .header("Authorization", "Bearer $token")
-                                .post(favPayload.toString().toRequestBody("application/json".toMediaType()))
-                                .build()
-                        ).execute().close()
+                val favOk = runCatching {
+                    client.newCall(
+                        Request.Builder()
+                            .url("https://graphql.anilist.co")
+                            .header("Authorization", "Bearer $token")
+                            .post(favPayload.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                    ).execute().use { it.isSuccessful }
+                }.getOrDefault(false)
+                if (favOk) {
+                    val baseSnap = prevSnap ?: RemoteTrackerEntrySnapshot(
+                        trackerKey = "ANILIST",
+                        remoteId = alId.toString(),
+                        title = item.title
+                    )
+                    nextSnaps["ANILIST"] = baseSnap.copy(
+                        isFavorite = item.anilistFavorite,
+                        lastSyncedMs = System.currentTimeMillis()
+                    )
+                    if (item.id > 0L) {
+                        repository.updateMedia(
+                            item.copy(matchedTrackerMetaJson = TrackerMetadataCodec.encodeMatchedSnapshots(nextSnaps))
+                        )
                     }
                 }
             }
@@ -524,14 +634,23 @@ class TrackerSyncEngine(
                 item.tmdbId?.let { put("tmdb", it.toInt()) }
                 item.imdbId?.takeIf { it.isNotBlank() }?.let { put("imdb", it) }
             }
-            val endpointPath = when (effectiveStatus) {
-                TrackingStatus.PLAN_TO_TRACK -> "sync/watchlist"
-                else -> "sync/history"
+            val seasonsArr = if (effectiveStatus == TrackingStatus.IN_PROGRESS && item.mediaType != MediaType.MOVIE) {
+                buildWatchedSeasonsArray(item)
+            } else null
+
+            val useHistory = when {
+                effectiveStatus == TrackingStatus.COMPLETED -> true
+                effectiveStatus == TrackingStatus.IN_PROGRESS && item.mediaType != MediaType.MOVIE -> seasonsArr != null
+                else -> false
             }
+            val endpointPath = if (useHistory) "sync/history" else "sync/watchlist"
             val payload = buildJsonObject {
                 put(arrayKey, buildJsonArray {
                     add(buildJsonObject {
                         put("ids", idObj)
+                        if (useHistory && seasonsArr != null) {
+                            put("seasons", seasonsArr)
+                        }
                     })
                 })
             }
@@ -641,6 +760,39 @@ class TrackerSyncEngine(
                     TrackerSyncOutcome("SIMKL", false, code, "SIMKL HTTP $code")
                 } else {
                     TrackerSyncOutcome("SIMKL", true, code, "SIMKL synced")
+                }
+            }
+
+            // Push watched episodes / completed movie to SIMKL /sync/history so episode counts stay synced
+            if (mainOutcome.success) {
+                val historySeasons = if (item.mediaType != MediaType.MOVIE && item.currentProgress >= 1.0) {
+                    buildWatchedSeasonsArray(item)
+                } else null
+                val shouldPushHistory = (item.mediaType == MediaType.MOVIE && effectiveStatus == TrackingStatus.COMPLETED) ||
+                    (item.mediaType != MediaType.MOVIE && (historySeasons != null || effectiveStatus == TrackingStatus.COMPLETED))
+                if (shouldPushHistory) {
+                    val histPayload = buildJsonObject {
+                        put(arrayName, buildJsonArray {
+                            add(buildJsonObject {
+                                put("ids", idObj)
+                                if (historySeasons != null) {
+                                    put("seasons", historySeasons)
+                                }
+                            })
+                        })
+                    }
+                    runCatching {
+                        client.newCall(
+                            Request.Builder()
+                                .url("https://api.simkl.com/sync/history")
+                                .header("Authorization", "Bearer $token")
+                                .header("simkl-api-key", TrackerAccountVerifier.SIMKL_CLIENT_ID)
+                                .header("User-Agent", "OmniTrack/1.0 (Android)")
+                                .header("Content-Type", "application/json")
+                                .post(histPayload.toString().toRequestBody("application/json".toMediaType()))
+                                .build()
+                        ).execute().close()
+                    }
                 }
             }
 
@@ -787,24 +939,38 @@ class TrackerSyncEngine(
 
     private suspend fun pushTmdb(
         item: MediaItemEntity,
-        token: String?
+        token: String?,
+        sessionId: String?
     ): TrackerSyncOutcome = NetworkPacer.withTmdbPacing {
-        if (token.isNullOrBlank()) return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "TMDb account token not connected")
+        val clean = token?.trim().orEmpty()
+        if (clean.isBlank()) return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "TMDb account token not connected")
+        val sid = sessionId?.trim().orEmpty()
+        if (sid.isBlank()) {
+            return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "Sign in to TMDb in Tracker Accounts to enable rating sync")
+        }
         val tId = item.tmdbId ?: return@withTmdbPacing TrackerSyncOutcome("TMDB", false, null, "TMDb ID not bound")
         val rating = item.userRating ?: return@withTmdbPacing TrackerSyncOutcome("TMDB", true, null, "TMDb linked (rate entry to push score)")
         try {
             val type = if (item.mediaType == MediaType.MOVIE) "movie" else "tv"
             val halfStarRating = ((rating * 2f).roundToInt() / 2.0).coerceIn(0.5, 10.0)
             val payload = buildJsonObject { put("value", halfStarRating) }
+            val isJwt = TrackerAccountVerifier.isTmdbV4Jwt(clean)
+            val encSid = URLEncoder.encode(sid, "UTF-8")
+            val url = if (isJwt) {
+                "https://api.themoviedb.org/3/$type/$tId/rating?session_id=$encSid"
+            } else {
+                "https://api.themoviedb.org/3/$type/$tId/rating?api_key=${URLEncoder.encode(clean, "UTF-8")}&session_id=$encSid"
+            }
 
-            val request = Request.Builder()
-                .url("https://api.themoviedb.org/3/$type/$tId/rating")
-                .header("Authorization", "Bearer $token")
+            val reqBuilder = Request.Builder()
+                .url(url)
                 .header("User-Agent", "OmniTrack/1.0 (Android)")
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            if (isJwt) {
+                reqBuilder.header("Authorization", "Bearer $clean")
+            }
 
-            client.newCall(request).execute().use { response ->
+            client.newCall(reqBuilder.build()).execute().use { response ->
                 val code = response.code
                 if (!response.isSuccessful) {
                     AppLogger.w("TrackerSync", "service=TMDB op=push http=$code")
@@ -1202,6 +1368,11 @@ class TrackerSyncEngine(
             isbn = existing.isbn ?: incoming.isbn,
             currentProgress = nextProgress,
             totalProgress = nextTotal,
+            volumesProgress = maxOf(existing.volumesProgress, incoming.volumesProgress),
+            rewatchCount = maxOf(existing.rewatchCount, incoming.rewatchCount),
+            personalNotes = existing.personalNotes?.takeIf { it.isNotBlank() } ?: incoming.personalNotes,
+            startedAtMs = existing.startedAtMs ?: incoming.startedAtMs,
+            finishedAtMs = existing.finishedAtMs ?: incoming.finishedAtMs,
             playtimeHours = nextPlaytime,
             userRating = nextRating,
             status = nextStatus
@@ -1268,6 +1439,11 @@ class TrackerSyncEngine(
                             lists {
                                 entries {
                                     progress
+                                    progressVolumes
+                                    repeat
+                                    notes
+                                    startedAt { year month day }
+                                    completedAt { year month day }
                                     score(format: POINT_10_DECIMAL)
                                     status
                                     media {
@@ -1352,6 +1528,11 @@ class TrackerSyncEngine(
                             status = trackingStatus,
                             currentProgress = progress,
                             totalProgress = totalProg,
+                            volumesProgress = entryObj["progressVolumes"]?.asSafeInt() ?: 0,
+                            rewatchCount = entryObj["repeat"]?.asSafeInt() ?: 0,
+                            personalNotes = entryObj["notes"]?.asSafeStr(),
+                            startedAtMs = parseFuzzyDateToEpochMs(entryObj["startedAt"].asSafeObj()),
+                            finishedAtMs = parseFuzzyDateToEpochMs(entryObj["completedAt"].asSafeObj()),
                             userRating = score,
                             anilistId = alId,
                             malId = mediaObj["idMal"].asSafeLong()
@@ -1385,9 +1566,9 @@ class TrackerSyncEngine(
         try {
             for (isAnime in listOf(true, false)) {
                 val endpoint = if (isAnime) {
-                    "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status,num_episodes,main_picture,start_date,media_type&limit=200"
+                    "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status{status,score,num_episodes_watched,num_times_rewatched,comments,start_date,finish_date},num_episodes,main_picture,start_date,media_type&limit=200"
                 } else {
-                    "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status,num_chapters,main_picture,start_date,media_type&limit=200"
+                    "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status{status,score,num_chapters_read,num_volumes_read,num_times_reread,comments,start_date,finish_date},num_chapters,main_picture,start_date,media_type&limit=200"
                 }
                 var nextUrl: String? = endpoint
                 var page = 0
@@ -1439,6 +1620,11 @@ class TrackerSyncEngine(
                         val total = (if (isAnime) node["num_episodes"] else node["num_chapters"])
                             ?.asSafeInt()?.takeIf { it > 0 }?.toDouble()
                         val score = listStatus?.get("score")?.asSafeInt()?.takeIf { it > 0 }?.toFloat()
+                        val vols = if (!isAnime) listStatus?.get("num_volumes_read")?.asSafeInt() ?: 0 else 0
+                        val rewatches = (if (isAnime) listStatus?.get("num_times_rewatched") else listStatus?.get("num_times_reread"))?.asSafeInt() ?: 0
+                        val note = listStatus?.get("comments")?.asSafeStr()
+                        val startMs = parseYmdToEpochMs(listStatus?.get("start_date")?.asSafeStr())
+                        val finishMs = parseYmdToEpochMs(listStatus?.get("finish_date")?.asSafeStr())
                         when (smartMergeIncomingItem(
                             MediaItemEntity(
                                 title = title,
@@ -1447,6 +1633,11 @@ class TrackerSyncEngine(
                                 status = status,
                                 currentProgress = prog,
                                 totalProgress = total,
+                                volumesProgress = vols,
+                                rewatchCount = rewatches,
+                                personalNotes = note,
+                                startedAtMs = startMs,
+                                finishedAtMs = finishMs,
                                 userRating = score,
                                 releaseYear = year,
                                 malId = malId
@@ -1504,11 +1695,31 @@ class TrackerSyncEngine(
                 }
             }
 
+            val movieRatings = mutableMapOf<Long, Float>()
+            val showRatings = mutableMapOf<Long, Float>()
+            fetchTraktArr("sync/ratings/movies")?.forEach { elem ->
+                val obj = elem.asSafeObj() ?: return@forEach
+                val r = obj["rating"]?.asSafeInt()?.takeIf { it > 0 }?.toFloat() ?: return@forEach
+                val mIds = obj["movie"].asSafeObj()?.get("ids").asSafeObj()
+                mIds?.get("trakt").asSafeLong()?.let { movieRatings[it] = r }
+                mIds?.get("tmdb").asSafeLong()?.let { movieRatings[-it] = r }
+            }
+            fetchTraktArr("sync/ratings/shows")?.forEach { elem ->
+                val obj = elem.asSafeObj() ?: return@forEach
+                val r = obj["rating"]?.asSafeInt()?.takeIf { it > 0 }?.toFloat() ?: return@forEach
+                val sIds = obj["show"].asSafeObj()?.get("ids").asSafeObj()
+                sIds?.get("trakt").asSafeLong()?.let { showRatings[it] = r }
+                sIds?.get("tmdb").asSafeLong()?.let { showRatings[-it] = r }
+            }
+
             fetchTraktArr("sync/watched/movies")?.forEach { elem ->
                 val movieObj = elem.asSafeObj()?.get("movie").asSafeObj() ?: return@forEach
                 val title = movieObj["title"].asSafeStr() ?: return@forEach
                 val ids = movieObj["ids"].asSafeObj()
                 val year = movieObj["year"].asSafeStr()
+                val trId = ids?.get("trakt").asSafeLong()
+                val tmId = ids?.get("tmdb").asSafeLong()
+                val rating = (trId?.let { movieRatings[it] }) ?: (tmId?.let { movieRatings[-it] })
                 when (smartMergeIncomingItem(
                     MediaItemEntity(
                         title = title,
@@ -1517,9 +1728,10 @@ class TrackerSyncEngine(
                         status = com.omnitrack.app.data.model.TrackingStatus.COMPLETED,
                         currentProgress = 1.0,
                         totalProgress = 1.0,
+                        userRating = rating,
                         releaseYear = year,
-                        tmdbId = ids?.get("tmdb").asSafeLong(),
-                        traktId = ids?.get("trakt").asSafeLong(),
+                        tmdbId = tmId,
+                        traktId = trId,
                         imdbId = ids?.get("imdb").asSafeStr()
                     )
                 )) {
@@ -1544,6 +1756,9 @@ class TrackerSyncEngine(
                 } else {
                     com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
                 }
+                val trId = ids?.get("trakt").asSafeLong()
+                val tmId = ids?.get("tmdb").asSafeLong()
+                val rating = (trId?.let { showRatings[it] }) ?: (tmId?.let { showRatings[-it] })
                 when (smartMergeIncomingItem(
                     MediaItemEntity(
                         title = title,
@@ -1552,9 +1767,10 @@ class TrackerSyncEngine(
                         status = status,
                         currentProgress = watchedCount,
                         totalProgress = aired,
+                        userRating = rating,
                         releaseYear = year,
-                        tmdbId = ids?.get("tmdb").asSafeLong(),
-                        traktId = ids?.get("trakt").asSafeLong(),
+                        tmdbId = tmId,
+                        traktId = trId,
                         imdbId = ids?.get("imdb").asSafeStr()
                     )
                 )) {
@@ -2733,7 +2949,7 @@ class TrackerSyncEngine(
                             put("fields", "id,title,released,rating,image{url}")
                             put("results", 1)
                         }.toString()
-                        client.newCall(
+                        val baseSnap = client.newCall(
                             Request.Builder()
                                 .url("https://api.vndb.org/kana/vn")
                                 .header("User-Agent", "OmniTrack/1.0")
@@ -2752,7 +2968,63 @@ class TrackerSyncEngine(
                                 year = o["released"].asSafeStr()?.take(4),
                                 remoteScore10 = o["rating"].asSafeInt()?.let { it / 10f }
                             )
+                        } ?: return@runCatching null
+
+                        val vndbTok = tokens.vndbToken?.trim().orEmpty()
+                        if (vndbTok.isBlank()) return@runCatching baseSnap
+
+                        val userId = runCatching {
+                            client.newCall(
+                                Request.Builder()
+                                    .url("https://api.vndb.org/kana/authinfo")
+                                    .header("Authorization", "Token $vndbTok")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .get()
+                                    .build()
+                            ).execute().use { r ->
+                                if (r.isSuccessful) json.parseToJsonElement(r.body?.string().orEmpty()).asSafeObj()?.get("id").asSafeStr() else null
+                            }
+                        }.getOrNull() ?: return@runCatching baseSnap
+
+                        val ulistPayload = buildJsonObject {
+                            put("user", userId)
+                            put("filters", buildJsonArray { add(JsonPrimitive("id")); add(JsonPrimitive("=")); add(JsonPrimitive(vId)) })
+                            put("fields", "id,vote,notes,started,finished,labels.label")
+                            put("results", 1)
+                        }.toString()
+
+                        val uEntry = runCatching {
+                            client.newCall(
+                                Request.Builder()
+                                    .url("https://api.vndb.org/kana/ulist")
+                                    .header("Authorization", "Token $vndbTok")
+                                    .header("User-Agent", "OmniTrack/1.0")
+                                    .post(ulistPayload.toRequestBody("application/json".toMediaType()))
+                                    .build()
+                            ).execute().use { r ->
+                                if (!r.isSuccessful) return@use null
+                                json.parseToJsonElement(r.body?.string().orEmpty()).asSafeObj()
+                                    ?.get("results").asSafeArr()?.firstOrNull()?.asSafeObj()
+                            }
+                        }.getOrNull() ?: return@runCatching baseSnap
+
+                        val labels = uEntry["labels"].asSafeArr()?.mapNotNull { it.asSafeObj()?.get("label").asSafeStr()?.lowercase() }.orEmpty()
+                        val st = when {
+                            labels.any { "finished" in it } -> TrackingStatus.COMPLETED
+                            labels.any { "playing" in it } -> TrackingStatus.IN_PROGRESS
+                            labels.any { "stalled" in it || "hold" in it } -> TrackingStatus.ON_HOLD
+                            labels.any { "dropped" in it } -> TrackingStatus.DROPPED
+                            labels.any { "wishlist" in it } -> TrackingStatus.PLAN_TO_TRACK
+                            else -> null
                         }
+                        val userScore = uEntry["vote"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
+                        baseSnap.copy(
+                            remoteStatus = st ?: baseSnap.remoteStatus,
+                            remoteScore10 = userScore ?: baseSnap.remoteScore10,
+                            remoteNote = uEntry["notes"].asSafeStr() ?: baseSnap.remoteNote,
+                            startedAtMs = parseYmdToEpochMs(uEntry["started"].asSafeStr()) ?: baseSnap.startedAtMs,
+                            finishedAtMs = parseYmdToEpochMs(uEntry["finished"].asSafeStr()) ?: baseSnap.finishedAtMs
+                        )
                     }.getOrNull()
                 }
             }
@@ -3050,19 +3322,26 @@ class TrackerSyncEngine(
             }
             "TMDB" -> {
                 val tok = tokens.tmdbToken?.trim().orEmpty()
+                val sid = tokens.tmdbSessionId?.trim().orEmpty()
                 val tId = item.tmdbId
                 if (tok.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "TMDb not signed in")
+                if (sid.isBlank()) return@withContext TrackerSyncOutcome(key, false, null, "Sign in to TMDb in Tracker Accounts to remove remote rating")
                 if (tId == null) return@withContext TrackerSyncOutcome(key, false, null, "TMDb ID not bound")
                 val seg = if (item.mediaType == MediaType.MOVIE) "movie" else "tv"
+                val isJwt = TrackerAccountVerifier.isTmdbV4Jwt(tok)
+                val encSid = URLEncoder.encode(sid, "UTF-8")
+                val url = if (isJwt) {
+                    "https://api.themoviedb.org/3/$seg/$tId/rating?session_id=$encSid"
+                } else {
+                    "https://api.themoviedb.org/3/$seg/$tId/rating?api_key=${URLEncoder.encode(tok, "UTF-8")}&session_id=$encSid"
+                }
                 NetworkPacer.withTmdbPacing {
                     runCatching {
-                        client.newCall(
-                            Request.Builder()
-                                .url("https://api.themoviedb.org/3/$seg/$tId/rating")
-                                .header("Authorization", "Bearer $tok")
-                                .delete()
-                                .build()
-                        ).execute().use { resp ->
+                        val reqBuilder = Request.Builder()
+                            .url(url)
+                            .delete()
+                        if (isJwt) reqBuilder.header("Authorization", "Bearer $tok")
+                        client.newCall(reqBuilder.build()).execute().use { resp ->
                             if (resp.isSuccessful || resp.code == 404) TrackerSyncOutcome(key, true, resp.code, "TMDb rating removed")
                             else TrackerSyncOutcome(key, false, resp.code, "TMDb delete HTTP ${resp.code}")
                         }

@@ -5,8 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,14 +33,18 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -267,33 +271,33 @@ private fun OmniThemeChip(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
+            .background(if (isSelected) palette.accent.copy(alpha = 0.08f) else palette.background.copy(alpha = 0.65f))
+            .border(
+                width = if (isSelected) 1.3.dp else 0.6.dp,
+                color = if (isSelected) palette.accent else Color.White.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(8.dp)
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 6.dp),
+            .padding(horizontal = 6.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Miniature UI surface & swatch preview
         Box(
             modifier = Modifier
-                .size(52.dp)
-                .then(
-                    if (isSelected) {
-                        Modifier.border(
-                            width = 1.5.dp,
-                            color = palette.accent,
-                            shape = RoundedCornerShape(10.dp)
-                        )
-                    } else {
-                        Modifier
-                    }
-                ),
-            contentAlignment = Alignment.Center
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(palette.surfaceCard)
+                .padding(horizontal = 6.dp, vertical = 5.dp)
         ) {
             if (theme == OmniAppTheme.CUSTOM) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(22.dp)
+                        .align(Alignment.CenterStart)
                         .clip(CircleShape)
                         .background(customThemeRingBrush())
-                        .padding(3.5.dp)
+                        .padding(2.5.dp)
                         .clip(CircleShape)
                         .background(AmoledBlack),
                     contentAlignment = Alignment.Center
@@ -303,14 +307,15 @@ private fun OmniThemeChip(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Selected",
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(11.dp)
                         )
                     }
                 }
             } else {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(22.dp)
+                        .align(Alignment.CenterStart)
                         .clip(CircleShape)
                         .background(previewBrush),
                     contentAlignment = Alignment.Center
@@ -320,10 +325,32 @@ private fun OmniThemeChip(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Selected",
                             tint = checkTint,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(start = 26.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.28f))
+                )
+                Box(
+                    modifier = Modifier
+                        .size(width = 18.dp, height = 3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(palette.accent)
+                )
             }
         }
 
@@ -338,15 +365,6 @@ private fun OmniThemeChip(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Box(
-            modifier = Modifier
-                .size(width = 30.dp, height = 2.5.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(if (isSelected) previewBrush else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent)))
         )
     }
 }
@@ -370,8 +388,16 @@ private fun CustomThemeColorPicker(
     onColorSelected: (Color) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var hexValue by remember(selectedColor) { mutableStateOf(selectedColor.toThemeHex()) }
-    var hsv by remember(selectedColor) { mutableStateOf(selectedColor.toHsv()) }
+    var isDragging by remember { mutableStateOf(false) }
+    var hexValue by remember { mutableStateOf(selectedColor.toThemeHex()) }
+    var hsv by remember { mutableStateOf(selectedColor.toHsv()) }
+
+    LaunchedEffect(selectedColor) {
+        if (!isDragging && selectedColor.toThemeHex() != hsv.toColor().toThemeHex()) {
+            hsv = selectedColor.toHsv()
+            hexValue = selectedColor.toThemeHex()
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
@@ -469,6 +495,7 @@ private fun CustomThemeColorPicker(
             ) {
                 SaturationValuePicker(
                     hsv = hsv,
+                    onDragStateChange = { dragging -> isDragging = dragging },
                     onHsvChanged = { updated ->
                         hsv = updated
                         val c = updated.toColor()
@@ -478,6 +505,7 @@ private fun CustomThemeColorPicker(
                 )
                 HuePicker(
                     hue = hsv.hue,
+                    onDragStateChange = { dragging -> isDragging = dragging },
                     onHueChanged = { hue ->
                         val updated = hsv.copy(hue = hue)
                         hsv = updated
@@ -516,34 +544,51 @@ private fun CustomThemeColorPicker(
 @Composable
 private fun SaturationValuePicker(
     hsv: HsvColor,
+    onDragStateChange: (Boolean) -> Unit,
     onHsvChanged: (HsvColor) -> Unit
 ) {
-    fun update(position: Offset, width: Float, height: Float) {
-        if (width <= 0f || height <= 0f) return
-        onHsvChanged(
-            hsv.copy(
-                saturation = (position.x / width).coerceIn(0f, 1f),
-                value = (1f - position.y / height).coerceIn(0f, 1f)
-            )
-        )
-    }
+    val currentHsv by rememberUpdatedState(hsv)
+    val currentOnHsvChanged by rememberUpdatedState(onHsvChanged)
+    val currentOnDragState by rememberUpdatedState(onDragStateChange)
 
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(148.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .pointerInput(hsv.hue) {
-                detectTapGestures { update(it, size.width.toFloat(), size.height.toFloat()) }
-            }
-            .pointerInput(hsv.hue) {
-                detectDragGestures(
-                    onDragStart = { update(it, size.width.toFloat(), size.height.toFloat()) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        update(change.position, size.width.toFloat(), size.height.toFloat())
+            .height(168.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    currentOnDragState(true)
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    val h = size.height.toFloat().coerceAtLeast(1f)
+                    fun emitAt(pos: Offset) {
+                        currentOnHsvChanged(
+                            currentHsv.copy(
+                                saturation = (pos.x / w).coerceIn(0f, 1f),
+                                value = (1f - pos.y / h).coerceIn(0f, 1f)
+                            )
+                        )
                     }
-                )
+                    emitAt(down.position)
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+                            change.consume()
+                            emitAt(change.position)
+                        }
+                    } finally {
+                        currentOnDragState(false)
+                    }
+                }
             }
     ) {
         drawRect(
@@ -556,14 +601,21 @@ private fun SaturationValuePicker(
         )
         val cx = hsv.saturation.coerceIn(0f, 1f) * size.width
         val cy = (1f - hsv.value.coerceIn(0f, 1f)) * size.height
+        val liveColor = hsv.toColor()
         drawCircle(
-            color = Color.Black.copy(alpha = 0.65f),
-            radius = 8.dp.toPx(),
+            color = Color.Black.copy(alpha = 0.72f),
+            radius = 9.5.dp.toPx(),
+            center = Offset(cx, cy),
+            style = Stroke(width = 2.dp.toPx())
+        )
+        drawCircle(
+            color = liveColor,
+            radius = 7.dp.toPx(),
             center = Offset(cx, cy)
         )
         drawCircle(
             color = Color.White,
-            radius = 7.dp.toPx(),
+            radius = 8.dp.toPx(),
             center = Offset(cx, cy),
             style = Stroke(width = 2.dp.toPx())
         )
@@ -573,32 +625,49 @@ private fun SaturationValuePicker(
 @Composable
 private fun HuePicker(
     hue: Float,
+    onDragStateChange: (Boolean) -> Unit,
     onHueChanged: (Float) -> Unit
 ) {
-    fun update(x: Float, width: Float) {
-        if (width <= 0f) return
-        onHueChanged((x / width).coerceIn(0f, 1f) * 360f)
-    }
+    val currentOnHueChanged by rememberUpdatedState(onHueChanged)
+    val currentOnDragState by rememberUpdatedState(onDragStateChange)
 
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(20.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .height(30.dp)
             .pointerInput(Unit) {
-                detectTapGestures { update(it.x, size.width.toFloat()) }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { update(it.x, size.width.toFloat()) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        update(change.position.x, size.width.toFloat())
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    currentOnDragState(true)
+                    val w = size.width.toFloat().coerceAtLeast(1f)
+                    fun emitHue(x: Float) {
+                        currentOnHueChanged((x / w).coerceIn(0f, 1f) * 359.9f)
                     }
-                )
+                    emitHue(down.position.x)
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+                            change.consume()
+                            emitHue(change.position.x)
+                        }
+                    } finally {
+                        currentOnDragState(false)
+                    }
+                }
             }
     ) {
-        drawRect(
+        val trackHeight = 16.dp.toPx()
+        val trackTop = (size.height - trackHeight) / 2f
+        val radius = 6.dp.toPx()
+        drawRoundRect(
             brush = Brush.horizontalGradient(
                 listOf(
                     Color.Red,
@@ -609,12 +678,26 @@ private fun HuePicker(
                     Color.Magenta,
                     Color.Red
                 )
-            )
+            ),
+            topLeft = Offset(0f, trackTop),
+            size = Size(size.width, trackHeight),
+            cornerRadius = CornerRadius(radius, radius)
         )
         val markerX = (hue / 360f).coerceIn(0f, 1f) * size.width
+        val pureHueColor = HsvColor(hue, 1f, 1f).toColor()
+        drawCircle(
+            color = Color.Black.copy(alpha = 0.72f),
+            radius = 9.5.dp.toPx(),
+            center = Offset(markerX, size.height / 2f)
+        )
+        drawCircle(
+            color = pureHueColor,
+            radius = 8.dp.toPx(),
+            center = Offset(markerX, size.height / 2f)
+        )
         drawCircle(
             color = Color.White,
-            radius = 7.dp.toPx(),
+            radius = 8.dp.toPx(),
             center = Offset(markerX, size.height / 2f),
             style = Stroke(width = 2.dp.toPx())
         )

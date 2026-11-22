@@ -51,12 +51,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
@@ -108,6 +113,7 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -155,9 +161,15 @@ fun HomeDashboardView(
     onNavigateToDiscover: () -> Unit,
     onNavigateToHistory: () -> Unit,
     modifier: Modifier = Modifier,
-    posterStyle: PosterCardStyle = PosterCardStyle()
+    posterStyle: PosterCardStyle = PosterCardStyle(),
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var heroRefreshNonce by remember { mutableIntStateOf(0) }
+    var localRefreshing by remember { mutableStateOf(false) }
+    val pullState = rememberPullToRefreshState()
     var selectedCategory by remember { mutableStateOf(heroSettings.defaultCategory) }
     LaunchedEffect(heroSettings.defaultCategory) {
         selectedCategory = heroSettings.defaultCategory
@@ -231,7 +243,8 @@ fun HomeDashboardView(
         heroSettings.statusFilters,
         selectedCategory,
         trendingItems,
-        allMedia
+        allMedia,
+        heroRefreshNonce
     ) {
         fun matchesHeroCategory(type: MediaType): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
             "FOLLOW_HOME" -> selectedCategory == MediaType.ALL || type == selectedCategory
@@ -335,14 +348,30 @@ fun HomeDashboardView(
         }
 
         val ordered = when (heroSettings.slideOrder.uppercase()) {
-            "TOP_RATED" -> resolved.sortedByDescending { slide ->
-                when (slide) {
-                    is HomeHeroSlide.LocalSlide -> slide.item.userRating ?: slide.item.communityScore ?: 0f
-                    is HomeHeroSlide.TrendingSlide -> slide.item.communityScore ?: 0f
+            "TOP_RATED" -> {
+                val base = resolved.sortedByDescending { slide ->
+                    when (slide) {
+                        is HomeHeroSlide.LocalSlide -> slide.item.userRating ?: slide.item.communityScore ?: 0f
+                        is HomeHeroSlide.TrendingSlide -> slide.item.communityScore ?: 0f
+                    }
+                }
+                if (heroRefreshNonce > 0 && base.size > 1) {
+                    val shift = java.util.Random(heroRefreshNonce.toLong() * 31L).nextInt(base.size - 1) + 1
+                    base.drop(shift) + base.take(shift)
+                } else base
+            }
+            "SHUFFLE" -> {
+                if (heroRefreshNonce > 0) {
+                    resolved.shuffled(java.util.Random(heroRefreshNonce.toLong() * 1009L + 42L))
+                } else {
+                    resolved.shuffled(java.util.Random(42L))
                 }
             }
-            "SHUFFLE" -> resolved.sortedBy { it.slideKey().hashCode() }
-            else -> resolved
+            else -> {
+                if (heroRefreshNonce > 0 && resolved.size > 1) {
+                    resolved.shuffled(java.util.Random(heroRefreshNonce.toLong() * 7919L + 17L))
+                } else resolved
+            }
         }
 
         if (heroSettings.slideCount <= 0) ordered else ordered.take(heroSettings.slideCount.coerceIn(1, 50))
@@ -368,7 +397,30 @@ fun HomeDashboardView(
         )
     }
 
-    Box(
+    PullToRefreshBox(
+        isRefreshing = isRefreshing || localRefreshing,
+        state = pullState,
+        onRefresh = {
+            localRefreshing = true
+            heroRefreshNonce++
+            onRefresh()
+            scope.launch {
+                delay(550L)
+                localRefreshing = false
+            }
+        },
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = isRefreshing || localRefreshing,
+                containerColor = DarkSurfaceElevated,
+                color = AccentGold,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 52.dp)
+            )
+        },
         modifier = modifier
             .fillMaxSize()
             .background(AmoledBlack)
@@ -394,6 +446,12 @@ fun HomeDashboardView(
                             initialPage = startIndex,
                             pageCount = { virtualCount }
                         )
+
+                        LaunchedEffect(heroRefreshNonce) {
+                            if (heroRefreshNonce > 0 && heroSlides.isNotEmpty()) {
+                                runCatching { pagerState.scrollToPage(startIndex) }
+                            }
+                        }
 
                         LaunchedEffect(heroKeys) {
                             if (heroSlides.isNotEmpty() && !pagerState.isScrollInProgress) {
@@ -463,7 +521,7 @@ fun HomeDashboardView(
                                 }
                             }
 
-                            if (isLooping) {
+                            if (isLooping && heroSettings.slideCount > 0 && heroSlides.size <= 15) {
                                 Row(
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)

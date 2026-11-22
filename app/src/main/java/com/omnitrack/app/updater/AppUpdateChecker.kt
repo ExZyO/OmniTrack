@@ -48,11 +48,18 @@ class AppUpdateChecker(
             val versionJsonDeferred = async { fetchFromRawVersionJson() }
             val buildStatusDeferred = async { fetchBuildStatus() }
 
-            val apiRelease = releaseApiDeferred.await()
+            val apiBase = releaseApiDeferred.await()
             val rawRelease = versionJsonDeferred.await()
             val buildStatus = buildStatusDeferred.await()
 
-            val candidate = apiRelease ?: rawRelease
+            val candidate = when {
+                apiBase != null && rawRelease != null &&
+                    apiBase.apkSha256.isBlank() &&
+                    (rawRelease.version == apiBase.version || rawRelease.versionCode == apiBase.versionCode) ->
+                    apiBase.copy(apkSha256 = rawRelease.apkSha256)
+                apiBase != null -> apiBase
+                else -> rawRelease
+            }
             val isReleaseNewer = candidate != null && isNewerVersion(
                 remoteVersion = candidate.version,
                 remoteCode = candidate.versionCode,
@@ -76,6 +83,7 @@ class AppUpdateChecker(
                         releasePageUrl = candidate?.releasePageUrl?.ifBlank {
                             "https://github.com/$githubRepo/releases"
                         } ?: "https://github.com/$githubRepo/releases",
+                        apkSha256 = if (isReleaseNewer) candidate?.apkSha256.orEmpty() else "",
                         isNewer = true,
                         isBuilding = true,
                         buildRunNumber = runNum,
@@ -178,6 +186,7 @@ class AppUpdateChecker(
                 val htmlUrl = root["html_url"]?.jsonPrimitive?.contentOrNull ?: ""
 
                 var apkUrl = ""
+                var apkSha256 = ""
                 val assets = root["assets"]?.jsonArray
                 if (assets != null) {
                     val isDebug = BuildConfig.DEBUG
@@ -187,11 +196,15 @@ class AppUpdateChecker(
                         if (isDebug) {
                             if (name.endsWith("-debug.apk", ignoreCase = true)) {
                                 apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
+                                apkSha256 = obj["digest"]?.jsonPrimitive?.contentOrNull
+                                    ?.removePrefix("sha256:")?.trim().orEmpty()
                                 break
                             }
                         } else {
                             if (name.endsWith(".apk", ignoreCase = true) && !name.contains("-debug", ignoreCase = true)) {
                                 apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
+                                apkSha256 = obj["digest"]?.jsonPrimitive?.contentOrNull
+                                    ?.removePrefix("sha256:")?.trim().orEmpty()
                                 break
                             }
                         }
@@ -202,10 +215,16 @@ class AppUpdateChecker(
                             val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: ""
                             if (name.endsWith(".apk", ignoreCase = true)) {
                                 apkUrl = obj["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: ""
+                                apkSha256 = obj["digest"]?.jsonPrimitive?.contentOrNull
+                                    ?.removePrefix("sha256:")?.trim().orEmpty()
                                 break
                             }
                         }
                     }
+                }
+
+                if (apkSha256.isBlank()) {
+                    apkSha256 = extractSha256FromReleaseNotes(releaseNotes, isDebug = BuildConfig.DEBUG)
                 }
 
                 val buildCode = extractBuildNumber(tagName)
@@ -214,10 +233,20 @@ class AppUpdateChecker(
                     versionCode = buildCode,
                     releaseNotes = releaseNotes,
                     apkDownloadUrl = apkUrl,
-                    releasePageUrl = htmlUrl
+                    releasePageUrl = htmlUrl,
+                    apkSha256 = apkSha256
                 )
             }
         }.getOrNull()
+    }
+
+    private fun extractSha256FromReleaseNotes(notes: String, isDebug: Boolean): String {
+        val linePrefix = if (isDebug) "debug" else "release"
+        val targeted = Regex("(?im)^.*$linePrefix.*sha-?256[^a-f0-9]*([a-f0-9]{64}).*$")
+            .find(notes)?.groupValues?.getOrNull(1)
+        if (!targeted.isNullOrBlank()) return targeted.lowercase()
+        return Regex("(?im)^.*sha-?256[^a-f0-9]*([a-f0-9]{64}).*$")
+            .find(notes)?.groupValues?.getOrNull(1)?.lowercase().orEmpty()
     }
 
     private fun fetchFromRawVersionJson(): AppRelease? {
@@ -237,12 +266,18 @@ class AppUpdateChecker(
                 } else {
                     manifest.apkUrl
                 }
+                val expectedSha = if (BuildConfig.DEBUG && manifest.debugApkUrl.isNotBlank()) {
+                    manifest.debugApkSha256.takeIf { it.isNotBlank() } ?: manifest.apkSha256
+                } else {
+                    manifest.apkSha256
+                }
                 AppRelease(
                     version = manifest.version.removePrefix("v"),
                     versionCode = manifest.versionCode,
                     releaseNotes = manifest.releaseNotes,
                     apkDownloadUrl = downloadUrl,
-                    releasePageUrl = "https://github.com/$githubRepo/releases"
+                    releasePageUrl = "https://github.com/$githubRepo/releases",
+                    apkSha256 = expectedSha
                 )
             }
         }.getOrNull()

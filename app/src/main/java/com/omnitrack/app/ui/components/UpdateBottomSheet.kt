@@ -293,6 +293,7 @@ fun UpdateBottomSheet(
                                 val result = AppUpdateInstaller.downloadAndInstall(
                                     context = context,
                                     apkUrl = release.apkDownloadUrl,
+                                    expectedSha256 = release.apkSha256.takeIf { it.isNotBlank() },
                                     onProgress = { downloadProgress = it }
                                 )
                                 isDownloading = false

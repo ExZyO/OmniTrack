@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/omnitrack_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="omnitrack_diagnostics.xml" />
+        <exclude domain="file" path="omnitrack_diagnostics.log" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/omnitrack_settings.preferences_pb" />
+        <exclude domain="sharedpref" path="omnitrack_diagnostics.xml" />
+        <exclude domain="file" path="omnitrack_diagnostics.log" />
+    </device-transfer>
+</data-extraction-rules>

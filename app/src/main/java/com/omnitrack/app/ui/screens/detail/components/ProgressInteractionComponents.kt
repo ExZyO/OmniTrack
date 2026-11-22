@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.ui.components.repeatingClickable
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -151,16 +152,18 @@ fun ProgressEditSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = {
-                        val step = if (isDecimal) 0.5 else 1.0
-                        progressValue = (progressValue - step).coerceAtLeast(0.0)
-                        textInput = if (isDecimal) String.format("%.1f", progressValue) else progressValue.toInt().toString()
-                    },
+                Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.08f))
+                        .repeatingClickable {
+                            val step = if (isDecimal) 0.5 else 1.0
+                            val rawNext = (progressValue - step).coerceAtLeast(0.0)
+                            progressValue = if (isDecimal) (rawNext * 10.0).roundToInt() / 10.0 else rawNext
+                            textInput = if (isDecimal) String.format("%.1f", progressValue) else progressValue.toInt().toString()
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(imageVector = Icons.Default.Remove, contentDescription = "Minus", tint = TextPrimary)
                 }
@@ -198,17 +201,19 @@ fun ProgressEditSheet(
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        val step = if (isDecimal) 0.5 else 1.0
-                        val next = progressValue + step
-                        progressValue = if (totalProgress != null) next.coerceAtMost(totalProgress) else next
-                        textInput = if (isDecimal) String.format("%.1f", progressValue) else progressValue.toInt().toString()
-                    },
+                Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
                         .background(AccentArctic.copy(alpha = 0.2f))
+                        .repeatingClickable {
+                            val step = if (isDecimal) 0.5 else 1.0
+                            val next = progressValue + step
+                            val clamped = if (totalProgress != null) next.coerceAtMost(totalProgress) else next
+                            progressValue = if (isDecimal) (clamped * 10.0).roundToInt() / 10.0 else clamped
+                            textInput = if (isDecimal) String.format("%.1f", progressValue) else progressValue.toInt().toString()
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = "Plus", tint = AccentArctic)
                 }

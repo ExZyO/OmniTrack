@@ -62,6 +62,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -110,6 +112,7 @@ import com.omnitrack.app.data.sync.TrackerOverrideConfig
 import com.omnitrack.app.data.sync.TrackerSyncEngine
 import com.omnitrack.app.data.sync.TrackerSyncOutcome
 import com.omnitrack.app.data.sync.TrackerTokens
+import com.omnitrack.app.ui.components.repeatingClickable
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
@@ -175,6 +178,7 @@ fun MultiTrackerSheet(
     var deleteDialogTracker by remember { mutableStateOf<TrackerDef?>(null) }
     var pullPromptAfterBind by remember { mutableStateOf<String?>(null) }
     var datePickTarget by remember { mutableStateOf<String?>(null) }
+    var showExactProgressDialog by remember { mutableStateOf(false) }
 
     val matchedSnapshots = remember(localItem.matchedTrackerMetaJson) {
         TrackerMetadataCodec.decodeMatchedSnapshots(localItem.matchedTrackerMetaJson)
@@ -1055,9 +1059,29 @@ fun MultiTrackerSheet(
 
                     // 3d. Progress + Volumes + Split-Cour Season Offset
                     val curOverride = overridesMap[activeTracker.key] ?: TrackerOverrideConfig()
+                    val isDecimalHours = localItem.mediaType == MediaType.VISUAL_NOVEL || localItem.mediaType == MediaType.GAME
+                    val currentProgressDisplayVal = if (isDecimalHours) {
+                        maxOf(localItem.playtimeHours, localItem.currentProgress)
+                    } else {
+                        localItem.currentProgress
+                    }
+                    fun applyProgressValue(rawVal: Double) {
+                        val clampedMin = rawVal.coerceAtLeast(0.0)
+                        val maxT = localItem.totalProgress
+                        val clamped = if (maxT != null && maxT > 0.0) clampedMin.coerceAtMost(maxT) else clampedMin
+                        val finalVal = if (isDecimalHours) (clamped * 10.0).roundToInt() / 10.0 else clamped
+                        commitLocalUpdate(
+                            if (isDecimalHours) {
+                                localItem.copy(currentProgress = finalVal, playtimeHours = finalVal)
+                            } else {
+                                localItem.copy(currentProgress = finalVal)
+                            }
+                        )
+                    }
+
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            text = "PROGRESS & SPLIT-COUR OFFSET",
+                            text = if (isDecimalHours) "PLAYTIME & PROGRESS (HOLD −/+ TO REPEAT · TAP NUMBER)" else "PROGRESS & SPLIT-COUR OFFSET (HOLD −/+ TO REPEAT)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextSecondary,
@@ -1068,10 +1092,22 @@ fun MultiTrackerSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
-                                val totStr = localItem.totalProgress?.toInt()?.let { " / $it" }.orEmpty()
+                            Column(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { showExactProgressDialog = true }
+                                    .padding(vertical = 2.dp, horizontal = 2.dp)
+                            ) {
+                                val totStr = localItem.totalProgress?.takeIf { it > 0.0 }?.let { t ->
+                                    if (isDecimalHours) " / ${String.format(Locale.US, "%.1f", t)}" else " / ${t.toInt()}"
+                                }.orEmpty()
+                                val valStr = if (isDecimalHours) {
+                                    String.format(Locale.US, "%.1f", currentProgressDisplayVal)
+                                } else {
+                                    currentProgressDisplayVal.toInt().toString()
+                                }
                                 Text(
-                                    text = "${localItem.mediaType.unitLabel}: ${localItem.currentProgress.toInt()}$totStr",
+                                    text = "${localItem.mediaType.unitLabel}: $valStr$totStr",
                                     fontSize = 17.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
@@ -1084,19 +1120,22 @@ fun MultiTrackerSheet(
                                         fontWeight = FontWeight.SemiBold,
                                         color = AccentGold
                                     )
+                                } else {
+                                    Text(
+                                        text = "Tap number to enter exact value",
+                                        fontSize = 10.5.sp,
+                                        color = TextSecondary.copy(alpha = 0.72f)
+                                    )
                                 }
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 SmallStepCircle(Icons.Default.Remove) {
-                                    val next = (localItem.currentProgress - 1.0).coerceAtLeast(0.0)
-                                    commitLocalUpdate(localItem.copy(currentProgress = next))
+                                    val step = if (isDecimalHours) 0.5 else 1.0
+                                    applyProgressValue(currentProgressDisplayVal - step)
                                 }
                                 SmallStepCircle(Icons.Default.Add, accent = true) {
-                                    val maxT = localItem.totalProgress
-                                    val next = (localItem.currentProgress + 1.0).let {
-                                        if (maxT != null && maxT > 0.0) it.coerceAtMost(maxT) else it
-                                    }
-                                    commitLocalUpdate(localItem.copy(currentProgress = next))
+                                    val step = if (isDecimalHours) 0.5 else 1.0
+                                    applyProgressValue(currentProgressDisplayVal + step)
                                 }
                             }
                         }
@@ -1257,18 +1296,18 @@ fun MultiTrackerSheet(
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     "-", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextSecondary,
-                                    modifier = Modifier.clickable {
+                                    modifier = Modifier.repeatingClickable {
                                         val nextR = (localItem.rewatchCount - 1).coerceAtLeast(0)
                                         commitLocalUpdate(localItem.copy(rewatchCount = nextR, malRewatches = nextR))
-                                    }.padding(horizontal = 4.dp)
+                                    }.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                                 Text("${localItem.rewatchCount}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AccentGold)
                                 Text(
                                     "+", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AccentGold,
-                                    modifier = Modifier.clickable {
+                                    modifier = Modifier.repeatingClickable {
                                         val nextR = localItem.rewatchCount + 1
                                         commitLocalUpdate(localItem.copy(rewatchCount = nextR, malRewatches = nextR))
-                                    }.padding(horizontal = 4.dp)
+                                    }.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
                         }
@@ -1390,7 +1429,9 @@ fun MultiTrackerSheet(
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("ANILIST EXTRAS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.8.sp)
                                 TrackerToggleRow(
-                                    label = "Favorite on AniList ♥",
+                                    label = "Favorite on AniList",
+                                    leadingIcon = if (localItem.anilistFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                    leadingIconTint = if (localItem.anilistFavorite) AccentGold else TextSecondary,
                                     checked = localItem.anilistFavorite,
                                     onToggle = { v ->
                                         commitLocalUpdate(localItem.copy(anilistFavorite = v, isFavorite = v || localItem.isFavorite))
@@ -1650,6 +1691,76 @@ fun MultiTrackerSheet(
             DatePicker(state = state)
         }
     }
+
+    if (showExactProgressDialog) {
+        val isDecimalHours = localItem.mediaType == MediaType.VISUAL_NOVEL || localItem.mediaType == MediaType.GAME
+        val initialNum = if (isDecimalHours) maxOf(localItem.playtimeHours, localItem.currentProgress) else localItem.currentProgress
+        var exactInput by remember(showExactProgressDialog) {
+            mutableStateOf(
+                if (isDecimalHours) String.format(Locale.US, "%.1f", initialNum)
+                else initialNum.toInt().toString()
+            )
+        }
+        AlertDialog(
+            onDismissRequest = { showExactProgressDialog = false },
+            containerColor = AmoledBlack,
+            title = {
+                Text(
+                    text = "Set ${localItem.mediaType.unitLabel}",
+                    color = TextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = exactInput,
+                    onValueChange = { exactInput = it },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = if (isDecimalHours) KeyboardType.Decimal else KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    label = { Text(localItem.mediaType.unitLabel, fontSize = 12.sp) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGold,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.22f),
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        cursorColor = AccentGold
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val parsed = exactInput.trim().toDoubleOrNull()
+                        if (parsed != null) {
+                            val clampedMin = parsed.coerceAtLeast(0.0)
+                            val maxT = localItem.totalProgress
+                            val clamped = if (maxT != null && maxT > 0.0) clampedMin.coerceAtMost(maxT) else clampedMin
+                            val finalVal = if (isDecimalHours) (clamped * 10.0).roundToInt() / 10.0 else clamped
+                            commitLocalUpdate(
+                                if (isDecimalHours) {
+                                    localItem.copy(currentProgress = finalVal, playtimeHours = finalVal)
+                                } else {
+                                    localItem.copy(currentProgress = finalVal)
+                                }
+                            )
+                        }
+                        showExactProgressDialog = false
+                    }
+                ) {
+                    Text("Apply", color = AccentGold, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExactProgressDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1855,7 +1966,7 @@ private fun SmallStepCircle(
             .size(32.dp)
             .clip(CircleShape)
             .background(if (accent) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
-            .clickable(onClick = onClick),
+            .repeatingClickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(icon, contentDescription = null, tint = if (accent) AccentGold else TextPrimary, modifier = Modifier.size(16.dp))
@@ -1866,7 +1977,9 @@ private fun SmallStepCircle(
 private fun TrackerToggleRow(
     label: String,
     checked: Boolean,
-    onToggle: (Boolean) -> Unit
+    onToggle: (Boolean) -> Unit,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    leadingIconTint: Color = TextSecondary
 ) {
     Row(
         modifier = Modifier
@@ -1876,7 +1989,20 @@ private fun TrackerToggleRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(label, fontSize = 13.5.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    tint = leadingIconTint,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+            Text(label, fontSize = 13.5.sp, color = TextPrimary, fontWeight = FontWeight.Medium)
+        }
         Switch(
             checked = checked,
             onCheckedChange = onToggle,

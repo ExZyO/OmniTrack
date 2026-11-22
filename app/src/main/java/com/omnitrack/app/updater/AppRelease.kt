@@ -9,6 +9,7 @@ data class AppRelease(
     val releaseNotes: String = "",
     val apkDownloadUrl: String = "",
     val releasePageUrl: String = "",
+    val apkSha256: String = "",
     val isNewer: Boolean = false,
     val isBuilding: Boolean = false,
     val buildRunNumber: Long = 0,
@@ -23,5 +24,7 @@ data class VersionManifest(
     val versionCode: Long = 0,
     val apkUrl: String = "",
     val debugApkUrl: String = "",
+    val apkSha256: String = "",
+    val debugApkSha256: String = "",
     val releaseNotes: String = ""
 )

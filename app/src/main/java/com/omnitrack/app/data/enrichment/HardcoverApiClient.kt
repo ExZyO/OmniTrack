@@ -369,7 +369,7 @@ class HardcoverApiClient(
         }
         val cleanNote = reviewNote?.trim()?.takeIf { it.isNotBlank() }
         val gql = """
-            mutation UpdateBook(${'$'}bookId: Int!, ${'$'}statusId: Int!, ${'$'}rating: numeric, ${'$'}review: String, ${'$'}priv: Boolean) {
+            mutation UpdateBook(${'$'}bookId: Int!, ${'$'}statusId: Int!, ${'$'}rating: numeric, ${'$'}review: String) {
               insert_user_book(object: {book_id: ${'$'}bookId, status_id: ${'$'}statusId, rating: ${'$'}rating, review_raw: ${'$'}review, privacy_setting_id: ${if (isPrivate) 3 else 1}}) {
                 id
                 user_book {
@@ -387,7 +387,6 @@ class HardcoverApiClient(
             if (cleanNote != null) {
                 put("review", cleanNote)
             }
-            put("priv", isPrivate)
         }
         val data = executeGraphQl(token, gql, vars)
         if (data == null || !lastError.isNullOrBlank()) {

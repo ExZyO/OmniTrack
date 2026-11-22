@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +39,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -55,6 +59,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -96,6 +102,8 @@ fun BackupRestoreSheet(
 
     // Create options
     var createOptions by remember { mutableStateOf(BackupModuleOptions()) }
+    var createCredentialsPassword by remember { mutableStateOf("") }
+    var showCreatePassword by remember { mutableStateOf(false) }
 
     // Restore inspection state
     var selectedSourceName by remember { mutableStateOf<String?>(null) }
@@ -103,6 +111,8 @@ fun BackupRestoreSheet(
     var selectedRestoreFile by remember { mutableStateOf<File?>(null) }
     var inspectedArchive by remember { mutableStateOf<BackupInspectionResult?>(null) }
     var restoreOptions by remember { mutableStateOf(BackupModuleOptions()) }
+    var restoreCredentialsPassword by remember { mutableStateOf("") }
+    var showRestorePassword by remember { mutableStateOf(false) }
 
     fun applyInspection(name: String, uri: Uri?, file: File?, result: BackupInspectionResult) {
         selectedSourceName = name
@@ -141,7 +151,8 @@ fun BackupRestoreSheet(
                                 database = app.database,
                                 coverCache = app.coverCache,
                                 outputStream = out,
-                                options = createOptions
+                                options = createOptions,
+                                credentialsPassword = createCredentialsPassword.takeIf { createOptions.includeCredentials }
                             )
                         }
                         if (result.success) {
@@ -434,12 +445,51 @@ fun BackupRestoreSheet(
                     onChange = { createOptions = it }
                 )
 
+                if (createOptions.includeCredentials) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = createCredentialsPassword,
+                            onValueChange = { createCredentialsPassword = it },
+                            label = { Text("Credential Backup Password (min 6 chars)", fontSize = 12.sp) },
+                            placeholder = { Text("Encrypts exported tokens with AES-256", fontSize = 12.sp) },
+                            singleLine = true,
+                            visualTransformation = if (showCreatePassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showCreatePassword = !showCreatePassword }) {
+                                    Icon(
+                                        imageVector = if (showCreatePassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showCreatePassword) "Hide password" else "Show password",
+                                        tint = TextSecondary
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedLabelColor = AccentGold,
+                                unfocusedLabelColor = TextSecondary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (createCredentialsPassword.length in 1..5) {
+                            Text(
+                                text = "Password must be at least 6 characters",
+                                color = Color(0xFFEF4444),
+                                fontSize = 11.5.sp
+                            )
+                        }
+                    }
+                }
+
                 Button(
                     onClick = {
                         val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
                         exportFileLauncher.launch("omnitrack_backup_$timestamp.omnibk")
                     },
-                    enabled = !isProcessing && anyCreateSelected,
+                    enabled = !isProcessing && anyCreateSelected &&
+                        (!createOptions.includeCredentials || createCredentialsPassword.trim().length >= 6),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
@@ -534,6 +584,35 @@ fun BackupRestoreSheet(
                         onChange = { restoreOptions = it }
                     )
 
+                    if (info.credentialsRequirePassword && restoreOptions.includeCredentials) {
+                        OutlinedTextField(
+                            value = restoreCredentialsPassword,
+                            onValueChange = { restoreCredentialsPassword = it },
+                            label = { Text("Backup Password for Credentials", fontSize = 12.sp) },
+                            placeholder = { Text("Enter password set during backup", fontSize = 12.sp) },
+                            singleLine = true,
+                            visualTransformation = if (showRestorePassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { showRestorePassword = !showRestorePassword }) {
+                                    Icon(
+                                        imageVector = if (showRestorePassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showRestorePassword) "Hide password" else "Show password",
+                                        tint = TextSecondary
+                                    )
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
+                                focusedLabelColor = AccentGold,
+                                unfocusedLabelColor = TextSecondary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
                     Button(
                         onClick = {
                             if (!isProcessing && (selectedRestoreUri != null || selectedRestoreFile != null)) {
@@ -542,6 +621,7 @@ fun BackupRestoreSheet(
                                 statusMessage = "Restoring selected modules..."
                                 scope.launch {
                                     try {
+                                        val pwArg = restoreCredentialsPassword.takeIf { restoreOptions.includeCredentials }
                                         val result = when {
                                             selectedRestoreUri != null -> {
                                                 context.contentResolver.openInputStream(selectedRestoreUri!!)?.use { stream ->
@@ -550,7 +630,8 @@ fun BackupRestoreSheet(
                                                         database = app.database,
                                                         coverCache = app.coverCache,
                                                         inputStream = stream,
-                                                        options = restoreOptions
+                                                        options = restoreOptions,
+                                                        credentialsPassword = pwArg
                                                     )
                                                 }
                                             }
@@ -561,7 +642,8 @@ fun BackupRestoreSheet(
                                                         database = app.database,
                                                         coverCache = app.coverCache,
                                                         inputStream = stream,
-                                                        options = restoreOptions
+                                                        options = restoreOptions,
+                                                        credentialsPassword = pwArg
                                                     )
                                                 }
                                             }
@@ -588,7 +670,8 @@ fun BackupRestoreSheet(
                                 }
                             }
                         },
-                        enabled = !isProcessing && anyRestoreSelected,
+                        enabled = !isProcessing && anyRestoreSelected &&
+                            (!info.credentialsRequirePassword || !restoreOptions.includeCredentials || restoreCredentialsPassword.isNotBlank()),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),

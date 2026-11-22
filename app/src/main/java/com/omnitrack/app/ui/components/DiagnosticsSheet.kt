@@ -155,13 +155,13 @@ fun DiagnosticsSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isLoggingEnabled by AppLogger.isLoggingEnabled.collectAsState()
+    val autoRefresh by AppLogger.isLiveLogcatAutoRefresh.collectAsState()
     val appEventLogs by AppLogger.logs.collectAsState()
 
     var activeTab by remember { mutableIntStateOf(0) } // 0 = Live Logcat, 1 = App Events
     var logcatLines by remember { mutableStateOf<List<LogcatLine>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
     var levelFilter by remember { mutableStateOf("ALL") } // ALL, E, W, I, D
-    var autoRefresh by remember { mutableStateOf(true) }
     var refreshSignal by remember { mutableIntStateOf(0) }
 
     val logcatListState = rememberLazyListState()
@@ -414,14 +414,14 @@ fun DiagnosticsSheet(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = if (activeTab == 0) "Auto 2s" else "Log",
+                        text = if (activeTab == 0) "Auto 2s" else "Capture",
                         color = TextSecondary,
                         fontSize = 11.sp
                     )
                     Switch(
                         checked = if (activeTab == 0) autoRefresh else isLoggingEnabled,
                         onCheckedChange = { checked ->
-                            if (activeTab == 0) autoRefresh = checked
+                            if (activeTab == 0) AppLogger.setLiveLogcatAutoRefresh(checked)
                             else AppLogger.setLoggingEnabled(checked)
                         },
                         colors = SwitchDefaults.colors(

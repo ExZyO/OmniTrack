@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.screens.settings
 
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -102,6 +103,7 @@ fun ArtworkPriorityScreen(
     }
 
     val pagerState = rememberPagerState(initialPage = 0) { categories.size }
+    val hapticFeedback = LocalHapticFeedback.current
 
     Column(
         modifier = modifier
@@ -149,6 +151,28 @@ fun ArtworkPriorityScreen(
                     fontSize = 12.sp
                 )
             }
+
+            Text(
+                text = "Reset",
+                color = AccentGold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable {
+                        val activeCat = categories[pagerState.currentPage]
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        coroutineScope.launch {
+                            prefManager.resetArtSourcePriority(activeCat)
+                            Toast.makeText(
+                                context,
+                                "Reset ${activeCat.displayName} art sources to recommended order",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
         }
 
         // Horizontal Category Tabs (Synchronized auto-scroll with pager swiping)
@@ -459,14 +483,27 @@ private fun CategoryWaterfallList(
 private fun getSourceDescription(source: String): String = when (source) {
     "MangaDex API" -> "Lossless original manga tankōbon & magazine artwork"
     "AniList GraphQL" -> "High-definition key visuals & widescreen banners"
-    "Bangumi" -> "Comprehensive Japanese anime/manga community catalog"
+    "Bangumi" -> "Comprehensive Japanese anime/manga/game community catalog"
     "Comick" -> "Webtoon, manhwa, and manga high-res covers"
+    "BookWalker" -> "Official high-resolution Japanese digital storefront covers"
+    "Naver" -> "Official Korean webtoon vertical covers & widescreen banners"
+    "Kuaikan" -> "Official Chinese manhua covers & banners"
+    "RanobeDB" -> "Light novel edition cover art & Japanese volume database"
+    "MyAnimeList" -> "Classic anime & manga cover archive"
     "TMDb" -> "Cinema posters, official backdrops, and TV series banners"
     "TVMaze" -> "Episodic metadata and episodic stills"
     "TheTVDB" -> "Season posters, fanart backdrops, and character art"
     "RPDB" -> "High-resolution posters with rating badge overlays"
+    "Apple Books" -> "1200×1200 high-resolution epub & comic store cover art"
+    "Hardcover" -> "Modern reader-curated high-res book cover artwork"
+    "Open Library" -> "Archive edition covers across print runs"
+    "Wikimedia Commons" -> "Public-domain classic illustrations & literary artwork"
+    "Google Books" -> "Fallback book edition covers"
+    "Comic Vine" -> "Official comic issue covers & series key visuals"
+    "Metron" -> "Structured DC/Marvel/Indie comic issue cover database"
+    "SteamGridDB" -> "Custom 2:3 grids, widescreen hero art & logos"
     "IGDB" -> "Twitch/IGDB high-resolution game box art & screenshots"
-    "Steam" -> "Steam Store official headers, hero artwork & logos"
+    "Steam" -> "Steam Store official headers, hero artwork & 2x library art"
     "VNDB Kana" -> "Visual Novel Database official visual novel CGs & covers"
     "NovelUpdates" -> "Light novel and web novel translated cover catalog"
     "Kitsu" -> "Alternative anime/manga fallback database"

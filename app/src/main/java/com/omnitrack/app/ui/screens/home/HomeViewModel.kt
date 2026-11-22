@@ -17,7 +17,6 @@ import com.omnitrack.app.data.preferences.HomeRowKey
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
-import com.omnitrack.app.util.MockData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -139,17 +138,15 @@ class HomeViewModel(
     )
 
     init {
-        seedIfEmpty()
+        initializeLibraryMaintenance()
     }
 
-    private fun seedIfEmpty() {
+    private fun initializeLibraryMaintenance() {
         viewModelScope.launch {
-            repository.getAllMediaSummaries().collect { items ->
-                if (items.isEmpty()) {
-                    repository.insertAllMedia(MockData.sampleMedia)
-                    repository.insertAllCategories(MockData.categories)
-                } else {
-                    // Smart sync canonical seed updates without requiring data wipe
+            try {
+                val items = repository.getAllMediaSummaries().first()
+                if (items.isNotEmpty()) {
+                    // Smart sync canonical ID updates without requiring data wipe
                     val allItems = repository.getAllMedia().first()
                     for (existing in allItems) {
                         if (existing.title == "Omniscient Reader's Viewpoint" && existing.totalProgress != 551.0) {
@@ -171,8 +168,8 @@ class HomeViewModel(
                         }
                     }
                 }
+            } finally {
                 _isLoading.value = false
-                return@collect
             }
         }
     }

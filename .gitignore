@@ -23,3 +23,6 @@ build-artifacts/
 build_artifacts/
 scratch/
 bug_logs/
+keystore/
+*.jks
+*.keystore

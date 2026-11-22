@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +51,8 @@ import com.omnitrack.app.data.preferences.DiscoverCustomizationSettings
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.DiscoverShelfCatalog
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.ui.components.DiscoverLayoutWireframe
+import com.omnitrack.app.ui.components.VisualOptionTile
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.OnAccentColor
@@ -215,43 +216,35 @@ fun DiscoverCustomizerSheet(
                                 letterSpacing = 0.9.sp
                             )
                         }
-                        items(DiscoverLayoutStyle.entries, key = { "layout_${it.name}" }) { style ->
-                            val isSelected = settings.layoutStyle == style
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isSelected) AccentGold.copy(alpha = 0.09f) else Color.Transparent)
-                                        .clickable { scope.launch { preferenceManager.updateDiscoverLayoutStyle(style) } }
-                                        .padding(horizontal = 8.dp, vertical = 11.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text(
-                                            text = style.displayName,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (isSelected) AccentGold else TextPrimary
-                                        )
-                                        Text(
-                                            text = style.description,
-                                            fontSize = 11.5.sp,
-                                            color = TextSecondary,
-                                            lineHeight = 15.sp
-                                        )
+                        item(key = "disc_layout_grid") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                DiscoverLayoutStyle.entries.forEach { style ->
+                                    val shortTitle = when (style) {
+                                        DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> "Spotlight"
+                                        DiscoverLayoutStyle.HERO_CAROUSEL -> "Carousel"
+                                        DiscoverLayoutStyle.MINIMAL_RAILS -> "Minimal"
                                     }
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Selected",
-                                            tint = AccentGold,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    val shortSub = when (style) {
+                                        DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> "Hero + shelves"
+                                        DiscoverLayoutStyle.HERO_CAROUSEL -> "Top carousel"
+                                        DiscoverLayoutStyle.MINIMAL_RAILS -> "Search first"
+                                    }
+                                    VisualOptionTile(
+                                        title = shortTitle,
+                                        subtitle = shortSub,
+                                        isSelected = settings.layoutStyle == style,
+                                        modifier = Modifier.weight(1f),
+                                        previewHeight = 64.dp,
+                                        onClick = {
+                                            scope.launch { preferenceManager.updateDiscoverLayoutStyle(style) }
+                                        }
+                                    ) {
+                                        DiscoverLayoutWireframe(style = style)
                                     }
                                 }
-                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
                             }
                         }
 

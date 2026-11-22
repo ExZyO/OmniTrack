@@ -56,6 +56,7 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.GameCompletionTier
 import com.omnitrack.app.data.model.GameDetailMeta
 import com.omnitrack.app.data.model.GameEntryType
+import com.omnitrack.app.ui.components.repeatingClickable
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -222,8 +223,8 @@ fun DetailGameTrackingSection(
                     fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.80f),
                     modifier = Modifier
-                        .clickable { onStepPlaytime(-1.0) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(-1.0) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
                 Text(
                     text = "+1h",
@@ -231,8 +232,8 @@ fun DetailGameTrackingSection(
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier
-                        .clickable { onStepPlaytime(1.0) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(1.0) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
                 Text(
                     text = "+5h",
@@ -240,8 +241,8 @@ fun DetailGameTrackingSection(
                     fontWeight = FontWeight.Bold,
                     color = AccentGold,
                     modifier = Modifier
-                        .clickable { onStepPlaytime(5.0) }
-                        .padding(vertical = 2.dp)
+                        .repeatingClickable { onStepPlaytime(5.0) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
                 )
             }
         }

@@ -61,9 +61,16 @@ import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PresentationSettings
+import com.omnitrack.app.ui.components.AmbientAuraWireframe
+import com.omnitrack.app.ui.components.BannerSizingWireframe
+import com.omnitrack.app.ui.components.DetailsLayoutWireframe
+import com.omnitrack.app.ui.components.DiscoverLayoutWireframe
+import com.omnitrack.app.ui.components.VisualOptionTile
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.OmniThemeSettings
+import com.omnitrack.app.ui.theme.OmniThemeState
 import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -157,47 +164,69 @@ fun VisualPresentationScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val isHero = presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Hero Layout",
-                    description = "Full-bleed edge-to-edge banner behind status bar, zero-box AMOLED canvas.",
+                    subtitle = "Edge-to-edge dissolve into AMOLED canvas",
                     isSelected = isHero,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 76.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateDetailsPagePresentation(DetailsPagePresentation.HERO)
                         }
                     }
-                )
+                ) {
+                    DetailsLayoutWireframe(isHero = true)
+                }
 
                 val isClassic = presentationSettings.detailsPagePresentation == DetailsPagePresentation.CLASSIC
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Classic Poster",
-                    description = "Overlaid portrait cover with ambient glow, studio logo art as title, and floating stats.",
+                    subtitle = "Overlaid poster with floating metadata",
                     isSelected = isClassic,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 76.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateDetailsPagePresentation(DetailsPagePresentation.CLASSIC)
                         }
                     }
-                )
+                ) {
+                    DetailsLayoutWireframe(isHero = false)
+                }
             }
 
             // Section 1B: Discover Tab Layout (Layout A / B / C)
             PresentationSectionTitle("DISCOVER TAB LAYOUT")
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 DiscoverLayoutStyle.entries.forEach { style ->
-                    PresentationChoiceCard(
-                        title = style.displayName,
-                        description = style.description,
+                    val shortTitle = when (style) {
+                        DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> "Spotlight"
+                        DiscoverLayoutStyle.HERO_CAROUSEL -> "Carousel"
+                        DiscoverLayoutStyle.MINIMAL_RAILS -> "Minimal"
+                    }
+                    val shortSub = when (style) {
+                        DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> "Hero + shelves"
+                        DiscoverLayoutStyle.HERO_CAROUSEL -> "Top carousel"
+                        DiscoverLayoutStyle.MINIMAL_RAILS -> "Search first"
+                    }
+                    VisualOptionTile(
+                        title = shortTitle,
+                        subtitle = shortSub,
                         isSelected = discoverLayoutStyle == style,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
+                        previewHeight = 68.dp,
                         onClick = {
                             scope.launch {
                                 prefManager.updateDiscoverLayoutStyle(style)
                             }
                         }
-                    )
+                    ) {
+                        DiscoverLayoutWireframe(style = style)
+                    }
                 }
             }
 
@@ -208,30 +237,36 @@ fun VisualPresentationScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val isFullBleed = presentationSettings.bannerSizing == BannerSizing.FULL_BLEED
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Full-Bleed Hero",
-                    description = "Tall cinematic backdrop dissolving with smoothstep curve into pure black.",
+                    subtitle = "Tall backdrop fading cleanly to black",
                     isSelected = isFullBleed,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 76.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateBannerSizing(BannerSizing.FULL_BLEED)
                         }
                     }
-                )
+                ) {
+                    BannerSizingWireframe(isFullBleed = true)
+                }
 
                 val isCinema = presentationSettings.bannerSizing == BannerSizing.CINEMA_SHOWCASE
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Cinema Showcase",
-                    description = "Widescreen 16:9 card with ambient atmospheric aura.",
+                    subtitle = "Floating 16:9 frame with ambient glow",
                     isSelected = isCinema,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 76.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateBannerSizing(BannerSizing.CINEMA_SHOWCASE)
                         }
                     }
-                )
+                ) {
+                    BannerSizingWireframe(isFullBleed = false)
+                }
             }
 
             // Section 3: Fallback Ambient Atmosphere
@@ -241,30 +276,36 @@ fun VisualPresentationScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val isBlur = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.CINEMATIC_BLUR
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Cinematic Blur",
-                    description = "Vibrant atmospheric aura sampled from artwork, bathing the background in color.",
+                    subtitle = "Soft ambient artwork aura backdrop",
                     isSelected = isBlur,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 68.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateFallbackBackgroundStyle(FallbackBackgroundStyle.CINEMATIC_BLUR)
                         }
                     }
-                )
+                ) {
+                    AmbientAuraWireframe(isBlur = true)
+                }
 
                 val isSolidBlack = presentationSettings.fallbackBackgroundStyle == FallbackBackgroundStyle.SOLID_BLACK
-                PresentationChoiceCard(
+                VisualOptionTile(
                     title = "Minimalist OLED",
-                    description = "Pure pitch-black #000000 canvas with zero light bleed. Maximum battery savings.",
+                    subtitle = "Pure #000000 canvas, zero bleed",
                     isSelected = isSolidBlack,
                     modifier = Modifier.weight(1f),
+                    previewHeight = 68.dp,
                     onClick = {
                         scope.launch {
                             prefManager.updateFallbackBackgroundStyle(FallbackBackgroundStyle.SOLID_BLACK)
                         }
                     }
-                )
+                ) {
+                    AmbientAuraWireframe(isBlur = false)
+                }
             }
 
             // Section 4: Preferred Title Localization
@@ -326,39 +367,40 @@ fun VisualPresentationScreen(
 
 @Composable
 private fun AnimeArtworkCanvas(modifier: Modifier = Modifier) {
+    val accent = AccentGold
+    val variant = OmniThemeState.accentVariant
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
 
-        // 1. Cosmic cyberpunk twilight sky
+        // 1. Deep theme-tinted twilight sky
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color(0xFF0B0F19),
-                    Color(0xFF1E1B4B),
-                    Color(0xFF312E81),
-                    Color(0xFF4338CA),
-                    Color(0xFF0284C7)
+                    AmoledBlack,
+                    DarkSurfaceElevated,
+                    variant.copy(alpha = 0.24f),
+                    accent.copy(alpha = 0.16f)
                 )
             )
         )
 
-        // 2. Glowing moon / neon disc in upper right
+        // 2. Soft theme-tinted disc in upper right
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFFFDE047).copy(alpha = 0.95f),
-                    Color(0xFFF59E0B).copy(alpha = 0.50f),
+                    accent.copy(alpha = 0.85f),
+                    variant.copy(alpha = 0.35f),
                     Color.Transparent
                 ),
                 center = Offset(w * 0.76f, h * 0.32f),
-                radius = h * 0.38f
+                radius = h * 0.36f
             ),
-            radius = h * 0.38f,
+            radius = h * 0.36f,
             center = Offset(w * 0.76f, h * 0.32f)
         )
 
-        // 3. Cyberpunk distant mountain silhouettes
+        // 3. Distant silhouette ridges
         val mountainPath = Path().apply {
             moveTo(0f, h * 0.70f)
             lineTo(w * 0.22f, h * 0.38f)
@@ -374,15 +416,15 @@ private fun AnimeArtworkCanvas(modifier: Modifier = Modifier) {
             path = mountainPath,
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color(0xFF1E1B4B).copy(alpha = 0.95f),
-                    Color(0xFF0B0F19)
+                    DarkSurfaceElevated.copy(alpha = 0.95f),
+                    AmoledBlack
                 ),
                 startY = h * 0.32f,
                 endY = h
             )
         )
 
-        // 4. Foreground neon skyline ridge
+        // 4. Foreground silhouette ridge
         val ridgePath = Path().apply {
             moveTo(0f, h * 0.82f)
             lineTo(w * 0.28f, h * 0.62f)
@@ -395,22 +437,22 @@ private fun AnimeArtworkCanvas(modifier: Modifier = Modifier) {
         }
         drawPath(
             path = ridgePath,
-            color = Color(0xFF050811)
+            color = AmoledBlack
         )
 
-        // 5. Subtle neon horizon glow line
+        // 5. Subtle theme-reactive horizon glow line
         drawLine(
             brush = Brush.horizontalGradient(
                 colors = listOf(
-                    Color(0xFF38BDF8).copy(alpha = 0.1f),
-                    Color(0xFF38BDF8).copy(alpha = 0.8f),
-                    Color(0xFFA855F7).copy(alpha = 0.8f),
-                    Color(0xFF38BDF8).copy(alpha = 0.1f)
+                    accent.copy(alpha = 0.08f),
+                    accent.copy(alpha = 0.72f),
+                    variant.copy(alpha = 0.62f),
+                    accent.copy(alpha = 0.08f)
                 )
             ),
             start = Offset(0f, h * 0.78f),
             end = Offset(w, h * 0.78f),
-            strokeWidth = 1.5.dp.toPx()
+            strokeWidth = 1.2.dp.toPx()
         )
     }
 }
@@ -420,6 +462,8 @@ private fun LivePresentationMockup(
     settings: PresentationSettings,
     modifier: Modifier = Modifier
 ) {
+    val accent = AccentGold
+    val variant = OmniThemeState.accentVariant
     val isHero = settings.detailsPagePresentation == DetailsPagePresentation.HERO
     val isFullBleed = settings.bannerSizing == BannerSizing.FULL_BLEED
     val isSolidBlack = settings.fallbackBackgroundStyle == FallbackBackgroundStyle.SOLID_BLACK
@@ -442,299 +486,269 @@ private fun LivePresentationMockup(
         label = "titleStart"
     )
 
-    val containerBg = if (isSolidBlack) AmoledBlack else Color(0xFF080C16)
-    val bottomRowBg = if (isSolidBlack) AmoledBlack else Color.Black.copy(alpha = 0.45f)
-    val dissolveTarget = if (isSolidBlack) AmoledBlack else Color.Black.copy(alpha = 0.50f)
+    val containerBg = if (isSolidBlack) AmoledBlack else DarkSurfaceElevated
+    val bottomRowBg = if (isSolidBlack) AmoledBlack else AmoledBlack.copy(alpha = 0.55f)
+    val dissolveTarget = if (isSolidBlack) AmoledBlack else AmoledBlack.copy(alpha = 0.65f)
 
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(240.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(containerBg)
-            .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Atmospheric Ambient Aura Backdrop (Toggles on in Cinematic Blur, completely gone in Minimalist OLED)
-        if (!isSolidBlack) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF0284C7).copy(alpha = 0.60f),
-                                Color(0xFF38BDF8).copy(alpha = 0.35f),
-                                Color.Transparent
-                            ),
-                            center = Offset(120f, 90f),
-                            radius = 420f
-                        )
-                    )
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF8B5CF6).copy(alpha = 0.55f),
-                                Color(0xFFD946EF).copy(alpha = 0.30f),
-                                Color.Transparent
-                            ),
-                            center = Offset(700f, 220f),
-                            radius = 480f
-                        )
-                    )
-            )
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.20f))
-            )
-        }
-
-        // Banner Sizing Mockup Area
-        if (isFullBleed) {
-            // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp)
-            ) {
-                AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
-
-                // 17-Stop Quintic Smoothstep Dissolve Overlay
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(228.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(containerBg)
+                .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
+        ) {
+            // Theme-reactive Atmospheric Ambient Aura Backdrop (toggles on in Cinematic Blur)
+            if (!isSolidBlack) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0.15f to Color.Transparent,
-                                0.60f to dissolveTarget.copy(alpha = 0.55f),
-                                1.00f to dissolveTarget
-                            )
-                        )
-                )
-
-                // Full-Bleed Badge
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(10.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black.copy(alpha = 0.70f))
-                        .border(0.8.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
-                ) {
-                    Text(
-                        text = "FULL-BLEED HERO (EDGE-TO-EDGE)",
-                        fontSize = 8.5.sp,
-                        color = AccentGold,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        } else {
-            // MODE B: Cinema Showcase Floating 16:9 Widescreen Card with Ambient Colored Aura
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                    .height(112.dp)
-            ) {
-                // Ambient backlight aura radiating around and behind the floating card
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.06f
-                            scaleY = 1.20f
-                            alpha = 0.75f
-                        }
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF0284C7).copy(alpha = 0.70f),
-                                    Color(0xFF7C3AED).copy(alpha = 0.45f),
+                                    variant.copy(alpha = 0.42f),
+                                    accent.copy(alpha = 0.24f),
                                     Color.Transparent
-                                )
+                                ),
+                                center = Offset(120f, 90f),
+                                radius = 420f
                             )
                         )
                 )
-
-                // The floating 16:9 widescreen card itself
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    accent.copy(alpha = 0.34f),
+                                    variant.copy(alpha = 0.18f),
+                                    Color.Transparent
+                                ),
+                                center = Offset(700f, 220f),
+                                radius = 480f
+                            )
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.24f))
+                )
+            }
+
+            // Banner Sizing Mockup Area
+            if (isFullBleed) {
+                // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(144.dp)
                 ) {
                     AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
 
-                    // Cinema card subtle vignette
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                                    0.15f to Color.Transparent,
+                                    0.60f to dissolveTarget.copy(alpha = 0.58f),
+                                    1.00f to dissolveTarget
+                                )
+                            )
+                    )
+                }
+            } else {
+                // MODE B: Cinema Showcase Floating 16:9 Widescreen Card with Theme Ambient Aura
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .height(108.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = 1.06f
+                                scaleY = 1.18f
+                                alpha = 0.65f
+                            }
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        accent.copy(alpha = 0.48f),
+                                        variant.copy(alpha = 0.30f),
+                                        Color.Transparent
+                                    )
                                 )
                             )
                     )
 
-                    // Cinema Showcase Badge
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = 0.75f))
-                            .border(0.8.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
                     ) {
-                        Text(
-                            text = "16:9 CINEMA SHOWCASE CARD",
-                            fontSize = 8.5.sp,
-                            color = AccentGold,
-                            fontWeight = FontWeight.Bold
+                        AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                                    )
+                                )
                         )
                     }
                 }
             }
-        }
 
-        // Atmosphere Mode Pill in Top-Left
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(10.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(Color.Black.copy(alpha = 0.70f))
-                .padding(horizontal = 6.dp, vertical = 2.5.dp)
-        ) {
-            Text(
-                text = if (isSolidBlack) "AMOLED #000000" else "CINEMATIC BLUR AURA",
-                fontSize = 8.5.sp,
-                color = if (isSolidBlack) TextSecondary else AccentGold,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Mock Poster (Fades in when Classic layout is active)
-        if (posterAlpha > 0.01f) {
-            Box(
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 65.dp)
-                    .graphicsLayer {
-                        alpha = posterAlpha
-                        translationY = posterTranslateY.toPx()
-                    }
-                    .width(54.dp)
-                    .height(80.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF38BDF8), Color(0xFF6366F1), Color(0xFFA855F7))
+            // Mock Poster (Fades in when Classic layout is active)
+            if (posterAlpha > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .padding(start = 16.dp, top = 58.dp)
+                        .graphicsLayer {
+                            alpha = posterAlpha
+                            translationY = posterTranslateY.toPx()
+                        }
+                        .width(54.dp)
+                        .height(80.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            Brush.linearGradient(
+                                listOf(variant.copy(alpha = 0.85f), accent.copy(alpha = 0.90f))
+                            )
                         )
+                        .border(0.8.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                        .shadow(elevation = 10.dp, shape = RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "POSTER",
+                        color = OnAccentColor,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(8.dp))
-                    .shadow(elevation = 14.dp, shape = RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
+                }
+            }
+
+            // Title Row Mock
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = 50.dp)
+                    .padding(start = titlePaddingStart, end = 16.dp)
             ) {
                 Text(
-                    text = "POSTER",
-                    color = Color.White,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Black,
+                    text = "Cyberpunk: Edgerunners",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = "ANIME · 2022 · STUDIO TRIGGER",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
                 )
             }
+
+            // Unboxed Stats Row Mock
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+                    .drawBehind {
+                        val strokeW = 0.8.dp.toPx()
+                        drawLine(
+                            Color.White.copy(alpha = 0.08f),
+                            Offset(0f, 0f),
+                            Offset(size.width, 0f),
+                            strokeWidth = strokeW
+                        )
+                    }
+                    .background(bottomRowBg)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(accent.copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+1", color = accent, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                    }
+                    Text("10 / 10 EP", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(accent)
+                    )
+                    Text("COMPLETED", color = accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text("9.5", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
         }
 
-        // Title Row Mock
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomStart)
-                .padding(bottom = 54.dp)
-                .padding(start = titlePaddingStart, end = 16.dp)
-        ) {
-            Text(
-                text = "Cyberpunk: Edgerunners",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1
-            )
-            Text(
-                text = "ANIME • 2022 • STUDIO TRIGGER",
-                color = TextSecondary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.5.sp
-            )
-        }
-
-        // Unboxed Stats Row Mock
+        // Clean non-overlapping caption bar below preview frame
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .drawBehind {
-                    val strokeW = 1.dp.toPx()
-                    drawLine(
-                        Color.White.copy(alpha = 0.08f),
-                        Offset(0f, 0f),
-                        Offset(size.width, 0f),
-                        strokeWidth = strokeW
-                    )
-                }
-                .background(bottomRowBg)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(20.dp)
-                        .clip(CircleShape)
-                        .background(AccentGold.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("+1", color = AccentGold, fontSize = 9.sp, fontWeight = FontWeight.Black)
-                }
-                Text("10 / 10 EP", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(AccentGold)
-                )
-                Text("COMPLETED", color = AccentGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = null,
-                    tint = AccentGold,
-                    modifier = Modifier.size(12.dp)
-                )
-                Text("9.5", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
+            Text(
+                text = if (isSolidBlack) "Minimalist OLED (#000000)" else "Cinematic Blur Aura",
+                fontSize = 10.5.sp,
+                color = if (isSolidBlack) TextSecondary else accent,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = (if (isHero) "Hero Layout" else "Classic Poster") + " · " +
+                    (if (isFullBleed) "Full-Bleed" else "16:9 Cinema"),
+                fontSize = 10.5.sp,
+                color = TextSecondary,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

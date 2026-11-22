@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.ui.components.repeatingClickable
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -109,86 +111,94 @@ fun DetailPersonalNotesSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "Personal Notes & Log",
+                color = TextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            if (hasLinkedTrackers) {
                 Text(
-                    text = "Personal Notes & Log",
-                    color = TextPrimary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold
+                    text = "Mirrored to Trackers",
+                    color = AccentGold.copy(alpha = 0.85f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clickable(onClick = onOpenTrackingStudio)
                 )
-                if (hasLinkedTrackers) {
-                    Text(
-                        text = "Mirrored to Trackers",
-                        color = AccentGold.copy(alpha = 0.85f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.clickable(onClick = onOpenTrackingStudio)
+            }
+        }
+
+        // Balanced 50/50 Split Option-A Action Row (Favorite & Add/Edit Note)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        if (isFav) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.05f)
                     )
-                }
+                    .clickable {
+                        onUpdatePersonalLog(
+                            draftNote.trim().takeIf { it.isNotEmpty() },
+                            !isFav,
+                            item.startedAtMs,
+                            item.finishedAtMs,
+                            item.rewatchCount
+                        )
+                    }
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+            ) {
+                Icon(
+                    imageVector = if (isFav) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = "Favorite",
+                    tint = if (isFav) AccentGold else TextSecondary,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = if (isFav) "Favorited" else "Favorite",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isFav) AccentGold else TextPrimary,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
 
             Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        if (isEditingNote) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.05f)
+                    )
+                    .clickable { isEditingNote = !isEditingNote }
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
             ) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(
-                            if (isFav) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f)
-                        )
-                        .clickable {
-                            onUpdatePersonalLog(
-                                draftNote.trim().takeIf { it.isNotEmpty() },
-                                !isFav,
-                                item.startedAtMs,
-                                item.finishedAtMs,
-                                item.rewatchCount
-                            )
-                        }
-                        .padding(horizontal = 11.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isFav) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (isFav) AccentGold else TextSecondary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = if (isFav) "Favorited" else "Favorite",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isFav) AccentGold else TextSecondary
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .clickable { isEditingNote = !isEditingNote }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Edit Note",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = if (isEditingNote) "Done" else if (draftNote.isBlank()) "Add Note" else "Edit",
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
-                        )
-                    }
-                }
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Note",
+                    tint = if (isEditingNote) AccentGold else TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = if (isEditingNote) "Done" else if (draftNote.isBlank()) "Add Note" else "Edit Note",
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isEditingNote) AccentGold else TextPrimary,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
 
@@ -250,7 +260,7 @@ fun DetailPersonalNotesSection(
                         color = TextSecondary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable {
+                            .repeatingClickable {
                                 val next = (item.rewatchCount - 1).coerceAtLeast(0)
                                 onUpdatePersonalLog(
                                     draftNote.trim().takeIf { it.isNotEmpty() },
@@ -275,7 +285,7 @@ fun DetailPersonalNotesSection(
                         color = AccentGold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .clickable {
+                            .repeatingClickable {
                                 val next = item.rewatchCount + 1
                                 onUpdatePersonalLog(
                                     draftNote.trim().takeIf { it.isNotEmpty() },
@@ -356,7 +366,7 @@ fun DetailPersonalNotesSection(
                             fontWeight = FontWeight.Bold,
                             color = AccentGold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(999.dp))
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(AccentGold.copy(alpha = 0.16f))
                                 .clickable {
                                     focusManager.clearFocus()

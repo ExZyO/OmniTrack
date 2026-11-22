@@ -1,3 +1,6 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,6 +13,24 @@ android {
     namespace = "com.omnitrack.app"
     compileSdk = 35
 
+    val localProps = Properties().apply {
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localPropsFile.inputStream().use { load(it) }
+        }
+    }
+
+    fun readSecretProp(name: String): String {
+        return System.getenv(name)?.takeIf { it.isNotBlank() }
+            ?: project.findProperty(name)?.toString()?.takeIf { it.isNotBlank() }
+            ?: localProps.getProperty(name)?.takeIf { it.isNotBlank() }
+            ?: ""
+    }
+
+    fun escapeBuildConfig(value: String): String {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"")
+    }
+
     val buildVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull() ?: 1
     val buildVersionName = project.findProperty("versionName")?.toString() ?: "1.0.0"
 
@@ -20,16 +41,26 @@ android {
         versionCode = buildVersionCode
         versionName = buildVersionName
 
-        val envTraktClientId = System.getenv("TRAKT_CLIENT_ID") ?: project.findProperty("TRAKT_CLIENT_ID")?.toString() ?: ""
-        val envTraktClientSecret = System.getenv("TRAKT_CLIENT_SECRET") ?: project.findProperty("TRAKT_CLIENT_SECRET")?.toString() ?: ""
-        val rawMalClientId = System.getenv("MAL_CLIENT_ID") ?: project.findProperty("MAL_CLIENT_ID")?.toString() ?: ""
-        val envMalClientId = if (rawMalClientId.isBlank() || rawMalClientId == "2db7880d919b9231be3031ec80e77f15") "3342466cfb744b714350df413002f5ef" else rawMalClientId
-        val envSimklClientId = System.getenv("SIMKL_CLIENT_ID") ?: project.findProperty("SIMKL_CLIENT_ID")?.toString() ?: ""
+        val envTraktClientId = readSecretProp("TRAKT_CLIENT_ID")
+        val envTraktClientSecret = readSecretProp("TRAKT_CLIENT_SECRET")
+        val rawMalClientId = readSecretProp("MAL_CLIENT_ID")
+        val envMalClientId = if (rawMalClientId.isBlank() || rawMalClientId == "2db7880d919b9231be3031ec80e77f15") {
+            "3342466cfb744b714350df413002f5ef"
+        } else {
+            rawMalClientId
+        }
+        val envSimklClientId = readSecretProp("SIMKL_CLIENT_ID")
+        val envSimklClientSecret = readSecretProp("SIMKL_CLIENT_SECRET")
+        val envBangumiClientId = readSecretProp("BANGUMI_CLIENT_ID")
+        val envBangumiClientSecret = readSecretProp("BANGUMI_CLIENT_SECRET")
 
-        buildConfigField("String", "TRAKT_CLIENT_ID", "\"$envTraktClientId\"")
-        buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"$envTraktClientSecret\"")
-        buildConfigField("String", "MAL_CLIENT_ID", "\"$envMalClientId\"")
-        buildConfigField("String", "SIMKL_CLIENT_ID", "\"$envSimklClientId\"")
+        buildConfigField("String", "TRAKT_CLIENT_ID", "\"${escapeBuildConfig(envTraktClientId)}\"")
+        buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"${escapeBuildConfig(envTraktClientSecret)}\"")
+        buildConfigField("String", "MAL_CLIENT_ID", "\"${escapeBuildConfig(envMalClientId)}\"")
+        buildConfigField("String", "SIMKL_CLIENT_ID", "\"${escapeBuildConfig(envSimklClientId)}\"")
+        buildConfigField("String", "SIMKL_CLIENT_SECRET", "\"${escapeBuildConfig(envSimklClientSecret)}\"")
+        buildConfigField("String", "BANGUMI_CLIENT_ID", "\"${escapeBuildConfig(envBangumiClientId)}\"")
+        buildConfigField("String", "BANGUMI_CLIENT_SECRET", "\"${escapeBuildConfig(envBangumiClientSecret)}\"")
 
         manifestPlaceholders["appName"] = "OmniTrack"
 
@@ -39,19 +70,40 @@ android {
         }
     }
 
+    val releaseStorePath = readSecretProp("KEYSTORE_FILE")
+    val releaseStorePassword = readSecretProp("KEYSTORE_PASSWORD")
+    val releaseKeyAlias = readSecretProp("KEY_ALIAS")
+    val releaseKeyPassword = readSecretProp("KEY_PASSWORD")
+    val releaseKeystoreFile = if (releaseStorePath.isNotBlank()) {
+        val candidate = File(releaseStorePath)
+        if (candidate.isAbsolute) candidate else rootProject.file(releaseStorePath)
+    } else {
+        null
+    }
+    val hasReleaseSigning = releaseKeystoreFile != null &&
+        releaseKeystoreFile.exists() &&
+        releaseStorePassword.isNotBlank() &&
+        releaseKeyAlias.isNotBlank() &&
+        releaseKeyPassword.isNotBlank()
+
     signingConfigs {
-        create("release") {
-            storeFile = rootProject.file("keystore/release.jks")
-            storePassword = "omnitrack_release_key"
-            keyAlias = "omnitrack"
-            keyPassword = "omnitrack_release_key"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             manifestPlaceholders["appName"] = "OmniTrack"
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -61,7 +113,6 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            signingConfig = signingConfigs.getByName("release")
             manifestPlaceholders["appName"] = "OmniTrack (Debug)"
         }
     }

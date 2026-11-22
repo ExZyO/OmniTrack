@@ -5,8 +5,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -931,30 +931,31 @@ fun CardDepthTuningPad(
                 padHeight = it.height.toFloat().coerceAtLeast(1f)
             }
             .pointerInput(Unit) {
-                detectTapGestures { offset ->
-                    val (edge, sheen) = valuesAt(offset.x, offset.y)
-                    currentOnChange(edge, sheen)
-                    currentOnCommit(edge, sheen)
-                }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val (edge, sheen) = valuesAt(offset.x, offset.y)
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    fun emit(pos: Offset) {
+                        val (edge, sheen) = valuesAt(pos.x, pos.y)
                         currentOnChange(edge, sheen)
-                    },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        val (edge, sheen) = valuesAt(change.position.x, change.position.y)
-                        currentOnChange(edge, sheen)
-                    },
-                    onDragEnd = {
-                        currentOnCommit(currentEdge, currentSheen)
-                    },
-                    onDragCancel = {
+                    }
+                    emit(down.position)
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+                            change.consume()
+                            emit(change.position)
+                        }
+                    } finally {
                         currentOnCommit(currentEdge, currentSheen)
                     }
-                )
+                }
             }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {

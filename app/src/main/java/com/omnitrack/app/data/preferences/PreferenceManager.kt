@@ -950,7 +950,22 @@ class PreferenceManager(private val context: Context) {
                 if (raw.isNullOrBlank()) {
                     defaultSources
                 } else {
-                    raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    val saved = raw.split(",")
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() && !it.equals("NovelUpdates", ignoreCase = true) }
+                        .map { token ->
+                            if (token.equals("AniList", ignoreCase = true)) "AniList GraphQL" else token
+                        }
+                    val seen = LinkedHashMap<String, String>()
+                    saved.forEach { src ->
+                        val key = src.lowercase()
+                        if (key !in seen) seen[key] = src
+                    }
+                    defaultSources.forEach { src ->
+                        val key = src.lowercase()
+                        if (key !in seen) seen[key] = src
+                    }
+                    seen.values.toList()
                 }
             }
     }
@@ -958,6 +973,13 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateArtSourcePriority(mediaType: MediaType, sources: List<String>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.priorityKey(mediaType)] = sources.joinToString(",")
+        }
+    }
+
+    suspend fun resetArtSourcePriority(mediaType: MediaType) {
+        context.dataStore.edit { prefs ->
+            prefs.remove(PreferencesKeys.priorityKey(mediaType))
+            prefs.remove(PreferencesKeys.disabledSourcesKey(mediaType))
         }
     }
 
@@ -1303,15 +1325,15 @@ class PreferenceManager(private val context: Context) {
         var cachedMetronPassword: String = ""
 
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
-            MediaType.ANIME -> listOf("AniList GraphQL", "Bangumi", "Kitsu")
-            MediaType.MANGA -> listOf("MangaDex API", "AniList", "Comick")
+            MediaType.ANIME -> listOf("AniList GraphQL", "TMDb", "Bangumi", "Kitsu", "MangaDex API")
+            MediaType.MANGA -> listOf("MangaDex API", "AniList GraphQL", "BookWalker", "Naver", "Kuaikan", "Bangumi", "Comick", "Kitsu", "MyAnimeList")
             MediaType.COMIC -> listOf("Comic Vine", "Metron", "Apple Books", "Open Library")
-            MediaType.NOVEL -> listOf("Bangumi", "AniList", "NovelUpdates")
-            MediaType.BOOK -> listOf("Google Books", "Open Library", "Hardcover")
-            MediaType.SHOW -> listOf("TMDb", "TVMaze", "TheTVDB")
-            MediaType.MOVIE -> listOf("TMDb", "RPDB")
-            MediaType.GAME -> listOf("IGDB", "Steam")
-            MediaType.VISUAL_NOVEL -> listOf("VNDB Kana", "Bangumi")
+            MediaType.NOVEL -> listOf("RanobeDB", "BookWalker", "AniList GraphQL", "Bangumi", "Naver", "MangaDex API", "Kuaikan", "Kitsu", "MyAnimeList")
+            MediaType.BOOK -> listOf("Apple Books", "Hardcover", "Open Library", "Wikimedia Commons", "Google Books")
+            MediaType.SHOW -> listOf("TMDb", "TVMaze", "TheTVDB", "Bangumi")
+            MediaType.MOVIE -> listOf("TMDb", "Bangumi", "RPDB")
+            MediaType.GAME -> listOf("SteamGridDB", "Steam", "IGDB", "Bangumi")
+            MediaType.VISUAL_NOVEL -> listOf("VNDB Kana", "SteamGridDB", "Steam", "Bangumi", "AniList GraphQL", "IGDB")
             MediaType.ALL -> listOf("Default")
         }
     }

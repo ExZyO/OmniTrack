@@ -17,7 +17,7 @@ data class BackupModuleOptions(
     val includeLibrary: Boolean = true,
     val includeSubEntries: Boolean = true,
     val includeSettings: Boolean = true,
-    val includeCredentials: Boolean = true,
+    val includeCredentials: Boolean = false,
     val includeCustomArtwork: Boolean = true,
     val includeCachedCovers: Boolean = false
 )
@@ -39,6 +39,7 @@ data class BackupInspectionResult(
     val settingsCount: Int = 0,
     val hasCredentials: Boolean = false,
     val credentialsCount: Int = 0,
+    val credentialsRequirePassword: Boolean = false,
     val customArtworkCount: Int = 0,
     val cachedArtworkCount: Int = 0
 )
@@ -92,6 +93,8 @@ data class OmniPreferencesDump(
 
 @Serializable
 data class OmniTrackerTokensDump(
+    val formatVersion: Int = 1,
+    val encryptedPayload: String? = null,
     val encryptedTokens: Map<String, String> = emptyMap()
 )
 

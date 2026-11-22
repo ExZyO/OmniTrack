@@ -74,6 +74,12 @@ import com.omnitrack.app.data.preferences.HomeLayoutDefaults
 import com.omnitrack.app.data.preferences.HomeRowItem
 import com.omnitrack.app.data.preferences.HomeShelfPosterSize
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.ui.components.ContinueStyleWireframe
+import com.omnitrack.app.ui.components.HeroHeightWireframe
+import com.omnitrack.app.ui.components.HeroMetadataLayoutWireframe
+import com.omnitrack.app.ui.components.HomeLayoutWireframe
+import com.omnitrack.app.ui.components.ShelfPosterSizeWireframe
+import com.omnitrack.app.ui.components.VisualOptionTile
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
@@ -252,21 +258,23 @@ fun HomeCustomizerSheet(
                             CustomizerSectionLabel("HOME LAYOUT STYLE")
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 listOf(
-                                    "EDITORIAL" to "Editorial (Option A)",
-                                    "COMPACT" to "Dense Timeline (Option C)"
-                                ).forEach { (styleKey, label) ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        CustomizerChoiceChip(
-                                            label = label,
-                                            selected = heroSettings.homeDashboardStyle.equals(styleKey, ignoreCase = true),
-                                            fullWidth = true,
-                                            onClick = {
-                                                coroutineScope.launch { preferenceManager.setHomeDashboardStyle(styleKey) }
-                                            }
-                                        )
+                                    Triple("EDITORIAL", "Editorial (Option A)", "Hero showcase + poster shelves"),
+                                    Triple("COMPACT", "Dense Timeline (C)", "Compact feed + tight rows")
+                                ).forEach { (styleKey, label, subtitle) ->
+                                    VisualOptionTile(
+                                        title = label,
+                                        subtitle = subtitle,
+                                        isSelected = heroSettings.homeDashboardStyle.equals(styleKey, ignoreCase = true),
+                                        modifier = Modifier.weight(1f),
+                                        previewHeight = 62.dp,
+                                        onClick = {
+                                            coroutineScope.launch { preferenceManager.setHomeDashboardStyle(styleKey) }
+                                        }
+                                    ) {
+                                        HomeLayoutWireframe(isEditorial = styleKey == "EDITORIAL")
                                     }
                                 }
                             }
@@ -274,19 +282,28 @@ fun HomeCustomizerSheet(
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                             CustomizerSectionLabel("CONTINUE TRACKING STYLE")
-                            FlowRow(
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 ContinueTrackingStyle.entries.forEach { style ->
-                                    CustomizerChoiceChip(
-                                        label = style.displayName,
-                                        selected = heroSettings.continueTrackingStyle == style,
+                                    val shortTitle = when (style) {
+                                        ContinueTrackingStyle.CARD -> "16:9 Card"
+                                        ContinueTrackingStyle.WIDE -> "Wide Split"
+                                        ContinueTrackingStyle.POSTER -> "Poster"
+                                    }
+                                    VisualOptionTile(
+                                        title = shortTitle,
+                                        subtitle = null,
+                                        isSelected = heroSettings.continueTrackingStyle == style,
+                                        modifier = Modifier.weight(1f),
+                                        previewHeight = 56.dp,
                                         onClick = {
                                             coroutineScope.launch { preferenceManager.setContinueTrackingStyle(style) }
                                         }
-                                    )
+                                    ) {
+                                        ContinueStyleWireframe(style = style)
+                                    }
                                 }
                             }
 
@@ -307,15 +324,17 @@ fun HomeCustomizerSheet(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 HomeShelfPosterSize.entries.forEach { size ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        CustomizerChoiceChip(
-                                            label = size.displayName,
-                                            selected = heroSettings.shelfPosterSize == size,
-                                            fullWidth = true,
-                                            onClick = {
-                                                coroutineScope.launch { preferenceManager.setHomeShelfPosterSize(size) }
-                                            }
-                                        )
+                                    VisualOptionTile(
+                                        title = size.displayName,
+                                        subtitle = null,
+                                        isSelected = heroSettings.shelfPosterSize == size,
+                                        modifier = Modifier.weight(1f),
+                                        previewHeight = 54.dp,
+                                        onClick = {
+                                            coroutineScope.launch { preferenceManager.setHomeShelfPosterSize(size) }
+                                        }
+                                    ) {
+                                        ShelfPosterSizeWireframe(posterSize = size)
                                     }
                                 }
                             }
@@ -654,19 +673,23 @@ fun HomeCustomizerSheet(
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                     CustomizerSectionLabel("HERO HEIGHT & AUTO-ROTATE TIMER")
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf("COMPACT" to "Compact", "STANDARD" to "Standard", "TALL" to "Tall").forEach { (h, label) ->
-                            CustomizerChoiceChip(
-                                label = label,
-                                selected = heroSettings.heroHeightPreset.equals(h, ignoreCase = true),
+                            VisualOptionTile(
+                                title = label,
+                                subtitle = null,
+                                isSelected = heroSettings.heroHeightPreset.equals(h, ignoreCase = true),
+                                modifier = Modifier.weight(1f),
+                                previewHeight = 52.dp,
                                 onClick = {
                                     coroutineScope.launch { preferenceManager.setHomeHeroHeightPreset(h) }
                                 }
-                            )
+                            ) {
+                                HeroHeightWireframe(preset = h)
+                            }
                         }
                     }
                     FlowRow(
@@ -738,24 +761,32 @@ fun HomeCustomizerSheet(
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                     CustomizerSectionLabel("HERO METADATA LAYOUT")
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            0 to "Clean Separation",
-                            1 to "Stacked Rows",
-                            2 to "Compact Single-Line",
-                            3 to "Minimal Inline"
-                        ).forEach { (idx, label) ->
-                            CustomizerChoiceChip(
-                                label = label,
-                                selected = heroSettings.metadataLayout == idx,
-                                onClick = {
-                                    coroutineScope.launch { preferenceManager.setHomeHeroMetadataLayout(idx) }
+                            Triple(0, "Clean Separation", "Spacious title & tags"),
+                            Triple(1, "Stacked Rows", "Eyebrow, title & progress"),
+                            Triple(2, "Compact Line", "Inline single-band specs"),
+                            Triple(3, "Minimal Inline", "Title & clean bottom action")
+                        ).chunked(2).forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                pair.forEach { (idx, label, sub) ->
+                                    VisualOptionTile(
+                                        title = label,
+                                        subtitle = sub,
+                                        isSelected = heroSettings.metadataLayout == idx,
+                                        modifier = Modifier.weight(1f),
+                                        previewHeight = 56.dp,
+                                        onClick = {
+                                            coroutineScope.launch { preferenceManager.setHomeHeroMetadataLayout(idx) }
+                                        }
+                                    ) {
+                                        HeroMetadataLayoutWireframe(layoutIndex = idx)
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
 

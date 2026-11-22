@@ -65,6 +65,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             // Asynchronously warm up SQLite database engine and Network client off the main thread
             database.openHelper.writableDatabase
             com.omnitrack.app.data.network.NetworkClient.getClient(this@OmniTrackApplication)
+            runCatching { trackerTokenManager.migrateLegacyTokensToKeystore() }
 
             launch { preferenceManager.customTraktClientId.collect { TrackerAccountVerifier.customTraktClientId = it } }
             launch { preferenceManager.customTraktClientSecret.collect { TrackerAccountVerifier.customTraktClientSecret = it } }

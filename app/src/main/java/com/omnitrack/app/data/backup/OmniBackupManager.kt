@@ -58,6 +58,7 @@ object OmniBackupManager {
         val k = key.lowercase(Locale.US)
         return k.startsWith("token_") ||
             k.startsWith("pkce_") ||
+            k.contains("tmdb_pending") ||
             k.contains("api_key") ||
             k.contains("client_secret") ||
             k.contains("client_id") ||
@@ -73,7 +74,8 @@ object OmniBackupManager {
         database: OmniTrackDatabase,
         coverCache: CoverCache,
         outputStream: OutputStream? = null,
-        options: BackupModuleOptions = BackupModuleOptions()
+        options: BackupModuleOptions = BackupModuleOptions(),
+        credentialsPassword: String? = null
     ): BackupResult = withContext(Dispatchers.IO) {
         try {
             val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
@@ -143,11 +145,28 @@ object OmniBackupManager {
             val rawCredentials = if (options.includeCredentials) {
                 rawPrefs.filterKeys { isSensitiveCredentialKey(it.name) }
                     .mapKeys { it.key.name }
-                    .mapValues { it.value.toString() }
+                    .mapValues { (key, value) ->
+                        val strVal = value.toString()
+                        if (TrackerTokenManager.isEncryptedTokenKey(key)) {
+                            TrackerTokenManager.decrypt(strVal) ?: ""
+                        } else {
+                            strVal
+                        }
+                    }
+                    .filterValues { it.isNotEmpty() }
             } else emptyMap()
 
             val tokensDumpJson = if (options.includeCredentials) {
-                json.encodeToString(OmniTrackerTokensDump(encryptedTokens = rawCredentials))
+                val pw = credentialsPassword?.trim().orEmpty()
+                if (pw.length < 6) {
+                    return@withContext BackupResult(
+                        success = false,
+                        errorMessage = "Enter a backup password (6+ characters) to encrypt credentials"
+                    )
+                }
+                val plainMapJson = json.encodeToString(rawCredentials)
+                val encryptedBlob = TrackerTokenManager.encryptWithPassword(plainMapJson, pw.toCharArray())
+                json.encodeToString(OmniTrackerTokensDump(formatVersion = 2, encryptedPayload = encryptedBlob))
             } else null
 
             val customFiles = if (options.includeCustomArtwork && coverCache.customCoverDir.exists()) {
@@ -300,6 +319,7 @@ object OmniBackupManager {
                 val fromTyped = p.typedEntries.count { isSensitiveCredentialKey(it.key) }
                 if (fromTyped > 0) fromTyped else p.entries.keys.count { isSensitiveCredentialKey(it) }
             } ?: 0
+            val requiresPw = tokensDump?.formatVersion == 2 && !tokensDump.encryptedPayload.isNullOrBlank()
             val totalCredCount = (tokensDump?.encryptedTokens?.size ?: 0) + legacyCredCount
 
             BackupInspectionResult(
@@ -317,7 +337,8 @@ object OmniBackupManager {
                 hasSettings = prefsBytes != null,
                 settingsCount = nonSensitivePrefCount,
                 hasCredentials = tokensBytes != null || legacyCredCount > 0,
-                credentialsCount = maxOf(totalCredCount, manifest.credentialsCount.takeIf { tokensBytes != null } ?: 0),
+                credentialsCount = if (requiresPw) manifest.credentialsCount.coerceAtLeast(1) else maxOf(totalCredCount, manifest.credentialsCount.takeIf { tokensBytes != null } ?: 0),
+                credentialsRequirePassword = requiresPw,
                 customArtworkCount = maxOf(customCount, manifest.customArtworkCount.takeIf { customCount > 0 } ?: 0),
                 cachedArtworkCount = maxOf(cachedCount, manifest.cachedArtworkCount.takeIf { cachedCount > 0 } ?: 0)
             )
@@ -335,7 +356,8 @@ object OmniBackupManager {
         database: OmniTrackDatabase,
         coverCache: CoverCache,
         inputStream: InputStream,
-        options: BackupModuleOptions = BackupModuleOptions()
+        options: BackupModuleOptions = BackupModuleOptions(),
+        credentialsPassword: String? = null
     ): RestoreResult = withContext(Dispatchers.IO) {
         try {
             var manifestBytes: ByteArray? = null
@@ -567,21 +589,45 @@ object OmniBackupManager {
                     if (options.includeCredentials) {
                         val legacyTyped = prefsDump?.typedEntries?.filter { isSensitiveCredentialKey(it.key) }.orEmpty()
                         val legacyMap = prefsDump?.entries?.filterKeys { isSensitiveCredentialKey(it) }.orEmpty()
+                        val v2Payload = tokensDump?.takeIf { it.formatVersion == 2 }?.encryptedPayload
+
+                        val decryptedV2Map: Map<String, String>? = if (!v2Payload.isNullOrBlank()) {
+                            val pw = credentialsPassword?.trim().orEmpty()
+                            if (pw.isBlank()) {
+                                throw IllegalArgumentException("Enter the backup password to decrypt credentials")
+                            }
+                            val decryptedJson = TrackerTokenManager.decryptWithPassword(v2Payload, pw.toCharArray())
+                                ?: throw IllegalArgumentException("Incorrect backup password — could not decrypt credentials")
+                            json.decodeFromString<Map<String, String>>(decryptedJson)
+                        } else null
+
                         val tokenEntries = tokensDump?.encryptedTokens.orEmpty()
-                        if (tokenEntries.isNotEmpty() || legacyTyped.isNotEmpty() || legacyMap.isNotEmpty()) {
+                        if (decryptedV2Map != null || tokenEntries.isNotEmpty() || legacyTyped.isNotEmpty() || legacyMap.isNotEmpty()) {
                             prefs.asMap().keys.toList().forEach { k ->
                                 if (isSensitiveCredentialKey(k.name)) {
                                     prefs.remove(k)
                                 }
                             }
+                            fun storeRestoredCredential(k: String, rawVal: String, isAlreadyPlain: Boolean) {
+                                val finalVal = if (TrackerTokenManager.isEncryptedTokenKey(k)) {
+                                    val plain = if (isAlreadyPlain) rawVal else TrackerTokenManager.decrypt(rawVal)
+                                    if (!plain.isNullOrBlank()) TrackerTokenManager.encrypt(plain) else null
+                                } else rawVal
+                                if (!finalVal.isNullOrBlank()) {
+                                    prefs[stringPreferencesKey(k)] = finalVal
+                                }
+                            }
                             for ((key, value) in legacyMap) {
-                                prefs[stringPreferencesKey(key)] = value
+                                storeRestoredCredential(key, value, isAlreadyPlain = false)
                             }
                             for (entry in legacyTyped) {
-                                prefs[stringPreferencesKey(entry.key)] = entry.value
+                                storeRestoredCredential(entry.key, entry.value, isAlreadyPlain = false)
                             }
                             for ((key, value) in tokenEntries) {
-                                prefs[stringPreferencesKey(key)] = value
+                                storeRestoredCredential(key, value, isAlreadyPlain = false)
+                            }
+                            decryptedV2Map?.forEach { (key, plainVal) ->
+                                storeRestoredCredential(key, plainVal, isAlreadyPlain = true)
                             }
                             restoredCredentials = true
                         }

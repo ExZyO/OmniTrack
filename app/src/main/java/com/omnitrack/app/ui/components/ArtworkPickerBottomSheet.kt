@@ -11,7 +11,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,8 +28,10 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -34,6 +39,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +71,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Tab
@@ -88,6 +95,7 @@ import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -101,6 +109,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.ArtworkCandidate
 import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
@@ -166,6 +176,7 @@ fun ArtworkPickerBottomSheet(
     onResetBanner: () -> Unit = {},
     onRoleSelected: ((String) -> Unit)? = null,
     repository: ArtworkWaterfallRepository? = null,
+    @Suppress("UNUSED_PARAMETER")
     sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 ) {
     val context = LocalContext.current
@@ -195,8 +206,8 @@ fun ArtworkPickerBottomSheet(
                 } else {
                     onCoverSelected(uri.toString())
                 }
-                sheetState.hide()
-            }.invokeOnCompletion { onDismiss() }
+                onDismiss()
+            }
         }
     }
 
@@ -212,8 +223,8 @@ fun ArtworkPickerBottomSheet(
                 } else {
                     onBannerSelected(uri.toString())
                 }
-                sheetState.hide()
-            }.invokeOnCompletion { onDismiss() }
+                onDismiss()
+            }
         }
     }
 
@@ -288,35 +299,32 @@ fun ArtworkPickerBottomSheet(
 
     val isBannerDisabled = currentCustomBannerPath == "NONE" || currentRole == "DISABLE_BANNER"
 
-    ModalBottomSheet(
+    Dialog(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = DarkSurface,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 10.dp)
-                    .width(36.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.2f))
-            )
-        }
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.88f)
-                .padding(horizontal = 16.dp)
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AmoledBlack
         ) {
-            // Header Row
-            Row(
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp)
             ) {
+                // Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Customize Artwork",
@@ -345,9 +353,7 @@ fun ArtworkPickerBottomSheet(
                         )
                     }
                     IconButton(
-                        onClick = {
-                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                        }
+                        onClick = onDismiss
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
@@ -501,7 +507,7 @@ fun ArtworkPickerBottomSheet(
                                     Button(
                                         onClick = {
                                             onCoverSelected(latestLnCover.url)
-                                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                            onDismiss()
                                         },
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
@@ -527,7 +533,7 @@ fun ArtworkPickerBottomSheet(
                                     Button(
                                         onClick = {
                                             onCoverSelected(latestMdCover.url)
-                                            scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                            onDismiss()
                                         },
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
@@ -570,7 +576,7 @@ fun ArtworkPickerBottomSheet(
                                 OutlinedButton(
                                     onClick = {
                                         onResetCover()
-                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                        onDismiss()
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
@@ -620,7 +626,7 @@ fun ArtworkPickerBottomSheet(
                                         onClick = {
                                             if (customUrlInput.isNotBlank()) {
                                                 onCoverSelected(customUrlInput.trim())
-                                                scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                                onDismiss()
                                             }
                                         },
                                         enabled = customUrlInput.isNotBlank(),
@@ -671,7 +677,7 @@ fun ArtworkPickerBottomSheet(
                                                 )
                                                 .clickable {
                                                     onCoverSelected(candidate.url)
-                                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                                    onDismiss()
                                                 }
                                         ) {
                                             AsyncImage(
@@ -751,375 +757,421 @@ fun ArtworkPickerBottomSheet(
                         }
                     }
 
-                    // TAB 1: BANNERS
+                    // TAB 1: BANNERS (Full-screen spacious scrollable workbench + live banner switch)
                     1 -> {
-                        Column(modifier = Modifier.weight(1f)) {
-                            // Quick Action Chips for Banners
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        bannerPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.filledTonalButtonColors(
-                                        containerColor = DarkSurfaceElevated,
-                                        contentColor = AccentGold
-                                    )
-                                ) {
-                                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Pick File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        onBannerSelected(currentCoverUrl)
-                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
-                                ) {
-                                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Use Cover", fontSize = 12.sp, color = TextSecondary)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        onBannerSelected("NONE")
-                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        if (isBannerDisabled) AccentGold else GlassBorder
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Block,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(15.dp),
-                                        tint = if (isBannerDisabled) AccentGold else TextSecondary
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (isBannerDisabled) "Enable Banner" else "Disable Banner",
-                                        fontSize = 12.sp,
-                                        color = if (isBannerDisabled) AccentGold else TextSecondary
-                                    )
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        onResetBanner()
-                                        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                    },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Reset Auto", fontSize = 12.sp, color = TextSecondary)
-                                }
-
-                                OutlinedButton(
-                                    onClick = { showDirectUrlInput = !showDirectUrlInput },
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(
-                                        1.dp,
-                                        if (showDirectUrlInput) AccentGold else GlassBorder
-                                    )
-                                ) {
-                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentGold else TextSecondary)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentGold else TextSecondary)
-                                }
-
-                                if (!isBannerDisabled) {
-                                    OutlinedButton(
-                                        onClick = { showFramingEditor = !showFramingEditor },
-                                        shape = RoundedCornerShape(10.dp),
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            if (showFramingEditor) AccentGold else GlassBorder
-                                        )
-                                    ) {
-                                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showFramingEditor) AccentGold else TextSecondary)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Reposition & Zoom", fontSize = 12.sp, color = if (showFramingEditor) AccentGold else TextPrimary)
-                                    }
-                                }
+                        val bannerListState = rememberLazyListState()
+                        var userPickedBannerFilter by remember { mutableStateOf<String?>(null) }
+                        val supportsCleanBannerFilter = mediaType == MediaType.VISUAL_NOVEL || mediaType == MediaType.GAME || mediaType == MediaType.BOOK
+                        val cleanBannerCount = remember(displayedBanners) { displayedBanners.count { !it.isScreenshot } }
+                        val shotBannerCount = remember(displayedBanners) { displayedBanners.count { it.isScreenshot } }
+                        val activeVnBannerFilter = userPickedBannerFilter ?: if (cleanBannerCount > 0) "CLEAN" else "ALL"
+                        val visibleBanners = remember(displayedBanners, supportsCleanBannerFilter, activeVnBannerFilter) {
+                            if (!supportsCleanBannerFilter) {
+                                displayedBanners
+                            } else when (activeVnBannerFilter) {
+                                "CLEAN" -> displayedBanners.filter { !it.isScreenshot }
+                                "SHOTS" -> displayedBanners.filter { it.isScreenshot }
+                                else -> displayedBanners
                             }
+                        }
 
-                            AnimatedVisibility(visible = showFramingEditor && !isBannerDisabled) {
-                                val framingPreviewModel: Any? = remember(currentCustomBannerPath, currentBannerUrl, currentCoverUrl) {
-                                    currentCustomBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let { path ->
-                                        if (path.startsWith("http") || path.startsWith("content:")) path else java.io.File(path)
-                                    } ?: currentBannerUrl?.takeIf { it.isNotBlank() } ?: currentCoverUrl.takeIf { it.isNotBlank() }
-                                }
-                                Column(
+                        LazyColumn(
+                            state = bannerListState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            item(key = "banner_actions") {
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(top = 10.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(DarkSurfaceElevated)
-                                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                        .padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(176.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .clipToBounds()
-                                            .background(DarkSurfaceCard)
-                                            .border(1.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
-                                            .pointerInput(Unit) {
-                                                detectTransformGestures { _, pan, zoom, _ ->
-                                                    val nextZoom = (draftZoom * zoom).coerceIn(1f, 2.5f)
-                                                    val w = size.width.toFloat().coerceAtLeast(1f)
-                                                    val h = size.height.toFloat().coerceAtLeast(1f)
-                                                    val sens = 1.6f / nextZoom
-                                                    draftZoom = nextZoom
-                                                    draftFocalX = (draftFocalX - (pan.x / w) * sens).coerceIn(-1f, 1f)
-                                                    draftFocalY = (draftFocalY - (pan.y / h) * sens).coerceIn(-1f, 1f)
-                                                }
-                                            }
-                                    ) {
-                                        if (framingPreviewModel != null) {
-                                            AsyncImage(
-                                                model = framingPreviewModel,
-                                                contentDescription = "Banner Framing Preview",
-                                                contentScale = ContentScale.Crop,
-                                                alignment = BiasAlignment(draftFocalX, draftFocalY),
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .graphicsLayer(scaleX = draftZoom, scaleY = draftZoom)
+                                    FilledTonalButton(
+                                        onClick = {
+                                            bannerPickerLauncher.launch(
+                                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                             )
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(8.dp)
-                                                .clip(RoundedCornerShape(999.dp))
-                                                .background(AmoledBlack.copy(alpha = 0.75f))
-                                                .padding(horizontal = 9.dp, vertical = 3.dp)
-                                        ) {
-                                            Text(
-                                                text = "Drag to pan · Pinch to zoom",
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = TextPrimary
-                                            )
-                                        }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(
+                                            containerColor = DarkSurfaceElevated,
+                                            contentColor = AccentGold
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Pick File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                     }
 
-                                    // Synced X / Y / Zoom controls
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text("X", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(18.dp))
-                                        Slider(
-                                            value = draftFocalX,
-                                            onValueChange = { draftFocalX = it },
-                                            valueRange = -1f..1f,
-                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text("Y", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(18.dp))
-                                        Slider(
-                                            value = draftFocalY,
-                                            onValueChange = { draftFocalY = it },
-                                            valueRange = -1f..1f,
-                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text("Zoom", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                        Slider(
-                                            value = draftZoom,
-                                            onValueChange = { draftZoom = it },
-                                            valueRange = 1f..2.5f,
-                                            colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            text = String.format(java.util.Locale.US, "%.1fx", draftZoom),
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = AccentGold
-                                        )
-                                    }
-
-                                    // Quick snaps
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        listOf(
-                                            "Left" to Triple(-1f, draftFocalY, draftZoom),
-                                            "Center" to Triple(0f, 0f, draftZoom),
-                                            "Right" to Triple(1f, draftFocalY, draftZoom),
-                                            "Top" to Triple(draftFocalX, -1f, draftZoom),
-                                            "Bottom" to Triple(draftFocalX, 1f, draftZoom)
-                                        ).forEach { (lbl, target) ->
-                                            OutlinedButton(
-                                                onClick = {
-                                                    draftFocalX = target.first
-                                                    draftFocalY = target.second
-                                                    draftZoom = target.third
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
-                                            ) {
-                                                Text(lbl, fontSize = 11.sp, color = TextPrimary)
-                                            }
-                                        }
-                                    }
-
-                                    // Fixed Reset & Apply Framing row (always immediately reachable)
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        OutlinedButton(
-                                            onClick = {
+                                    OutlinedButton(
+                                        onClick = {
+                                            onBannerSelected(currentCoverUrl)
+                                            if (showFramingEditor) {
                                                 draftFocalX = 0f
                                                 draftFocalY = 0f
                                                 draftZoom = 1f
-                                            },
-                                            shape = RoundedCornerShape(10.dp),
-                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Text("Reset", fontSize = 12.sp, color = TextPrimary)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                onBannerFramingChanged(draftFocalX, draftFocalY, draftZoom)
-                                                showFramingEditor = false
-                                            },
-                                            shape = RoundedCornerShape(10.dp),
-                                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
-                                            modifier = Modifier.weight(1.6f)
-                                        ) {
-                                            Text("Apply Framing", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Optional Direct URL input
-                            AnimatedVisibility(visible = showDirectUrlInput) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedTextField(
-                                        value = customUrlInput,
-                                        onValueChange = { customUrlInput = it },
-                                        placeholder = { Text("https://.../banner.jpg", color = TextMuted, fontSize = 12.sp) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = AccentGold,
-                                            unfocusedBorderColor = GlassBorder,
-                                            focusedTextColor = TextPrimary,
-                                            unfocusedTextColor = TextPrimary
-                                        )
-                                    )
-                                    Button(
-                                        onClick = {
-                                            if (customUrlInput.isNotBlank()) {
-                                                onBannerSelected(customUrlInput.trim())
-                                                scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+                                            } else {
+                                                onDismiss()
                                             }
                                         },
-                                        enabled = customUrlInput.isNotBlank(),
                                         shape = RoundedCornerShape(10.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
                                     ) {
-                                        Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Use Cover", fontSize = 12.sp, color = TextSecondary)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            onBannerSelected("NONE")
+                                            onDismiss()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (isBannerDisabled) AccentGold else GlassBorder
+                                        )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Block,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp),
+                                            tint = if (isBannerDisabled) AccentGold else TextSecondary
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isBannerDisabled) "Enable Banner" else "Disable Banner",
+                                            fontSize = 12.sp,
+                                            color = if (isBannerDisabled) AccentGold else TextSecondary
+                                        )
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            onResetBanner()
+                                            onDismiss()
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(15.dp), tint = TextSecondary)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Reset Auto", fontSize = 12.sp, color = TextSecondary)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { showDirectUrlInput = !showDirectUrlInput },
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (showDirectUrlInput) AccentGold else GlassBorder
+                                        )
+                                    ) {
+                                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showDirectUrlInput) AccentGold else TextSecondary)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Direct URL", fontSize = 12.sp, color = if (showDirectUrlInput) AccentGold else TextSecondary)
+                                    }
+
+                                    if (!isBannerDisabled) {
+                                        OutlinedButton(
+                                            onClick = { showFramingEditor = !showFramingEditor },
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                if (showFramingEditor) AccentGold else GlassBorder
+                                            )
+                                        ) {
+                                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(15.dp), tint = if (showFramingEditor) AccentGold else TextSecondary)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Reposition & Zoom", fontSize = 12.sp, color = if (showFramingEditor) AccentGold else TextPrimary)
+                                        }
                                     }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                            if (showFramingEditor && !isBannerDisabled) {
+                                item(key = "framing_editor") {
+                                    val framingPreviewModel: Any? = remember(currentCustomBannerPath, currentBannerUrl, currentCoverUrl) {
+                                        currentCustomBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let { path ->
+                                            if (path.startsWith("http") || path.startsWith("content:")) path else java.io.File(path)
+                                        } ?: currentBannerUrl?.takeIf { it.isNotBlank() } ?: currentCoverUrl.takeIf { it.isNotBlank() }
+                                    }
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(DarkSurfaceElevated)
+                                            .border(0.8.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(184.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clipToBounds()
+                                                .background(DarkSurfaceCard)
+                                                .border(1.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                                .pointerInput(Unit) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                                        down.consume()
+                                                        do {
+                                                            val event = awaitPointerEvent()
+                                                            val zoomChange = event.calculateZoom()
+                                                            val pan = event.calculatePan()
+                                                            if (zoomChange != 1f || pan != Offset.Zero) {
+                                                                val nextZoom = (draftZoom * zoomChange).coerceIn(1f, 2.5f)
+                                                                val w = size.width.toFloat().coerceAtLeast(1f)
+                                                                val h = size.height.toFloat().coerceAtLeast(1f)
+                                                                val sens = 1.6f / nextZoom
+                                                                draftZoom = nextZoom
+                                                                draftFocalX = (draftFocalX - (pan.x / w) * sens).coerceIn(-1f, 1f)
+                                                                draftFocalY = (draftFocalY - (pan.y / h) * sens).coerceIn(-1f, 1f)
+                                                            }
+                                                            event.changes.forEach { it.consume() }
+                                                        } while (event.changes.any { it.pressed })
+                                                    }
+                                                }
+                                        ) {
+                                            if (framingPreviewModel != null) {
+                                                AsyncImage(
+                                                    model = framingPreviewModel,
+                                                    contentDescription = "Banner Framing Preview",
+                                                    contentScale = ContentScale.Crop,
+                                                    alignment = BiasAlignment(draftFocalX, draftFocalY),
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .graphicsLayer(scaleX = draftZoom, scaleY = draftZoom)
+                                                )
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopStart)
+                                                    .padding(8.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(AmoledBlack.copy(alpha = 0.78f))
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Drag to pan · Pinch to zoom",
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = TextPrimary
+                                                )
+                                            }
+                                        }
 
-                            var userPickedBannerFilter by remember { mutableStateOf<String?>(null) }
-                            val supportsCleanBannerFilter = mediaType == MediaType.VISUAL_NOVEL || mediaType == MediaType.GAME || mediaType == MediaType.BOOK
-                            val cleanBannerCount = remember(displayedBanners) { displayedBanners.count { !it.isScreenshot } }
-                            val shotBannerCount = remember(displayedBanners) { displayedBanners.count { it.isScreenshot } }
-                            val activeVnBannerFilter = userPickedBannerFilter ?: if (cleanBannerCount > 0) "CLEAN" else "ALL"
-                            val visibleBanners = remember(displayedBanners, supportsCleanBannerFilter, activeVnBannerFilter) {
-                                if (!supportsCleanBannerFilter) {
-                                    displayedBanners
-                                } else when (activeVnBannerFilter) {
-                                    "CLEAN" -> displayedBanners.filter { !it.isScreenshot }
-                                    "SHOTS" -> displayedBanners.filter { it.isScreenshot }
-                                    else -> displayedBanners
+                                        // Synced X / Y controls
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(34.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("X", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
+                                            Slider(
+                                                value = draftFocalX,
+                                                onValueChange = { draftFocalX = it },
+                                                valueRange = -1f..1f,
+                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text("Y", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
+                                            Slider(
+                                                value = draftFocalY,
+                                                onValueChange = { draftFocalY = it },
+                                                valueRange = -1f..1f,
+                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(34.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text("Zoom", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                            Slider(
+                                                value = draftZoom,
+                                                onValueChange = { draftZoom = it },
+                                                valueRange = 1f..2.5f,
+                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                text = String.format(java.util.Locale.US, "%.1fx", draftZoom),
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = AccentGold
+                                            )
+                                        }
+
+                                        // Quick snaps
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            listOf(
+                                                "Left" to Triple(-1f, draftFocalY, draftZoom),
+                                                "Center" to Triple(0f, 0f, draftZoom),
+                                                "Right" to Triple(1f, draftFocalY, draftZoom),
+                                                "Top" to Triple(draftFocalX, -1f, draftZoom),
+                                                "Bottom" to Triple(draftFocalX, 1f, draftZoom)
+                                            ).forEach { (lbl, target) ->
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        draftFocalX = target.first
+                                                        draftFocalY = target.second
+                                                        draftZoom = target.third
+                                                    },
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                                                ) {
+                                                    Text(lbl, fontSize = 11.sp, color = TextPrimary)
+                                                }
+                                            }
+                                        }
+
+                                        // Reset & Apply Framing row
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 2.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    draftFocalX = 0f
+                                                    draftFocalY = 0f
+                                                    draftZoom = 1f
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Reset", fontSize = 12.sp, color = TextPrimary)
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    onBannerFramingChanged(draftFocalX, draftFocalY, draftZoom)
+                                                    showFramingEditor = false
+                                                },
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                                                modifier = Modifier.weight(1.6f)
+                                            ) {
+                                                Text("Apply Framing", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
-                            if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(bottom = 10.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(18.dp)
-                                ) {
-                                    listOf(
-                                        "CLEAN" to if (mediaType == MediaType.BOOK) "Wide Art ($cleanBannerCount)" else "Clean Art ($cleanBannerCount)",
-                                        "ALL" to "All (${displayedBanners.size})",
-                                        "SHOTS" to if (mediaType == MediaType.BOOK) "Illustrations ($shotBannerCount)" else "Screenshots ($shotBannerCount)"
-                                    ).forEach { (key, label) ->
-                                        val selected = activeVnBannerFilter == key
-                                        Column(
-                                            modifier = Modifier
-                                                .width(IntrinsicSize.Max)
-                                                .clickable { userPickedBannerFilter = key },
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
-                                                fontSize = 12.sp,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            if (showDirectUrlInput) {
+                                item(key = "direct_url") {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = customUrlInput,
+                                            onValueChange = { customUrlInput = it },
+                                            placeholder = { Text("https://.../banner.jpg", color = TextMuted, fontSize = 12.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                            colors = OutlinedTextFieldDefaults.colors(
+                                                focusedBorderColor = AccentGold,
+                                                unfocusedBorderColor = GlassBorder,
+                                                focusedTextColor = TextPrimary,
+                                                unfocusedTextColor = TextPrimary
                                             )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Box(
+                                        )
+                                        Button(
+                                            onClick = {
+                                                if (customUrlInput.isNotBlank()) {
+                                                    onBannerSelected(customUrlInput.trim())
+                                                    if (showFramingEditor) {
+                                                        draftFocalX = 0f
+                                                        draftFocalY = 0f
+                                                        draftZoom = 1f
+                                                    } else {
+                                                        onDismiss()
+                                                    }
+                                                }
+                                            },
+                                            enabled = customUrlInput.isNotBlank(),
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold)
+                                        ) {
+                                            Text("Apply", color = AmoledBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            if ((supportsCleanBannerFilter && displayedBanners.isNotEmpty()) || showFramingEditor) {
+                                item(key = "banner_filter_tabs") {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
+                                            Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .height(2.dp)
-                                                    .background(if (selected) Color.White else Color.Transparent)
+                                                    .horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(18.dp)
+                                            ) {
+                                                listOf(
+                                                    "CLEAN" to if (mediaType == MediaType.BOOK) "Wide Art ($cleanBannerCount)" else "Clean Art ($cleanBannerCount)",
+                                                    "ALL" to "All (${displayedBanners.size})",
+                                                    "SHOTS" to if (mediaType == MediaType.BOOK) "Illustrations ($shotBannerCount)" else "Screenshots ($shotBannerCount)"
+                                                ).forEach { (key, label) ->
+                                                    val selected = activeVnBannerFilter == key
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .width(IntrinsicSize.Max)
+                                                            .clickable { userPickedBannerFilter = key },
+                                                        horizontalAlignment = Alignment.CenterHorizontally
+                                                    ) {
+                                                        Text(
+                                                            text = label,
+                                                            color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                                            fontSize = 12.sp,
+                                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                                        )
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(2.dp)
+                                                                .background(if (selected) Color.White else Color.Transparent)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if (showFramingEditor && visibleBanners.isNotEmpty()) {
+                                            Text(
+                                                text = "More Banners (${visibleBanners.size}) · Tap to preview in reframe editor",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = AccentGold
                                             )
                                         }
                                     }
@@ -1127,127 +1179,131 @@ fun ArtworkPickerBottomSheet(
                             }
 
                             if (visibleBanners.isEmpty()) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                item(key = "banner_empty") {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(180.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
-                                                "No clean widescreen art found — try the Screenshots tab."
-                                            } else {
-                                                "No dedicated widescreen banners found online."
-                                            },
-                                            color = TextMuted,
-                                            fontSize = 13.sp,
-                                            textAlign = TextAlign.Center
-                                        )
-                                        Text(
-                                            text = "You can tap 'Use Cover' to generate a banner or 'Pick File' for custom fanart.",
-                                            color = TextSecondary,
-                                            fontSize = 11.5.sp,
-                                            textAlign = TextAlign.Center
-                                        )
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (supportsCleanBannerFilter && displayedBanners.isNotEmpty()) {
+                                                    "No clean widescreen art found — try the Screenshots tab."
+                                                } else {
+                                                    "No dedicated widescreen banners found online."
+                                                },
+                                                color = TextMuted,
+                                                fontSize = 13.sp,
+                                                textAlign = TextAlign.Center
+                                            )
+                                            Text(
+                                                text = "You can tap 'Use Cover' to generate a banner or 'Pick File' for custom fanart.",
+                                                color = TextSecondary,
+                                                fontSize = 11.5.sp,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
                                     }
                                 }
                             } else {
-                                LazyColumn(
-                                    contentPadding = PaddingValues(bottom = 24.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    itemsIndexed(visibleBanners, key = { idx, item -> "${idx}_${item.url}" }) { _, candidate ->
-                                        val isCurrent = candidate.url == currentBannerUrl
+                                itemsIndexed(visibleBanners, key = { idx, item -> "${idx}_${item.url}" }) { _, candidate ->
+                                    val isCurrent = candidate.url == currentBannerUrl
 
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .aspectRatio(16f / 7f)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .border(
+                                                width = if (isCurrent) 2.5.dp else 1.dp,
+                                                color = if (isCurrent) AccentGold else GlassBorder,
+                                                shape = RoundedCornerShape(12.dp)
+                                            )
+                                            .clickable {
+                                                if (showFramingEditor) {
+                                                    onBannerSelected(candidate.url)
+                                                    draftFocalX = 0f
+                                                    draftFocalY = 0f
+                                                    draftZoom = 1f
+                                                    scope.launch { bannerListState.animateScrollToItem(1) }
+                                                } else {
+                                                    onBannerSelected(candidate.url)
+                                                    onDismiss()
+                                                }
+                                            }
+                                    ) {
+                                        AsyncImage(
+                                            model = candidate.url,
+                                            contentDescription = candidate.description,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+
+                                        // Compact source badge
                                         Box(
                                             modifier = Modifier
-                                                .fillMaxWidth()
-                                                .aspectRatio(16f / 7f)
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .border(
-                                                    width = if (isCurrent) 2.5.dp else 1.dp,
-                                                    color = if (isCurrent) AccentGold else GlassBorder,
-                                                    shape = RoundedCornerShape(12.dp)
+                                                .padding(8.dp)
+                                                .align(Alignment.TopStart)
+                                                .background(
+                                                    color = Color(0xD912110E),
+                                                    shape = RoundedCornerShape(6.dp)
                                                 )
-                                                .clickable {
-                                                    onBannerSelected(candidate.url)
-                                                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
-                                                }
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
                                         ) {
-                                            AsyncImage(
-                                                model = candidate.url,
-                                                contentDescription = candidate.description,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
+                                            Text(
+                                                text = formatArtSourceBadgeLabel(candidate.sourceName),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = TextPrimary,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis
                                             )
+                                        }
 
-                                            // Compact source badge
+                                        if (!candidate.description.isNullOrBlank()) {
                                             Box(
                                                 modifier = Modifier
-                                                    .padding(8.dp)
-                                                    .align(Alignment.TopStart)
+                                                    .align(Alignment.BottomCenter)
+                                                    .fillMaxWidth()
                                                     .background(
-                                                        color = Color(0xD912110E),
-                                                        shape = RoundedCornerShape(6.dp)
+                                                        Brush.verticalGradient(
+                                                            colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.86f))
+                                                        )
                                                     )
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
                                                 Text(
-                                                    text = formatArtSourceBadgeLabel(candidate.sourceName),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Medium,
+                                                    text = candidate.description,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
                                                     color = TextPrimary,
                                                     maxLines = 1,
-                                                    softWrap = false,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
                                             }
+                                        }
 
-                                            if (!candidate.description.isNullOrBlank()) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomCenter)
-                                                        .fillMaxWidth()
-                                                        .background(
-                                                            Brush.verticalGradient(
-                                                                colors = listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.86f))
-                                                            )
-                                                        )
-                                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = candidate.description,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = TextPrimary,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-
-                                            if (isCurrent) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.TopEnd)
-                                                        .padding(8.dp)
-                                                        .size(22.dp)
-                                                        .clip(CircleShape)
-                                                        .background(AccentGold),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = null,
-                                                        tint = AmoledBlack,
-                                                        modifier = Modifier.size(13.dp)
-                                                    )
-                                                }
+                                        if (isCurrent) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(8.dp)
+                                                    .size(22.dp)
+                                                    .clip(CircleShape)
+                                                    .background(AccentGold),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = AmoledBlack,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
                                             }
                                         }
                                     }
@@ -1355,4 +1411,5 @@ fun ArtworkPickerBottomSheet(
             }
         }
     }
+}
 }

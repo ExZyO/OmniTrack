@@ -47,27 +47,51 @@ jobs:
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
+      - name: Decode Release Keystore
+        run: |
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "ERROR: KEYSTORE_BASE64 secret is missing!"
+            exit 1
+          fi
+          printf '%s' "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${{ runner.temp }}/release.jks"
+          if [ ! -s "${{ runner.temp }}/release.jks" ]; then
+            echo "ERROR: Decoded release keystore is empty!"
+            exit 1
+          fi
+
       - name: Build Release & Debug APKs
         run: ./gradlew assembleRelease assembleDebug -PversionCode=${{ github.run_number }} -PversionName=1.0.0-b${{ github.run_number }} --stacktrace
         env:
+          KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
           MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
           SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
+          BANGUMI_CLIENT_ID: ${{ secrets.BANGUMI_CLIENT_ID }}
+          BANGUMI_CLIENT_SECRET: ${{ secrets.BANGUMI_CLIENT_SECRET }}
 
       - name: Prepare Release Artifact & Notes
         run: |
           mkdir -p release-output
           cp app/build/outputs/apk/release/app-release.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk
           cp app/build/outputs/apk/debug/app-debug.apk release-output/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk
+          RELEASE_SHA256=$(sha256sum "release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk" | awk '{print $1}')
+          DEBUG_SHA256=$(sha256sum "release-output/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk" | awk '{print $1}')
           COMMIT_SUBJ=$(git log -1 --pretty=%s)
+          SAFE_SUBJ=$(printf '%s' "$COMMIT_SUBJ" | tr '"' "'" | tr -d '\\')
           cat <<EOF > release-output/version.json
           {
             "version": "${{ steps.release_info.outputs.tag }}",
             "versionCode": ${{ github.run_number }},
             "apkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}.apk",
             "debugApkUrl": "https://github.com/ExZyO/OmniTrack/releases/download/${{ steps.release_info.outputs.tag }}/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk",
-            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: $COMMIT_SUBJ"
+            "apkSha256": "$RELEASE_SHA256",
+            "debugApkSha256": "$DEBUG_SHA256",
+            "releaseNotes": "OmniTrack ${{ steps.release_info.outputs.tag }}: $SAFE_SUBJ"
           }
           EOF
           cp release-output/version.json version.json
@@ -82,9 +106,13 @@ jobs:
           - **Release APK:** \`OmniTrack-${{ steps.release_info.outputs.tag }}.apk\`
           - **Debug APK (for ADB / Wireless Debugging logs):** \`OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk\`
 
+          ### 🔐 Verification Checksums (SHA-256)
+          - **Release SHA-256:** \`$RELEASE_SHA256\`
+          - **Debug SHA-256:** \`$DEBUG_SHA256\`
+
           ### 🔧 Technical Details
           - **Commit:** ${{ github.sha }}
-          - **Build Type:** Release & Debug
+          - **Build Type:** Release (R8 Minified) & Debug
           - **Engine:** Room SQLite WAL, Coil 3 Lossless Artwork, Fast Dual-Channel Update Stream
           EOF
 
