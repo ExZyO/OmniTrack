@@ -172,17 +172,24 @@ fun FanficImportSheet(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .background(AmoledBlack)
-                .navigationBarsPadding()
-                .imePadding(),
+                .background(AmoledBlack),
             color = AmoledBlack
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding()
+            ) {
                 // Header
                 Row(
                     modifier = Modifier

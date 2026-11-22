@@ -124,8 +124,9 @@ fun FanficWebViewSheet(
     var isDesktopMode by remember(initialSite, safeInitialUrl) {
         mutableStateOf(initialSite == FanficSite.FFN || safeInitialUrl.contains("fanfiction.net", ignoreCase = true))
     }
-    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    val defaultMobileUa = remember { mutableStateOf("") }
+    // Firefox UA strings avoid Chromium WebView Client-Hint mismatches on accounts.google.com OAuth
+    val desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+    val mobileUa = "Mozilla/5.0 (Android 14; Mobile; rv:132.0) Gecko/132.0 Firefox/132.0"
 
     val webViewHolder = remember { mutableStateOf<WebView?>(null) }
 
@@ -163,6 +164,7 @@ fun FanficWebViewSheet(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
             dismissOnBackPress = false,
             dismissOnClickOutside = false
         )
@@ -185,6 +187,7 @@ fun FanficWebViewSheet(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
                 // Top toolbar
@@ -256,7 +259,7 @@ fun FanficWebViewSheet(
                                 val next = !isDesktopMode
                                 isDesktopMode = next
                                 webViewHolder.value?.let { wv ->
-                                    wv.settings.userAgentString = if (next) desktopUa else defaultMobileUa.value
+                                    wv.settings.userAgentString = if (next) desktopUa else mobileUa
                                     val reloadUrl = if (next && currentUrl.contains("://m.fanfiction.net", ignoreCase = true)) {
                                         currentUrl.replace(Regex("(?i)://m\\.fanfiction\\.net"), "://www.fanfiction.net")
                                     } else currentUrl
@@ -337,6 +340,8 @@ fun FanficWebViewSheet(
                             cm.setAcceptThirdPartyCookies(this, true)
 
                             settings.javaScriptEnabled = true
+                            settings.javaScriptCanOpenWindowsAutomatically = true
+                            settings.setSupportMultipleWindows(false)
                             settings.domStorageEnabled = true
                             settings.loadsImagesAutomatically = true
                             settings.useWideViewPort = true
@@ -345,8 +350,7 @@ fun FanficWebViewSheet(
                             settings.builtInZoomControls = true
                             settings.displayZoomControls = false
                             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                            defaultMobileUa.value = settings.userAgentString.replace("; wv", "")
-                            settings.userAgentString = if (isDesktopMode) desktopUa else defaultMobileUa.value
+                            settings.userAgentString = if (isDesktopMode) desktopUa else mobileUa
 
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {

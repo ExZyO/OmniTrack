@@ -51,7 +51,20 @@ private val FANFIC_PALETTES = listOf(
     FanficSpinePalette(Color(0xFF14222A), Color(0xFF070E12), Color(0xFF60A5FA))
 )
 
-fun shouldBlurFanficCover(ratingCode: String?, mode: VnNsfwFilterMode = PreferenceManager.cachedFanficNsfwFilterMode): Boolean {
+fun shouldBlurFanficCover(
+    ratingCode: String?,
+    hasActualImageCover: Boolean = false,
+    mode: VnNsfwFilterMode = PreferenceManager.cachedFanficNsfwFilterMode
+): Boolean {
+    if (!hasActualImageCover) return false
+    if (mode != VnNsfwFilterMode.BLUR_TAP) return false
+    return FanficRating.fromRaw(ratingCode).isNsfw
+}
+
+fun shouldBlurFanficTags(
+    ratingCode: String?,
+    mode: VnNsfwFilterMode = PreferenceManager.cachedFanficNsfwFilterMode
+): Boolean {
     if (mode != VnNsfwFilterMode.BLUR_TAP) return false
     return FanficRating.fromRaw(ratingCode).isNsfw
 }
@@ -63,7 +76,8 @@ fun shouldHideFanficItem(ratingCode: String?, mode: VnNsfwFilterMode = Preferenc
 
 /**
  * Editorial book-spine cover rendered automatically for Fanfiction items when no custom
- * image or fetched fandom artwork is present. Also handles Mature/Explicit blur masks.
+ * image or fetched fandom artwork is present. Purely typographic covers are never blurred
+ * so the work title, author, and fandom remain legible at all ratings.
  */
 @Composable
 fun FanficTypographicCover(
@@ -75,7 +89,7 @@ fun FanficTypographicCover(
     wordCount: Int? = null,
     isCrossover: Boolean = false,
     compact: Boolean = false,
-    isBlurred: Boolean = shouldBlurFanficCover(ratingCode),
+    isBlurred: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val palette = remember(primaryFandom, title) {
@@ -91,7 +105,6 @@ fun FanficTypographicCover(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (isBlurred) Modifier.blur(16.dp) else Modifier)
                 .background(
                     Brush.verticalGradient(
                         listOf(palette.topColor, palette.bottomColor)
@@ -255,31 +268,6 @@ fun FanficTypographicCover(
                         )
                         Spacer(Modifier.width(4.dp))
                     }
-                }
-            }
-        }
-
-        if (isBlurred) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.72f))
-                        .border(0.8.dp, Color(0xFFF59E0B).copy(alpha = 0.65f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = FanficRating.fromRaw(ratingCode).label.uppercase(),
-                        color = Color(0xFFFBBF24),
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.7.sp
-                    )
                 }
             }
         }

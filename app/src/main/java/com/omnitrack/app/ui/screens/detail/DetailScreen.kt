@@ -3119,7 +3119,7 @@ private fun DetailBookEditorialHeroSection(
                         wordCount = item.fanficWordCount,
                         isCrossover = item.fanficIsCrossover,
                         compact = false,
-                        isBlurred = item.customCoverPath.isNullOrBlank() && shouldBlurFanficCover(item.fanficRating)
+                        isBlurred = false
                     )
                 } else {
                     AsyncImage(
@@ -3338,7 +3338,7 @@ private fun DetailClassicHeaderSection(
                     wordCount = item.fanficWordCount,
                     isCrossover = item.fanficIsCrossover,
                     compact = true,
-                    isBlurred = item.customCoverPath.isNullOrBlank() && shouldBlurFanficCover(item.fanficRating)
+                    isBlurred = false
                 )
             } else {
                 AsyncImage(

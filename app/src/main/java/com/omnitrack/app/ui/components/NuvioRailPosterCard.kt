@@ -78,7 +78,9 @@ fun NuvioRailPosterCard(
                 .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(cornerRadius))
         ) {
             val imageModel = remember(coverUrl) { ArtworkModelResolver.toCoilModel(coverUrl) }
-            val isBlurred = isFanfic && shouldBlurFanficCover(fanficRating)
+            var unblurredByTap by remember(coverUrl, title) { androidx.compose.runtime.mutableStateOf(false) }
+            val isBlurred = isFanfic && !unblurredByTap &&
+                shouldBlurFanficCover(fanficRating, hasActualImageCover = imageModel != null)
             if (isFanfic && imageModel == null) {
                 FanficTypographicCover(
                     title = title,
@@ -89,7 +91,7 @@ fun NuvioRailPosterCard(
                     wordCount = fanficWordCount,
                     isCrossover = fanficIsCrossover,
                     compact = true,
-                    isBlurred = isBlurred
+                    isBlurred = false
                 )
             } else if (imageModel != null) {
                 AsyncImage(
@@ -104,7 +106,8 @@ fun NuvioRailPosterCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.55f)),
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { unblurredByTap = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -115,7 +118,7 @@ fun NuvioRailPosterCard(
                                 .padding(horizontal = 7.dp, vertical = 3.dp)
                         ) {
                             Text(
-                                text = com.omnitrack.app.data.model.FanficRating.fromRaw(fanficRating).label.uppercase(),
+                                text = "${com.omnitrack.app.data.model.FanficRating.fromRaw(fanficRating).label.uppercase()} \u00B7 TAP",
                                 color = Color(0xFFFBBF24),
                                 fontSize = 8.5.sp,
                                 fontWeight = FontWeight.ExtraBold,

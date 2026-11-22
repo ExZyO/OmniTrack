@@ -69,7 +69,7 @@ import com.omnitrack.app.data.model.FanficWorkStatus
 import com.omnitrack.app.data.model.decodeFanficMeta
 import com.omnitrack.app.data.model.formatWordCount
 import com.omnitrack.app.ui.components.repeatingClickable
-import com.omnitrack.app.ui.components.shouldBlurFanficCover
+import com.omnitrack.app.ui.components.shouldBlurFanficTags
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
@@ -123,7 +123,7 @@ fun DetailFanficTrackingSection(
     val primarySite = remember(item.fanficSourceSite) { FanficSite.fromCode(item.fanficSourceSite) }
     val rating = remember(item.fanficRating) { FanficRating.fromRaw(item.fanficRating) }
     val workStatus = remember(item.fanficWorkStatus) { FanficWorkStatus.fromRaw(item.fanficWorkStatus) }
-    val blurSensitive = remember(item.fanficRating) { shouldBlurFanficCover(item.fanficRating) }
+    val blurSensitive = remember(item.fanficRating) { shouldBlurFanficTags(item.fanficRating) }
 
     var revealSensitiveTags by remember(item.id, blurSensitive) { mutableStateOf(!blurSensitive) }
     var expandAllFreeform by remember(item.id) { mutableStateOf(false) }

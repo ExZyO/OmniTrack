@@ -100,6 +100,7 @@ import com.omnitrack.app.data.preferences.DiscoverShelfDef
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.GeminiModelSelectorSection
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
@@ -1697,6 +1698,18 @@ private fun DiscoverSpotlightBanner(
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
+                    )
+                } else if (item.mediaType == MediaType.FANFICTION) {
+                    FanficTypographicCover(
+                        title = item.title,
+                        author = libraryMatch?.bookAuthor ?: item.bookAuthor,
+                        primaryFandom = libraryMatch?.fanficPrimaryFandom ?: item.fanficPrimaryFandom,
+                        sourceSite = libraryMatch?.fanficSourceSite ?: item.fanficSourceSite,
+                        ratingCode = libraryMatch?.fanficRating ?: item.fanficRating,
+                        wordCount = libraryMatch?.fanficWordCount ?: item.fanficWordCount,
+                        isCrossover = libraryMatch?.fanficIsCrossover ?: item.fanficIsCrossover,
+                        compact = true,
+                        isBlurred = false
                     )
                 }
             }

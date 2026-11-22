@@ -68,10 +68,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
@@ -469,8 +471,7 @@ fun HistoryView(
     val sheetTarget = actionTarget
     if (sheetTarget != null) {
         val coverModel = remember(sheetTarget.customCoverPath, sheetTarget.coverUrl) {
-            sheetTarget.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-                ?: LosslessCoverMapper.toLosslessUrl(sheetTarget.coverUrl)
+            ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(sheetTarget))
         }
         ModalBottomSheet(
             onDismissRequest = { actionTarget = null },
@@ -500,16 +501,34 @@ fun HistoryView(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(
-                        model = coverModel,
-                        contentDescription = sheetTarget.title,
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
                             .width(46.dp)
                             .aspectRatio(2f / 3f)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color.White.copy(alpha = 0.08f))
-                    )
+                    ) {
+                        if (coverModel != null) {
+                            AsyncImage(
+                                model = coverModel,
+                                contentDescription = sheetTarget.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (sheetTarget.mediaType == MediaType.FANFICTION) {
+                            FanficTypographicCover(
+                                title = sheetTarget.title,
+                                author = sheetTarget.bookAuthor,
+                                primaryFandom = sheetTarget.fanficPrimaryFandom,
+                                sourceSite = sheetTarget.fanficSourceSite,
+                                ratingCode = sheetTarget.fanficRating,
+                                wordCount = sheetTarget.fanficWordCount,
+                                isCrossover = sheetTarget.fanficIsCrossover,
+                                compact = true,
+                                isBlurred = false
+                            )
+                        }
+                    }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             text = sheetTarget.title,
@@ -692,8 +711,7 @@ private fun HistoryHairlineRow(
     onLongClick: () -> Unit
 ) {
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
-        item.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-            ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item))
     }
     val progressStr = remember(item) { formatConciseProgress(item) }
     val rating = item.userRating ?: item.communityScore
@@ -717,12 +735,26 @@ private fun HistoryHairlineRow(
                 .clip(RoundedCornerShape(6.dp))
                 .background(Color.White.copy(alpha = 0.06f))
         ) {
-            AsyncImage(
-                model = coverModel,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            if (coverModel != null) {
+                AsyncImage(
+                    model = coverModel,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (item.mediaType == MediaType.FANFICTION) {
+                FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = true,
+                    isBlurred = false
+                )
+            }
         }
 
         Column(

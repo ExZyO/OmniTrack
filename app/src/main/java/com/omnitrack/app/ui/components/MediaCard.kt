@@ -212,14 +212,16 @@ fun MediaCard(
                     enabled = cardDepthEnabled
                 )
         ) {
-            val isFanficBlurred = item.mediaType == MediaType.FANFICTION &&
-                shouldBlurFanficCover(item.fanficRating)
             var fanficArtFailed by remember(activeModel) { mutableStateOf(false) }
             val hasRenderableArt = when (activeModel) {
                 is String -> activeModel.isNotBlank() && !fanficArtFailed
                 null -> false
                 else -> !fanficArtFailed
             }
+            var unblurredByTap by remember(item.id, activeModel) { mutableStateOf(false) }
+            val isFanficBlurred = item.mediaType == MediaType.FANFICTION &&
+                !unblurredByTap &&
+                shouldBlurFanficCover(item.fanficRating, hasActualImageCover = hasRenderableArt)
 
             if (item.mediaType == MediaType.FANFICTION && !hasRenderableArt) {
                 FanficTypographicCover(
@@ -231,7 +233,7 @@ fun MediaCard(
                     wordCount = item.fanficWordCount,
                     isCrossover = item.fanficIsCrossover,
                     compact = isLandscape,
-                    isBlurred = isFanficBlurred
+                    isBlurred = false
                 )
             } else {
                 AsyncImage(
@@ -261,7 +263,8 @@ fun MediaCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.55f)),
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .clickable { unblurredByTap = true },
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
@@ -272,7 +275,7 @@ fun MediaCard(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).label.uppercase(),
+                                text = "${com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).label.uppercase()} \u00B7 TAP",
                                 color = Color(0xFFFBBF24),
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.ExtraBold,

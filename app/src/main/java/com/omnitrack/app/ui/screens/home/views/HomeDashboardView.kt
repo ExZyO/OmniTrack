@@ -102,6 +102,7 @@ import com.omnitrack.app.data.preferences.HomeRowItem
 import com.omnitrack.app.data.preferences.HomeRowKey
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
 import com.omnitrack.app.ui.components.glassCardDepth
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
@@ -1075,8 +1076,7 @@ fun HomeDashboardView(
         val sheetTarget = actionSheetItem
         if (sheetTarget != null) {
             val coverThumb = remember(sheetTarget.customCoverPath, sheetTarget.coverUrl) {
-                sheetTarget.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-                    ?: LosslessCoverMapper.toLosslessUrl(sheetTarget.coverUrl)
+                ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(sheetTarget))
             }
             ModalBottomSheet(
                 onDismissRequest = { actionSheetItem = null },
@@ -1105,16 +1105,34 @@ fun HomeDashboardView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        AsyncImage(
-                            model = coverThumb,
-                            contentDescription = sheetTarget.title,
-                            contentScale = ContentScale.Crop,
+                        Box(
                             modifier = Modifier
                                 .width(44.dp)
                                 .height(64.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(DarkSurfaceCard)
-                        )
+                        ) {
+                            if (coverThumb != null) {
+                                AsyncImage(
+                                    model = coverThumb,
+                                    contentDescription = sheetTarget.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else if (sheetTarget.mediaType == MediaType.FANFICTION) {
+                                FanficTypographicCover(
+                                    title = sheetTarget.title,
+                                    author = sheetTarget.bookAuthor,
+                                    primaryFandom = sheetTarget.fanficPrimaryFandom,
+                                    sourceSite = sheetTarget.fanficSourceSite,
+                                    ratingCode = sheetTarget.fanficRating,
+                                    wordCount = sheetTarget.fanficWordCount,
+                                    isCrossover = sheetTarget.fanficIsCrossover,
+                                    compact = true,
+                                    isBlurred = false
+                                )
+                            }
+                        }
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = sheetTarget.title,
@@ -1250,8 +1268,8 @@ private fun LocalMediaHeroCard(
     heroSettings: HomeHeroSettings,
     onDetails: () -> Unit
 ) {
-    val coverModel: Any = remember(item.customCoverPath, item.coverUrl) {
-        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item)) ?: ""
+    val coverModel: Any? = remember(item.customCoverPath, item.coverUrl) {
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item))
     }
     val authenticBannerModel = remember(item.customBannerPath, item.bannerUrl, item.artworkRole, item.coverUrl) {
         ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredBanner(item))
@@ -1269,6 +1287,21 @@ private fun LocalMediaHeroCard(
         title = item.title,
         categoryBadge = "${item.mediaType.displayName.uppercase()} \u00B7 ${item.status.displayName.uppercase()}",
         posterModel = coverModel,
+        posterFallback = if (item.mediaType == MediaType.FANFICTION && coverModel == null) {
+            {
+                FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = true,
+                    isBlurred = false
+                )
+            }
+        } else null,
         authenticBannerModel = authenticBannerModel,
         bannerFocalX = item.bannerFocalX,
         bannerFocalY = item.bannerFocalY,
@@ -1289,7 +1322,7 @@ private fun TrendingMediaHeroCard(
     heroSettings: HomeHeroSettings,
     onDetails: () -> Unit
 ) {
-    val coverModel = remember(item.coverUrl) { LosslessCoverMapper.toLosslessUrl(item.coverUrl) }
+    val coverModel: Any? = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) }
     val authenticBannerModel = remember(item.bannerUrl, item.coverUrl) {
         item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }?.let { LosslessCoverMapper.toLosslessUrl(it) }
     }
@@ -1301,6 +1334,21 @@ private fun TrendingMediaHeroCard(
         title = item.title,
         categoryBadge = "TRENDING \u00B7 ${item.mediaType.displayName.uppercase()}",
         posterModel = coverModel,
+        posterFallback = if (item.mediaType == MediaType.FANFICTION && coverModel == null) {
+            {
+                FanficTypographicCover(
+                    title = item.title,
+                    author = item.bookAuthor,
+                    primaryFandom = item.fanficPrimaryFandom,
+                    sourceSite = item.fanficSourceSite,
+                    ratingCode = item.fanficRating,
+                    wordCount = item.fanficWordCount,
+                    isCrossover = item.fanficIsCrossover,
+                    compact = true,
+                    isBlurred = false
+                )
+            }
+        } else null,
         authenticBannerModel = authenticBannerModel,
         bannerFocalX = 0f,
         bannerFocalY = 0f,
@@ -1319,7 +1367,8 @@ private fun TrendingMediaHeroCard(
 private fun ChimanewComboHeroCard(
     title: String,
     categoryBadge: String,
-    posterModel: Any,
+    posterModel: Any?,
+    posterFallback: (@Composable () -> Unit)? = null,
     authenticBannerModel: Any?,
     bannerFocalX: Float,
     bannerFocalY: Float,
@@ -1369,7 +1418,7 @@ private fun ChimanewComboHeroCard(
                     .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                     .alpha(if (heroSettings.dimBanner) 0.56f else 0.94f)
             )
-        } else if (heroSettings.allowCroppedFallback) {
+        } else if (heroSettings.allowCroppedFallback && posterModel != null) {
             AsyncImage(
                 model = posterModel,
                 contentDescription = null,
@@ -1452,13 +1501,17 @@ private fun ChimanewComboHeroCard(
                     .background(DarkSurfaceCard)
                     .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(12.dp))
             ) {
-                AsyncImage(
-                    model = posterModel,
-                    contentDescription = title,
-                    contentScale = ContentScale.Crop,
-                    alignment = Alignment.TopCenter,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (posterModel != null) {
+                    AsyncImage(
+                        model = posterModel,
+                        contentDescription = title,
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (posterFallback != null) {
+                    posterFallback()
+                }
             }
 
             Column(
@@ -1769,12 +1822,10 @@ private fun ContinueTrackingCard(
     onQuickProgress: () -> Unit
 ) {
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
-        item.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-            ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item))
     }
-    val bannerModel = remember(item.customBannerPath, item.bannerUrl, item.coverUrl) {
-        item.customBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let { if (it.startsWith("http")) it else File(it) }
-            ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl && item.mediaType != MediaType.BOOK }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+    val bannerModel = remember(item.customBannerPath, item.bannerUrl, item.artworkRole, item.coverUrl) {
+        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredBanner(item))
     }
     val hasWideBanner = bannerModel != null
     val progressLabel = remember(item) { formatConciseProgress(item) }
@@ -1809,13 +1860,28 @@ private fun ContinueTrackingCard(
                             if (!applyDepth) Modifier.border(0.5.dp, Color.White.copy(alpha = 0.08f), artShape) else Modifier
                         )
                 ) {
-                    AsyncImage(
-                        model = bannerModel ?: coverModel,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Crop,
-                        alignment = if (hasWideBanner) BiasAlignment(item.bannerFocalX, item.bannerFocalY) else Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    val cardArtModel = bannerModel ?: coverModel
+                    if (cardArtModel != null) {
+                        AsyncImage(
+                            model = cardArtModel,
+                            contentDescription = item.title,
+                            contentScale = ContentScale.Crop,
+                            alignment = if (hasWideBanner) BiasAlignment(item.bannerFocalX, item.bannerFocalY) else Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (item.mediaType == MediaType.FANFICTION) {
+                        FanficTypographicCover(
+                            title = item.title,
+                            author = item.bookAuthor,
+                            primaryFandom = item.fanficPrimaryFandom,
+                            sourceSite = item.fanficSourceSite,
+                            ratingCode = item.fanficRating,
+                            wordCount = item.fanficWordCount,
+                            isCrossover = item.fanficIsCrossover,
+                            compact = true,
+                            isBlurred = false
+                        )
+                    }
 
                     if (showQuickPlus) {
                         Box(
@@ -1904,13 +1970,27 @@ private fun ContinueTrackingCard(
                                 enabled = applyDepth
                             )
                     ) {
-                        AsyncImage(
-                            model = coverModel,
-                            contentDescription = item.title,
-                            contentScale = ContentScale.Crop,
-                            alignment = Alignment.TopCenter,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        if (coverModel != null) {
+                            AsyncImage(
+                                model = coverModel,
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                alignment = Alignment.TopCenter,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else if (item.mediaType == MediaType.FANFICTION) {
+                            FanficTypographicCover(
+                                title = item.title,
+                                author = item.bookAuthor,
+                                primaryFandom = item.fanficPrimaryFandom,
+                                sourceSite = item.fanficSourceSite,
+                                ratingCode = item.fanficRating,
+                                wordCount = item.fanficWordCount,
+                                isCrossover = item.fanficIsCrossover,
+                                compact = true,
+                                isBlurred = false
+                            )
+                        }
                     }
                     Column(
                         modifier = Modifier
@@ -2037,13 +2117,27 @@ private fun ContinueTrackingCard(
                             if (!applyDepth) Modifier.border(0.5.dp, Color.White.copy(alpha = 0.08f), posterShape) else Modifier
                         )
                 ) {
-                    AsyncImage(
-                        model = coverModel,
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Crop,
-                        alignment = Alignment.TopCenter,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    if (coverModel != null) {
+                        AsyncImage(
+                            model = coverModel,
+                            contentDescription = item.title,
+                            contentScale = ContentScale.Crop,
+                            alignment = Alignment.TopCenter,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (item.mediaType == MediaType.FANFICTION) {
+                        FanficTypographicCover(
+                            title = item.title,
+                            author = item.bookAuthor,
+                            primaryFandom = item.fanficPrimaryFandom,
+                            sourceSite = item.fanficSourceSite,
+                            ratingCode = item.fanficRating,
+                            wordCount = item.fanficWordCount,
+                            isCrossover = item.fanficIsCrossover,
+                            compact = true,
+                            isBlurred = false
+                        )
+                    }
 
                     if (showQuickPlus) {
                         Box(
@@ -2338,7 +2432,7 @@ private fun MediaSummaryRail(
         ) {
             items(items, key = { "${title}_${it.id}" }) { summary ->
                 val cover = remember(summary.customCoverPath, summary.coverUrl) {
-                    summary.customCoverPath ?: LosslessCoverMapper.toLosslessUrl(summary.coverUrl)
+                    ArtworkModelResolver.preferredCover(summary)
                 }
                 val sub = remember(summary) { formatConciseProgress(summary).ifBlank { summary.mediaType.displayName } }
                 NuvioRailPosterCard(
