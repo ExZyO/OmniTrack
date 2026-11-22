@@ -48,7 +48,6 @@ import com.omnitrack.app.data.enrichment.ComicEnrichmentSource
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.data.search.SearchResultItem
-import com.omnitrack.app.ui.components.InWindowBottomSheet
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary

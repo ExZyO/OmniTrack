@@ -103,7 +103,7 @@ fun DetailComicTrackingSection(
 
     val publisherText = comicDetailMeta.publisher ?: item.comicPublisher ?: "—"
     val startYearText = comicDetailMeta.startYear?.takeIf { it.isNotBlank() }
-        ?: item.releaseDate?.take(4)?.takeIf { it.isNotBlank() }
+        ?: item.releaseYear?.take(4)?.takeIf { it.isNotBlank() }
         ?: "—"
 
     Column(

@@ -2177,7 +2177,7 @@ class TrackerSyncEngine(
                         val ids = m["ids"].asSafeObj()
                         val traktId = ids?.get("trakt").asSafeStr() ?: return@mapNotNull null
                         val title = m["title"].asSafeStr() ?: return@mapNotNull null
-                        val tmdbId = ids["tmdb"].asSafeLong()
+                        val tmdbId = ids?.get("tmdb").asSafeLong()
                         val cov = fetchTmdbPosterCached(if (mediaType == MediaType.MOVIE) "movie" else "tv", tmdbId)
                         RemoteTrackerEntrySnapshot(
                             trackerKey = "TRAKT",

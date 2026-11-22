@@ -1909,7 +1909,7 @@ fun DetailScreen(
                     totalProgress = item.totalProgress,
                     onProgressConfirmed = { viewModel.updateProgress(it) },
                     onDismiss = { showProgressEditSheet = false },
-                    unitLabel = item.mediaType.progressUnit,
+                    unitLabel = item.mediaType.unitLabel,
                     presentationSettings = presentationSettings,
                     backdropBitmap = backdropBitmap,
                     backdropTargetUrl = effectiveBanner

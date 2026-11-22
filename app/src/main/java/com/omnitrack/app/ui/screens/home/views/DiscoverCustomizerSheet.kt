@@ -269,7 +269,7 @@ fun DiscoverCustomizerSheet(
                             }
                         }
 
-                        val uiToggles = listOf(
+                        val uiToggles: List<Triple<String, String, Pair<Boolean, suspend (Boolean) -> Unit>>> = listOf(
                             Triple("Spotlight / Hero Banner", "Featured visual showcase above shelves (Layouts A & B)", settings.showSpotlightBanner to { v: Boolean -> preferenceManager.setDiscoverShowSpotlight(v) }),
                             Triple("Quick-Search Inspiration Chips", "Curated one-tap search pills below category tabs", settings.showQuickSearchChips to { v: Boolean -> preferenceManager.setDiscoverShowQuickChips(v) }),
                             Triple("Secondary Sub-Filter Bars", "Format, origin, publisher & platform sub-filters", settings.showSubFilters to { v: Boolean -> preferenceManager.setDiscoverShowSubFilters(v) }),
