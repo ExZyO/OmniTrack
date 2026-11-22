@@ -846,37 +846,116 @@ class TrackerSyncEngine(
             }
             val effNote = TrackerMetadataCodec.resolveEffectiveNote(item, "BANGUMI", 380)
             val effProg = TrackerMetadataCodec.resolveEffectiveProgress(item, "BANGUMI", progressOverride)
-            val tagsList = item.bangumiTags?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+            val tagsList = item.bangumiTags
+                ?.split(",")
+                ?.map { it.trim().replace(Regex("\\s+"), "_") }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
 
-            val payload = buildJsonObject {
+            // Step 1: Upsert collection status/rating/comment/tags (never include ep_status/vol_status here,
+            // because Bangumi v0 rejects ep_status/vol_status with HTTP 400 on non-book subjects or uncollected items)
+            val basePayload = buildJsonObject {
                 put("type", bgmType)
-                item.userRating?.let { put("rate", it.roundToInt().coerceIn(1, 10)) }
-                effNote?.let { put("comment", it) }
+                item.userRating?.takeIf { it > 0f }?.let { put("rate", it.roundToInt().coerceIn(1, 10)) }
+                effNote?.takeIf { it.isNotBlank() }?.let { put("comment", it) }
                 put("private", item.bangumiPrivate)
-                put("ep_status", effProg)
-                if (item.volumesProgress > 0) put("vol_status", item.volumesProgress)
                 if (tagsList.isNotEmpty()) {
                     put("tags", buildJsonArray { tagsList.forEach { add(JsonPrimitive(it)) } })
                 }
             }
 
+            val jsonMediaType = "application/json".toMediaType()
             val request = Request.Builder()
                 .url("https://api.bgm.tv/v0/users/-/collections/$bgmId")
                 .header("Authorization", "Bearer $token")
                 .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
                 .header("Accept", "application/json")
-                .post(payload.toString().toByteArray(Charsets.UTF_8).toRequestBody("application/json".toMediaType()))
+                .post(basePayload.toString().toByteArray(Charsets.UTF_8).toRequestBody(jsonMediaType))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val mainOutcome = client.newCall(request).execute().use { response ->
                 val code = response.code
                 if (!response.isSuccessful) {
-                    AppLogger.w("TrackerSync", "service=BANGUMI op=push http=$code")
+                    val errDetail = runCatching { response.body?.string().orEmpty().take(180) }.getOrDefault("")
+                    AppLogger.w("TrackerSync", "service=BANGUMI op=push http=$code detail=$errDetail")
                     TrackerSyncOutcome("BANGUMI", false, code, "Bangumi HTTP $code")
                 } else {
                     TrackerSyncOutcome("BANGUMI", true, code, "Bangumi synced")
                 }
             }
+
+            if (!mainOutcome.success) return@withBangumiPacing mainOutcome
+
+            // Step 2: Sync progress according to Bangumi v0 subject rules
+            val isBookLike = item.mediaType == com.omnitrack.app.data.model.MediaType.MANGA ||
+                item.mediaType == com.omnitrack.app.data.model.MediaType.NOVEL ||
+                item.mediaType == com.omnitrack.app.data.model.MediaType.BOOK ||
+                item.mediaType == com.omnitrack.app.data.model.MediaType.COMIC
+
+            if (isBookLike && (effProg > 0 || item.volumesProgress > 0)) {
+                runCatching {
+                    val bookProgPayload = buildJsonObject {
+                        if (effProg > 0) put("ep_status", effProg)
+                        if (item.volumesProgress > 0) put("vol_status", item.volumesProgress)
+                    }
+                    val patchReq = Request.Builder()
+                        .url("https://api.bgm.tv/v0/users/-/collections/$bgmId")
+                        .header("Authorization", "Bearer $token")
+                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        .header("Accept", "application/json")
+                        .patch(bookProgPayload.toString().toByteArray(Charsets.UTF_8).toRequestBody(jsonMediaType))
+                        .build()
+                    client.newCall(patchReq).execute().close()
+                }
+            } else if ((item.mediaType == com.omnitrack.app.data.model.MediaType.ANIME ||
+                    item.mediaType == com.omnitrack.app.data.model.MediaType.SHOW) && effProg > 0
+            ) {
+                runCatching {
+                    val epGetReq = Request.Builder()
+                        .url("https://api.bgm.tv/v0/users/-/collections/$bgmId/episodes?episode_type=0&limit=300")
+                        .header("Authorization", "Bearer $token")
+                        .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                        .header("Accept", "application/json")
+                        .get()
+                        .build()
+                    val epIdsToMark = client.newCall(epGetReq).execute().use { epResp ->
+                        if (!epResp.isSuccessful) emptyList()
+                        else {
+                            val rootObj = json.parseToJsonElement(epResp.body?.string().orEmpty()).asSafeObj()
+                            val dataArr = rootObj?.get("data").asSafeArr().orEmpty()
+                            dataArr.mapNotNull { el ->
+                                val row = el.asSafeObj() ?: return@mapNotNull null
+                                val epObj = row["episode"].asSafeObj() ?: return@mapNotNull null
+                                val epId = epObj["id"].asSafeLong() ?: return@mapNotNull null
+                                val sortNum = (epObj["sort"] as? JsonPrimitive)?.doubleOrNull
+                                    ?: (epObj["ep"] as? JsonPrimitive)?.doubleOrNull
+                                val curType = row["type"].asSafeInt() ?: 0
+                                Triple(epId, sortNum, curType)
+                            }.filterIndexed { idx, (_, sortNum, _) ->
+                                if (sortNum != null && sortNum > 0.0) sortNum <= effProg.toDouble()
+                                else (idx + 1) <= effProg
+                            }.filter { (_, _, curType) -> curType != 2 }
+                                .map { it.first }
+                        }
+                    }
+                    if (epIdsToMark.isNotEmpty()) {
+                        val epPatchPayload = buildJsonObject {
+                            put("episode_id", buildJsonArray { epIdsToMark.forEach { add(JsonPrimitive(it)) } })
+                            put("type", 2)
+                        }
+                        val epPatchReq = Request.Builder()
+                            .url("https://api.bgm.tv/v0/users/-/collections/$bgmId/episodes")
+                            .header("Authorization", "Bearer $token")
+                            .header("User-Agent", "ExZyO/OmniTrack/1.0 (Android)")
+                            .header("Accept", "application/json")
+                            .patch(epPatchPayload.toString().toByteArray(Charsets.UTF_8).toRequestBody(jsonMediaType))
+                            .build()
+                        client.newCall(epPatchReq).execute().close()
+                    }
+                }
+            }
+
+            mainOutcome
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             AppLogger.w("TrackerSync", "service=BANGUMI op=push ex=${e.javaClass.simpleName}")
