@@ -57,8 +57,10 @@ object TrackerAccountVerifier {
     var customSimklClientSecret: String? = null
 
     // Default Fallback Public Client IDs (non-secret public OAuth identifiers)
+    private const val DEFAULT_ANILIST_CLIENT_ID = "50688"
     private const val DEFAULT_TRAKT_CLIENT_ID = "VqwWoA1jPRnMBEtn7fEV3Zlx4XeXYRNaipC7pAaWL4o"
     private const val DEFAULT_SIMKL_CLIENT_ID = "c9c006c049d34a887a0f744b29f09658e3dce579cf5db98665db4d96e35d036a"
+    private const val DEFAULT_COMICK_CLIENT_ID = "SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH"
 
     @Volatile
     var pendingTraktVerifier: String? = null
@@ -86,6 +88,10 @@ object TrackerAccountVerifier {
             .digest(verifier.toByteArray(Charsets.US_ASCII))
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
     }
+
+    val ANILIST_CLIENT_ID: String
+        get() = BuildConfig.ANILIST_CLIENT_ID.takeIf { it.isNotBlank() }
+            ?: DEFAULT_ANILIST_CLIENT_ID
 
     val TRAKT_CLIENT_ID: String
         get() = customTraktClientId?.takeIf { it.isNotBlank() }
@@ -122,9 +128,12 @@ object TrackerAccountVerifier {
     val BANGUMI_CLIENT_SECRET: String
         get() = BuildConfig.BANGUMI_CLIENT_SECRET.takeIf { it.isNotBlank() } ?: ""
 
-    // Comick Client ID (injected via BuildConfig / CI Secrets)
+    // Comick Client ID (custom CI secret if set, else Mihon public PKCE client ID since Comick has no self-serve OAuth portal)
     val COMICK_CLIENT_ID: String
-        get() = BuildConfig.COMICK_CLIENT_ID.takeIf { it.isNotBlank() } ?: ""
+        get() = BuildConfig.COMICK_CLIENT_ID.takeIf { it.isNotBlank() } ?: DEFAULT_COMICK_CLIENT_ID
+
+    val COMICK_REDIRECT_URI: String
+        get() = if (BuildConfig.COMICK_CLIENT_ID.isNotBlank()) "omnitrack://auth/comick" else "app.mihon://comick-auth"
 
     @Volatile
     var pendingMalVerifier: String? = null

@@ -109,9 +109,10 @@ class MainActivity : ComponentActivity() {
     private fun handleAuthDeepLink(data: Uri?, app: OmniTrackApplication) {
         if (data == null) return
         val scheme = data.scheme?.lowercase() ?: return
-        if (scheme != "omnitrack") return
-
         val host = data.host?.lowercase() ?: ""
+        val isAllowedCallback = scheme == "omnitrack" || (scheme == "app.mihon" && host == "comick-auth")
+        if (!isAllowedCallback) return
+
         val uriStr = data.toString().lowercase()
         val service: String = when {
             host.endsWith("-auth") -> host.removeSuffix("-auth")
@@ -267,7 +268,7 @@ class MainActivity : ComponentActivity() {
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", TrackerAccountVerifier.COMICK_CLIENT_ID)
                                 .add("code", code)
-                                .add("redirect_uri", "omnitrack://auth/comick")
+                                .add("redirect_uri", if (scheme == "app.mihon") "app.mihon://comick-auth" else TrackerAccountVerifier.COMICK_REDIRECT_URI)
                                 .add("code_verifier", verifier)
                                 .add("resource", "https://api.comick.dev/integrations/v1")
                                 .build()

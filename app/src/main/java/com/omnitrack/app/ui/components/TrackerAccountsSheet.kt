@@ -488,7 +488,7 @@ fun TrackerAccountsSheet(
                                 context.startActivity(
                                     Intent(
                                         Intent.ACTION_VIEW,
-                                        Uri.parse("https://anilist.co/api/v2/oauth/authorize?client_id=50688&response_type=token")
+                                        Uri.parse("https://anilist.co/api/v2/oauth/authorize?client_id=${TrackerAccountVerifier.ANILIST_CLIENT_ID}&response_type=token")
                                     )
                                 )
                             }
@@ -565,21 +565,13 @@ fun TrackerAccountsSheet(
                             }
                             TrackerServiceId.COMICK -> {
                                 scope.launch {
-                                    if (TrackerAccountVerifier.COMICK_CLIENT_ID.isBlank()) {
-                                        Toast.makeText(
-                                            context,
-                                            "Comick Client ID not configured — add COMICK_CLIENT_ID in GitHub Secrets",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                        return@launch
-                                    }
                                     val pkce = PkceUtil.generateS256Codes()
                                     val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
                                     TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveComickVerifier(pkce.codeVerifier)
                                     tokenManager.saveOAuthState(state)
-                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=${TrackerAccountVerifier.COMICK_CLIENT_ID}&redirect_uri=omnitrack://auth/comick&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256&state=$state"
+                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=${TrackerAccountVerifier.COMICK_CLIENT_ID}&redirect_uri=${TrackerAccountVerifier.COMICK_REDIRECT_URI}&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256&state=$state"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
                             }

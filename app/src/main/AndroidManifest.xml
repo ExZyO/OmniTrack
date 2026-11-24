@@ -46,6 +46,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="omnitrack" />
             </intent-filter>
+            <!-- Scoped Comick OAuth Fallback Callback (strictly comick-auth host only) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="app.mihon" android:host="comick-auth" />
+            </intent-filter>
             <!-- Share Sheet URL Interceptor for Fanfiction & Web Novel Sites (AO3, FF.net, SB, SV, QQ, Wattpad) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

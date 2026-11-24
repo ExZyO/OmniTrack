@@ -41,6 +41,7 @@ android {
         versionCode = buildVersionCode
         versionName = buildVersionName
 
+        val envAnilistClientId = readSecretProp("ANILIST_CLIENT_ID")
         val envTraktClientId = readSecretProp("TRAKT_CLIENT_ID")
         val envTraktClientSecret = readSecretProp("TRAKT_CLIENT_SECRET")
         val envMalClientId = readSecretProp("MAL_CLIENT_ID")
@@ -50,6 +51,7 @@ android {
         val envBangumiClientSecret = readSecretProp("BANGUMI_CLIENT_SECRET")
         val envComickClientId = readSecretProp("COMICK_CLIENT_ID")
 
+        buildConfigField("String", "ANILIST_CLIENT_ID", "\"${escapeBuildConfig(envAnilistClientId)}\"")
         buildConfigField("String", "TRAKT_CLIENT_ID", "\"${escapeBuildConfig(envTraktClientId)}\"")
         buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"${escapeBuildConfig(envTraktClientSecret)}\"")
         buildConfigField("String", "MAL_CLIENT_ID", "\"${escapeBuildConfig(envMalClientId)}\"")
