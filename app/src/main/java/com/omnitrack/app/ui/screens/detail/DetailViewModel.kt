@@ -55,7 +55,9 @@ import com.omnitrack.app.data.model.AnimeStaffItem
 import com.omnitrack.app.data.preferences.DetailSectionItem
 import com.omnitrack.app.data.preferences.DetailsPageLayoutDefaults
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.CachedMultiRatings
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.network.NetworkClient
 import com.omnitrack.app.data.sync.RemoteTrackerEntrySnapshot
@@ -260,6 +262,17 @@ class DetailViewModel(
     private val gameEnrichmentSource = GameEnrichmentSource()
     private val bookEnrichmentSource = BookEnrichmentSource()
     private val comicEnrichmentSource = ComicEnrichmentSource()
+
+    private fun persistHeroMultiRatings(item: MediaItemEntity, ratings: CachedMultiRatings) {
+        if (!ratings.hasAnyScore()) return
+        val prefs = preferenceManager
+            ?: runCatching { com.omnitrack.app.OmniTrackApplication.instance.preferenceManager }.getOrNull()
+            ?: return
+        val key = heroRatingsCacheKey(item.id.takeIf { it > 0L }, item.mediaType, item.title)
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.mergeCachedMultiRatings(key, ratings)
+        }
+    }
     private val _mediaId = MutableStateFlow(mediaId)
     private val _previewStack = MutableStateFlow<List<MediaItemEntity>>(emptyList())
     private val _previewItem = MutableStateFlow<MediaItemEntity?>(null)
@@ -923,6 +936,25 @@ class DetailViewModel(
             if (enrichment.videos.isNotEmpty() && isStillCurrentItem()) {
                 _trailers.value = enrichment.videos
             }
+            val effectiveVideoTmdb = enrichment.resolvedTmdbId ?: item.tmdbId
+            val tmdbScoreVal = if (
+                item.mediaType == MediaType.SHOW ||
+                item.mediaType == MediaType.MOVIE ||
+                (item.mediaType == MediaType.ANIME && effectiveVideoTmdb != null)
+            ) {
+                enrichment.communityScore
+            } else null
+            persistHeroMultiRatings(
+                item,
+                CachedMultiRatings(
+                    imdbScore = enrichment.imdbScore,
+                    tmdbScore = tmdbScoreVal,
+                    traktScore = enrichment.traktScore,
+                    audienceScore = enrichment.audienceScore,
+                    rtScore = enrichment.rtScore,
+                    metacriticScore = enrichment.metacriticScore
+                )
+            )
             if (enrichment.belongsToCollectionId != null && _collectionItems.value.isEmpty() && isStillCurrentItem()) {
                 val collData = enrichmentRepository.fetchTmdbCollection(enrichment.belongsToCollectionId, tmdbKey)
                 if (collData != null && isStillCurrentItem()) {
@@ -2379,6 +2411,15 @@ class DetailViewModel(
                     if (vnData.bangumiScore != null) {
                         _novelDetailMeta.value = _novelDetailMeta.value.copy(bangumiScore = vnData.bangumiScore)
                     }
+                    persistHeroMultiRatings(
+                        item,
+                        CachedMultiRatings(
+                            vndbScore = vnData.vnDetailMeta.vndbScore,
+                            steamPositivePct = vnData.vnDetailMeta.steamPositivePct,
+                            bangumiScore = vnData.bangumiScore,
+                            metacriticScore = vnData.metacriticScore
+                        )
+                    )
                     if (!vnData.clearLogoUrl.isNullOrBlank()) {
                         EnrichmentRepository.putCachedClearart(item, vnData.clearLogoUrl)
                         _heroClearLogoUrl.value = vnData.clearLogoUrl
@@ -2496,6 +2537,16 @@ class DetailViewModel(
 
                 if (gameData != null) {
                     _gameDetailMeta.value = gameData.gameDetailMeta
+                    persistHeroMultiRatings(
+                        item,
+                        CachedMultiRatings(
+                            igdbUserScore = gameData.gameDetailMeta.igdbUserRating,
+                            igdbCriticScore = gameData.gameDetailMeta.igdbCriticRating,
+                            steamPositivePct = gameData.gameDetailMeta.steamPositivePct,
+                            metacriticScore = gameData.metacriticScore ?: gameData.gameDetailMeta.metacriticScore,
+                            bangumiScore = gameData.gameDetailMeta.bangumiScore
+                        )
+                    )
                     _companies.value = gameData.companies
                     _animeRelations.value = gameData.relations
                     _recommendations.value = gameData.similarGames
@@ -2602,6 +2653,14 @@ class DetailViewModel(
                 if (!isStillCurrentItem()) return@launch
                 if (bookData != null) {
                     _bookDetailMeta.value = bookData.bookDetailMeta
+                    persistHeroMultiRatings(
+                        item,
+                        CachedMultiRatings(
+                            hardcoverRating = bookData.bookDetailMeta.hardcoverRating,
+                            openLibraryRating = bookData.bookDetailMeta.openLibraryRating,
+                            appleBooksRating = bookData.bookDetailMeta.appleBooksRating
+                        )
+                    )
                     if (bookData.tags.isNotEmpty()) _tags.value = bookData.tags
                     if (bookData.relations.isNotEmpty()) _animeRelations.value = bookData.relations
                     if (bookData.similarBooks.isNotEmpty()) _recommendations.value = bookData.similarBooks
@@ -2686,6 +2745,13 @@ class DetailViewModel(
                 val comicData = comicEnrichmentSource.fetchFullComicData(item)
                 if (!isStillCurrentItem()) return@launch
                 _comicDetailMeta.value = comicData.comicDetailMeta
+                persistHeroMultiRatings(
+                    item,
+                    CachedMultiRatings(
+                        appleBooksRating = comicData.comicDetailMeta.appleBooksRating,
+                        openLibraryRating = comicData.comicDetailMeta.openLibraryRating
+                    )
+                )
                 if (comicData.tags.isNotEmpty()) _tags.value = comicData.tags
                 if (comicData.similarComics.isNotEmpty()) _recommendations.value = comicData.similarComics
                 if (comicData.externalLinks.isNotEmpty()) _externalLinks.value = comicData.externalLinks
@@ -3182,6 +3248,7 @@ class DetailViewModel(
                         if (animeDetails.externalLinks.isNotEmpty()) _externalLinks.value = animeDetails.externalLinks
                         if (animeDetails.averageScore != null) {
                             _novelDetailMeta.update { it.copy(anilistScore = animeDetails.averageScore) }
+                            persistHeroMultiRatings(item, CachedMultiRatings(anilistScore = animeDetails.averageScore))
                         }
 
                         if (animeDetails.animationStudios.isNotEmpty()) {
@@ -3645,6 +3712,14 @@ class DetailViewModel(
                         bangumiScore = content.bangumiScore ?: curr.bangumiScore
                     )
                 }
+                persistHeroMultiRatings(
+                    item,
+                    CachedMultiRatings(
+                        kitsuScore = content.kitsuDetails?.score,
+                        mangaUpdatesScore = content.mangaUpdatesRating,
+                        bangumiScore = content.bangumiScore
+                    )
+                )
 
                 if (_format.value.isNullOrBlank()) {
                     _format.value = if (content.isLightNovel) "NOVEL" else "WEB_NOVEL"

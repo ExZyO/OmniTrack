@@ -11,8 +11,10 @@ import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
+import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.enrichment.ReleaseCalendarRepository
 import com.omnitrack.app.data.model.BookTrackingMode
+import com.omnitrack.app.data.preferences.CachedMultiRatings
 import com.omnitrack.app.data.preferences.DiscoverShelfCatalog
 import com.omnitrack.app.data.preferences.DiscoverShelfDef
 import com.omnitrack.app.data.preferences.HomeRowKey
@@ -20,6 +22,7 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -81,6 +84,8 @@ class HomeViewModel(
 
     private val releaseCalendarRepository = ReleaseCalendarRepository()
     private val homeSearchRepository = OmniSearchRepository()
+    private val heroEnrichmentRepository = EnrichmentRepository()
+    private val heroPrefetchedKeys = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private val _rawCalendarReleases = MutableStateFlow<List<CalendarReleaseItem>>(emptyList())
     private val _isLoadingCalendar = MutableStateFlow(false)
@@ -939,6 +944,138 @@ class HomeViewModel(
                 coverCache.promoteFromDiskCache(prepared.coverUrl, diskCache)
             }
             onCreated(insertedId)
+        }
+    }
+
+    fun prefetchLocalHeroRatings(
+        item: MediaCardSummary,
+        existingCached: CachedMultiRatings?,
+        preferenceManager: PreferenceManager
+    ) {
+        val key = com.omnitrack.app.data.preferences.heroRatingsCacheKey(item.id, item.mediaType, item.title)
+        prefetchHeroRatingsCore(
+            cacheKey = key,
+            mediaId = item.id,
+            mediaType = item.mediaType,
+            title = item.title,
+            nativeTitle = item.nativeTitle,
+            anilistId = item.anilistId,
+            malId = item.malId,
+            tmdbId = item.tmdbId,
+            imdbId = item.imdbId,
+            bangumiId = item.bangumiId,
+            steamAppId = item.steamAppId,
+            igdbId = item.igdbId,
+            vndbId = item.vndbId,
+            hardcoverId = item.hardcoverId,
+            openLibraryId = item.openLibraryId,
+            bookAuthor = item.bookAuthor,
+            existingCached = existingCached,
+            preferenceManager = preferenceManager
+        )
+    }
+
+    fun prefetchSearchHeroRatings(
+        item: SearchResultItem,
+        existingCached: CachedMultiRatings?,
+        preferenceManager: PreferenceManager
+    ) {
+        val key = com.omnitrack.app.data.preferences.heroRatingsCacheKey(null, item.mediaType, item.title)
+        prefetchHeroRatingsCore(
+            cacheKey = key,
+            mediaId = null,
+            mediaType = item.mediaType,
+            title = item.title,
+            nativeTitle = item.nativeTitle,
+            anilistId = item.anilistId,
+            malId = item.malId,
+            tmdbId = item.tmdbId,
+            imdbId = item.imdbId,
+            bangumiId = item.bangumiId,
+            steamAppId = item.steamAppId,
+            igdbId = null,
+            vndbId = item.vndbId,
+            hardcoverId = null,
+            openLibraryId = item.openLibraryId,
+            bookAuthor = item.bookAuthor,
+            existingCached = existingCached,
+            preferenceManager = preferenceManager
+        )
+    }
+
+    private fun prefetchHeroRatingsCore(
+        cacheKey: String,
+        mediaId: Long?,
+        mediaType: MediaType,
+        title: String,
+        nativeTitle: String?,
+        anilistId: Long?,
+        malId: Long?,
+        tmdbId: Long?,
+        imdbId: String?,
+        bangumiId: Long?,
+        steamAppId: Long?,
+        igdbId: Long?,
+        vndbId: String?,
+        hardcoverId: String?,
+        openLibraryId: String?,
+        bookAuthor: String?,
+        existingCached: CachedMultiRatings?,
+        preferenceManager: PreferenceManager
+    ) {
+        if (mediaType == MediaType.FANFICTION || title.isBlank()) return
+        val freshWindowMs = 7L * 24 * 60 * 60 * 1000L
+        if (existingCached != null && existingCached.hasAnyScore() &&
+            (System.currentTimeMillis() - existingCached.updatedAtMs) < freshWindowMs
+        ) {
+            return
+        }
+        if (!heroPrefetchedKeys.add(cacheKey)) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val tmdbKey = preferenceManager.tmdbApiKey.firstOrNull().orEmpty()
+                val mdbKey = preferenceManager.mdblistApiKey.firstOrNull().orEmpty()
+                val fetched = heroEnrichmentRepository.fetchHeroMultiRatings(
+                    mediaType = mediaType,
+                    title = title,
+                    nativeTitle = nativeTitle,
+                    anilistId = anilistId,
+                    malId = malId,
+                    tmdbId = tmdbId,
+                    imdbId = imdbId,
+                    bangumiId = bangumiId,
+                    steamAppId = steamAppId,
+                    igdbId = igdbId,
+                    vndbId = vndbId,
+                    hardcoverId = hardcoverId,
+                    openLibraryId = openLibraryId,
+                    bookAuthor = bookAuthor,
+                    tmdbApiKey = tmdbKey.ifBlank { PreferenceManager.cachedTmdbApiKey },
+                    mdblistApiKey = mdbKey.ifBlank { PreferenceManager.cachedMdblistApiKey }
+                )
+                if (fetched.hasAnyScore()) {
+                    preferenceManager.mergeCachedMultiRatings(cacheKey, fetched)
+                    if (mediaId != null && mediaId > 0L && (mediaType == MediaType.SHOW || mediaType == MediaType.MOVIE)) {
+                        val current = repository.getMediaByIdOnce(mediaId)
+                        if (current != null) {
+                            val updated = current.copy(
+                                imdbScore = current.imdbScore ?: fetched.imdbScore,
+                                communityScore = current.communityScore ?: fetched.tmdbScore,
+                                traktScore = current.traktScore ?: fetched.traktScore,
+                                audienceScore = current.audienceScore ?: fetched.audienceScore,
+                                rtScore = current.rtScore ?: fetched.rtScore,
+                                metacriticScore = current.metacriticScore ?: fetched.metacriticScore
+                            )
+                            if (updated != current) {
+                                repository.updateMedia(updated)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
         }
     }
 

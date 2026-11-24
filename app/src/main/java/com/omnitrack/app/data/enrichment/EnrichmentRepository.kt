@@ -23,6 +23,9 @@ import com.omnitrack.app.data.model.UserStatSet
 import com.omnitrack.app.data.model.UserStatEntry
 import com.omnitrack.app.data.model.UserMediaListItem
 import com.omnitrack.app.data.network.NetworkPacer
+import com.omnitrack.app.data.preferences.CachedMultiRatings
+import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.sync.TrackerTokenManager
 import com.omnitrack.app.ui.screens.detail.components.MediaTrailer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -5899,4 +5902,462 @@ class EnrichmentRepository(
                 null
             }
         }
+
+    suspend fun fetchHeroMultiRatings(
+        mediaType: MediaType,
+        title: String,
+        nativeTitle: String? = null,
+        anilistId: Long? = null,
+        malId: Long? = null,
+        tmdbId: Long? = null,
+        imdbId: String? = null,
+        bangumiId: Long? = null,
+        steamAppId: Long? = null,
+        igdbId: Long? = null,
+        vndbId: String? = null,
+        hardcoverId: String? = null,
+        openLibraryId: String? = null,
+        bookAuthor: String? = null,
+        tmdbApiKey: String = PreferenceManager.cachedTmdbApiKey,
+        mdblistApiKey: String = PreferenceManager.cachedMdblistApiKey
+    ): CachedMultiRatings = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        if (mediaType == MediaType.FANFICTION || title.isBlank()) {
+            return@withContext CachedMultiRatings(updatedAtMs = now)
+        }
+        val effTmdbKey = tmdbApiKey.ifBlank { "844dba0bfd8f3a4f3799f6130ef9e335" }
+        val effMdbKey = mdblistApiKey.trim()
+
+        when (mediaType) {
+            MediaType.SHOW, MediaType.MOVIE -> coroutineScope {
+                val isMovie = mediaType == MediaType.MOVIE
+                val mdbDef = async {
+                    if (effMdbKey.isNotBlank() && (!imdbId.isNullOrBlank() || tmdbId != null || title.isNotBlank())) {
+                        fetchMdbListRatings(imdbId, tmdbId, isMovie, title, effMdbKey, nativeTitle)
+                    } else null
+                }
+                val tmdbScoreDef = async {
+                    if (tmdbId != null && effTmdbKey.isNotBlank()) {
+                        fetchTmdbVote(tmdbId, isMovie, effTmdbKey)
+                    } else null
+                }
+                val resolvedImdbDef = async {
+                    imdbId?.takeIf { it.isNotBlank() }
+                        ?: tmdbId?.let { fetchTmdbImdbId(it, isMovie, effTmdbKey) }
+                }
+                val mdb = mdbDef.await()
+                val directTmdb = tmdbScoreDef.await()
+                val effImdbId = resolvedImdbDef.await()
+                val imdb = mdb?.imdbScore ?: effImdbId?.let { fetchCinemetaImdbById(it, isMovie) }
+                CachedMultiRatings(
+                    imdbScore = imdb,
+                    tmdbScore = mdb?.tmdbScore ?: directTmdb,
+                    traktScore = mdb?.traktScore,
+                    audienceScore = mdb?.audienceScore,
+                    rtScore = mdb?.rtScore,
+                    metacriticScore = mdb?.metacriticScore,
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.ANIME -> coroutineScope {
+                val aniPair = fetchAniListRatingAndMal(anilistId, title, isAnime = true, preferNovel = false)
+                val effMalId = malId ?: aniPair.second
+                val jikanDef = async { effMalId?.let { fetchJikanScore(it, isManga = false) } }
+                val bgmDef = async {
+                    bangumiId?.let { fetchBangumiScore(it) }
+                        ?: fetchBangumiSubjectSearchScore(nativeTitle ?: title, subjectType = 2)
+                }
+                val kitsuDef = async { fetchKitsuMediaScore(title, subtype = "anime") }
+                val mdbDef = async {
+                    if (effMdbKey.isNotBlank() && (!imdbId.isNullOrBlank() || tmdbId != null)) {
+                        fetchMdbListRatings(imdbId, tmdbId, false, title, effMdbKey, nativeTitle)
+                    } else null
+                }
+                val malScore = jikanDef.await()
+                val bgmScore = bgmDef.await()
+                val kitsuScore = kitsuDef.await()
+                val mdb = mdbDef.await()
+                val imdbScore = mdb?.imdbScore ?: imdbId?.takeIf { it.isNotBlank() }?.let { fetchCinemetaImdbById(it, false) }
+                val tmdbScore = mdb?.tmdbScore ?: tmdbId?.let { fetchTmdbVote(it, false, effTmdbKey) }
+                CachedMultiRatings(
+                    imdbScore = imdbScore,
+                    tmdbScore = tmdbScore,
+                    traktScore = mdb?.traktScore,
+                    audienceScore = mdb?.audienceScore,
+                    rtScore = mdb?.rtScore,
+                    metacriticScore = mdb?.metacriticScore,
+                    anilistScore = aniPair.first,
+                    malScore = malScore,
+                    bangumiScore = bgmScore,
+                    kitsuScore = kitsuScore,
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.MANGA, MediaType.NOVEL -> coroutineScope {
+                val isNovel = mediaType == MediaType.NOVEL
+                val aniPair = fetchAniListRatingAndMal(anilistId, title, isAnime = false, preferNovel = isNovel)
+                val effMalId = malId ?: aniPair.second
+                val jikanDef = async { effMalId?.let { fetchJikanScore(it, isManga = true) } }
+                val kitsuDef = async {
+                    if (isNovel) fetchKitsuNovelDetails(title)?.score else fetchKitsuMediaScore(title, subtype = "manga")
+                }
+                val muDef = async { fetchMangaUpdatesInfo(title, preferNovel = isNovel)?.bayesianRating }
+                val bgmDef = async {
+                    bangumiId?.let { fetchBangumiScore(it) }
+                        ?: fetchBangumiNovelDetails(title, nativeTitle, bangumiId)?.score
+                }
+                CachedMultiRatings(
+                    anilistScore = aniPair.first,
+                    malScore = jikanDef.await(),
+                    kitsuScore = kitsuDef.await(),
+                    mangaUpdatesScore = muDef.await(),
+                    bangumiScore = bgmDef.await(),
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.GAME -> coroutineScope {
+                val effSteamId = steamAppId ?: resolveSteamAppIdQuick(title)
+                val steamPosDef = async { effSteamId?.let { fetchSteamPositivePct(it) } }
+                val steamMetaDef = async { effSteamId?.let { fetchSteamAppDetails(it)?.metacriticScore } }
+                val igdbDef = async {
+                    val cid = PreferenceManager.cachedIgdbClientId
+                    val csec = PreferenceManager.cachedIgdbClientSecret
+                    if (cid.isNotBlank() && csec.isNotBlank()) {
+                        runCatching {
+                            IgdbApiClient(client).fetchFullGameDetails(cid, csec, igdbId, effSteamId, title)
+                        }.getOrNull()
+                    } else null
+                }
+                val bgmDef = async { bangumiId?.let { fetchBangumiScore(it) } }
+                val igdbData = igdbDef.await()
+                val bridgedSteamId = if (effSteamId == null) igdbData?.steamAppId else null
+                val steamPct = steamPosDef.await() ?: bridgedSteamId?.let { fetchSteamPositivePct(it) }
+                val meta = steamMetaDef.await() ?: bridgedSteamId?.let { fetchSteamAppDetails(it)?.metacriticScore }
+                CachedMultiRatings(
+                    igdbUserScore = igdbData?.userRating,
+                    igdbCriticScore = igdbData?.criticRating,
+                    steamPositivePct = steamPct,
+                    metacriticScore = meta,
+                    bangumiScore = bgmDef.await(),
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.VISUAL_NOVEL -> coroutineScope {
+                val vnQuick = fetchVndbRatingQuick(vndbId, title)
+                val effSteamId = steamAppId ?: vnQuick?.second
+                val steamDef = async { effSteamId?.let { fetchSteamPositivePct(it) } }
+                val metaDef = async { effSteamId?.let { fetchSteamAppDetails(it)?.metacriticScore } }
+                val bgmDef = async {
+                    bangumiId?.let { fetchBangumiScore(it) }
+                        ?: fetchBangumiSubjectSearchScore(nativeTitle ?: title, subjectType = 4)
+                }
+                CachedMultiRatings(
+                    vndbScore = vnQuick?.first,
+                    steamPositivePct = steamDef.await(),
+                    metacriticScore = metaDef.await(),
+                    bangumiScore = bgmDef.await(),
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.BOOK -> coroutineScope {
+                val olDef = async { fetchOpenLibraryQuickRating(title, bookAuthor, openLibraryId) }
+                val appleDef = async { fetchAppleBooksQuickRating(title, bookAuthor) }
+                val hcDef = async {
+                    val hcToken = TrackerTokenManager.cachedHardcoverToken
+                    if (hcToken.isNotBlank()) {
+                        runCatching {
+                            HardcoverApiClient(client).fetchBookDetails(hcToken, hardcoverId, title, bookAuthor)?.rating5
+                        }.getOrNull()
+                    } else null
+                }
+                CachedMultiRatings(
+                    openLibraryRating = olDef.await(),
+                    appleBooksRating = appleDef.await(),
+                    hardcoverRating = hcDef.await(),
+                    updatedAtMs = now
+                )
+            }
+
+            MediaType.COMIC -> coroutineScope {
+                val appleDef = async {
+                    runCatching {
+                        ComicEnrichmentSource(client)
+                            .searchAppleComics(title, strictComicFilter = true)
+                            .firstOrNull()
+                            ?.communityScore
+                            ?.let { it / 2f }
+                    }.getOrNull()
+                }
+                val olDef = async { fetchOpenLibraryQuickRating(title, bookAuthor, openLibraryId) }
+                CachedMultiRatings(
+                    appleBooksRating = appleDef.await(),
+                    openLibraryRating = olDef.await(),
+                    updatedAtMs = now
+                )
+            }
+
+            else -> CachedMultiRatings(updatedAtMs = now)
+        }
+    }
+
+    private suspend fun fetchAniListRatingAndMal(
+        anilistId: Long?,
+        title: String,
+        isAnime: Boolean,
+        preferNovel: Boolean
+    ): Pair<Float?, Long?> = NetworkPacer.withAniListPacing {
+        try {
+            val typeStr = if (isAnime) "ANIME" else "MANGA"
+            val gql = if (anilistId != null && anilistId > 0L) {
+                """
+                    query (${'$'}id: Int, ${'$'}type: MediaType) {
+                        Media(id: ${'$'}id, type: ${'$'}type) {
+                            averageScore
+                            idMal
+                        }
+                    }
+                """.trimIndent()
+            } else if (preferNovel) {
+                """
+                    query (${'$'}search: String, ${'$'}type: MediaType) {
+                        Media(search: ${'$'}search, type: ${'$'}type, format: NOVEL) {
+                            averageScore
+                            idMal
+                        }
+                    }
+                """.trimIndent()
+            } else {
+                """
+                    query (${'$'}search: String, ${'$'}type: MediaType) {
+                        Media(search: ${'$'}search, type: ${'$'}type) {
+                            averageScore
+                            idMal
+                        }
+                    }
+                """.trimIndent()
+            }
+            val payload = buildJsonObject {
+                put("query", gql)
+                putJsonObject("variables") {
+                    if (anilistId != null && anilistId > 0L) put("id", anilistId) else put("search", title)
+                    put("type", typeStr)
+                }
+            }.toString()
+            val req = Request.Builder()
+                .url("https://graphql.anilist.co")
+                .header("User-Agent", "OmniTrack/1.0")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withAniListPacing null to null
+                val body = resp.body?.string() ?: return@withAniListPacing null to null
+                val media = json.parseToJsonElement(body).jsonObject["data"]?.jsonObject?.get("Media")?.jsonObject
+                    ?: return@withAniListPacing null to null
+                val score = media["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }?.let { it / 10f }
+                val malId = media["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()?.takeIf { it > 0L }
+                score to malId
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null to null
+        }
+    }
+
+    private suspend fun fetchKitsuMediaScore(title: String, subtype: String): Float? = NetworkPacer.withGeneralPacing {
+        try {
+            val encoded = URLEncoder.encode(stripNovelEditionSuffix(title).ifBlank { title }, "UTF-8")
+            val endpoint = if (subtype == "anime") "anime" else "manga"
+            val req = Request.Builder()
+                .url("https://kitsu.io/api/edge/$endpoint?filter[text]=$encoded&page[limit]=1")
+                .header("Accept", "application/vnd.api+json")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withGeneralPacing null
+                val body = resp.body?.string() ?: return@withGeneralPacing null
+                val first = json.parseToJsonElement(body).jsonObject["data"]?.jsonArray?.firstOrNull()?.jsonObject
+                    ?: return@withGeneralPacing null
+                first["attributes"]?.jsonObject?.get("averageRating")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                    ?.takeIf { it > 0f }?.let { it / 10f }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchBangumiSubjectSearchScore(query: String, subjectType: Int): Float? {
+        val clean = query.trim()
+        if (clean.isBlank()) return null
+        val bgmId = NetworkPacer.withBangumiPacing {
+            try {
+                val encoded = URLEncoder.encode(clean, "UTF-8")
+                val req = Request.Builder()
+                    .url("https://api.bgm.tv/search/subject/$encoded?type=$subjectType&responseGroup=small&max_results=3")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withBangumiPacing null
+                    val body = resp.body?.string() ?: return@withBangumiPacing null
+                    val list = json.parseToJsonElement(body).jsonObject["list"]?.jsonArray ?: return@withBangumiPacing null
+                    val first = list.firstOrNull()?.jsonObject ?: return@withBangumiPacing null
+                    first["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                null
+            }
+        } ?: return null
+        return fetchBangumiScore(bgmId)
+    }
+
+    private suspend fun resolveSteamAppIdQuick(title: String): Long? = NetworkPacer.withSteamPacing {
+        try {
+            val encoded = URLEncoder.encode(title.trim(), "UTF-8")
+            val req = Request.Builder()
+                .url("https://store.steampowered.com/api/storesearch/?term=$encoded&l=en&cc=us")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withSteamPacing null
+                val body = resp.body?.string() ?: return@withSteamPacing null
+                val items = json.parseToJsonElement(body).jsonObject["items"]?.jsonArray ?: return@withSteamPacing null
+                val target = title.trim().lowercase()
+                val best = items.firstOrNull { el ->
+                    el.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase() == target
+                } ?: items.firstOrNull()
+                best?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchSteamPositivePct(appId: Long): Int? = NetworkPacer.withSteamPacing {
+        try {
+            val req = Request.Builder()
+                .url("https://store.steampowered.com/appreviews/$appId?json=1&language=all&purchase_type=all&num_per_page=0")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withSteamPacing null
+                val body = resp.body?.string() ?: return@withSteamPacing null
+                val summary = json.parseToJsonElement(body).jsonObject["query_summary"]?.jsonObject ?: return@withSteamPacing null
+                val pos = summary["total_positive"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                val total = summary["total_reviews"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                if (total > 0) kotlin.math.round((pos * 100.0) / total).toInt().coerceIn(0, 100) else null
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchVndbRatingQuick(vndbId: String?, title: String): Pair<Float?, Long?>? = NetworkPacer.withVndbPacing {
+        try {
+            val filtersElement = if (!vndbId.isNullOrBlank()) {
+                json.parseToJsonElement("""["id", "=", "${vndbId.replace("\"", "")}"]""")
+            } else {
+                json.parseToJsonElement("""["search", "=", "${title.replace("\"", "").trim()}"]""")
+            }
+            val payload = buildJsonObject {
+                put("filters", filtersElement)
+                put("fields", "id, rating, extlinks{name,id}")
+                put("results", 1)
+            }.toString()
+            val req = Request.Builder()
+                .url("https://api.vndb.org/kana/vn")
+                .post(payload.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withVndbPacing null
+                val body = resp.body?.string() ?: return@withVndbPacing null
+                val first = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray?.firstOrNull()?.jsonObject
+                    ?: return@withVndbPacing null
+                val score = first["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }?.let { it / 10f }
+                val steamExt = first["extlinks"]?.jsonArray.orEmpty().firstOrNull { link ->
+                    link.jsonObject["name"]?.jsonPrimitive?.contentOrNull?.equals("steam", ignoreCase = true) == true
+                }?.jsonObject?.get("id")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                score to steamExt
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchOpenLibraryQuickRating(
+        title: String,
+        author: String?,
+        openLibraryId: String?
+    ): Float? = NetworkPacer.withOpenLibraryPacing {
+        try {
+            val cleanOl = openLibraryId?.trim()?.takeIf { it.isNotBlank() }
+            if (cleanOl != null) {
+                val path = if (cleanOl.startsWith("/works/")) cleanOl else "/works/$cleanOl"
+                val req = Request.Builder()
+                    .url("https://openlibrary.org$path/ratings.json")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val avg = json.parseToJsonElement(resp.body?.string().orEmpty())
+                            .jsonObject["summary"]?.jsonObject?.get("average")?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                        if (avg != null && avg > 0f) return@withOpenLibraryPacing avg
+                    }
+                }
+            }
+            val encodedTitle = URLEncoder.encode(title.trim(), "UTF-8")
+            val authorParam = author?.trim()?.takeIf { it.isNotBlank() }?.let {
+                "&author=${URLEncoder.encode(it, "UTF-8")}"
+            }.orEmpty()
+            val req = Request.Builder()
+                .url("https://openlibrary.org/search.json?title=$encodedTitle$authorParam&fields=key,ratings_average&limit=1")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withOpenLibraryPacing null
+                val first = json.parseToJsonElement(resp.body?.string().orEmpty())
+                    .jsonObject["docs"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@withOpenLibraryPacing null
+                first["ratings_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    private suspend fun fetchAppleBooksQuickRating(title: String, author: String?): Float? = NetworkPacer.withGeneralPacing {
+        try {
+            val q = listOfNotNull(title.trim().takeIf { it.isNotBlank() }, author?.trim()?.takeIf { it.isNotBlank() }).joinToString(" ")
+            val encoded = URLEncoder.encode(q, "UTF-8")
+            val req = Request.Builder()
+                .url("https://itunes.apple.com/search?term=$encoded&media=ebook&limit=2")
+                .header("User-Agent", "OmniTrack/1.0")
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withGeneralPacing null
+                val arr = json.parseToJsonElement(resp.body?.string().orEmpty())
+                    .jsonObject["results"]?.jsonArray ?: return@withGeneralPacing null
+                arr.firstNotNullOfOrNull { el ->
+                    el.jsonObject["averageUserRating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }
+                }
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
 }

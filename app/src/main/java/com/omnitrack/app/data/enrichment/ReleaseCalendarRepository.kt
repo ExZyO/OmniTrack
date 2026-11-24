@@ -117,12 +117,127 @@ class ReleaseCalendarRepository(
                 "${it.mediaType}_${it.id}_${it.anilistId}_${it.tmdbId}_${it.steamAppId}_${it.vndbId}_${it.metronId}_${it.episodeNumber}_${it.airingAtEpochSec / 3600L}"
             }
             .sortedBy { it.airingAtEpochSec }
+        val resolved = backfillMissingCalendarCovers(deduped)
 
-        if (deduped.isNotEmpty()) {
-            cachedItems = deduped
+        if (resolved.isNotEmpty()) {
+            cachedItems = resolved
             cachedAtMs = System.currentTimeMillis()
         }
-        deduped
+        resolved
+    }
+
+    private suspend fun backfillMissingCalendarCovers(
+        items: List<CalendarReleaseItem>
+    ): List<CalendarReleaseItem> = coroutineScope {
+        val candidates = items.withIndex()
+            .filter { (_, item) -> item.coverUrl.isBlank() && item.fallbackCoverUrl.isNullOrBlank() }
+            .take(15)
+        if (candidates.isEmpty()) return@coroutineScope items
+
+        val fetchedByIndex = candidates.map { (idx, item) ->
+            async {
+                val resolved = runCatching { resolveSecondaryCalendarCover(item) }.getOrNull()
+                idx to resolved
+            }
+        }.awaitAll().toMap()
+
+        items.mapIndexed { idx, item ->
+            val found = fetchedByIndex[idx]
+            if (!found.isNullOrBlank() && item.coverUrl.isBlank()) {
+                item.copy(coverUrl = LosslessCoverMapper.toLosslessUrl(found))
+            } else {
+                item
+            }
+        }
+    }
+
+    private suspend fun resolveSecondaryCalendarCover(item: CalendarReleaseItem): String? {
+        val cleanTitle = item.title.trim()
+        if (cleanTitle.isBlank()) return null
+        return when (item.mediaType) {
+            MediaType.MANGA, MediaType.ANIME, MediaType.NOVEL -> NetworkPacer.withAniListPacing {
+                val alType = if (item.mediaType == MediaType.ANIME) "ANIME" else "MANGA"
+                val gql = """
+                    query (${'$'}search: String, ${'$'}type: MediaType) {
+                        Media(search: ${'$'}search, type: ${'$'}type) {
+                            coverImage { extraLarge large }
+                        }
+                    }
+                """.trimIndent()
+                val payload = buildJsonObject {
+                    put("query", gql)
+                    putJsonObject("variables") {
+                        put("search", cleanTitle)
+                        put("type", alType)
+                    }
+                }.toString()
+                val req = Request.Builder()
+                    .url("https://graphql.anilist.co")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .post(payload.toRequestBody("application/json".toMediaType()))
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withAniListPacing null
+                    val cov = ((json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("data") as? JsonObject)
+                        ?.get("Media")?.let { it as? JsonObject }
+                        ?.get("coverImage")?.let { it as? JsonObject }
+                    listOf("extraLarge", "large").firstNotNullOfOrNull { k ->
+                        (cov?.get(k) as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+            MediaType.BOOK, MediaType.COMIC -> NetworkPacer.withGeneralPacing {
+                val encoded = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                val req = Request.Builder()
+                    .url("https://itunes.apple.com/search?term=$encoded&media=ebook&limit=1")
+                    .header("User-Agent", "OmniTrack/1.0")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withGeneralPacing null
+                    val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("results") as? JsonArray ?: return@withGeneralPacing null
+                    val first = arr.firstOrNull() as? JsonObject ?: return@withGeneralPacing null
+                    val art = (first["artworkUrl100"] as? JsonPrimitive)?.contentOrNull
+                        ?: (first["artworkUrl60"] as? JsonPrimitive)?.contentOrNull
+                    art?.replace(Regex("\\d+x\\d+bb"), "600x600bb")
+                }
+            }
+            MediaType.GAME -> NetworkPacer.withSteamPacing {
+                val encoded = java.net.URLEncoder.encode(cleanTitle, "UTF-8")
+                val req = Request.Builder()
+                    .url("https://store.steampowered.com/api/storesearch/?term=$encoded&l=en&cc=us")
+                    .get()
+                    .build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withSteamPacing null
+                    val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("items") as? JsonArray ?: return@withSteamPacing null
+                    val first = arr.firstOrNull() as? JsonObject ?: return@withSteamPacing null
+                    val appId = (first["id"] as? JsonPrimitive)?.longOrNull
+                    val tiny = (first["tiny_image"] as? JsonPrimitive)?.contentOrNull
+                    appId?.let { "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$it/header.jpg" }
+                        ?: tiny
+                }
+            }
+            MediaType.SHOW, MediaType.MOVIE -> item.imdbId?.takeIf { it.isNotBlank() }?.let { imdb ->
+                NetworkPacer.withGeneralPacing {
+                    val cinType = if (item.mediaType == MediaType.MOVIE) "movie" else "series"
+                    val req = Request.Builder()
+                        .url("https://v3-cinemeta.strem.io/meta/$cinType/$imdb.json")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing null
+                        val meta = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("meta") as? JsonObject
+                        (meta?.get("poster") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                    }
+                }
+            }
+            else -> null
+        }
     }
 
     private suspend fun fetchAniListSchedule(startSec: Long, endSec: Long): List<CalendarReleaseItem> {
@@ -413,7 +528,7 @@ class ReleaseCalendarRepository(
                             ((it as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull == "cover_art"
                         } as? JsonObject)?.get("attributes")?.let { it as? JsonObject }?.get("fileName")?.let { (it as? JsonPrimitive)?.contentOrNull }
                         val coverUrl = if (!coverFile.isNullOrBlank()) {
-                            "https://uploads.mangadex.org/covers/$mangaId/$coverFile.512.jpg"
+                            "https://uploads.mangadex.org/covers/$mangaId/$coverFile"
                         } else ""
 
                         CalendarReleaseItem(
@@ -459,7 +574,7 @@ class ReleaseCalendarRepository(
                                             (it as? JsonPrimitive)?.contentOrNull
                                         }
                                         if (!fileName.isNullOrBlank()) {
-                                            coverMap[mId] = "https://uploads.mangadex.org/covers/$mId/$fileName.512.jpg"
+                                            coverMap[mId] = "https://uploads.mangadex.org/covers/$mId/$fileName"
                                         }
                                     }
                                 }

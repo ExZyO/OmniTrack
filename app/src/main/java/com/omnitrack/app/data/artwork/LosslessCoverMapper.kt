@@ -14,9 +14,12 @@ object LosslessCoverMapper {
             clean = clean.replaceFirst("http://", "https://")
         }
 
-        // MangaDex: strip .512.jpg or .256.jpg
-        clean = clean.replace(Regex("\\.(256|512)\\.jpg$"), ".jpg")
-            .replace(Regex("\\.(256|512)\\.png$"), ".png")
+        // MangaDex thumbnails append .256.jpg / .512.jpg AFTER the original extension (e.g. foo.jpg.512.jpg or foo.png.512.jpg).
+        // Strip only the trailing thumbnail suffix so the original extension is preserved (avoiding .jpg.jpg / .png.jpg 404s).
+        clean = clean.replace(
+            Regex("(\\.(?:jpe?g|png|webp))\\.(?:256|512)\\.(?:jpe?g|png)$", RegexOption.IGNORE_CASE),
+            "$1"
+        )
 
         // AniList: upgrade /cover/medium/ to /cover/large/ if present
         if (clean.contains("anilist.co") && clean.contains("/cover/medium/")) {

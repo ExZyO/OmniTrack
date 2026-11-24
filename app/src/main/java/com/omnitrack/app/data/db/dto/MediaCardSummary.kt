@@ -73,5 +73,6 @@ data class MediaCardSummary(
     val bangumiId: Long? = null,
     val comickId: String? = null,
     val studioOrNetwork: String? = null,
-    val isFavorite: Boolean = false
+    val isFavorite: Boolean = false,
+    val igdbId: Long? = null
 )

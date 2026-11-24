@@ -477,6 +477,61 @@ enum class TriStateFilter {
     }
 }
 
+@Serializable
+data class CachedMultiRatings(
+    val imdbScore: Float? = null,
+    val tmdbScore: Float? = null,
+    val traktScore: Int? = null,
+    val audienceScore: Int? = null,
+    val rtScore: Int? = null,
+    val metacriticScore: Int? = null,
+    val anilistScore: Float? = null,
+    val malScore: Float? = null,
+    val bangumiScore: Float? = null,
+    val kitsuScore: Float? = null,
+    val mangaUpdatesScore: Float? = null,
+    val igdbUserScore: Float? = null,
+    val igdbCriticScore: Int? = null,
+    val steamPositivePct: Int? = null,
+    val vndbScore: Float? = null,
+    val hardcoverRating: Float? = null,
+    val openLibraryRating: Float? = null,
+    val appleBooksRating: Float? = null,
+    val updatedAtMs: Long = 0L
+) {
+    fun mergeWith(other: CachedMultiRatings): CachedMultiRatings = CachedMultiRatings(
+        imdbScore = other.imdbScore?.takeIf { it > 0f } ?: imdbScore,
+        tmdbScore = other.tmdbScore?.takeIf { it > 0f } ?: tmdbScore,
+        traktScore = other.traktScore?.takeIf { it > 0 } ?: traktScore,
+        audienceScore = other.audienceScore?.takeIf { it > 0 } ?: audienceScore,
+        rtScore = other.rtScore?.takeIf { it > 0 } ?: rtScore,
+        metacriticScore = other.metacriticScore?.takeIf { it > 0 } ?: metacriticScore,
+        anilistScore = other.anilistScore?.takeIf { it > 0f } ?: anilistScore,
+        malScore = other.malScore?.takeIf { it > 0f } ?: malScore,
+        bangumiScore = other.bangumiScore?.takeIf { it > 0f } ?: bangumiScore,
+        kitsuScore = other.kitsuScore?.takeIf { it > 0f } ?: kitsuScore,
+        mangaUpdatesScore = other.mangaUpdatesScore?.takeIf { it > 0f } ?: mangaUpdatesScore,
+        igdbUserScore = other.igdbUserScore?.takeIf { it > 0f } ?: igdbUserScore,
+        igdbCriticScore = other.igdbCriticScore?.takeIf { it > 0 } ?: igdbCriticScore,
+        steamPositivePct = other.steamPositivePct?.takeIf { it > 0 } ?: steamPositivePct,
+        vndbScore = other.vndbScore?.takeIf { it > 0f } ?: vndbScore,
+        hardcoverRating = other.hardcoverRating?.takeIf { it > 0f } ?: hardcoverRating,
+        openLibraryRating = other.openLibraryRating?.takeIf { it > 0f } ?: openLibraryRating,
+        appleBooksRating = other.appleBooksRating?.takeIf { it > 0f } ?: appleBooksRating,
+        updatedAtMs = maxOf(updatedAtMs, other.updatedAtMs)
+    )
+
+    fun hasAnyScore(): Boolean = listOfNotNull(
+        imdbScore, tmdbScore, anilistScore, malScore, bangumiScore, kitsuScore,
+        mangaUpdatesScore, igdbUserScore, vndbScore, hardcoverRating, openLibraryRating, appleBooksRating
+    ).any { it > 0f } || listOfNotNull(
+        traktScore, audienceScore, rtScore, metacriticScore, igdbCriticScore, steamPositivePct
+    ).any { it > 0 }
+}
+
+fun heroRatingsCacheKey(mediaId: Long?, mediaType: MediaType, title: String): String =
+    if (mediaId != null && mediaId > 0L) "id:$mediaId" else "${mediaType.name}:${title.trim().lowercase()}"
+
 @Immutable
 data class ChimanewLibrarySettings(
     val displayMode: LibraryDisplayMode = LibraryDisplayMode.COMPACT_GRID,
@@ -581,6 +636,7 @@ class PreferenceManager(private val context: Context) {
         val CHIMANEW_LIB_SHOW_HIDDEN_CATS = booleanPreferencesKey("chimanew_lib_show_hidden_cats")
         val CHIMANEW_LIB_DEFAULT_CATEGORY_ID = longPreferencesKey("chimanew_lib_default_category_id")
         val CHIMANEW_CATEGORY_ASSIGNMENTS = stringPreferencesKey("chimanew_category_assignments")
+        val HERO_MULTI_RATINGS_CACHE = stringPreferencesKey("hero_multi_ratings_cache")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
@@ -946,6 +1002,7 @@ class PreferenceManager(private val context: Context) {
         .map { it[PreferencesKeys.MDBLIST_API_KEY] ?: "" }
 
     suspend fun updateMdblistApiKey(key: String) {
+        cachedMdblistApiKey = key
         context.dataStore.edit { it[PreferencesKeys.MDBLIST_API_KEY] = key }
     }
 
@@ -1788,6 +1845,44 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    private val heroRatingsJson = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+    val heroMultiRatingsCache: Flow<Map<String, CachedMultiRatings>> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.HERO_MULTI_RATINGS_CACHE]
+            if (raw.isNullOrBlank()) emptyMap()
+            else try {
+                heroRatingsJson.decodeFromString<Map<String, CachedMultiRatings>>(raw)
+            } catch (_: Exception) {
+                emptyMap()
+            }
+        }
+        .distinctUntilChanged()
+
+    suspend fun mergeCachedMultiRatings(key: String, incoming: CachedMultiRatings) {
+        if (key.isBlank() || !incoming.hasAnyScore()) return
+        val stamped = if (incoming.updatedAtMs > 0L) incoming else incoming.copy(updatedAtMs = System.currentTimeMillis())
+        context.dataStore.edit { prefs ->
+            val current = prefs[PreferencesKeys.HERO_MULTI_RATINGS_CACHE]
+                ?.takeIf { it.isNotBlank() }
+                ?.let { runCatching { heroRatingsJson.decodeFromString<Map<String, CachedMultiRatings>>(it) }.getOrNull() }
+                ?.toMutableMap()
+                ?: mutableMapOf()
+            val merged = current[key]?.mergeWith(stamped) ?: stamped
+            current[key] = merged
+            val trimmed = if (current.size > 250) {
+                current.entries
+                    .sortedByDescending { it.value.updatedAtMs }
+                    .take(250)
+                    .associate { it.key to it.value }
+            } else {
+                current
+            }
+            prefs[PreferencesKeys.HERO_MULTI_RATINGS_CACHE] = heroRatingsJson.encodeToString(trimmed)
+        }
+    }
+
     companion object {
         @Volatile
         var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
@@ -1806,6 +1901,9 @@ class PreferenceManager(private val context: Context) {
 
         @Volatile
         var cachedTmdbApiKey: String = ""
+
+        @Volatile
+        var cachedMdblistApiKey: String = ""
 
         @Volatile
         var cachedIgdbClientId: String = ""

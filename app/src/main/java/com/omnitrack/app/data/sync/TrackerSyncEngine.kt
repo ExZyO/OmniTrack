@@ -1575,6 +1575,7 @@ class TrackerSyncEngine(
             finishedAtMs = existing.finishedAtMs ?: incoming.finishedAtMs,
             playtimeHours = nextPlaytime,
             userRating = nextRating,
+            communityScore = existing.communityScore ?: incoming.communityScore,
             status = nextStatus
         )
         return if (changed != existing) {
@@ -1654,6 +1655,7 @@ class TrackerSyncEngine(
                                         bannerImage
                                         episodes
                                         chapters
+                                        averageScore
                                         description
                                         format
                                     }
@@ -1710,6 +1712,7 @@ class TrackerSyncEngine(
                             mediaObj["chapters"].asSafeStr()?.toDoubleOrNull()
                         }
                         val score = entryObj["score"].asSafeStr()?.toFloatOrNull()?.let { if (it > 0f) it else null }
+                        val communityAvg = mediaObj["averageScore"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
                         val trackingStatus = when (entryObj["status"].asSafeStr()) {
                             "CURRENT" -> com.omnitrack.app.data.model.TrackingStatus.IN_PROGRESS
                             "PLANNING" -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
@@ -1734,6 +1737,7 @@ class TrackerSyncEngine(
                             startedAtMs = parseFuzzyDateToEpochMs(entryObj["startedAt"].asSafeObj()),
                             finishedAtMs = parseFuzzyDateToEpochMs(entryObj["completedAt"].asSafeObj()),
                             userRating = score,
+                            communityScore = communityAvg,
                             anilistId = alId,
                             malId = mediaObj["idMal"].asSafeLong()
                         )
@@ -1766,9 +1770,9 @@ class TrackerSyncEngine(
         try {
             for (isAnime in listOf(true, false)) {
                 val endpoint = if (isAnime) {
-                    "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status{status,score,num_episodes_watched,num_times_rewatched,comments,start_date,finish_date},num_episodes,main_picture,start_date,media_type&limit=200"
+                    "https://api.myanimelist.net/v2/users/@me/animelist?fields=list_status{status,score,num_episodes_watched,num_times_rewatched,comments,start_date,finish_date},num_episodes,mean,main_picture,start_date,media_type&limit=200"
                 } else {
-                    "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status{status,score,num_chapters_read,num_volumes_read,num_times_reread,comments,start_date,finish_date},num_chapters,main_picture,start_date,media_type&limit=200"
+                    "https://api.myanimelist.net/v2/users/@me/mangalist?fields=list_status{status,score,num_chapters_read,num_volumes_read,num_times_reread,comments,start_date,finish_date},num_chapters,mean,main_picture,start_date,media_type&limit=200"
                 }
                 var nextUrl: String? = endpoint
                 var page = 0
@@ -1825,6 +1829,7 @@ class TrackerSyncEngine(
                         val note = listStatus?.get("comments")?.asSafeStr()
                         val startMs = parseYmdToEpochMs(listStatus?.get("start_date")?.asSafeStr())
                         val finishMs = parseYmdToEpochMs(listStatus?.get("finish_date")?.asSafeStr())
+                        val malMean = node["mean"]?.asSafeStr()?.toFloatOrNull()?.takeIf { it > 0f }
                         when (smartMergeIncomingItem(
                             MediaItemEntity(
                                 title = title,
@@ -1839,6 +1844,7 @@ class TrackerSyncEngine(
                                 startedAtMs = startMs,
                                 finishedAtMs = finishMs,
                                 userRating = score,
+                                communityScore = malMean,
                                 releaseYear = year,
                                 malId = malId
                             )
@@ -2270,7 +2276,7 @@ class TrackerSyncEngine(
                 val (resultsArr, hasMore) = NetworkPacer.withVndbPacing {
                     val payload = buildJsonObject {
                         put("user", userId)
-                        put("fields", "id,vote,labels.label,vn{id,title,released,image{url}}")
+                        put("fields", "id,vote,labels.label,vn{id,title,released,rating,image{url}}")
                         put("results", 100)
                         put("page", page)
                     }.toString()
@@ -2320,6 +2326,7 @@ class TrackerSyncEngine(
                         else -> com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
                     }
                     val rating = obj["vote"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
+                    val vnCommunityRating = vn["rating"].asSafeInt()?.takeIf { it > 0 }?.let { it / 10f }
                     when (smartMergeIncomingItem(
                         MediaItemEntity(
                             title = title,
@@ -2327,6 +2334,7 @@ class TrackerSyncEngine(
                             mediaType = com.omnitrack.app.data.model.MediaType.VISUAL_NOVEL,
                             status = status,
                             userRating = rating,
+                            communityScore = vnCommunityRating,
                             releaseYear = year,
                             vndbId = vndbId
                         )

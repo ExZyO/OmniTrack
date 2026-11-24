@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -26,9 +27,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -387,16 +394,55 @@ fun ReleaseCalendarSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                AsyncImage(
-                                    model = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) },
-                                    contentDescription = item.title,
-                                    contentScale = ContentScale.Crop,
+                                var useFallbackCover by remember(item.id, item.coverUrl, item.fallbackCoverUrl) { mutableStateOf(false) }
+                                var coverFailed by remember(item.id, item.coverUrl, item.fallbackCoverUrl) { mutableStateOf(false) }
+                                val activeCoverUrl = remember(item.coverUrl, item.fallbackCoverUrl, useFallbackCover) {
+                                    val primary = item.coverUrl.trim()
+                                    val secondary = item.fallbackCoverUrl?.trim().orEmpty()
+                                    when {
+                                        !useFallbackCover && primary.isNotBlank() -> primary
+                                        secondary.isNotBlank() -> secondary
+                                        else -> ""
+                                    }
+                                }
+                                Box(
                                     modifier = Modifier
                                         .width(46.dp)
                                         .aspectRatio(0.68f)
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(DarkSurfaceCard)
-                                )
+                                        .background(DarkSurfaceCard),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (activeCoverUrl.isNotBlank() && !coverFailed) {
+                                        AsyncImage(
+                                            model = remember(activeCoverUrl) { ArtworkModelResolver.toCoilModel(activeCoverUrl) },
+                                            contentDescription = item.title,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize(),
+                                            onError = {
+                                                if (!useFallbackCover && !item.fallbackCoverUrl.isNullOrBlank()) {
+                                                    useFallbackCover = true
+                                                } else {
+                                                    coverFailed = true
+                                                }
+                                            }
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = when (item.mediaType) {
+                                                MediaType.MOVIE -> Icons.Default.Movie
+                                                MediaType.SHOW -> Icons.Default.Tv
+                                                MediaType.GAME -> Icons.Default.SportsEsports
+                                                MediaType.BOOK, MediaType.COMIC -> Icons.Default.MenuBook
+                                                MediaType.MANGA, MediaType.NOVEL, MediaType.FANFICTION -> Icons.Default.AutoStories
+                                                else -> Icons.Default.PlayCircleOutline
+                                            },
+                                            contentDescription = null,
+                                            tint = TextMuted.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
 
                             Column(
                                 modifier = Modifier.weight(1f),

@@ -115,6 +115,7 @@ import com.omnitrack.app.data.preferences.LibrarySortOption
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.TriStateFilter
+import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.LibraryFastScroller
@@ -240,6 +241,7 @@ fun HomeScreen(
     val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
     val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
+    val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
     val calendarReleases by viewModel.calendarReleases.collectAsState()
     val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
     val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
@@ -511,6 +513,15 @@ fun HomeScreen(
                             }
                             pendingLibraryTabKey = "CAT_$catId"
                             currentNavDestination = NavDestination.LIBRARY
+                        },
+                        heroMultiRatingsCache = heroMultiRatingsCache,
+                        onPrefetchLocalHeroRatings = { heroItem ->
+                            val cached = heroMultiRatingsCache[heroRatingsCacheKey(heroItem.id, heroItem.mediaType, heroItem.title)]
+                            viewModel.prefetchLocalHeroRatings(heroItem, cached, prefManager)
+                        },
+                        onPrefetchSearchHeroRatings = { searchItem ->
+                            val cached = heroMultiRatingsCache[heroRatingsCacheKey(null, searchItem.mediaType, searchItem.title)]
+                            viewModel.prefetchSearchHeroRatings(searchItem, cached, prefManager)
                         }
                     )
                 }
