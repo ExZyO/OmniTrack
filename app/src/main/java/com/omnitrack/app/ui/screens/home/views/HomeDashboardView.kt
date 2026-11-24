@@ -117,8 +117,12 @@ import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
+import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
 import com.omnitrack.app.ui.components.glassCardDepth
+import com.omnitrack.app.ui.components.heroScrollBackdropAlpha
+import com.omnitrack.app.ui.components.heroScrollBackdropScale
+import com.omnitrack.app.ui.components.heroScrollForegroundAlpha
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -192,6 +196,8 @@ fun HomeDashboardView(
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val perf = LocalPerformanceSettings.current
+    val homeListState = rememberLazyListState()
     var heroRefreshNonce by remember { mutableIntStateOf(0) }
     var localRefreshing by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
@@ -515,6 +521,7 @@ fun HomeDashboardView(
             .background(AmoledBlack)
     ) {
         LazyColumn(
+            state = homeListState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 118.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp)
@@ -522,6 +529,15 @@ fun HomeDashboardView(
             if (heroSettings.showHero) {
                 item(key = "home_hero_carousel") {
                     if (heroSlides.isNotEmpty()) {
+                        val animateHero = !perf.disableCardAnimations
+                        val heroScrollPx: () -> Float = {
+                            if (!animateHero) 0f
+                            else if (homeListState.firstVisibleItemIndex > 0) 1400f
+                            else homeListState.firstVisibleItemScrollOffset.toFloat()
+                        }
+                        val pullStretchFraction: () -> Float = {
+                            if (!animateHero) 0f else pullState.distanceFraction.coerceIn(0f, 1.5f)
+                        }
                         val isLooping = heroSlides.size > 1
                         val virtualCount = if (isLooping) 100_000 else heroSlides.size
                         val startIndex = remember(heroSlides.size) {
@@ -619,11 +635,18 @@ fun HomeDashboardView(
                                 modifier = Modifier.fillMaxWidth()
                             ) { page ->
                                 val idx = if (isLooping) page % heroSlides.size else page
+                                val pageOffsetProvider: () -> Float = {
+                                    if (!animateHero) 0f
+                                    else (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                                }
                                 when (val slide = heroSlides.getOrNull(idx)) {
                                     is HomeHeroSlide.LocalSlide -> LocalMediaHeroCard(
                                         item = slide.item,
                                         cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(slide.item.id, slide.item.mediaType, slide.item.title)],
                                         heroSettings = heroSettings,
+                                        scrollOffsetPx = heroScrollPx,
+                                        pullFraction = pullStretchFraction,
+                                        pageOffsetProvider = pageOffsetProvider,
                                         onDetails = { onItemClick(slide.item.id) }
                                     )
                                     is HomeHeroSlide.TrendingSlide -> {
@@ -646,6 +669,9 @@ fun HomeDashboardView(
                                                 item = libMatch,
                                                 cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(libMatch.id, libMatch.mediaType, libMatch.title)],
                                                 heroSettings = heroSettings,
+                                                scrollOffsetPx = heroScrollPx,
+                                                pullFraction = pullStretchFraction,
+                                                pageOffsetProvider = pageOffsetProvider,
                                                 onDetails = { onItemClick(libMatch.id) }
                                             )
                                         } else {
@@ -653,6 +679,9 @@ fun HomeDashboardView(
                                                 item = slide.item,
                                                 cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(null, slide.item.mediaType, slide.item.title)],
                                                 heroSettings = heroSettings,
+                                                scrollOffsetPx = heroScrollPx,
+                                                pullFraction = pullStretchFraction,
+                                                pageOffsetProvider = pageOffsetProvider,
                                                 onDetails = { onPreviewSearchItem(slide.item) }
                                             )
                                         }
@@ -662,21 +691,38 @@ fun HomeDashboardView(
                             }
 
                             if (isLooping && heroSettings.slideCount > 0 && heroSlides.size <= 15) {
+                                val heroHeightPxEst = when (heroSettings.heroHeightPreset.uppercase()) {
+                                    "COMPACT" -> 920f
+                                    "TALL" -> 1300f
+                                    else -> 1120f
+                                }
                                 Row(
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
-                                        .padding(bottom = 10.dp),
+                                        .padding(bottom = 10.dp)
+                                        .graphicsLayer {
+                                            alpha = heroScrollForegroundAlpha(heroScrollPx(), heroHeightPxEst)
+                                        },
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     repeat(heroSlides.size) { index ->
-                                        val active = index == currentActualIndex
+                                        val activeFraction = if (!animateHero) {
+                                            if (index == currentActualIndex) 1f else 0f
+                                        } else {
+                                            val raw = currentActualIndex + pagerState.currentPageOffsetFraction - index
+                                            val wrapped = ((raw + heroSlides.size * 1.5f) % heroSlides.size) - heroSlides.size * 0.5f
+                                            (1f - kotlin.math.abs(wrapped)).coerceIn(0f, 1f)
+                                        }
                                         Box(
                                             modifier = Modifier
-                                                .width(if (active) 18.dp else 6.dp)
+                                                .width((6f + 14f * activeFraction).dp)
                                                 .height(5.dp)
                                                 .clip(CircleShape)
-                                                .background(if (active) AccentGold else Color.White.copy(alpha = 0.35f))
+                                                .background(
+                                                    if (activeFraction > 0.5f) AccentGold.copy(alpha = 0.45f + 0.55f * activeFraction)
+                                                    else Color.White.copy(alpha = 0.35f + 0.50f * activeFraction)
+                                                )
                                         )
                                     }
                                 }
@@ -1446,6 +1492,9 @@ private fun LocalMediaHeroCard(
     item: MediaCardSummary,
     cachedRatings: CachedMultiRatings? = null,
     heroSettings: HomeHeroSettings,
+    scrollOffsetPx: () -> Float = { 0f },
+    pullFraction: () -> Float = { 0f },
+    pageOffsetProvider: () -> Float = { 0f },
     onDetails: () -> Unit
 ) {
     val coverModel: Any? = remember(item.customCoverPath, item.coverUrl) {
@@ -1507,6 +1556,9 @@ private fun LocalMediaHeroCard(
         progressLabel = progressLabel,
         remainingCount = remainingCount,
         heroSettings = heroSettings,
+        scrollOffsetPx = scrollOffsetPx,
+        pullFraction = pullFraction,
+        pageOffsetProvider = pageOffsetProvider,
         onDetailsClick = onDetails
     )
 }
@@ -1516,6 +1568,9 @@ private fun TrendingMediaHeroCard(
     item: SearchResultItem,
     cachedRatings: CachedMultiRatings? = null,
     heroSettings: HomeHeroSettings,
+    scrollOffsetPx: () -> Float = { 0f },
+    pullFraction: () -> Float = { 0f },
+    pageOffsetProvider: () -> Float = { 0f },
     onDetails: () -> Unit
 ) {
     val coverModel: Any? = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) }
@@ -1565,6 +1620,9 @@ private fun TrendingMediaHeroCard(
         progressLabel = progressHint,
         remainingCount = 0,
         heroSettings = heroSettings,
+        scrollOffsetPx = scrollOffsetPx,
+        pullFraction = pullFraction,
+        pageOffsetProvider = pageOffsetProvider,
         onDetailsClick = onDetails
     )
 }
@@ -1601,6 +1659,9 @@ private fun ChimanewComboHeroCard(
     progressLabel: String,
     remainingCount: Int,
     heroSettings: HomeHeroSettings,
+    scrollOffsetPx: () -> Float = { 0f },
+    pullFraction: () -> Float = { 0f },
+    pageOffsetProvider: () -> Float = { 0f },
     onDetailsClick: () -> Unit
 ) {
     val showUnread = heroSettings.showUnreadBadge && remainingCount > 0
@@ -1620,6 +1681,7 @@ private fun ChimanewComboHeroCard(
     ) {
         // 1. Backdrop Layer: Authentic Wide Banner -> Cropped/Blurred Cover -> Warm Obsidian Procedural Ambient Glow
         if (authenticBannerModel != null) {
+            val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
             AsyncImage(
                 model = authenticBannerModel,
                 contentDescription = null,
@@ -1631,16 +1693,23 @@ private fun ChimanewComboHeroCard(
                         val fx = bannerFocalX.coerceIn(-1f, 1f)
                         val fy = bannerFocalY.coerceIn(-1f, 1f)
                         val effZoom = bannerZoom.coerceIn(1f, 2.5f)
-                        scaleX = effZoom
-                        scaleY = effZoom
-                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f
-                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                        val sPx = scrollOffsetPx()
+                        val pFrac = pullFraction()
+                        val pOff = pageOffsetProvider()
+                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
+                        val scrollScale = heroScrollBackdropScale(sPx) * (1f + pFrac * 0.14f)
+                        val totalZoom = effZoom * scrollScale
+                        scaleX = totalZoom
+                        scaleY = totalZoom
+                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f + pOff * size.width * 0.24f
+                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.34f
+                        alpha = baseAlpha * swipeVis * heroScrollBackdropAlpha(sPx, size.height)
                     }
                     .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
-                    .alpha(if (heroSettings.dimBanner) 0.56f else 0.94f)
             )
         } else if ((heroSettings.allowCroppedFallback || forceCoverBackdrop) && posterModel != null) {
             val fallbackBlur = if (bannerBlurDp > 0) maxOf(bannerBlurDp, 16) else 20
+            val baseAlpha = if (heroSettings.dimBanner) 0.38f else 0.76f
             AsyncImage(
                 model = posterModel,
                 contentDescription = null,
@@ -1648,13 +1717,34 @@ private fun ChimanewComboHeroCard(
                 alignment = Alignment.TopCenter,
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer {
+                        val sPx = scrollOffsetPx()
+                        val pFrac = pullFraction()
+                        val pOff = pageOffsetProvider()
+                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
+                        val scrollScale = heroScrollBackdropScale(sPx) * (1f + pFrac * 0.12f)
+                        scaleX = scrollScale
+                        scaleY = scrollScale
+                        translationX = pOff * size.width * 0.24f
+                        translationY = sPx * 0.34f
+                        alpha = baseAlpha * swipeVis * heroScrollBackdropAlpha(sPx, size.height)
+                    }
                     .blur(fallbackBlur.dp)
-                    .alpha(if (heroSettings.dimBanner) 0.38f else 0.76f)
             )
         } else {
             // Default Gentle Ambient Glow procedural canvas (never crops portrait covers)
             val auraAlpha = if (heroSettings.dimBanner) 0.24f else 0.42f
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val sPx = scrollOffsetPx()
+                        val pOff = pageOffsetProvider()
+                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
+                        translationY = sPx * 0.25f
+                        alpha = swipeVis * heroScrollBackdropAlpha(sPx, size.height)
+                    }
+            ) {
                 drawRect(color = Color(0xFF0D0C0B))
                 drawRect(
                     brush = Brush.radialGradient(
@@ -1711,7 +1801,16 @@ private fun ChimanewComboHeroCard(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, bottom = 28.dp),
+                .padding(start = 18.dp, end = 18.dp, bottom = 28.dp)
+                .graphicsLayer {
+                    val sPx = scrollOffsetPx()
+                    val pOff = pageOffsetProvider()
+                    val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
+                    val approxHeroPx = heroHeightDp.toPx()
+                    alpha = swipeVis * heroScrollForegroundAlpha(sPx, approxHeroPx)
+                    translationX = -pOff * size.width * 0.14f
+                    translationY = -sPx * 0.10f
+                },
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {

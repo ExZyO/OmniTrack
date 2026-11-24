@@ -104,7 +104,7 @@ fun PerformanceSettingsSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Reduce GPU blur, decode overhead & offscreen work",
+                        text = "Every switch ON = faster & lighter GPU/RAM usage",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
@@ -142,10 +142,22 @@ fun PerformanceSettingsContent(
     val scope = rememberCoroutineScope()
     var showAdvanced by remember { mutableStateOf(initiallyExpanded) }
 
+    val reduceLiveBlur = !settings.liveNavBarBlur
+    val limitOffscreenTabs = !settings.prefetchAdjacentTabs
+    val activeCount = listOf(
+        reduceLiveBlur,
+        settings.autoPauseBlurOnScroll,
+        settings.downsampleGridCovers,
+        settings.disableCardDepthEffects,
+        settings.disableCardAnimations,
+        limitOffscreenTabs,
+        settings.hardwareBitmaps
+    ).count { it }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         PerfSwitchRow(
             title = "Performance Mode",
-            subtitle = "One-tap fast preset: disables live bar blur, card sheen gradients & grid animations",
+            subtitle = "Turns ON every speed optimization below for maximum FPS on slower phones",
             checked = settings.performanceModeEnabled,
             onCheckedChange = { enabled ->
                 scope.launch { preferenceManager.setPerformanceModeEnabled(enabled) }
@@ -169,7 +181,7 @@ fun PerformanceSettingsContent(
                     color = AccentGold
                 )
                 Text(
-                    text = "Fine-tune individual GPU, Coil & pager optimizations",
+                    text = "All switches ON = faster \u00B7 $activeCount / 7 active",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
@@ -186,50 +198,50 @@ fun PerformanceSettingsContent(
             Column(modifier = Modifier.fillMaxWidth()) {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Live Floating Bar Glass Blur",
-                    subtitle = "Real-time backdrop refraction under the bottom navigation dock",
-                    checked = settings.liveNavBarBlur,
-                    onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("LIVE_BLUR", it) } }
+                    title = "Reduce Floating Bar Glass Blur",
+                    subtitle = "Replaces live backdrop blur with a fast translucent bar (biggest FPS boost)",
+                    checked = reduceLiveBlur,
+                    onCheckedChange = { reduce -> scope.launch { preferenceManager.setPerformanceOption("LIVE_BLUR", !reduce) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
                     title = "Auto-Pause Blur While Scrolling",
-                    subtitle = "Temporarily lifts shader cost during fast Library flings (zero idle change)",
+                    subtitle = "Temporarily pauses live glass blur during fast Library scrolls",
                     checked = settings.autoPauseBlurOnScroll,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("PAUSE_BLUR_SCROLL", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
                     title = "Smart Grid Cover Downsampling",
-                    subtitle = "Decode right-sized thumbnails in grids while keeping Details full lossless",
+                    subtitle = "Decodes right-sized thumbnails in grids while keeping Details full lossless",
                     checked = settings.downsampleGridCovers,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("DOWNSAMPLE_COVERS", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Disable Card Depth & Sheen",
-                    subtitle = "Turn off specular glass borders & top reflections on poster cards",
+                    title = "Skip Card Depth & Sheen",
+                    subtitle = "Removes specular glass borders & top reflections from poster cards",
                     checked = settings.disableCardDepthEffects,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("DISABLE_CARD_DEPTH", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Disable Grid & Pager Animations",
-                    subtitle = "Skip poster fade crossfades, tap bounce & pager zoom scaling",
+                    title = "Reduce Grid & Pager Animations",
+                    subtitle = "Skips cover fade-ins, tap bounce & Library tab zoom transitions",
                     checked = settings.disableCardAnimations,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("DISABLE_ANIMS", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Pre-Render Far Library Tabs",
-                    subtitle = "Off keeps only adjacent tabs composed (faster swipes & lower RAM)",
-                    checked = settings.prefetchAdjacentTabs,
-                    onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("PREFETCH_TABS", it) } }
+                    title = "Limit Offscreen Library Tabs",
+                    subtitle = "Keeps only adjacent tabs composed for faster tab jumps & lower RAM",
+                    checked = limitOffscreenTabs,
+                    onCheckedChange = { limit -> scope.launch { preferenceManager.setPerformanceOption("PREFETCH_TABS", !limit) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
                     title = "GPU Hardware Bitmaps",
-                    subtitle = "Decode covers straight into immutable GPU textures for zero-copy drawing",
+                    subtitle = "Decodes covers directly into GPU textures for zero-copy drawing",
                     checked = settings.hardwareBitmaps,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("HARDWARE_BITMAPS", it) } }
                 )

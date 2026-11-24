@@ -1809,6 +1809,7 @@ private fun DiscoverHeroCarousel(
             runCatching { pagerState.scrollToPage(startIndex) }
         }
     }
+    val perf = com.omnitrack.app.ui.components.LocalPerformanceSettings.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalPager(
             state = pagerState,
@@ -1817,36 +1818,58 @@ private fun DiscoverHeroCarousel(
             val idx = if (isLooping) page % items.size else page
             val item = items[idx]
             val match = findLibraryMatch(allMedia, item)
-            DiscoverSpotlightBanner(
-                item = item,
-                libraryMatch = match,
-                dimBanner = dimBanner,
-                bannerBlurDp = resolveBlurDp(item.mediaType),
-                onDetails = {
-                    if (match != null) onItemClick(match.id) else {
-                        EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
-                        onItemClick(-1L)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        if (!perf.disableCardAnimations) {
+                            val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                            val vis = (1f - kotlin.math.abs(pageOffset)).coerceIn(0f, 1f)
+                            alpha = 0.25f + 0.75f * vis
+                            translationX = pageOffset * size.width * 0.10f
+                        }
                     }
-                },
-                onAdd = { onAddMedia(item) }
-            )
+            ) {
+                DiscoverSpotlightBanner(
+                    item = item,
+                    libraryMatch = match,
+                    dimBanner = dimBanner,
+                    bannerBlurDp = resolveBlurDp(item.mediaType),
+                    onDetails = {
+                        if (match != null) onItemClick(match.id) else {
+                            EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                            onItemClick(-1L)
+                        }
+                    },
+                    onAdd = { onAddMedia(item) }
+                )
+            }
         }
         if (items.size > 1) {
             val activeIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage
+            val curReal = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 repeat(items.size) { idx ->
-                    val active = activeIdx == idx
+                    val frac = if (perf.disableCardAnimations) {
+                        if (activeIdx == idx) 1f else 0f
+                    } else if (isLooping) {
+                        val raw = curReal + pagerState.currentPageOffsetFraction - idx
+                        val wrapped = ((raw + items.size * 1.5f) % items.size) - items.size * 0.5f
+                        (1f - kotlin.math.abs(wrapped)).coerceIn(0f, 1f)
+                    } else {
+                        (1f - kotlin.math.abs((pagerState.currentPage - idx) + pagerState.currentPageOffsetFraction)).coerceIn(0f, 1f)
+                    }
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 3.dp)
-                            .width(if (active) 16.dp else 5.dp)
+                            .width((5f + 13f * frac).dp)
                             .height(4.dp)
                             .clip(CircleShape)
-                            .background(if (active) AccentGold else Color.White.copy(alpha = 0.28f))
+                            .background(AccentGold.copy(alpha = 0.30f + 0.70f * frac))
                     )
                 }
             }

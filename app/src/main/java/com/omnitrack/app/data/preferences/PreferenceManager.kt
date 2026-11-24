@@ -1937,16 +1937,22 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.PERF_MODE_ENABLED] = enabled
             if (enabled) {
+                // Every optimization switch ON = Faster
                 prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = false
+                prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = true
+                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = true
-                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
                 prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = false
+                prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = true
             } else {
                 prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = true
                 prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = true
+                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = false
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = false
+                prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = false
+                prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = true
             }
         }
     }

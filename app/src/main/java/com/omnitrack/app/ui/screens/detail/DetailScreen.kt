@@ -79,6 +79,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -94,6 +95,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -182,6 +184,11 @@ import com.omnitrack.app.data.model.formatBookDuration
 import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
 import com.omnitrack.app.ui.components.FormattedRichText
+import com.omnitrack.app.ui.components.LocalPerformanceSettings
+import com.omnitrack.app.ui.components.heroScrollBackdropAlpha
+import com.omnitrack.app.ui.components.heroScrollBackdropScale
+import com.omnitrack.app.ui.components.heroStretchHeight
+import com.omnitrack.app.ui.components.rememberHeroStretchState
 import com.omnitrack.app.ui.screens.detail.components.AnimeCharacterSheet
 import com.omnitrack.app.ui.screens.detail.components.AnimeStaffSheet
 import com.omnitrack.app.ui.screens.detail.components.AuthorProfileBottomSheet
@@ -797,6 +804,18 @@ fun DetailScreen(
                 }
             }
 
+            val perfSettings = LocalPerformanceSettings.current
+            val heroStretchState = rememberHeroStretchState(lazyListState)
+            val animateHeroScroll = !perfSettings.disableCardAnimations
+            val detailScrollPx: () -> Float = {
+                if (!animateHeroScroll) 0f
+                else if (lazyListState.firstVisibleItemIndex > 0) 1400f
+                else lazyListState.firstVisibleItemScrollOffset.toFloat()
+            }
+            val detailStretchPx: () -> Float = {
+                if (!animateHeroScroll || item.mediaType == MediaType.FANFICTION) 0f else heroStretchState.stretchPx
+            }
+
             @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
             androidx.compose.material3.pulltorefresh.PullToRefreshBox(
                 isRefreshing = item.mediaType == MediaType.FANFICTION && fanficAuxState.isCheckingUpdates,
@@ -805,7 +824,15 @@ fun DetailScreen(
                         viewModel.checkFanficUpdates()
                     }
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (item.mediaType != MediaType.FANFICTION && animateHeroScroll) {
+                            Modifier.nestedScroll(heroStretchState.nestedScrollConnection)
+                        } else {
+                            Modifier
+                        }
+                    )
             ) {
             LazyColumn(
                 state = lazyListState,
@@ -845,6 +872,9 @@ fun DetailScreen(
                                 gameDetailMeta = uiState.gameDetailMeta,
                                 bookDetailMeta = uiState.bookDetailMeta,
                                 comicDetailMeta = uiState.comicDetailMeta,
+                                scrollOffsetPx = detailScrollPx,
+                                stretchPx = detailStretchPx,
+                                animateOnScroll = animateHeroScroll,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onSearchInDiscover = onSearchInDiscover,
                                 onOptionsClick = { showOptionsMenu = true },
@@ -873,6 +903,9 @@ fun DetailScreen(
                                 gameDetailMeta = uiState.gameDetailMeta,
                                 bookDetailMeta = uiState.bookDetailMeta,
                                 comicDetailMeta = uiState.comicDetailMeta,
+                                scrollOffsetPx = detailScrollPx,
+                                stretchPx = detailStretchPx,
+                                animateOnScroll = animateHeroScroll,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
                                 onSearchInDiscover = onSearchInDiscover,
                                 onCoverClick = { showArtworkPicker = true },
@@ -1691,13 +1724,16 @@ fun DetailScreen(
                     )
                 }
 
-                // Center Title / Clearart Logo (smooth fade-in as user scrolls down to seasons & content)
+                // Center Title / Clearart Logo (smooth fade-in + slide down as user scrolls down to seasons & content)
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp)
                         .padding(horizontal = 8.dp)
-                        .graphicsLayer { alpha = headerAlpha },
+                        .graphicsLayer {
+                            alpha = headerAlpha
+                            translationY = lerp((-12).dp, 0.dp, headerAlpha).toPx()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
@@ -2884,6 +2920,9 @@ private fun DetailHeroHeaderSection(
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    scrollOffsetPx: () -> Float = { 0f },
+    stretchPx: () -> Float = { 0f },
+    animateOnScroll: Boolean = true,
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
     onOptionsClick: () -> Unit,
@@ -2908,6 +2947,14 @@ private fun DetailHeroHeaderSection(
                     .padding(top = 56.dp, start = 20.dp, end = 20.dp, bottom = 14.dp)
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
+                    .graphicsLayer {
+                        if (animateOnScroll) {
+                            val sPx = scrollOffsetPx()
+                            val stretch = stretchPx()
+                            translationY = sPx * 0.16f + stretch * 0.25f
+                            alpha = (1f - sPx / (size.height.coerceAtLeast(1f) * 1.15f)).coerceIn(0.15f, 1f)
+                        }
+                    }
                     .clip(RoundedCornerShape(10.dp))
                     .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
             ) {
@@ -2921,8 +2968,12 @@ private fun DetailHeroHeaderSection(
                             val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                             val fy = item.bannerFocalY.coerceIn(-1f, 1f)
                             val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
-                            scaleX = effZoom
-                            scaleY = effZoom
+                            val stretchZoom = if (animateOnScroll) {
+                                1f + stretchPx().coerceAtLeast(0f) / size.height.coerceAtLeast(1f)
+                            } else 1f
+                            val totalZoom = effZoom * stretchZoom
+                            scaleX = totalZoom
+                            scaleY = totalZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                             translationY = -fy * size.height * (effZoom - 1f) * 0.5f
                         }
@@ -2934,7 +2985,10 @@ private fun DetailHeroHeaderSection(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(350.dp)
+                    .then(
+                        if (animateOnScroll) Modifier.heroStretchHeight(350.dp, stretchPx)
+                        else Modifier.height(350.dp)
+                    )
                     .clipToBounds()
             ) {
                 AsyncImage(
@@ -2947,10 +3001,26 @@ private fun DetailHeroHeaderSection(
                             val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                             val fy = item.bannerFocalY.coerceIn(-1f, 1f)
                             val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
-                            scaleX = effZoom
-                            scaleY = effZoom
-                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
-                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                            if (animateOnScroll) {
+                                val sPx = scrollOffsetPx()
+                                val stretch = stretchPx().coerceAtLeast(0f)
+                                val stretchZoom = 1f + stretch / size.height.coerceAtLeast(1f)
+                                val scrollScale = heroScrollBackdropScale(sPx)
+                                val totalZoom = effZoom * stretchZoom * scrollScale
+                                if (stretch > 0f) {
+                                    transformOrigin = TransformOrigin(0.5f, 0f)
+                                }
+                                scaleX = totalZoom
+                                scaleY = totalZoom
+                                translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                                translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.48f
+                                alpha = heroScrollBackdropAlpha(sPx, size.height)
+                            } else {
+                                scaleX = effZoom
+                                scaleY = effZoom
+                                translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                                translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                            }
                         }
                         .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                         .featherArtwork(startYRatio = 0.50f),
@@ -2966,7 +3036,13 @@ private fun DetailHeroHeaderSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) },
+            .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) }
+            .graphicsLayer {
+                if (animateOnScroll && backdropTargetUrl != null) {
+                    val sPx = scrollOffsetPx()
+                    alpha = (1f - (sPx - 90f).coerceAtLeast(0f) / 220f).coerceIn(0f, 1f)
+                }
+            },
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(
@@ -3326,6 +3402,9 @@ private fun DetailClassicHeaderSection(
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    scrollOffsetPx: () -> Float = { 0f },
+    stretchPx: () -> Float = { 0f },
+    animateOnScroll: Boolean = true,
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
     onCoverClick: () -> Unit,
@@ -3344,7 +3423,10 @@ private fun DetailClassicHeaderSection(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(350.dp)
+                .then(
+                    if (animateOnScroll) Modifier.heroStretchHeight(350.dp, stretchPx)
+                    else Modifier.height(350.dp)
+                )
                 .clipToBounds()
         ) {
             val classicContext = LocalContext.current
@@ -3364,10 +3446,26 @@ private fun DetailClassicHeaderSection(
                         val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                         val fy = item.bannerFocalY.coerceIn(-1f, 1f)
                         val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
-                        scaleX = effZoom
-                        scaleY = effZoom
-                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f
-                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                        if (animateOnScroll) {
+                            val sPx = scrollOffsetPx()
+                            val stretch = stretchPx().coerceAtLeast(0f)
+                            val stretchZoom = 1f + stretch / size.height.coerceAtLeast(1f)
+                            val scrollScale = heroScrollBackdropScale(sPx)
+                            val totalZoom = effZoom * stretchZoom * scrollScale
+                            if (stretch > 0f) {
+                                transformOrigin = TransformOrigin(0.5f, 0f)
+                            }
+                            scaleX = totalZoom
+                            scaleY = totalZoom
+                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.48f
+                            alpha = heroScrollBackdropAlpha(sPx, size.height)
+                        } else {
+                            scaleX = effZoom
+                            scaleY = effZoom
+                            translationX = -fx * size.width * (effZoom - 1f) * 0.5f
+                            translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                        }
                     }
                     .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
                     .featherArtwork(startYRatio = 0.50f),
