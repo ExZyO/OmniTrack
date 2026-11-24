@@ -197,10 +197,16 @@ fun HomeScreen(
     val prefManager = remember(context) { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager }
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
-    val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+    val mediaCategoryPrefs by prefManager.mediaCategoryPrefs.collectAsState(
+        initial = com.omnitrack.app.data.preferences.MediaCategoryPrefs()
+    )
+    val fanfictionEnabled = !mediaCategoryPrefs.isHidden(MediaType.FANFICTION)
     val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
-    val visibleFilterTabs = remember(fanfictionEnabled) {
-        if (fanfictionEnabled) MediaType.filterTabs else MediaType.filterTabs.filter { it != MediaType.FANFICTION }
+    val visibleFilterTabs = remember(mediaCategoryPrefs) {
+        mediaCategoryPrefs.visibleFilterTabs(includeAll = true)
+    }
+    val visibleMediaTypes = remember(mediaCategoryPrefs) {
+        mediaCategoryPrefs.visibleMediaTypes()
     }
     val sharedFanficUrl by com.omnitrack.app.SharedFanficUrlBus.pendingUrl.collectAsState()
     var showFanficImportSheet by remember { mutableStateOf(false) }
@@ -473,6 +479,7 @@ fun HomeScreen(
                         hasUpdateAvailable = availableUpdate != null,
                         posterStyle = posterStyle,
                         fanfictionEnabled = fanfictionEnabled,
+                        visibleFilterTabs = visibleFilterTabs,
                         fanficNsfwMode = fanficNsfwMode,
                         onItemClick = onItemClick,
                         onOpenCalendar = {
@@ -564,8 +571,65 @@ fun HomeScreen(
                             fanficTagFilter = fanficTagFilter
                         )
                     }
-                    val hasActiveChimanewFilters = remember(libSettings, uiState.selectedStatus) {
+                    val activeMediaTabType = activeTab?.mediaTypeFilter
+                    val activeSubFilterPills = remember(
+                        activeMediaTabType,
+                        selectedMangaSubtype,
+                        selectedNovelSubtype,
+                        selectedVnOriginSubtype,
+                        selectedVnLengthSubtype,
+                        selectedGamePlatform,
+                        selectedGameCompletion,
+                        selectedBookFormat,
+                        selectedBookCategory,
+                        selectedComicPublisher,
+                        selectedComicFormat,
+                        selectedFanficSite,
+                        selectedFanficRating,
+                        selectedFanficStatus,
+                        selectedFanficMinWords,
+                        fanficCrossoverOnly,
+                        fanficTagFilter
+                    ) {
+                        buildList<Pair<String, () -> Unit>> {
+                            when (activeMediaTabType) {
+                                MediaType.MANGA -> {
+                                    if (selectedMangaSubtype != "ALL") add(selectedMangaSubtype.lowercase().replaceFirstChar { it.uppercase() } to { selectedMangaSubtype = "ALL" })
+                                }
+                                MediaType.NOVEL -> {
+                                    if (selectedNovelSubtype != "ALL") add((if (selectedNovelSubtype == "LIGHT_NOVEL") "Light Novel" else "Web Novel") to { selectedNovelSubtype = "ALL" })
+                                }
+                                MediaType.VISUAL_NOVEL -> {
+                                    if (selectedVnOriginSubtype != "ALL") add(selectedVnOriginSubtype to { selectedVnOriginSubtype = "ALL" })
+                                    if (selectedVnLengthSubtype != "ALL") add(selectedVnLengthSubtype to { selectedVnLengthSubtype = "ALL" })
+                                }
+                                MediaType.GAME -> {
+                                    if (selectedGamePlatform != "ALL") add(selectedGamePlatform to { selectedGamePlatform = "ALL" })
+                                    if (selectedGameCompletion != "ALL") add(selectedGameCompletion to { selectedGameCompletion = "ALL" })
+                                }
+                                MediaType.BOOK -> {
+                                    if (selectedBookFormat != "ALL") add(selectedBookFormat to { selectedBookFormat = "ALL" })
+                                    if (selectedBookCategory != "ALL") add(selectedBookCategory to { selectedBookCategory = "ALL" })
+                                }
+                                MediaType.COMIC -> {
+                                    if (selectedComicPublisher != "ALL") add(selectedComicPublisher to { selectedComicPublisher = "ALL" })
+                                    if (selectedComicFormat != "ALL") add(selectedComicFormat.replace("_", " ") to { selectedComicFormat = "ALL" })
+                                }
+                                MediaType.FANFICTION -> {
+                                    if (selectedFanficSite != "ALL") add(selectedFanficSite to { selectedFanficSite = "ALL" })
+                                    if (selectedFanficRating != "ALL") add("Rated $selectedFanficRating" to { selectedFanficRating = "ALL" })
+                                    if (selectedFanficStatus != "ALL") add(selectedFanficStatus to { selectedFanficStatus = "ALL" })
+                                    if (selectedFanficMinWords > 0) add("${selectedFanficMinWords / 1000}k+ words" to { selectedFanficMinWords = 0 })
+                                    if (fanficCrossoverOnly) add("Crossovers" to { fanficCrossoverOnly = false })
+                                    if (fanficTagFilter.isNotBlank()) add("#${fanficTagFilter.trim()}" to { fanficTagFilter = "" })
+                                }
+                                else -> Unit
+                            }
+                        }
+                    }
+                    val hasActiveChimanewFilters = remember(libSettings, uiState.selectedStatus, activeSubFilterPills) {
                         uiState.selectedStatus != TrackingStatus.ALL ||
+                            activeSubFilterPills.isNotEmpty() ||
                             libSettings.filterStarted != TriStateFilter.OFF ||
                             libSettings.filterCompleted != TriStateFilter.OFF ||
                             libSettings.filterUnread != TriStateFilter.OFF ||
@@ -663,22 +727,6 @@ fun HomeScreen(
                                                 )
                                             }
                                         }
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .clip(CircleShape)
-                                            .background(DarkSurfaceElevated)
-                                            .clickable { showDiagnostics = true },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.BugReport,
-                                            contentDescription = "Diagnostics",
-                                            tint = TextSecondary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
                                     }
 
                                     Box(
@@ -865,128 +913,52 @@ fun HomeScreen(
                             )
                         }
 
-                        val activeMediaTabType = activeTab?.mediaTypeFilter
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.MANGA) {
+                        // Compact dismissible pills ONLY when contextual category sub-filters are active
+                        AnimatedVisibility(visible = activeSubFilterPills.isNotEmpty() && !isLibraryMultiSelect) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                                    .padding(horizontal = 14.dp, vertical = 3.dp)
                                     .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (key, label) ->
-                                    val isSelected = selectedMangaSubtype == key
-                                    Box(
+                                activeSubFilterPills.forEach { (label, onClear) ->
+                                    Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
-                                            .clickable { selectedMangaSubtype = key }
-                                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                                        contentAlignment = Alignment.Center
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(AccentGold.copy(alpha = 0.16f))
+                                            .clickable(onClick = onClear)
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
                                             text = label,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) AccentGold else TextSecondary
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AccentGold
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove filter",
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(12.dp)
                                         )
                                     }
                                 }
+                                Text(
+                                    text = "Clear",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextSecondary,
+                                    modifier = Modifier
+                                        .clickable {
+                                            activeSubFilterPills.forEach { it.second() }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                )
                             }
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.NOVEL) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 4.dp)
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (key, label) ->
-                                    val isSelected = selectedNovelSubtype == key
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
-                                            .clickable { selectedNovelSubtype = key }
-                                            .padding(horizontal = 12.dp, vertical = 5.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) AccentGold else TextSecondary
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.VISUAL_NOVEL) {
-                            VnUnderlineFilterBar(
-                                selectedOrigin = selectedVnOriginSubtype,
-                                selectedLength = selectedVnLengthSubtype,
-                                onOriginSelected = { selectedVnOriginSubtype = it },
-                                onLengthSelected = { selectedVnLengthSubtype = it },
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.GAME) {
-                            GameUnderlineFilterBar(
-                                selectedPlatform = selectedGamePlatform,
-                                selectedCompletion = selectedGameCompletion,
-                                onPlatformSelected = { selectedGamePlatform = it },
-                                onCompletionSelected = { selectedGameCompletion = it },
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.BOOK) {
-                            BookUnderlineFilterBar(
-                                selectedFormat = selectedBookFormat,
-                                selectedCategory = selectedBookCategory,
-                                onFormatSelected = { selectedBookFormat = it },
-                                onCategorySelected = { selectedBookCategory = it },
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.COMIC) {
-                            ComicUnderlineFilterBar(
-                                selectedPublisher = selectedComicPublisher,
-                                selectedFormat = selectedComicFormat,
-                                onPublisherSelected = { selectedComicPublisher = it },
-                                onFormatSelected = { selectedComicFormat = it },
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
-                        }
-
-                        AnimatedVisibility(visible = activeMediaTabType == MediaType.FANFICTION) {
-                            FanficUnderlineFilterBar(
-                                selectedSite = selectedFanficSite,
-                                selectedRating = selectedFanficRating,
-                                selectedStatus = selectedFanficStatus,
-                                minWords = selectedFanficMinWords,
-                                crossoverOnly = fanficCrossoverOnly,
-                                tagFilter = fanficTagFilter,
-                                onSiteSelected = { selectedFanficSite = it },
-                                onRatingSelected = { selectedFanficRating = it },
-                                onStatusSelected = { selectedFanficStatus = it },
-                                onMinWordsSelected = { selectedFanficMinWords = it },
-                                onCrossoverToggle = { fanficCrossoverOnly = !fanficCrossoverOnly },
-                                onTagFilterChanged = { fanficTagFilter = it },
-                                onOpenImport = {
-                                    fanficImportInitialTab = 0
-                                    fanficImportInitialUrl = ""
-                                    showFanficImportSheet = true
-                                },
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                            )
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1297,6 +1269,7 @@ fun HomeScreen(
                         onBatchRemoveFromHistory = { ids -> viewModel.batchRemoveFromHistory(ids) },
                         onBatchDeleteItems = { ids -> viewModel.batchDeleteItems(ids) },
                         watchedTimestamps90d = watchedTimestamps90d,
+                        visibleFilterTabs = visibleFilterTabs,
                         onOpenHeatmap = { showActivityHeatmapSheet = true },
                         onMultiSelectChanged = { isHistoryMultiSelect = it }
                     )
@@ -1531,11 +1504,54 @@ fun HomeScreen(
         }
 
         if (showLibraryFilterSheet) {
+            val activeSheetMediaTab = dynamicTabs.getOrNull(pagerState.currentPage)?.mediaTypeFilter
             ChimanewLibrarySheet(
                 settings = libSettings,
                 selectedStatus = uiState.selectedStatus,
                 categories = allCategories,
                 fanfictionEnabled = fanfictionEnabled,
+                visibleMediaTypes = visibleMediaTypes,
+                subFilters = LibraryCategorySubFilters(
+                    activeMediaTabType = activeSheetMediaTab,
+                    mangaSubtype = selectedMangaSubtype,
+                    onMangaSubtype = { selectedMangaSubtype = it },
+                    novelSubtype = selectedNovelSubtype,
+                    onNovelSubtype = { selectedNovelSubtype = it },
+                    vnOrigin = selectedVnOriginSubtype,
+                    onVnOrigin = { selectedVnOriginSubtype = it },
+                    vnLength = selectedVnLengthSubtype,
+                    onVnLength = { selectedVnLengthSubtype = it },
+                    gamePlatform = selectedGamePlatform,
+                    onGamePlatform = { selectedGamePlatform = it },
+                    gameCompletion = selectedGameCompletion,
+                    onGameCompletion = { selectedGameCompletion = it },
+                    bookFormat = selectedBookFormat,
+                    onBookFormat = { selectedBookFormat = it },
+                    bookCategory = selectedBookCategory,
+                    onBookCategory = { selectedBookCategory = it },
+                    comicPublisher = selectedComicPublisher,
+                    onComicPublisher = { selectedComicPublisher = it },
+                    comicFormat = selectedComicFormat,
+                    onComicFormat = { selectedComicFormat = it },
+                    fanficSite = selectedFanficSite,
+                    onFanficSite = { selectedFanficSite = it },
+                    fanficRating = selectedFanficRating,
+                    onFanficRating = { selectedFanficRating = it },
+                    fanficStatus = selectedFanficStatus,
+                    onFanficStatus = { selectedFanficStatus = it },
+                    fanficMinWords = selectedFanficMinWords,
+                    onFanficMinWords = { selectedFanficMinWords = it },
+                    fanficCrossoverOnly = fanficCrossoverOnly,
+                    onFanficCrossoverToggle = { fanficCrossoverOnly = !fanficCrossoverOnly },
+                    fanficTagFilter = fanficTagFilter,
+                    onFanficTagFilter = { fanficTagFilter = it },
+                    onOpenFanficImport = {
+                        showLibraryFilterSheet = false
+                        fanficImportInitialTab = 0
+                        fanficImportInitialUrl = ""
+                        showFanficImportSheet = true
+                    }
+                ),
                 onSelectStatus = { viewModel.selectStatus(it) },
                 onToggleTriStateFilter = { key, next ->
                     coroutineScope.launch { prefManager.setChimanewTriStateFilter(key, next) }
@@ -1573,6 +1589,22 @@ fun HomeScreen(
                 },
                 onResetFilters = {
                     viewModel.selectStatus(com.omnitrack.app.data.model.TrackingStatus.ALL)
+                    selectedMangaSubtype = "ALL"
+                    selectedNovelSubtype = "ALL"
+                    selectedVnOriginSubtype = "ALL"
+                    selectedVnLengthSubtype = "ALL"
+                    selectedGamePlatform = "ALL"
+                    selectedGameCompletion = "ALL"
+                    selectedBookFormat = "ALL"
+                    selectedBookCategory = "ALL"
+                    selectedComicPublisher = "ALL"
+                    selectedComicFormat = "ALL"
+                    selectedFanficSite = "ALL"
+                    selectedFanficRating = "ALL"
+                    selectedFanficStatus = "ALL"
+                    selectedFanficMinWords = 0
+                    fanficCrossoverOnly = false
+                    fanficTagFilter = ""
                     coroutineScope.launch { prefManager.resetChimanewLibraryFilters() }
                 },
                 onDismiss = { showLibraryFilterSheet = false }
@@ -1606,6 +1638,7 @@ fun HomeScreen(
                 initialTitle = customEntryInitTitle,
                 initialMediaType = customEntryInitType,
                 availableCategories = allCategories,
+                visibleMediaTypes = visibleMediaTypes,
                 initialCategoryIds = libSettings.defaultCategoryId?.let { setOf(it) } ?: emptySet(),
                 onCreateCategory = { name, onCreated ->
                     viewModel.createCategory(name, onCreated)
@@ -1872,6 +1905,7 @@ private fun HomeTabContent(
     hasUpdateAvailable: Boolean,
     posterStyle: PosterCardStyle,
     fanfictionEnabled: Boolean,
+    visibleFilterTabs: List<MediaType>,
     fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode,
     onItemClick: (Long) -> Unit,
     onOpenCalendar: () -> Unit,
@@ -1936,6 +1970,7 @@ private fun HomeTabContent(
             viewModel.loadReleaseCalendar(force = true)
         },
         fanfictionEnabled = fanfictionEnabled,
+        visibleFilterTabs = visibleFilterTabs,
         fanficNsfwMode = fanficNsfwMode,
         customCategories = allCategories,
         categoryAssignments = categoryAssignments,

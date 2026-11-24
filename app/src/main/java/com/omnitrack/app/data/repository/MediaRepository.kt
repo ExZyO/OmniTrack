@@ -417,16 +417,21 @@ class MediaRepository(
      */
     suspend fun saveOrUpdateFanficWork(
         work: com.omnitrack.app.data.fanfic.FanficParsedWork,
-        initialStatus: TrackingStatus = TrackingStatus.PLAN_TO_TRACK
+        initialStatus: TrackingStatus = TrackingStatus.PLAN_TO_TRACK,
+        targetMediaType: MediaType = MediaType.FANFICTION
     ): Pair<MediaItemEntity, Boolean> {
         val existing = findExistingMedia(
             fanficWorkId = work.workId,
             fanficSourceUrl = work.canonicalUrl,
             title = work.title,
-            mediaType = MediaType.FANFICTION
+            mediaType = targetMediaType
         )
         return if (existing != null) {
-            val merged = work.toMediaItemEntity(status = existing.status, existing = existing)
+            val merged = work.toMediaItemEntity(
+                status = existing.status,
+                existing = existing,
+                targetMediaType = existing.mediaType
+            )
             updateMedia(merged)
             val chaps = work.toChapterEntities(existing.id)
             if (chaps.isNotEmpty()) {
@@ -434,7 +439,11 @@ class MediaRepository(
             }
             merged to false
         } else {
-            val draft = work.toMediaItemEntity(status = initialStatus, existing = null)
+            val draft = work.toMediaItemEntity(
+                status = initialStatus,
+                existing = null,
+                targetMediaType = targetMediaType
+            )
             val newId = insertMedia(draft)
             val saved = draft.copy(id = newId)
             val chaps = work.toChapterEntities(newId)

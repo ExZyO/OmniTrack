@@ -10,15 +10,18 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.omnitrack.app.data.model.FanficSite
 import com.omnitrack.app.data.preferences.dataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -87,7 +90,9 @@ class TrackerTokenManager(private val context: Context) {
         val FANFIC_COOKIE_SV = stringPreferencesKey("fanfic_cookie_sv")
         val FANFIC_COOKIE_QQ = stringPreferencesKey("fanfic_cookie_qq")
         val FANFIC_COOKIE_FFN = stringPreferencesKey("fanfic_cookie_ffn")
+        val FANFIC_COOKIE_WATTPAD = stringPreferencesKey("fanfic_cookie_wattpad")
         val FANFIC_AO3_USERNAME = stringPreferencesKey("fanfic_ao3_username")
+        val FANFIC_WATTPAD_USERNAME = stringPreferencesKey("fanfic_wattpad_username")
     }
 
     val tokens: Flow<TrackerTokens> = context.dataStore.data
@@ -115,6 +120,7 @@ class TrackerTokenManager(private val context: Context) {
                 hardcoverToken = prefs[Keys.HARDCOVER_TOKEN]?.let { decrypt(it) }
             )
         }
+        .flowOn(Dispatchers.IO)
 
     suspend fun saveAnilistToken(token: String?) = saveToken(Keys.ANILIST_TOKEN, token)
 
@@ -250,6 +256,7 @@ class TrackerTokenManager(private val context: Context) {
         FanficSite.SV -> Keys.FANFIC_COOKIE_SV
         FanficSite.QQ -> Keys.FANFIC_COOKIE_QQ
         FanficSite.FFN -> Keys.FANFIC_COOKIE_FFN
+        FanficSite.WATTPAD -> Keys.FANFIC_COOKIE_WATTPAD
         FanficSite.OTHER -> null
     }
 
@@ -262,8 +269,10 @@ class TrackerTokenManager(private val context: Context) {
                 if (!prefs[Keys.FANFIC_COOKIE_SV].isNullOrBlank()) add(FanficSite.SV.code)
                 if (!prefs[Keys.FANFIC_COOKIE_QQ].isNullOrBlank()) add(FanficSite.QQ.code)
                 if (!prefs[Keys.FANFIC_COOKIE_FFN].isNullOrBlank()) add(FanficSite.FFN.code)
+                if (!prefs[Keys.FANFIC_COOKIE_WATTPAD].isNullOrBlank()) add(FanficSite.WATTPAD.code)
             }
         }
+        .flowOn(Dispatchers.IO)
 
     suspend fun saveFanficCookie(site: FanficSite, cookie: String?) {
         val key = fanficKeyFor(site) ?: return
@@ -285,6 +294,17 @@ class TrackerTokenManager(private val context: Context) {
 
     suspend fun getAo3Username(): String? =
         context.dataStore.data.firstOrNull()?.get(Keys.FANFIC_AO3_USERNAME)
+
+    suspend fun saveWattpadUsername(username: String?) {
+        val clean = username?.trim()?.removePrefix("@").orEmpty()
+        context.dataStore.edit { prefs ->
+            if (clean.isBlank()) prefs.remove(Keys.FANFIC_WATTPAD_USERNAME)
+            else prefs[Keys.FANFIC_WATTPAD_USERNAME] = clean
+        }
+    }
+
+    suspend fun getWattpadUsername(): String? =
+        context.dataStore.data.firstOrNull()?.get(Keys.FANFIC_WATTPAD_USERNAME)
 
     /**
      * One-time transparent upgrade: re-encrypts any legacy v1 token entries under the
@@ -349,11 +369,20 @@ class TrackerTokenManager(private val context: Context) {
             SecretKeySpec(keyBytes, "AES")
         }
 
+        @Volatile
+        private var cachedKeystoreKey: SecretKey? = null
+
+        private val decryptCache = ConcurrentHashMap<String, String>()
+
         @Synchronized
         private fun getOrCreateKeystoreKey(): SecretKey {
+            cachedKeystoreKey?.let { return it }
             val ks = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
             val existing = ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey
-            if (existing != null) return existing
+            if (existing != null) {
+                cachedKeystoreKey = existing
+                return existing
+            }
 
             val keyGen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
             val spec = KeyGenParameterSpec.Builder(
@@ -366,7 +395,9 @@ class TrackerTokenManager(private val context: Context) {
                 .setRandomizedEncryptionRequired(true)
                 .build()
             keyGen.init(spec)
-            return keyGen.generateKey()
+            val created = keyGen.generateKey()
+            cachedKeystoreKey = created
+            return created
         }
 
         fun isEncryptedTokenKey(keyName: String): Boolean =
@@ -394,23 +425,32 @@ class TrackerTokenManager(private val context: Context) {
 
         fun decrypt(stored: String): String? {
             if (stored.isBlank()) return null
-            if (stored.startsWith(KEYSTORE_PREFIX)) {
-                return try {
+            decryptCache[stored]?.let { return it }
+            val plain = if (stored.startsWith(KEYSTORE_PREFIX)) {
+                try {
                     val combined = Base64.decode(stored.removePrefix(KEYSTORE_PREFIX), Base64.NO_WRAP)
-                    if (combined.size <= GCM_IV_LENGTH) return null
-                    val iv = ByteArray(GCM_IV_LENGTH)
-                    val cipherText = ByteArray(combined.size - GCM_IV_LENGTH)
-                    System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH)
-                    System.arraycopy(combined, GCM_IV_LENGTH, cipherText, 0, cipherText.size)
+                    if (combined.size <= GCM_IV_LENGTH) null
+                    else {
+                        val iv = ByteArray(GCM_IV_LENGTH)
+                        val cipherText = ByteArray(combined.size - GCM_IV_LENGTH)
+                        System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH)
+                        System.arraycopy(combined, GCM_IV_LENGTH, cipherText, 0, cipherText.size)
 
-                    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                    cipher.init(Cipher.DECRYPT_MODE, getOrCreateKeystoreKey(), GCMParameterSpec(GCM_TAG_LENGTH, iv))
-                    String(cipher.doFinal(cipherText), StandardCharsets.UTF_8)
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKeystoreKey(), GCMParameterSpec(GCM_TAG_LENGTH, iv))
+                        String(cipher.doFinal(cipherText), StandardCharsets.UTF_8)
+                    }
                 } catch (_: Exception) {
                     null
                 }
+            } else {
+                decryptLegacy(stored)
             }
-            return decryptLegacy(stored)
+            if (plain != null) {
+                if (decryptCache.size > 128) decryptCache.clear()
+                decryptCache[stored] = plain
+            }
+            return plain
         }
 
         fun decryptLegacy(cipherTextBase64: String): String? {

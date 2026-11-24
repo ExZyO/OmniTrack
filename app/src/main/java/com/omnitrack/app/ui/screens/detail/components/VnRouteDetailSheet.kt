@@ -54,7 +54,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
+import com.omnitrack.app.data.model.VnDetailMeta
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ArtworkBackdrop
@@ -68,6 +70,8 @@ import kotlin.math.roundToInt
 @Composable
 fun VnRouteDetailSheet(
     route: VnRouteEntity,
+    mediaItem: MediaItemEntity? = null,
+    vnMeta: VnDetailMeta? = null,
     presentationSettings: PresentationSettings? = null,
     backdropBitmap: ImageBitmap? = null,
     backdropTargetUrl: String? = null,
@@ -80,6 +84,17 @@ fun VnRouteDetailSheet(
 
     var editedName by remember(route.id) { mutableStateOf(route.routeName) }
     var editedType by remember(route.id) { mutableStateOf(route.routeType) }
+    var photoSelection by remember(route.id) {
+        mutableStateOf(
+            VnRoutePhotoSelection(
+                imageUrl = route.characterImageUrl,
+                focalX = route.imageFocalX,
+                focalY = route.imageFocalY,
+                zoom = route.imageZoom
+            )
+        )
+    }
+    var showPhotoPicker by remember { mutableStateOf(false) }
     var isCompleted by remember(route.id) { mutableStateOf(route.isCompleted) }
     var isBookmarked by remember(route.id) { mutableStateOf(route.isBookmarked) }
     var isSpoiler by remember(route.id) { mutableStateOf(route.isSpoiler) }
@@ -147,12 +162,23 @@ fun VnRouteDetailSheet(
                     )
                 }
 
-                // Header
+                // Header with cropped route photo thumbnail & edit action
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    VnRoutePhotoThumb(
+                        imageUrl = photoSelection.imageUrl,
+                        focalX = photoSelection.focalX,
+                        focalY = photoSelection.focalY,
+                        zoom = photoSelection.zoom,
+                        contentDescription = editedName,
+                        size = 64.dp,
+                        cornerRadius = 12.dp,
+                        fallbackText = "+",
+                        modifier = Modifier.clickable { showPhotoPicker = true }
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = editedName.ifBlank { "Route Details" },
@@ -162,17 +188,31 @@ fun VnRouteDetailSheet(
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Text(
-                            text = "${formatRouteTypeLabel(editedType)} Route",
-                            color = Color.White.copy(alpha = 0.68f),
-                            fontSize = 12.sp
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${formatRouteTypeLabel(editedType)} Route",
+                                color = Color.White.copy(alpha = 0.68f),
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = if (photoSelection.imageUrl.isNullOrBlank()) "+ Add Photo" else "Edit Photo",
+                                color = AccentGold,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clickable { showPhotoPicker = true }
+                                    .padding(vertical = 2.dp)
+                            )
+                        }
                     }
                     if (!isUnrated || route.userRating != null) {
                         Text(
                             text = "Remove Rating",
                             color = Color(0xFFEF4444),
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .clickable { applySlider(0.9f) }
@@ -477,6 +517,10 @@ fun VnRouteDetailSheet(
                                 route.copy(
                                     routeName = editedName.trim().ifBlank { route.routeName },
                                     routeType = editedType,
+                                    characterImageUrl = photoSelection.imageUrl,
+                                    imageFocalX = photoSelection.focalX,
+                                    imageFocalY = photoSelection.focalY,
+                                    imageZoom = photoSelection.zoom,
                                     isCompleted = isCompleted,
                                     completedAtMs = if (isCompleted) (route.completedAtMs ?: System.currentTimeMillis()) else null,
                                     userRating = currentRating,
@@ -500,6 +544,17 @@ fun VnRouteDetailSheet(
                 }
             }
         }
+    }
+
+    if (showPhotoPicker) {
+        VnRoutePhotoPickerSheet(
+            routeTitle = editedName.ifBlank { route.routeName },
+            initialSelection = photoSelection,
+            mediaItem = mediaItem,
+            vnMeta = vnMeta,
+            onApply = { sel -> photoSelection = sel },
+            onDismiss = { showPhotoPicker = false }
+        )
     }
 }
 

@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -902,6 +903,21 @@ fun ArtworkPickerBottomSheet(
                                             if (path.startsWith("http") || path.startsWith("content:")) path else java.io.File(path)
                                         } ?: currentBannerUrl?.takeIf { it.isNotBlank() } ?: currentCoverUrl.takeIf { it.isNotBlank() }
                                     }
+                                    val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.coerceAtLeast(320)
+                                    val detailsHeroAspect = (screenWidthDp / 350f).coerceIn(0.85f, 1.85f)
+                                    val homeHeroAspect = (screenWidthDp / 404f).coerceIn(0.78f, 1.65f)
+                                    var aspectMode by remember { mutableStateOf("DETAILS") } // DETAILS (~1.1:1), HOME (~1:1), CINEMA (16:9)
+                                    var showFineTuneSliders by remember { mutableStateOf(false) }
+                                    val previewAspect = when (aspectMode) {
+                                        "HOME" -> homeHeroAspect
+                                        "CINEMA" -> 16f / 9f
+                                        else -> detailsHeroAspect
+                                    }
+                                    val aspectCaption = when (aspectMode) {
+                                        "HOME" -> "Matches Home Hero (${screenWidthDp}\u00D7404dp)"
+                                        "CINEMA" -> "Matches Cinema Showcase (16:9)"
+                                        else -> "Matches Details Hero (${screenWidthDp}\u00D7350dp)"
+                                    }
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -911,10 +927,47 @@ fun ArtworkPickerBottomSheet(
                                             .padding(12.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        // Aspect Ratio Preset Switcher matching real phone hero dimensions
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            listOf(
+                                                "DETAILS" to "Details Hero",
+                                                "HOME" to "Home Hero",
+                                                "CINEMA" to "Cinema 16:9"
+                                            ).forEach { (key, lbl) ->
+                                                val sel = aspectMode == key
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(if (sel) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                                        .border(
+                                                            0.8.dp,
+                                                            if (sel) AccentGold else Color.White.copy(alpha = 0.10f),
+                                                            RoundedCornerShape(6.dp)
+                                                        )
+                                                        .clickable { aspectMode = key }
+                                                        .padding(vertical = 6.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = lbl,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (sel) AccentGold else TextSecondary,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            }
+                                        }
+
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(184.dp)
+                                                .aspectRatio(previewAspect)
+                                                .heightIn(max = 320.dp)
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .clipToBounds()
                                                 .background(DarkSurfaceCard)
@@ -961,6 +1014,18 @@ fun ArtworkPickerBottomSheet(
                                                         }
                                                 )
                                             }
+                                            // Bottom safe-zone fade hint matching real Hero vignette
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomCenter)
+                                                    .fillMaxWidth()
+                                                    .height(54.dp)
+                                                    .background(
+                                                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                            listOf(Color.Transparent, AmoledBlack.copy(alpha = 0.82f))
+                                                        )
+                                                    )
+                                            )
                                             Box(
                                                 modifier = Modifier
                                                     .align(Alignment.TopStart)
@@ -970,88 +1035,114 @@ fun ArtworkPickerBottomSheet(
                                                     .padding(horizontal = 8.dp, vertical = 3.dp)
                                             ) {
                                                 Text(
-                                                    text = "Drag to pan · Pinch to zoom",
-                                                    fontSize = 10.5.sp,
+                                                    text = "Pinch & drag \u00B7 ${String.format(java.util.Locale.US, "%.1fx", draftZoom)} \u00B7 $aspectCaption",
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Medium,
-                                                    color = TextPrimary
+                                                    color = TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
 
-                                        // Synced X / Y controls
+                                        // Collapsible Fine-Tune X / Y / Zoom sliders fallback
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(34.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                .clickable { showFineTuneSliders = !showFineTuneSliders }
+                                                .padding(vertical = 2.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("X", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
-                                            Slider(
-                                                value = draftFocalX,
-                                                onValueChange = { draftFocalX = it },
-                                                valueRange = -1f..1f,
-                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            Text("Y", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
-                                            Slider(
-                                                value = draftFocalY,
-                                                onValueChange = { draftFocalY = it },
-                                                valueRange = -1f..1f,
-                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(34.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Text("Zoom", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                            Slider(
-                                                value = draftZoom,
-                                                onValueChange = { draftZoom = it },
-                                                valueRange = 1f..2.5f,
-                                                colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
-                                                modifier = Modifier.weight(1f)
-                                            )
                                             Text(
-                                                text = String.format(java.util.Locale.US, "%.1fx", draftZoom),
+                                                text = if (showFineTuneSliders) "Hide fine-tune sliders" else "Fine-tune X / Y / Zoom sliders",
                                                 fontSize = 11.5.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = AccentGold
                                             )
+                                            Text(
+                                                text = if (showFineTuneSliders) "\u25B2" else "\u25BC",
+                                                fontSize = 10.sp,
+                                                color = AccentGold
+                                            )
                                         }
 
-                                        // Quick snaps
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .horizontalScroll(rememberScrollState()),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            listOf(
-                                                "Left" to Triple(-1f, draftFocalY, draftZoom),
-                                                "Center" to Triple(0f, 0f, draftZoom),
-                                                "Right" to Triple(1f, draftFocalY, draftZoom),
-                                                "Top" to Triple(draftFocalX, -1f, draftZoom),
-                                                "Bottom" to Triple(draftFocalX, 1f, draftZoom)
-                                            ).forEach { (lbl, target) ->
-                                                OutlinedButton(
-                                                    onClick = {
-                                                        draftFocalX = target.first
-                                                        draftFocalY = target.second
-                                                        draftZoom = target.third
-                                                    },
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
-                                                ) {
-                                                    Text(lbl, fontSize = 11.sp, color = TextPrimary)
+                                        if (showFineTuneSliders) {
+                                            // Synced X / Y controls
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(34.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text("X", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
+                                                Slider(
+                                                    value = draftFocalX,
+                                                    onValueChange = { draftFocalX = it },
+                                                    valueRange = -1f..1f,
+                                                    colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text("Y", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = AccentGold, modifier = Modifier.width(16.dp))
+                                                Slider(
+                                                    value = draftFocalY,
+                                                    onValueChange = { draftFocalY = it },
+                                                    valueRange = -1f..1f,
+                                                    colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(34.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Text("Zoom", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                                Slider(
+                                                    value = draftZoom,
+                                                    onValueChange = { draftZoom = it },
+                                                    valueRange = 1f..2.5f,
+                                                    colors = SliderDefaults.colors(thumbColor = AccentGold, activeTrackColor = AccentGold),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text(
+                                                    text = String.format(java.util.Locale.US, "%.1fx", draftZoom),
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = AccentGold
+                                                )
+                                            }
+
+                                            // Quick snaps
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .horizontalScroll(rememberScrollState()),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                listOf(
+                                                    "Left" to Triple(-1f, draftFocalY, draftZoom),
+                                                    "Center" to Triple(0f, 0f, draftZoom),
+                                                    "Right" to Triple(1f, draftFocalY, draftZoom),
+                                                    "Top" to Triple(draftFocalX, -1f, draftZoom),
+                                                    "Bottom" to Triple(draftFocalX, 1f, draftZoom)
+                                                ).forEach { (lbl, target) ->
+                                                    OutlinedButton(
+                                                        onClick = {
+                                                            draftFocalX = target.first
+                                                            draftFocalY = target.second
+                                                            draftZoom = target.third
+                                                        },
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+                                                    ) {
+                                                        Text(lbl, fontSize = 11.sp, color = TextPrimary)
+                                                    }
                                                 }
                                             }
                                         }

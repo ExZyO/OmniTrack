@@ -108,9 +108,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handleAuthDeepLink(data: Uri?, app: OmniTrackApplication) {
         if (data == null) return
-        val validSchemes = setOf("omnitrack", "aniyomi", "chimahon", "mihon", "app.mihon", "nuvio", "komikku")
         val scheme = data.scheme?.lowercase() ?: return
-        if (scheme !in validSchemes) return
+        if (scheme != "omnitrack") return
 
         val host = data.host?.lowercase() ?: ""
         val uriStr = data.toString().lowercase()
@@ -130,13 +129,12 @@ class MainActivity : ComponentActivity() {
 
         if (service.isBlank()) return
         val tokenManager = app.trackerTokenManager
-        val effectiveRedirectUri = when {
-            scheme == "komikku" -> "komikku://bangumi-auth"
-            scheme == "app.mihon" -> "app.mihon://comick-auth"
-            scheme == "chimahon" || host == "myanimelist-auth" -> "chimahon://myanimelist-auth"
-            scheme == "nuvio" -> "nuvio://auth/$service"
-            else -> "omnitrack://auth/$service"
+        val normalizedService = when (service) {
+            "myanimelist" -> "mal"
+            "bgm" -> "bangumi"
+            else -> service
         }
+        val effectiveRedirectUri = "omnitrack://auth/$normalizedService"
 
         var token: String? = null
         var fragmentRefresh: String? = null
@@ -244,7 +242,7 @@ class MainActivity : ComponentActivity() {
                                 .add("client_id", TrackerAccountVerifier.BANGUMI_CLIENT_ID)
                                 .add("client_secret", TrackerAccountVerifier.BANGUMI_CLIENT_SECRET)
                                 .add("code", code)
-                                .add("redirect_uri", "komikku://bangumi-auth")
+                                .add("redirect_uri", "omnitrack://auth/bangumi")
                                 .build()
                             val req = Request.Builder()
                                 .url("https://bgm.tv/oauth/access_token")
@@ -269,7 +267,7 @@ class MainActivity : ComponentActivity() {
                                 .add("grant_type", "authorization_code")
                                 .add("client_id", TrackerAccountVerifier.COMICK_CLIENT_ID)
                                 .add("code", code)
-                                .add("redirect_uri", "app.mihon://comick-auth")
+                                .add("redirect_uri", "omnitrack://auth/comick")
                                 .add("code_verifier", verifier)
                                 .add("resource", "https://api.comick.dev/integrations/v1")
                                 .build()
@@ -291,11 +289,11 @@ class MainActivity : ComponentActivity() {
                     "mal", "myanimelist" -> {
                         try {
                             val pref = (application as OmniTrackApplication).preferenceManager
-                            val customMal = pref.customMalClientId.firstOrNull()?.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
+                            val customMal = pref.customMalClientId.firstOrNull()?.takeIf { it.isNotBlank() }
                             val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
                             val verifier = TrackerAccountVerifier.pendingMalVerifier?.takeIf { it.isNotBlank() }
                                 ?: tokenManager.getMalVerifier().orEmpty()
-                            val malRedirectUri = if (customMal != null) effectiveRedirectUri else "chimahon://myanimelist-auth"
+                            val malRedirectUri = "omnitrack://auth/mal"
 
                             AppLogger.i("OAuth", "Exchanging MAL auth code (redirect=$malRedirectUri)")
 

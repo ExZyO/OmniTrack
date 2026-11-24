@@ -65,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,15 +73,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.fanfic.FanficFetchResult
 import com.omnitrack.app.data.fanfic.FanficParsedWork
 import com.omnitrack.app.data.fanfic.FanficSiteEngine
 import com.omnitrack.app.data.model.FanficSite
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.model.extractFirstFanficUrl
 import com.omnitrack.app.data.model.formatWordCount
+import com.omnitrack.app.data.model.isLikelyWattpadFanfic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -113,6 +117,7 @@ fun FanficImportSheet(
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 1)) }
     var urlInput by remember(initialUrl) { mutableStateOf(initialUrl) }
     var selectedStatus by remember { mutableStateOf(TrackingStatus.IN_PROGRESS) }
+    var targetMediaType by remember { mutableStateOf(MediaType.FANFICTION) }
     var isFetching by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     var parsedWork by remember { mutableStateOf<FanficParsedWork?>(null) }
@@ -125,20 +130,33 @@ fun FanficImportSheet(
     // Tab 1 state (accounts & bulk import)
     val connectedSites by app.trackerTokenManager.fanficConnectedSites.collectAsState(initial = emptySet())
     var ao3Username by remember { mutableStateOf("") }
+    var wattpadUsername by remember { mutableStateOf("") }
     var bulkImportStatus by remember { mutableStateOf<String?>(null) }
     var isBulkImporting by remember { mutableStateOf(false) }
+
+    fun defaultCategoryForWork(work: FanficParsedWork): MediaType {
+        return if (work.site == FanficSite.WATTPAD && !isLikelyWattpadFanfic(work.freeformTags, work.summary, work.title)) {
+            MediaType.NOVEL
+        } else {
+            MediaType.FANFICTION
+        }
+    }
 
     LaunchedEffect(Unit) {
         val savedUser = app.trackerTokenManager.getAo3Username()
         if (!savedUser.isNullOrBlank()) {
             ao3Username = savedUser
         }
+        val savedWp = app.trackerTokenManager.getWattpadUsername()
+        if (!savedWp.isNullOrBlank()) {
+            wattpadUsername = savedWp
+        }
     }
 
     fun triggerUrlFetch(targetUrl: String) {
         val trimmed = extractFirstFanficUrl(targetUrl) ?: targetUrl.trim()
         if (trimmed.isBlank()) {
-            errorMessage = "Paste a fanfiction story URL first"
+            errorMessage = "Paste a fanfiction or Wattpad story URL first"
             return
         }
         urlInput = trimmed
@@ -150,6 +168,7 @@ fun FanficImportSheet(
             when (val res = FanficSiteEngine.fetchFromUrl(trimmed) { site -> app.trackerTokenManager.getFanficCookie(site) }) {
                 is FanficFetchResult.Success -> {
                     parsedWork = res.work
+                    targetMediaType = defaultCategoryForWork(res.work)
                 }
                 is FanficFetchResult.RequiresWebView -> {
                     webViewPrompt = res
@@ -201,13 +220,13 @@ fun FanficImportSheet(
                 ) {
                     Column {
                         Text(
-                            text = "Fanfiction Hub",
+                            text = "Fanfiction & Wattpad Hub",
                             color = TextPrimary,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "AO3 • FF.net • SpaceBattles • Sufficient Velocity • QQ",
+                            text = "AO3 • FF.net • Wattpad • SpaceBattles • SV • QQ",
                             color = TextSecondary,
                             fontSize = 11.sp
                         )
@@ -254,7 +273,7 @@ fun FanficImportSheet(
                             onValueChange = { urlInput = it },
                             modifier = Modifier.fillMaxWidth(),
                             label = { Text("Story or Thread URL") },
-                            placeholder = { Text("https://archiveofourown.org/works/...") },
+                            placeholder = { Text("https://www.wattpad.com/story/... or ao3 / ffn / sb") },
                             singleLine = true,
                             trailingIcon = {
                                 Row {
@@ -439,17 +458,26 @@ fun FanficImportSheet(
                                             .height(126.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                     ) {
-                                        FanficTypographicCover(
-                                            title = work.title,
-                                            author = work.author,
-                                            primaryFandom = work.fandoms.firstOrNull(),
-                                            sourceSite = work.site.code,
-                                            ratingCode = work.rating.code,
-                                            wordCount = work.wordCount,
-                                            isCrossover = work.isCrossover,
-                                            compact = true,
-                                            isBlurred = false
-                                        )
+                                        if (!work.coverUrl.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = work.coverUrl,
+                                                contentDescription = work.title,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        } else {
+                                            FanficTypographicCover(
+                                                title = work.title,
+                                                author = work.author,
+                                                primaryFandom = work.fandoms.firstOrNull(),
+                                                sourceSite = work.site.code,
+                                                ratingCode = work.rating.code,
+                                                wordCount = work.wordCount,
+                                                isCrossover = work.isCrossover,
+                                                compact = true,
+                                                isBlurred = false
+                                            )
+                                        }
                                     }
                                     Column(
                                         modifier = Modifier.weight(1f),
@@ -499,6 +527,35 @@ fun FanficImportSheet(
                                     )
                                 }
 
+                                if (work.site == FanficSite.WATTPAD) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Save as:",
+                                            color = TextSecondary,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        listOf(
+                                            MediaType.FANFICTION to "Fanfiction",
+                                            MediaType.NOVEL to "Web Novel"
+                                        ).forEach { (mt, label) ->
+                                            FilterChip(
+                                                selected = targetMediaType == mt,
+                                                onClick = { targetMediaType = mt },
+                                                label = { Text(label, fontSize = 12.sp) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = AccentGold.copy(alpha = 0.22f),
+                                                    selectedLabelColor = AccentGold
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
                                 // Status picker chips
                                 Row(
                                     modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -527,11 +584,13 @@ fun FanficImportSheet(
                                     onClick = {
                                         scope.launch {
                                             isSaving = true
-                                            val (saved, created) = app.repository.saveOrUpdateFanficWork(work, selectedStatus)
+                                            val chosenType = if (work.site == FanficSite.WATTPAD) targetMediaType else MediaType.FANFICTION
+                                            val (saved, created) = app.repository.saveOrUpdateFanficWork(work, selectedStatus, chosenType)
                                             isSaving = false
+                                            val destLabel = if (saved.mediaType == MediaType.NOVEL) "Web Novels" else "Fanfiction"
                                             Toast.makeText(
                                                 context,
-                                                if (created) "Added \"${saved.title}\" to Fanfiction library" else "Updated existing work \"${saved.title}\"",
+                                                if (created) "Added \"${saved.title}\" to $destLabel" else "Updated existing story \"${saved.title}\"",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                             onImported(saved)
@@ -579,6 +638,7 @@ fun FanficImportSheet(
 
                         listOf(
                             FanficSite.AO3,
+                            FanficSite.WATTPAD,
                             FanficSite.FFN,
                             FanficSite.SB,
                             FanficSite.SV,
@@ -619,6 +679,7 @@ fun FanficImportSheet(
                                                 isConnected && site == FanficSite.FFN -> "Cloudflare session saved (Encrypted)"
                                                 isConnected -> "Session saved (Encrypted)"
                                                 site == FanficSite.FFN -> "No login needed (Public) • Optional Cloudflare session"
+                                                site == FanficSite.WATTPAD -> "Optional login for Private Library & logged-in reading"
                                                 else -> "Not signed in"
                                             },
                                             color = if (isConnected) AccentJade else TextSecondary,
@@ -738,6 +799,106 @@ fun FanficImportSheet(
                             }
                         }
 
+                        // Wattpad Reading Lists (public) & Private Library import card
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(DarkSurfaceCard)
+                                .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text("Wattpad Reading Lists & Library", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "Public reading lists only need a username. Private Library uses your signed-in Wattpad session above.",
+                                color = TextSecondary,
+                                fontSize = 11.5.sp
+                            )
+                            OutlinedTextField(
+                                value = wattpadUsername,
+                                onValueChange = { wattpadUsername = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                label = { Text("Wattpad Username") },
+                                placeholder = { Text("username (without @)") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGold,
+                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
+                                )
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    enabled = !isBulkImporting && wattpadUsername.isNotBlank(),
+                                    onClick = {
+                                        scope.launch {
+                                            isBulkImporting = true
+                                            val cleanU = wattpadUsername.trim().removePrefix("@")
+                                            bulkImportStatus = "Fetching public Wattpad reading lists for @$cleanU..."
+                                            app.trackerTokenManager.saveWattpadUsername(cleanU)
+                                            val cookie = app.trackerTokenManager.getFanficCookie(FanficSite.WATTPAD)
+                                            val res = FanficSiteEngine.fetchWattpadUserReadingLists(cleanU, cookie)
+                                            res.onSuccess { works ->
+                                                var added = 0
+                                                var updated = 0
+                                                works.forEach { w ->
+                                                    val destType = defaultCategoryForWork(w)
+                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.PLAN_TO_TRACK, destType)
+                                                    if (created) added++ else updated++
+                                                }
+                                                bulkImportStatus = "Wattpad Reading Lists: imported $added new, updated $updated existing stories."
+                                            }.onFailure { err ->
+                                                bulkImportStatus = err.message ?: "Failed to fetch Wattpad reading lists"
+                                            }
+                                            isBulkImporting = false
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated, contentColor = AccentGold)
+                                ) {
+                                    Text("Public Lists", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+
+                                Button(
+                                    enabled = !isBulkImporting && FanficSite.WATTPAD.code in connectedSites,
+                                    onClick = {
+                                        scope.launch {
+                                            isBulkImporting = true
+                                            val cleanU = wattpadUsername.trim().removePrefix("@")
+                                            if (cleanU.isNotBlank()) app.trackerTokenManager.saveWattpadUsername(cleanU)
+                                            bulkImportStatus = "Fetching Wattpad Private Library..."
+                                            val cookie = app.trackerTokenManager.getFanficCookie(FanficSite.WATTPAD).orEmpty()
+                                            val res = FanficSiteEngine.fetchWattpadPrivateLibrary(cleanU, cookie)
+                                            res.onSuccess { works ->
+                                                var added = 0
+                                                var updated = 0
+                                                works.forEach { w ->
+                                                    val destType = defaultCategoryForWork(w)
+                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.IN_PROGRESS, destType)
+                                                    if (created) added++ else updated++
+                                                }
+                                                bulkImportStatus = "Wattpad Private Library: imported $added new, updated $updated existing stories."
+                                            }.onFailure { err ->
+                                                bulkImportStatus = err.message ?: "Failed to fetch Wattpad Private Library"
+                                            }
+                                            isBulkImporting = false
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(FanficSite.WATTPAD.accentHex), contentColor = Color.White)
+                                ) {
+                                    Text("Private Library", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+
                         // Forum Watched Threads import
                         val connectedForums = listOf(FanficSite.SB, FanficSite.SV, FanficSite.QQ)
                             .filter { it.code in connectedSites }
@@ -833,6 +994,7 @@ fun FanficImportSheet(
             onSessionSaved = { _, _ -> },
             onPageImported = { work ->
                 parsedWork = work
+                targetMediaType = defaultCategoryForWork(work)
                 webViewPrompt = null
                 errorMessage = null
                 selectedTab = 0

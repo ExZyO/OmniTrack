@@ -119,13 +119,15 @@ object DiscoverShelfCatalog {
 
         // Novels
         DiscoverShelfDef("NOVEL:top_webnovels", MediaType.NOVEL, "top_webnovels", "Popular Web Novels"),
+        DiscoverShelfDef("NOVEL:wattpad_webnovels", MediaType.NOVEL, "wattpad_webnovels", "Popular on Wattpad"),
         DiscoverShelfDef("NOVEL:progression_webnovels", MediaType.NOVEL, "progression_webnovels", "Progression & LitRPG Web Novels"),
         DiscoverShelfDef("NOVEL:trending_ln", MediaType.NOVEL, "trending_ln", "Trending Light Novels"),
         DiscoverShelfDef("NOVEL:top_rated_ln", MediaType.NOVEL, "top_rated_ln", "Top Rated Light Novels"),
 
-        // Fanfiction (AO3 live shelves)
+        // Fanfiction (AO3 + Wattpad live shelves)
         DiscoverShelfDef("ALL:fanfic_trending", MediaType.ALL, "fanfic_trending", "Popular Fanfiction (AO3)"),
         DiscoverShelfDef("FANFICTION:ao3_kudos", MediaType.FANFICTION, "ao3_kudos", "Most Kudosed on AO3"),
+        DiscoverShelfDef("FANFICTION:wattpad_fanfic", MediaType.FANFICTION, "wattpad_fanfic", "Popular on Wattpad"),
         DiscoverShelfDef("FANFICTION:ao3_updated", MediaType.FANFICTION, "ao3_updated", "Recently Updated on AO3"),
         DiscoverShelfDef("FANFICTION:ao3_complete", MediaType.FANFICTION, "ao3_complete", "Top Completed Works (20k+)"),
         DiscoverShelfDef("FANFICTION:ao3_crossovers", MediaType.FANFICTION, "ao3_crossovers", "Popular Crossovers"),
@@ -572,6 +574,23 @@ data class PerformanceSettings(
     val hardwareBitmaps: Boolean = true
 )
 
+val DEFAULT_MEDIA_TYPE_ORDER: List<MediaType> = MediaType.filterTabs.filter { it != MediaType.ALL }
+
+@Immutable
+data class MediaCategoryPrefs(
+    val orderedTypes: List<MediaType> = DEFAULT_MEDIA_TYPE_ORDER,
+    val hiddenTypes: Set<MediaType> = emptySet()
+) {
+    fun visibleMediaTypes(): List<MediaType> =
+        orderedTypes.filter { it != MediaType.ALL && it !in hiddenTypes }
+            .ifEmpty { listOf(MediaType.ANIME) }
+
+    fun visibleFilterTabs(includeAll: Boolean = true): List<MediaType> =
+        if (includeAll) listOf(MediaType.ALL) + visibleMediaTypes() else visibleMediaTypes()
+
+    fun isHidden(type: MediaType): Boolean = type in hiddenTypes
+}
+
 class PreferenceManager(private val context: Context) {
 
     private object PreferencesKeys {
@@ -697,6 +716,8 @@ class PreferenceManager(private val context: Context) {
         val VN_SPOILER_LEVEL = intPreferencesKey("vn_spoiler_level")
         val VN_NSFW_FILTER_MODE = stringPreferencesKey("vn_nsfw_filter_mode")
         val FANFICTION_ENABLED = booleanPreferencesKey("fanfiction_enabled")
+        val MEDIA_TYPE_ORDER = stringPreferencesKey("media_type_order")
+        val HIDDEN_MEDIA_TYPES = stringSetPreferencesKey("hidden_media_types")
         val FANFIC_NSFW_FILTER_MODE = stringPreferencesKey("fanfic_nsfw_filter_mode")
         val UNIVERSAL_HERO_BANNER_BLUR = stringPreferencesKey("universal_hero_banner_blur")
         val CATEGORY_HERO_BANNER_BLUR_OVERRIDES = stringPreferencesKey("category_hero_banner_blur_overrides")
@@ -1920,15 +1941,19 @@ class PreferenceManager(private val context: Context) {
     val performanceSettings: Flow<PerformanceSettings> = context.dataStore.data
         .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
+            // Zero-downside optimizations are always active automatically:
+            // autoPauseBlurOnScroll = true, downsampleGridCovers = true,
+            // prefetchAdjacentTabs = false (limit offscreen tabs), hardwareBitmaps = true.
+            val perfMode = prefs[PreferencesKeys.PERF_MODE_ENABLED] ?: false
             PerformanceSettings(
-                performanceModeEnabled = prefs[PreferencesKeys.PERF_MODE_ENABLED] ?: false,
-                liveNavBarBlur = prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] ?: true,
-                autoPauseBlurOnScroll = prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] ?: true,
-                downsampleGridCovers = prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] ?: true,
-                disableCardDepthEffects = prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] ?: false,
-                disableCardAnimations = prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] ?: false,
-                prefetchAdjacentTabs = prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] ?: false,
-                hardwareBitmaps = prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] ?: true
+                performanceModeEnabled = perfMode,
+                liveNavBarBlur = if (perfMode) false else (prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] ?: true),
+                autoPauseBlurOnScroll = true,
+                downsampleGridCovers = true,
+                disableCardDepthEffects = if (perfMode) true else (prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] ?: false),
+                disableCardAnimations = if (perfMode) true else (prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] ?: false),
+                prefetchAdjacentTabs = false,
+                hardwareBitmaps = true
             )
         }
         .distinctUntilChanged()
@@ -1937,22 +1962,13 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.PERF_MODE_ENABLED] = enabled
             if (enabled) {
-                // Every optimization switch ON = Faster
                 prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = false
-                prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = true
-                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = true
-                prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = false
-                prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = true
             } else {
                 prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = true
-                prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = true
-                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = false
                 prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = false
-                prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = false
-                prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = true
             }
         }
     }
@@ -1961,13 +1977,13 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { prefs ->
             when (key.uppercase()) {
                 "LIVE_BLUR" -> prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = enabled
-                "PAUSE_BLUR_SCROLL" -> prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = enabled
-                "DOWNSAMPLE_COVERS" -> prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = enabled
                 "DISABLE_CARD_DEPTH" -> prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = enabled
                 "DISABLE_ANIMS" -> prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = enabled
-                "PREFETCH_TABS" -> prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = enabled
-                "HARDWARE_BITMAPS" -> prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = enabled
             }
+            val liveBlur = prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] ?: true
+            val noDepth = prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] ?: false
+            val noAnims = prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] ?: false
+            prefs[PreferencesKeys.PERF_MODE_ENABLED] = !liveBlur && noDepth && noAnims
         }
     }
 
@@ -1981,6 +1997,75 @@ class PreferenceManager(private val context: Context) {
             prefs.remove(PreferencesKeys.PERF_DISABLE_CARD_ANIMS)
             prefs.remove(PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS)
             prefs.remove(PreferencesKeys.PERF_HARDWARE_BITMAPS)
+        }
+    }
+
+    val mediaCategoryPrefs: Flow<MediaCategoryPrefs> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val savedOrder = prefs[PreferencesKeys.MEDIA_TYPE_ORDER]
+                ?.split(",")
+                ?.mapNotNull { raw -> runCatching { MediaType.valueOf(raw.trim()) }.getOrNull() }
+                ?.filter { it != MediaType.ALL }
+                ?.distinct()
+                .orEmpty()
+            val fullOrder = buildList {
+                addAll(savedOrder)
+                DEFAULT_MEDIA_TYPE_ORDER.forEach { mt -> if (mt !in this) add(mt) }
+            }
+            val savedHidden = prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES]
+                ?.mapNotNull { raw -> runCatching { MediaType.valueOf(raw.trim()) }.getOrNull() }
+                ?.filter { it != MediaType.ALL }
+                ?.toMutableSet()
+                ?: mutableSetOf()
+            if (prefs[PreferencesKeys.FANFICTION_ENABLED] == false) {
+                savedHidden.add(MediaType.FANFICTION)
+            }
+            // Never allow all categories to be hidden at once
+            if (savedHidden.size >= fullOrder.size) {
+                savedHidden.remove(fullOrder.first())
+            }
+            MediaCategoryPrefs(orderedTypes = fullOrder, hiddenTypes = savedHidden)
+        }
+        .distinctUntilChanged()
+
+    suspend fun updateMediaTypeOrder(order: List<MediaType>) {
+        val clean = buildList {
+            order.filter { it != MediaType.ALL }.distinct().forEach { add(it) }
+            DEFAULT_MEDIA_TYPE_ORDER.forEach { if (it !in this) add(it) }
+        }
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.MEDIA_TYPE_ORDER] = clean.joinToString(",") { it.name }
+        }
+    }
+
+    suspend fun setMediaTypeHidden(type: MediaType, hidden: Boolean) {
+        if (type == MediaType.ALL) return
+        context.dataStore.edit { prefs ->
+            val current = prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES]?.toMutableSet() ?: mutableSetOf()
+            if (prefs[PreferencesKeys.FANFICTION_ENABLED] == false) {
+                current.add(MediaType.FANFICTION.name)
+            }
+            if (hidden) {
+                // Keep at least 1 category visible
+                if (current.size < DEFAULT_MEDIA_TYPE_ORDER.size - 1) {
+                    current.add(type.name)
+                }
+            } else {
+                current.remove(type.name)
+            }
+            prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES] = current
+            if (type == MediaType.FANFICTION) {
+                prefs[PreferencesKeys.FANFICTION_ENABLED] = !hidden
+            }
+        }
+    }
+
+    suspend fun resetMediaCategoryPrefs() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(PreferencesKeys.MEDIA_TYPE_ORDER)
+            prefs.remove(PreferencesKeys.HIDDEN_MEDIA_TYPES)
+            prefs[PreferencesKeys.FANFICTION_ENABLED] = true
         }
     }
 

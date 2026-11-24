@@ -180,13 +180,13 @@ fun ProgressEditSheet(
                             }
                         },
                         textStyle = TextStyle(
-                            color = AccentArctic,
+                            color = AccentGold,
                             fontSize = 32.sp,
                             fontWeight = FontWeight.Black,
                             textAlign = TextAlign.Center
                         ),
                         keyboardOptions = KeyboardOptions(keyboardType = if (isDecimal) KeyboardType.Decimal else KeyboardType.Number),
-                        cursorBrush = SolidColor(AccentArctic),
+                        cursorBrush = SolidColor(AccentGold),
                         singleLine = true,
                         modifier = Modifier.width(120.dp)
                     )
@@ -205,7 +205,7 @@ fun ProgressEditSheet(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(AccentArctic.copy(alpha = 0.2f))
+                        .background(AccentGold.copy(alpha = 0.2f))
                         .repeatingClickable {
                             val step = if (isDecimal) 0.5 else 1.0
                             val next = progressValue + step
@@ -215,7 +215,7 @@ fun ProgressEditSheet(
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Plus", tint = AccentArctic)
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Plus", tint = AccentGold)
                 }
             }
 
@@ -228,8 +228,8 @@ fun ProgressEditSheet(
                 },
                 valueRange = 0f..maxSlider,
                 colors = SliderDefaults.colors(
-                    thumbColor = AccentArctic,
-                    activeTrackColor = AccentArctic,
+                    thumbColor = AccentGold,
+                    activeTrackColor = AccentGold,
                     inactiveTrackColor = DarkSurfaceElevated
                 )
             )
@@ -251,7 +251,7 @@ fun ProgressEditSheet(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .background(if (isPositive) AccentArctic.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f))
+                            .background(if (isPositive) AccentGold.copy(alpha = 0.15f) else Color.White.copy(alpha = 0.06f))
                             .clickable {
                                 val next = (progressValue + step).coerceAtLeast(0.0)
                                 progressValue = if (totalProgress != null) next.coerceAtMost(totalProgress) else next
@@ -263,7 +263,7 @@ fun ProgressEditSheet(
                             text = if (isPositive) "+${if (isDecimal && step % 1.0 != 0.0) step else step.toInt()}" else "${step.toInt()}",
                             fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isPositive) AccentArctic else TextMuted
+                            color = if (isPositive) AccentGold else TextMuted
                         )
                     }
                 }

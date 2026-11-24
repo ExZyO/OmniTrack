@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
@@ -79,7 +80,13 @@ import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.model.VnDetailMeta
+import com.omnitrack.app.data.preferences.DEFAULT_MEDIA_TYPE_ORDER
 import com.omnitrack.app.ui.screens.detail.components.VN_ROUTE_TYPES
+import com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoChoice
+import com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoPickerSheet
+import com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoSelection
+import com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoThumb
 import com.omnitrack.app.ui.screens.detail.components.formatRouteTypeLabel
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -96,6 +103,10 @@ data class CustomVnRouteDraft(
     val existingId: Long = 0L,
     val routeName: String,
     val routeType: String = "HEROINE",
+    val imageUrl: String? = null,
+    val imageFocalX: Float = 0f,
+    val imageFocalY: Float = 0f,
+    val imageZoom: Float = 1f,
     val playtimeHours: Double? = null,
     val isCompleted: Boolean = false,
     val isSpoiler: Boolean = false,
@@ -106,10 +117,10 @@ data class CustomVnRouteDraft(
 
 /**
  * Option A Frameless AMOLED Manual Entry / Custom Editor Sheet:
- * - Wrapped FlowRow displaying all 10 media categories simultaneously
+ * - Wrapped FlowRow displaying visible media categories in user's preferred order
  * - Smart Dual Creator fields tailored per media vertical (Mangaka, Original Author, Director, Studio, Publisher, Fandom)
  * - Custom Library Categories multi-select chips with inline "+ New" quick creation
- * - Optional Visual Novel Routes & Endings builder (hours strictly optional)
+ * - Optional Visual Novel Routes & Endings builder (hours strictly optional, with route photo & crop)
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -117,9 +128,11 @@ fun CustomEntryEditorSheet(
     existingItem: MediaItemEntity? = null,
     initialTitle: String = "",
     initialMediaType: MediaType = MediaType.NOVEL,
+    visibleMediaTypes: List<MediaType> = DEFAULT_MEDIA_TYPE_ORDER,
     availableCategories: List<CategoryEntity> = emptyList(),
     initialCategoryIds: Set<Long> = emptySet(),
     initialVnRoutes: List<VnRouteEntity> = emptyList(),
+    vnMeta: VnDetailMeta? = null,
     onCreateCategory: ((String, (Long) -> Unit) -> Unit)? = null,
     onSaveFull: ((MediaItemEntity, Set<Long>, List<CustomVnRouteDraft>) -> Unit)? = null,
     onSaveWithCategories: ((MediaItemEntity, Set<Long>) -> Unit)? = null,
@@ -135,27 +148,18 @@ fun CustomEntryEditorSheet(
         existingItem?.id?.takeIf { it > 0L } ?: System.currentTimeMillis()
     }
 
-    val selectableTypes = remember {
-        listOf(
-            MediaType.ANIME,
-            MediaType.MANGA,
-            MediaType.COMIC,
-            MediaType.NOVEL,
-            MediaType.FANFICTION,
-            MediaType.BOOK,
-            MediaType.SHOW,
-            MediaType.MOVIE,
-            MediaType.GAME,
-            MediaType.VISUAL_NOVEL
-        )
+    val selectableTypes = remember(visibleMediaTypes, existingItem?.mediaType) {
+        val base = visibleMediaTypes.filter { it != MediaType.ALL }.ifEmpty { DEFAULT_MEDIA_TYPE_ORDER }
+        val existingType = existingItem?.mediaType?.takeIf { it != MediaType.ALL }
+        if (existingType != null && existingType !in base) base + existingType else base
     }
 
-    var selectedType by remember(existingItem?.id, initialMediaType) {
-        mutableStateOf(
-            existingItem?.mediaType?.takeIf { it != MediaType.ALL }
-                ?: initialMediaType.takeIf { it != MediaType.ALL }
-                ?: MediaType.NOVEL
-        )
+    var selectedType by remember(existingItem?.id, initialMediaType, selectableTypes) {
+        val preferred = existingItem?.mediaType?.takeIf { it != MediaType.ALL }
+            ?: initialMediaType.takeIf { it != MediaType.ALL && it in selectableTypes }
+            ?: selectableTypes.firstOrNull()
+            ?: MediaType.NOVEL
+        mutableStateOf(preferred)
     }
     var title by remember(existingItem?.id, initialTitle) {
         mutableStateOf(existingItem?.title ?: initialTitle)
@@ -242,6 +246,10 @@ fun CustomEntryEditorSheet(
                     existingId = r.id,
                     routeName = r.routeName,
                     routeType = r.routeType,
+                    imageUrl = r.characterImageUrl,
+                    imageFocalX = r.imageFocalX,
+                    imageFocalY = r.imageFocalY,
+                    imageZoom = r.imageZoom,
                     playtimeHours = r.playtimeHours,
                     isCompleted = r.isCompleted,
                     isSpoiler = r.isSpoiler,
@@ -258,6 +266,9 @@ fun CustomEntryEditorSheet(
     var draftRouteHours by remember { mutableStateOf("") }
     var draftRouteCompleted by remember { mutableStateOf(false) }
     var draftRouteSpoiler by remember { mutableStateOf(false) }
+    var draftRoutePhoto by remember { mutableStateOf(VnRoutePhotoSelection(null)) }
+    var showDraftRoutePhotoPicker by remember { mutableStateOf(false) }
+    var editingDraftPhotoIndex by remember { mutableStateOf<Int?>(null) }
 
     val coverPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -708,14 +719,52 @@ fun CustomEntryEditorSheet(
                                 .padding(vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            OutlinedTextField(
-                                value = draftRouteName,
-                                onValueChange = { draftRouteName = it },
-                                label = { Text("Route / Ending Name") },
-                                singleLine = true,
-                                colors = fieldColors,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.clickable { showDraftRoutePhotoPicker = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!draftRoutePhoto.imageUrl.isNullOrBlank()) {
+                                        VnRoutePhotoThumb(
+                                            imageUrl = draftRoutePhoto.imageUrl,
+                                            focalX = draftRoutePhoto.focalX,
+                                            focalY = draftRoutePhoto.focalY,
+                                            zoom = draftRoutePhoto.zoom,
+                                            contentDescription = "Route Photo",
+                                            size = 48.dp,
+                                            cornerRadius = 10.dp
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Color.White.copy(alpha = 0.06f))
+                                                .border(0.8.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AddPhotoAlternate,
+                                                contentDescription = "Add route photo",
+                                                tint = AccentGold,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                OutlinedTextField(
+                                    value = draftRouteName,
+                                    onValueChange = { draftRouteName = it },
+                                    label = { Text("Route / Ending Name") },
+                                    singleLine = true,
+                                    colors = fieldColors,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
 
                             Row(
                                 modifier = Modifier
@@ -830,6 +879,10 @@ fun CustomEntryEditorSheet(
                                             vnRouteDrafts = vnRouteDrafts + CustomVnRouteDraft(
                                                 routeName = cleanName,
                                                 routeType = draftRouteType,
+                                                imageUrl = draftRoutePhoto.imageUrl,
+                                                imageFocalX = draftRoutePhoto.focalX,
+                                                imageFocalY = draftRoutePhoto.focalY,
+                                                imageZoom = draftRoutePhoto.zoom,
                                                 playtimeHours = draftRouteHours.trim().toDoubleOrNull()?.takeIf { it > 0.0 },
                                                 isCompleted = draftRouteCompleted,
                                                 isSpoiler = draftRouteSpoiler
@@ -838,6 +891,7 @@ fun CustomEntryEditorSheet(
                                             draftRouteHours = ""
                                             draftRouteCompleted = false
                                             draftRouteSpoiler = false
+                                            draftRoutePhoto = VnRoutePhotoSelection(null)
                                         }
                                     },
                                     enabled = canAddRoute,
@@ -896,6 +950,22 @@ fun CustomEntryEditorSheet(
                                         if (draft.isCompleted) {
                                             Icon(Icons.Default.Check, contentDescription = null, tint = OnAccentColor, modifier = Modifier.size(12.dp))
                                         }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier.clickable { editingDraftPhotoIndex = idx },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        VnRoutePhotoThumb(
+                                            imageUrl = draft.imageUrl,
+                                            focalX = draft.imageFocalX,
+                                            focalY = draft.imageFocalY,
+                                            zoom = draft.imageZoom,
+                                            contentDescription = draft.routeName,
+                                            size = 42.dp,
+                                            cornerRadius = 8.dp,
+                                            fallbackText = draft.routeName.take(2).uppercase()
+                                        )
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
@@ -1149,6 +1219,10 @@ fun CustomEntryEditorSheet(
                             vnRouteDrafts + CustomVnRouteDraft(
                                 routeName = pendingName,
                                 routeType = draftRouteType,
+                                imageUrl = draftRoutePhoto.imageUrl,
+                                imageFocalX = draftRoutePhoto.focalX,
+                                imageFocalY = draftRoutePhoto.focalY,
+                                imageZoom = draftRoutePhoto.zoom,
                                 playtimeHours = draftRouteHours.trim().toDoubleOrNull()?.takeIf { it > 0.0 },
                                 isCompleted = draftRouteCompleted,
                                 isSpoiler = draftRouteSpoiler
@@ -1182,5 +1256,77 @@ fun CustomEntryEditorSheet(
                 )
             }
         }
+    }
+
+    val draftPhotoExtraChoices = remember(customCoverPath, coverUrlInput, customBannerPath, bannerUrlInput) {
+        buildList {
+            customBannerPath?.takeIf { it.isNotBlank() && it != "NONE" }?.let {
+                add(VnRoutePhotoChoice(it, "Entry Banner", "Current"))
+            }
+            bannerUrlInput.trim().takeIf { it.isNotBlank() }?.let {
+                add(VnRoutePhotoChoice(it, "Banner URL", "Current"))
+            }
+            customCoverPath?.takeIf { it.isNotBlank() }?.let {
+                add(VnRoutePhotoChoice(it, "Entry Cover", "Current"))
+            }
+            coverUrlInput.trim().takeIf { it.isNotBlank() }?.let {
+                add(VnRoutePhotoChoice(it, "Cover URL", "Current"))
+            }
+        }
+    }
+
+    val activeDraftEditIdx = editingDraftPhotoIndex
+    if (showDraftRoutePhotoPicker || activeDraftEditIdx != null) {
+        val editingDraft = activeDraftEditIdx?.let { vnRouteDrafts.getOrNull(it) }
+        val initialSel = if (editingDraft != null) {
+            VnRoutePhotoSelection(
+                imageUrl = editingDraft.imageUrl,
+                focalX = editingDraft.imageFocalX,
+                focalY = editingDraft.imageFocalY,
+                zoom = editingDraft.imageZoom
+            )
+        } else {
+            draftRoutePhoto
+        }
+        val sheetTitle = editingDraft?.routeName ?: draftRouteName.ifBlank { "New Route" }
+        val previewEntity = remember(existingItem, title, selectedType, coverUrlInput, bannerUrlInput, customCoverPath, customBannerPath) {
+            existingItem ?: title.trim().takeIf { it.isNotBlank() }?.let { t ->
+                MediaItemEntity(
+                    title = t,
+                    coverUrl = coverUrlInput.trim(),
+                    bannerUrl = bannerUrlInput.trim().takeIf { it.isNotBlank() },
+                    customCoverPath = customCoverPath,
+                    customBannerPath = customBannerPath,
+                    mediaType = selectedType
+                )
+            }
+        }
+        VnRoutePhotoPickerSheet(
+            routeTitle = sheetTitle,
+            initialSelection = initialSel,
+            mediaItem = previewEntity,
+            vnMeta = vnMeta,
+            extraImageCandidates = draftPhotoExtraChoices,
+            onApply = { sel ->
+                if (activeDraftEditIdx != null && activeDraftEditIdx in vnRouteDrafts.indices) {
+                    vnRouteDrafts = vnRouteDrafts.mapIndexed { i, d ->
+                        if (i == activeDraftEditIdx) {
+                            d.copy(
+                                imageUrl = sel.imageUrl,
+                                imageFocalX = sel.focalX,
+                                imageFocalY = sel.focalY,
+                                imageZoom = sel.zoom
+                            )
+                        } else d
+                    }
+                } else {
+                    draftRoutePhoto = sel
+                }
+            },
+            onDismiss = {
+                showDraftRoutePhotoPicker = false
+                editingDraftPhotoIndex = null
+            }
+        )
     }
 }

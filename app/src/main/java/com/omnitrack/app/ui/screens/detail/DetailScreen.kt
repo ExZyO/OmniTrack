@@ -1031,8 +1031,18 @@ fun DetailScreen(
                                             onStepPlaytime = { viewModel.stepVnPlaytime(it) },
                                             onSetExactPlaytime = { viewModel.setVnPlaytimeExact(it) },
                                             onToggleRouteCompleted = { viewModel.toggleVnRouteCompleted(it) },
-                                            onAddCustomRoute = { name, type, hours, spoiler ->
-                                                viewModel.addCustomVnRoute(name, type, hours, spoiler)
+                                            onAddCustomRoute = { name, type, hours, spoiler, photo ->
+                                                viewModel.addCustomVnRoute(name, type, hours, spoiler, photo)
+                                            },
+                                            onUpdateRoutePhoto = { route, photo ->
+                                                viewModel.saveVnRouteDetails(
+                                                    route.copy(
+                                                        characterImageUrl = photo.imageUrl,
+                                                        imageFocalX = photo.focalX,
+                                                        imageFocalY = photo.focalY,
+                                                        imageZoom = photo.zoom
+                                                    )
+                                                )
                                             },
                                             onOpenRouteDetail = { route ->
                                                 pushSheet(DetailSheetTarget.VnRoute(route.id))
@@ -1118,7 +1128,9 @@ fun DetailScreen(
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
                                 }
-                            } else if (item.mediaType == MediaType.FANFICTION) {
+                            } else if (item.mediaType == MediaType.FANFICTION ||
+                                (item.mediaType == MediaType.NOVEL && !item.fanficSourceUrl.isNullOrBlank())
+                            ) {
                                 item(key = "section_fanfic_tracking", contentType = "fanfic_tracking") {
                                     val effectiveChapters = if (item.id > 0L) uiState.fanficChapters else fanficAuxState.previewChapters
                                     Column {
@@ -1852,6 +1864,7 @@ fun DetailScreen(
                     availableCategories = allCategories,
                     initialCategoryIds = categoryAssignments[item.id].orEmpty(),
                     initialVnRoutes = uiState.vnRoutes,
+                    vnMeta = uiState.vnDetailMeta,
                     onCreateCategory = { name, onCreated ->
                         val trimmed = name.trim()
                         if (trimmed.isNotEmpty()) {
@@ -2390,6 +2403,8 @@ fun DetailScreen(
                 if (activeRoute != null) {
                     VnRouteDetailSheet(
                         route = activeRoute,
+                        mediaItem = item,
+                        vnMeta = uiState.vnDetailMeta,
                         presentationSettings = presentationSettings,
                         backdropBitmap = backdropBitmap,
                         backdropTargetUrl = effectiveBanner,
@@ -3036,13 +3051,7 @@ private fun DetailHeroHeaderSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
-            .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) }
-            .graphicsLayer {
-                if (animateOnScroll && backdropTargetUrl != null) {
-                    val sPx = scrollOffsetPx()
-                    alpha = (1f - (sPx - 90f).coerceAtLeast(0f) / 220f).coerceIn(0f, 1f)
-                }
-            },
+            .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) },
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(

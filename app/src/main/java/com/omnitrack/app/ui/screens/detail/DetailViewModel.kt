@@ -2159,7 +2159,8 @@ class DetailViewModel(
 
     fun addToLibrary(item: MediaItemEntity) {
         viewModelScope.launch {
-            val existing = if (item.mediaType == MediaType.FANFICTION) {
+            val isWebFic = item.mediaType == MediaType.FANFICTION || !item.fanficSourceUrl.isNullOrBlank()
+            val existing = if (isWebFic) {
                 repository.findExistingMedia(
                     fanficWorkId = item.fanficWorkId,
                     fanficSourceUrl = item.fanficSourceUrl,
@@ -2168,7 +2169,7 @@ class DetailViewModel(
                 )
             } else null
             val newId = existing?.id?.takeIf { it > 0L } ?: repository.insertMedia(item.copy(id = 0L))
-            if (item.mediaType == MediaType.FANFICTION && newId > 0L) {
+            if (isWebFic && newId > 0L) {
                 val previewChaps = _fanficAuxState.value.previewChapters
                 if (previewChaps.isNotEmpty()) {
                     repository.upsertFanficChaptersPreservingReadState(newId, previewChaps.map { it.copy(mediaId = newId) })
@@ -2818,7 +2819,9 @@ class DetailViewModel(
                 return@launch
             }
 
-            if (item.mediaType == MediaType.FANFICTION) {
+            if (item.mediaType == MediaType.FANFICTION ||
+                (item.mediaType == MediaType.NOVEL && !item.fanficSourceUrl.isNullOrBlank())
+            ) {
                 val meta = decodeFanficMeta(item.fanficMetaJson)
                 var linkId = 1L
                 val links = buildList {
@@ -4278,7 +4281,7 @@ class DetailViewModel(
                 status = if (preview.status == TrackingStatus.PLAN_TO_TRACK) TrackingStatus.IN_PROGRESS else preview.status
             )
         )
-        if (resolvedId > 0L && preview.mediaType == MediaType.FANFICTION) {
+        if (resolvedId > 0L && (preview.mediaType == MediaType.FANFICTION || !preview.fanficSourceUrl.isNullOrBlank())) {
             val previewChaps = _fanficAuxState.value.previewChapters
             if (previewChaps.isNotEmpty()) {
                 repository.upsertFanficChaptersPreservingReadState(resolvedId, previewChaps.map { it.copy(mediaId = resolvedId) })
@@ -5646,7 +5649,9 @@ class DetailViewModel(
         routeName: String,
         routeType: String = "CUSTOM",
         playtimeHours: Double? = null,
-        isSpoiler: Boolean = false
+        isSpoiler: Boolean = false,
+        photo: com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoSelection =
+            com.omnitrack.app.ui.screens.detail.components.VnRoutePhotoSelection(null)
     ) {
         val clean = routeName.trim()
         if (clean.isBlank()) return
@@ -5660,6 +5665,10 @@ class DetailViewModel(
                     mediaId = mediaId,
                     routeName = clean,
                     routeType = routeType,
+                    characterImageUrl = photo.imageUrl,
+                    imageFocalX = photo.focalX,
+                    imageFocalY = photo.focalY,
+                    imageZoom = photo.zoom,
                     playtimeHours = playtimeHours?.takeIf { it > 0.0 },
                     isSpoiler = isSpoiler,
                     sortOrder = nextOrder
@@ -5694,6 +5703,10 @@ class DetailViewModel(
                     val updated = prev.copy(
                         routeName = clean,
                         routeType = draft.routeType,
+                        characterImageUrl = draft.imageUrl,
+                        imageFocalX = draft.imageFocalX,
+                        imageFocalY = draft.imageFocalY,
+                        imageZoom = draft.imageZoom,
                         playtimeHours = draft.playtimeHours?.takeIf { it > 0.0 },
                         isCompleted = draft.isCompleted,
                         completedAtMs = if (draft.isCompleted) (prev.completedAtMs ?: now) else null,
@@ -5709,6 +5722,10 @@ class DetailViewModel(
                             mediaId = mediaId,
                             routeName = clean,
                             routeType = draft.routeType,
+                            characterImageUrl = draft.imageUrl,
+                            imageFocalX = draft.imageFocalX,
+                            imageFocalY = draft.imageFocalY,
+                            imageZoom = draft.imageZoom,
                             playtimeHours = draft.playtimeHours?.takeIf { it > 0.0 },
                             isCompleted = draft.isCompleted,
                             completedAtMs = if (draft.isCompleted) now else null,

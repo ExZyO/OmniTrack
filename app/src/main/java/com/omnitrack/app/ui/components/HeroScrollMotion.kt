@@ -4,8 +4,12 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -15,6 +19,9 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -23,12 +30,19 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val HERO_STRETCH_MAX = 180.dp
 private const val HERO_STRETCH_DRAG_RESISTANCE = 0.55f
 private const val HERO_STRETCH_RELEASE_ABSORB = 0.35f
 private const val HERO_STRETCH_FRAME_TO_VELOCITY = 60f
+
+const val HERO_BACKGROUND_PARALLAX = 0.055f
+const val HERO_BACKGROUND_SCALE = 1.14f
+const val HERO_CONTENT_PARALLAX = 0.18f
+private const val HERO_SWIPE_THRESHOLD_FRACTION = 0.16f
+private const val HERO_SWIPE_VELOCITY_THRESHOLD = 300f
 
 private val HeroStretchReleaseSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -39,6 +53,144 @@ private val HeroStretchBounceSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
     stiffness = 110f
 )
+
+@Immutable
+data class HeroPageLayer(
+    val itemIndex: Int,
+    val visibility: Float,
+    val offset: Float
+)
+
+fun heroPageOffset(
+    pagerState: PagerState,
+    page: Int
+): Float = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+
+fun heroVisibleLayers(
+    pagerState: PagerState,
+    itemCount: Int
+): List<HeroPageLayer> {
+    if (itemCount <= 0) return emptyList()
+    if (itemCount == 1) return listOf(HeroPageLayer(0, 1f, 0f))
+    val currentPage = pagerState.currentPage
+    val maxPage = (pagerState.pageCount - 1).coerceAtLeast(0)
+    return listOf(
+        currentPage,
+        (currentPage - 1).coerceAtLeast(0),
+        (currentPage + 1).coerceAtMost(maxPage)
+    ).distinct()
+        .mapNotNull { index ->
+            val pageOffset = heroPageOffset(pagerState, index)
+            val visibility = (1f - abs(pageOffset)).coerceIn(0f, 1f)
+            if (visibility <= 0f) {
+                null
+            } else {
+                HeroPageLayer(
+                    itemIndex = ((index % itemCount) + itemCount) % itemCount,
+                    visibility = visibility,
+                    offset = pageOffset
+                )
+            }
+        }
+        .sortedBy(HeroPageLayer::visibility)
+}
+
+fun heroPageForItem(currentPage: Int, itemIndex: Int, itemCount: Int): Int {
+    if (itemCount <= 1) return 0
+    val base = currentPage.toLong() - ((currentPage % itemCount + itemCount) % itemCount) + itemIndex
+    return listOf(base - itemCount, base, base + itemCount)
+        .filter { it in 0L until Int.MAX_VALUE.toLong() }
+        .minBy { abs(it - currentPage) }
+        .toInt()
+}
+
+/**
+ * Nuvio-style horizontal swipe gesture driver for stacked in-place hero crossfades.
+ * Yields immediately on vertical drags so parent LazyColumn / PullToRefresh stays silky.
+ */
+fun Modifier.homeHeroPagerGesture(
+    pagerState: PagerState,
+    itemCount: Int,
+    coroutineScope: CoroutineScope
+): Modifier {
+    if (itemCount <= 1) return this
+
+    return pointerInput(pagerState, itemCount) {
+        awaitEachGesture {
+            val down = awaitFirstDown(pass = PointerEventPass.Initial)
+            val widthPx = size.width.toFloat().takeIf { it > 0f } ?: return@awaitEachGesture
+            val velocityTracker = VelocityTracker().apply {
+                addPosition(down.uptimeMillis, down.position)
+            }
+            val startPage = pagerState.currentPage
+            var totalDx = 0f
+            var totalDy = 0f
+            var dragging = false
+
+            while (true) {
+                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                velocityTracker.addPosition(change.uptimeMillis, change.position)
+
+                if (!change.pressed) {
+                    if (dragging) {
+                        change.consume()
+                        val targetPage = resolveHeroTargetPage(
+                            startPage = startPage,
+                            pageCount = pagerState.pageCount,
+                            totalDx = totalDx,
+                            velocityX = velocityTracker.calculateVelocity().x,
+                            widthPx = widthPx
+                        )
+                        coroutineScope.launch {
+                            runCatching { pagerState.animateScrollToPage(targetPage) }
+                        }
+                    }
+                    break
+                }
+
+                val delta = change.position - change.previousPosition
+                totalDx += delta.x
+                totalDy += delta.y
+
+                if (!dragging) {
+                    val horizontalDrag =
+                        abs(totalDx) > viewConfiguration.touchSlop && abs(totalDx) > abs(totalDy)
+                    val verticalDrag =
+                        abs(totalDy) > viewConfiguration.touchSlop && abs(totalDy) > abs(totalDx)
+
+                    when {
+                        verticalDrag -> break
+                        horizontalDrag -> dragging = true
+                        else -> continue
+                    }
+                }
+
+                pagerState.dispatchRawDelta(-delta.x)
+                change.consume()
+            }
+        }
+    }
+}
+
+private fun resolveHeroTargetPage(
+    startPage: Int,
+    pageCount: Int,
+    totalDx: Float,
+    velocityX: Float,
+    widthPx: Float
+): Int {
+    val thresholdPassed = abs(totalDx) > widthPx * HERO_SWIPE_THRESHOLD_FRACTION ||
+        abs(velocityX) > HERO_SWIPE_VELOCITY_THRESHOLD
+    if (!thresholdPassed) return startPage
+
+    val currentPage = startPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+    return when {
+        totalDx > 0f -> (currentPage - 1).coerceAtLeast(0)
+        totalDx < 0f -> (currentPage + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0))
+        else -> currentPage
+    }
+}
 
 @Stable
 class HeroStretchState internal constructor(

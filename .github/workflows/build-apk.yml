@@ -73,6 +73,7 @@ jobs:
           SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
           BANGUMI_CLIENT_ID: ${{ secrets.BANGUMI_CLIENT_ID }}
           BANGUMI_CLIENT_SECRET: ${{ secrets.BANGUMI_CLIENT_SECRET }}
+          COMICK_CLIENT_ID: ${{ secrets.COMICK_CLIENT_ID }}
 
       - name: Prepare Release Artifact & Notes
         run: |

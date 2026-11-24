@@ -39,22 +39,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Universal Tracker OAuth Deep Link Interceptors (Wildcard Schemes) -->
+            <!-- OmniTrack OAuth Deep Link Interceptor -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="omnitrack" />
-                <data android:scheme="aniyomi" />
-                <data android:scheme="chimahon" />
-                <data android:scheme="mihon" />
-                <data android:scheme="app.mihon" />
-                <data android:scheme="nuvio" />
-                <data android:scheme="komikku" />
-                <data android:scheme="chimanew" />
-                <data android:scheme="tachiyomi" />
             </intent-filter>
-            <!-- Share Sheet URL Interceptor for Fanfiction Sites (AO3, FF.net, SB, SV, QQ) -->
+            <!-- Share Sheet URL Interceptor for Fanfiction & Web Novel Sites (AO3, FF.net, SB, SV, QQ, Wattpad) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

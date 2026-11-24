@@ -129,6 +129,7 @@ fun HistoryView(
     onBatchRemoveFromHistory: (Collection<Long>) -> Unit = {},
     onBatchDeleteItems: (Collection<Long>) -> Unit = {},
     watchedTimestamps90d: List<Long> = emptyList(),
+    visibleFilterTabs: List<MediaType> = MediaType.filterTabs,
     onOpenHeatmap: () -> Unit = {},
     onMultiSelectChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
@@ -364,7 +365,7 @@ fun HistoryView(
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            itemsIndexed(MediaType.filterTabs, key = { _, t -> "hcat_${t.name}" }) { _, type ->
+            itemsIndexed(visibleFilterTabs, key = { _, t -> "hcat_${t.name}" }) { _, type ->
                 val selected = selectedType == type
                 Column(
                     modifier = Modifier

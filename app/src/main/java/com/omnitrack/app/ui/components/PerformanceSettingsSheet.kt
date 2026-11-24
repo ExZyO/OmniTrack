@@ -143,21 +143,16 @@ fun PerformanceSettingsContent(
     var showAdvanced by remember { mutableStateOf(initiallyExpanded) }
 
     val reduceLiveBlur = !settings.liveNavBarBlur
-    val limitOffscreenTabs = !settings.prefetchAdjacentTabs
     val activeCount = listOf(
         reduceLiveBlur,
-        settings.autoPauseBlurOnScroll,
-        settings.downsampleGridCovers,
         settings.disableCardDepthEffects,
-        settings.disableCardAnimations,
-        limitOffscreenTabs,
-        settings.hardwareBitmaps
+        settings.disableCardAnimations
     ).count { it }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         PerfSwitchRow(
             title = "Performance Mode",
-            subtitle = "Turns ON every speed optimization below for maximum FPS on slower phones",
+            subtitle = "Turns ON all 3 visual trade-offs below for maximum FPS on slower phones",
             checked = settings.performanceModeEnabled,
             onCheckedChange = { enabled ->
                 scope.launch { preferenceManager.setPerformanceModeEnabled(enabled) }
@@ -175,13 +170,13 @@ fun PerformanceSettingsContent(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Advanced Optimizations",
+                    text = "Visual Trade-Offs",
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = AccentGold
                 )
                 Text(
-                    text = "All switches ON = faster \u00B7 $activeCount / 7 active",
+                    text = "All switches ON = faster \u00B7 $activeCount / 3 active",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
@@ -198,24 +193,10 @@ fun PerformanceSettingsContent(
             Column(modifier = Modifier.fillMaxWidth()) {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Reduce Floating Bar Glass Blur",
+                    title = "Disable Floating Bar Glass Blur",
                     subtitle = "Replaces live backdrop blur with a fast translucent bar (biggest FPS boost)",
                     checked = reduceLiveBlur,
                     onCheckedChange = { reduce -> scope.launch { preferenceManager.setPerformanceOption("LIVE_BLUR", !reduce) } }
-                )
-                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
-                PerfSwitchRow(
-                    title = "Auto-Pause Blur While Scrolling",
-                    subtitle = "Temporarily pauses live glass blur during fast Library scrolls",
-                    checked = settings.autoPauseBlurOnScroll,
-                    onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("PAUSE_BLUR_SCROLL", it) } }
-                )
-                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
-                PerfSwitchRow(
-                    title = "Smart Grid Cover Downsampling",
-                    subtitle = "Decodes right-sized thumbnails in grids while keeping Details full lossless",
-                    checked = settings.downsampleGridCovers,
-                    onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("DOWNSAMPLE_COVERS", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
@@ -226,26 +207,19 @@ fun PerformanceSettingsContent(
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
                 PerfSwitchRow(
-                    title = "Reduce Grid & Pager Animations",
-                    subtitle = "Skips cover fade-ins, tap bounce & Library tab zoom transitions",
+                    title = "Reduce Animations",
+                    subtitle = "Skips hero scroll/swipe parallax, cover fade-ins, tap bounce & tab zoom",
                     checked = settings.disableCardAnimations,
                     onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("DISABLE_ANIMS", it) } }
                 )
                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
-                PerfSwitchRow(
-                    title = "Limit Offscreen Library Tabs",
-                    subtitle = "Keeps only adjacent tabs composed for faster tab jumps & lower RAM",
-                    checked = limitOffscreenTabs,
-                    onCheckedChange = { limit -> scope.launch { preferenceManager.setPerformanceOption("PREFETCH_TABS", !limit) } }
+                Text(
+                    text = "GPU hardware bitmaps, smart grid cover sizing, offscreen tab limits & scroll-paused blur stay permanently active with no visual downsides.",
+                    fontSize = 11.sp,
+                    color = TextMuted,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                 )
-                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
-                PerfSwitchRow(
-                    title = "GPU Hardware Bitmaps",
-                    subtitle = "Decodes covers directly into GPU textures for zero-copy drawing",
-                    checked = settings.hardwareBitmaps,
-                    onCheckedChange = { scope.launch { preferenceManager.setPerformanceOption("HARDWARE_BITMAPS", it) } }
-                )
-                HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
 
                 Text(
                     text = "Reset to Balanced Defaults",
@@ -254,7 +228,7 @@ fun PerformanceSettingsContent(
                     color = AccentGold,
                     modifier = Modifier
                         .clickable { scope.launch { preferenceManager.resetPerformanceSettings() } }
-                        .padding(vertical = 12.dp)
+                        .padding(vertical = 10.dp)
                 )
             }
         }

@@ -58,7 +58,6 @@ object TrackerAccountVerifier {
 
     // Default Fallback Public Client IDs (non-secret public OAuth identifiers)
     private const val DEFAULT_TRAKT_CLIENT_ID = "VqwWoA1jPRnMBEtn7fEV3Zlx4XeXYRNaipC7pAaWL4o"
-    private const val DEFAULT_MAL_CLIENT_ID = "3342466cfb744b714350df413002f5ef"
     private const val DEFAULT_SIMKL_CLIENT_ID = "c9c006c049d34a887a0f744b29f09658e3dce579cf5db98665db4d96e35d036a"
 
     @Volatile
@@ -100,9 +99,9 @@ object TrackerAccountVerifier {
         }
 
     val MAL_CLIENT_ID: String
-        get() = customMalClientId?.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
-            ?: BuildConfig.MAL_CLIENT_ID.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
-            ?: DEFAULT_MAL_CLIENT_ID
+        get() = customMalClientId?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.MAL_CLIENT_ID.takeIf { it.isNotBlank() }
+            ?: ""
 
     val SIMKL_CLIENT_ID: String
         get() = customSimklClientId?.takeIf { it.isNotBlank() }
@@ -123,8 +122,9 @@ object TrackerAccountVerifier {
     val BANGUMI_CLIENT_SECRET: String
         get() = BuildConfig.BANGUMI_CLIENT_SECRET.takeIf { it.isNotBlank() } ?: ""
 
-    // Comick Client ID
-    const val COMICK_CLIENT_ID = "SGrUojDvbgqfhSCQbwfCjUPIccYMJdBH"
+    // Comick Client ID (injected via BuildConfig / CI Secrets)
+    val COMICK_CLIENT_ID: String
+        get() = BuildConfig.COMICK_CLIENT_ID.takeIf { it.isNotBlank() } ?: ""
 
     @Volatile
     var pendingMalVerifier: String? = null
@@ -905,7 +905,7 @@ object TrackerAccountVerifier {
                             .add("grant_type", "refresh_token")
                             .add("client_id", BANGUMI_CLIENT_ID)
                             .add("client_secret", BANGUMI_CLIENT_SECRET)
-                            .add("redirect_uri", "komikku://bangumi-auth")
+                            .add("redirect_uri", "omnitrack://auth/bangumi")
                             .add("refresh_token", rt)
                             .build()
                         val req = Request.Builder()

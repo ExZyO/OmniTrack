@@ -20,6 +20,9 @@ data class VnRouteEntity(
     val routeType: String = "HEROINE", // COMMON, HEROINE, TRUE, NORMAL, BAD, EXTRA, CUSTOM
     val characterId: String? = null,
     val characterImageUrl: String? = null,
+    val imageFocalX: Float = 0f,
+    val imageFocalY: Float = 0f,
+    val imageZoom: Float = 1f,
     val isCompleted: Boolean = false,
     val completedAtMs: Long? = null,
     val userRating: Float? = null,

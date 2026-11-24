@@ -13,6 +13,7 @@ import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.model.canonicalizeFanficUrl
 import com.omnitrack.app.data.model.decodeFanficMeta
 import com.omnitrack.app.data.model.encodeFanficMeta
+import com.omnitrack.app.data.model.isLikelyWattpadFanfic
 import com.omnitrack.app.data.network.NetworkClient
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.util.AppLogger
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -136,7 +138,8 @@ data class FanficParsedWork(
 
     fun toMediaItemEntity(
         status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK,
-        existing: MediaItemEntity? = null
+        existing: MediaItemEntity? = null,
+        targetMediaType: MediaType = MediaType.FANFICTION
     ): MediaItemEntity {
         val mainChapCount = chapters.count { it.category == FanficThreadmarkCategory.MAIN }
             .takeIf { it > 0 } ?: totalChapters
@@ -146,6 +149,8 @@ data class FanficParsedWork(
         val year = (updatedDate ?: publishedDate)?.let {
             Regex("""\b(19|20)\d{2}\b""").find(it)?.value
         } ?: existing?.releaseYear
+        val resolvedType = existing?.mediaType ?: targetMediaType
+        val resolvedPlatform = if (resolvedType == MediaType.NOVEL) "WEB_NOVEL" else site.displayName
 
         return if (existing != null) {
             existing.copy(
@@ -153,7 +158,7 @@ data class FanficParsedWork(
                 synopsis = summary ?: existing.synopsis,
                 coverUrl = existing.coverUrl.ifBlank { coverUrl.orEmpty() },
                 bookAuthor = author.takeIf { it.isNotBlank() } ?: existing.bookAuthor,
-                platform = site.displayName,
+                platform = existing.platform?.takeIf { resolvedType == MediaType.NOVEL && it.isNotBlank() } ?: resolvedPlatform,
                 totalProgress = mainChapCount?.toDouble() ?: existing.totalProgress,
                 airStatus = workStatus.label,
                 releaseYear = year,
@@ -174,11 +179,11 @@ data class FanficParsedWork(
                 title = title,
                 synopsis = summary,
                 coverUrl = coverUrl.orEmpty(),
-                mediaType = MediaType.FANFICTION,
+                mediaType = resolvedType,
                 status = status,
                 currentProgress = 0.0,
                 totalProgress = mainChapCount?.toDouble(),
-                platform = site.displayName,
+                platform = resolvedPlatform,
                 bookAuthor = author,
                 airStatus = workStatus.label,
                 releaseYear = year,
@@ -197,7 +202,7 @@ data class FanficParsedWork(
         }
     }
 
-    fun toSearchResultItem(): SearchResultItem {
+    fun toSearchResultItem(targetMediaType: MediaType = MediaType.FANFICTION): SearchResultItem {
         val mainChapCount = chapters.count { it.category == FanficThreadmarkCategory.MAIN }
             .takeIf { it > 0 } ?: totalChapters
         val metaJson = encodeFanficMeta(toMetaPayload())
@@ -208,11 +213,11 @@ data class FanficParsedWork(
             title = title,
             synopsis = summary,
             coverUrl = coverUrl.orEmpty(),
-            mediaType = MediaType.FANFICTION,
+            mediaType = targetMediaType,
             releaseYear = year,
             sourceProvider = site.shortBadge,
             bookAuthor = author,
-            platform = site.displayName,
+            platform = if (targetMediaType == MediaType.NOVEL) "WEB_NOVEL" else site.displayName,
             totalProgress = mainChapCount?.toDouble(),
             fanficSourceSite = site.code,
             fanficSourceUrl = canonicalUrl,
@@ -251,10 +256,22 @@ object FanficSiteEngine {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val ao3Mutex = Mutex()
     private val forumMutex = Mutex()
+    private val wattpadMutex = Mutex()
     private var lastAo3ReqMs = 0L
     private var lastForumReqMs = 0L
+    private var lastWattpadReqMs = 0L
 
     private fun httpClient(): OkHttpClient = NetworkClient.getClient()
+
+    private suspend fun <T> withWattpadDelay(block: suspend () -> T): T =
+        wattpadMutex.withLock {
+            val now = System.currentTimeMillis()
+            val wait = (lastWattpadReqMs + 550L) - now
+            if (wait > 0L) delay(wait)
+            val result = block()
+            lastWattpadReqMs = System.currentTimeMillis()
+            result
+        }
 
     private suspend fun <T> withPoliteDelay(mutex: Mutex, isAo3: Boolean, block: suspend () -> T): T =
         mutex.withLock {
@@ -314,6 +331,7 @@ object FanficSiteEngine {
                 FanficSite.AO3 -> fetchAo3Work(canonical, workId, cookie)
                 FanficSite.SB, FanficSite.SV, FanficSite.QQ -> fetchXenForoThread(canonical, site, workId, cookie)
                 FanficSite.FFN -> fetchViaFicHub(canonical, workId)
+                FanficSite.WATTPAD -> fetchWattpadStory(canonical, workId, cookie)
                 FanficSite.OTHER -> FanficFetchResult.RequiresWebView(
                     site = FanficSite.OTHER,
                     url = canonical,
@@ -1001,6 +1019,7 @@ object FanficSiteEngine {
                 FanficFetchResult.Success(work)
             }
             FanficSite.FFN -> parseFfnHtmlDocument(doc, canonical, workId)
+            FanficSite.WATTPAD -> parseWattpadHtmlDocument(doc, canonical, workId)
             FanficSite.SB, FanficSite.SV, FanficSite.QQ -> {
                 val base = parseXenForoThreadDocument(doc, site, canonical, workId)
                 val tmPair = parseXenForoThreadmarksPage(doc, site, FanficThreadmarkCategory.MAIN)
@@ -1110,6 +1129,384 @@ object FanficSiteEngine {
                 totalChapters = chCount ?: chapters.size.takeIf { it > 0 },
                 fandoms = fandoms,
                 isCrossover = fandoms.size > 1,
+                chapters = chapters
+            )
+        )
+    }
+
+    // -------------------------------------------------------------------------
+    // WATTPAD FULL ENGINE (API v3 JSON + WebView Snapshot Fallback + Bulk Import)
+    // -------------------------------------------------------------------------
+
+    private const val WATTPAD_STORY_FIELDS =
+        "id,title,description,cover,url,user(name,username),numParts,completed,mature,language(name),tags,readCount,voteCount,commentCount,modifyDate,createDate,isPaywalled,parts(id,title,url,wordCount,modifyDate,isPaywalled)"
+
+    private const val WATTPAD_LIST_STORY_FIELDS =
+        "stories(id,title,description,cover,url,user(name,username),numParts,completed,mature,language(name),tags,readCount,voteCount,commentCount,modifyDate,createDate,isPaywalled)"
+
+    private fun wattpadJsonHeaders(): Map<String, String> = mapOf(
+        "Accept" to "application/json",
+        "X-Requested-With" to "XMLHttpRequest",
+        "Referer" to "https://www.wattpad.com/"
+    )
+
+    private fun parseWattpadStoryJson(obj: JsonObject): FanficParsedWork? {
+        val storyId = obj["id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val title = obj["title"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val description = obj["description"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        val cover = obj["cover"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.startsWith("http") }
+        val canonical = "https://www.wattpad.com/story/$storyId"
+
+        val userObj = obj["user"] as? JsonObject
+        val username = userObj?.get("username")?.jsonPrimitive?.contentOrNull?.trim()
+        val displayName = userObj?.get("name")?.jsonPrimitive?.contentOrNull?.trim()
+        val author = displayName?.takeIf { it.isNotBlank() }
+            ?: username?.takeIf { it.isNotBlank() }
+            ?: "Wattpad Author"
+        val authorUrl = username?.takeIf { it.isNotBlank() }?.let { "https://www.wattpad.com/user/$it" }
+
+        val mature = obj["mature"]?.jsonPrimitive?.booleanOrNull == true
+        val completed = obj["completed"]?.jsonPrimitive?.booleanOrNull == true
+        val isStoryPaywalled = obj["isPaywalled"]?.jsonPrimitive?.booleanOrNull == true
+        val numParts = obj["numParts"]?.jsonPrimitive?.intOrNull
+        val readCount = obj["readCount"]?.jsonPrimitive?.intOrNull
+        val voteCount = obj["voteCount"]?.jsonPrimitive?.intOrNull
+        val commentCount = obj["commentCount"]?.jsonPrimitive?.intOrNull
+        val createDate = obj["createDate"]?.jsonPrimitive?.contentOrNull?.take(10)
+        val modifyDate = obj["modifyDate"]?.jsonPrimitive?.contentOrNull?.take(10) ?: createDate
+        val language = (obj["language"] as? JsonObject)?.get("name")?.jsonPrimitive?.contentOrNull?.trim()
+
+        val rawTags = (obj["tags"] as? JsonArray)?.mapNotNull { el ->
+            el.jsonPrimitive.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+        }.orEmpty()
+        val tagsWithBadges = if (isStoryPaywalled) (rawTags + "Paid Story").distinct() else rawTags
+        val isFanfic = isLikelyWattpadFanfic(tagsWithBadges, description, title)
+        val fandoms = if (isFanfic) {
+            rawTags.filterNot { it.equals("fanfiction", true) || it.equals("fanfic", true) }.take(3)
+        } else {
+            emptyList()
+        }
+
+        val partsArr = obj["parts"] as? JsonArray
+        val parsedChapters = partsArr?.mapIndexedNotNull { idx, el ->
+            val pObj = el as? JsonObject ?: return@mapIndexedNotNull null
+            val partId = pObj["id"]?.jsonPrimitive?.contentOrNull?.trim()
+            val rawPartTitle = pObj["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "Part ${idx + 1}" }
+            val partPaid = pObj["isPaywalled"]?.jsonPrimitive?.booleanOrNull == true
+            val partTitle = if (partPaid && !rawPartTitle.contains("[Paid]", ignoreCase = true)) {
+                "$rawPartTitle [Paid]"
+            } else rawPartTitle
+            val partUrl = pObj["url"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.startsWith("http") }
+                ?: partId?.let { "https://www.wattpad.com/$it" }
+            val partWords = pObj["wordCount"]?.jsonPrimitive?.intOrNull
+            val partDate = pObj["modifyDate"]?.jsonPrimitive?.contentOrNull?.take(10)
+            FanficParsedChapter(
+                chapterNumber = idx + 1,
+                title = partTitle,
+                category = FanficThreadmarkCategory.MAIN,
+                sourceSite = FanficSite.WATTPAD,
+                chapterUrl = partUrl,
+                wordCount = partWords,
+                publishedDate = partDate
+            )
+        }.orEmpty()
+
+        val totalWords = parsedChapters.mapNotNull { it.wordCount }.takeIf { it.isNotEmpty() }?.sum()
+
+        return FanficParsedWork(
+            site = FanficSite.WATTPAD,
+            canonicalUrl = canonical,
+            workId = "wp:$storyId",
+            title = title,
+            author = author,
+            authorUrl = authorUrl,
+            summary = description,
+            coverUrl = cover,
+            rating = if (mature) FanficRating.MATURE else FanficRating.TEEN,
+            workStatus = if (completed) FanficWorkStatus.COMPLETE else FanficWorkStatus.ONGOING,
+            wordCount = totalWords,
+            totalChapters = numParts ?: parsedChapters.size.takeIf { it > 0 },
+            fandoms = fandoms,
+            freeformTags = tagsWithBadges,
+            language = language,
+            kudosCount = voteCount,
+            hitsCount = readCount,
+            commentsCount = commentCount,
+            publishedDate = createDate,
+            updatedDate = modifyDate,
+            isCrossover = fandoms.size > 1,
+            isArchiveLocked = isStoryPaywalled,
+            chapters = parsedChapters
+        )
+    }
+
+    suspend fun fetchWattpadStory(
+        canonicalUrl: String,
+        workId: String? = canonicalizeFanficUrl(canonicalUrl).third,
+        cookie: String? = null
+    ): FanficFetchResult = withContext(Dispatchers.IO) {
+        try {
+            var resolvedStoryId = workId?.takeIf { it.startsWith("wp:") }?.removePrefix("wp:")
+                ?: Regex("""/story/(\d+)""").find(canonicalUrl)?.groupValues?.getOrNull(1)
+
+            // Resolve chapter/part URLs (e.g. wattpad.com/12345678-chapter-1) -> parent story ID
+            if (resolvedStoryId.isNullOrBlank()) {
+                val partId = workId?.takeIf { it.startsWith("wp_part:") }?.removePrefix("wp_part:")
+                    ?: Regex("""wattpad\.com/(\d+)""").find(canonicalUrl)?.groupValues?.getOrNull(1)
+                if (!partId.isNullOrBlank()) {
+                    val (pCode, _, pBody) = withWattpadDelay {
+                        executeGet(
+                            url = "https://www.wattpad.com/api/v3/story_parts/$partId?fields=groupId",
+                            cookie = cookie,
+                            extraHeaders = wattpadJsonHeaders()
+                        )
+                    }
+                    if (pCode in 200..299 && pBody.trimStart().startsWith("{")) {
+                        val pObj = runCatching { json.parseToJsonElement(pBody).jsonObject }.getOrNull()
+                        resolvedStoryId = pObj?.get("groupId")?.jsonPrimitive?.contentOrNull?.trim()
+                    }
+                }
+            }
+
+            if (resolvedStoryId.isNullOrBlank()) {
+                return@withContext FanficFetchResult.RequiresWebView(
+                    site = FanficSite.WATTPAD,
+                    url = canonicalUrl,
+                    reason = "Open this Wattpad story in WebView and tap Import Page"
+                )
+            }
+
+            val apiUrl = "https://www.wattpad.com/api/v3/stories/$resolvedStoryId?fields=${URLEncoder.encode(WATTPAD_STORY_FIELDS, "UTF-8")}"
+            val (code, _, body) = withWattpadDelay {
+                executeGet(url = apiUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+            }
+            if (isCloudflareChallenge(code, body) || code == 401 || code == 403) {
+                return@withContext FanficFetchResult.RequiresWebView(
+                    site = FanficSite.WATTPAD,
+                    url = "https://www.wattpad.com/story/$resolvedStoryId",
+                    reason = "Wattpad requested sign-in or browser verification — open in WebView then tap Import Page"
+                )
+            }
+            if (code !in 200..299 || !body.trimStart().startsWith("{")) {
+                return@withContext FanficFetchResult.RequiresWebView(
+                    site = FanficSite.WATTPAD,
+                    url = "https://www.wattpad.com/story/$resolvedStoryId",
+                    reason = "Wattpad returned HTTP $code — open in WebView to import"
+                )
+            }
+
+            val obj = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+            val parsed = obj?.let { parseWattpadStoryJson(it) }
+                ?: return@withContext FanficFetchResult.RequiresWebView(
+                    site = FanficSite.WATTPAD,
+                    url = "https://www.wattpad.com/story/$resolvedStoryId",
+                    reason = "Could not parse Wattpad story — open in WebView to import"
+                )
+            FanficFetchResult.Success(parsed)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("FanficSiteEngine", "fetchWattpadStory error: ${e.message}")
+            FanficFetchResult.RequiresWebView(
+                site = FanficSite.WATTPAD,
+                url = canonicalUrl,
+                reason = "Open Wattpad page in WebView and tap Import Page (${e.message ?: "network error"})"
+            )
+        }
+    }
+
+    suspend fun searchWattpad(
+        query: String,
+        page: Int = 1,
+        cookie: String? = null,
+        targetMediaType: MediaType? = null
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        try {
+            val cleanQ = query.trim()
+            if (cleanQ.isBlank()) return@withContext emptyList()
+            val limit = 20
+            val offset = ((page.coerceAtLeast(1) - 1) * limit)
+            val url = "https://www.wattpad.com/api/v3/stories?query=${URLEncoder.encode(cleanQ, "UTF-8")}&limit=$limit&offset=$offset&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}"
+            val (code, _, body) = withWattpadDelay {
+                executeGet(url = url, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+            }
+            if (code !in 200..299 || !body.trimStart().startsWith("{")) return@withContext emptyList()
+            val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return@withContext emptyList()
+            val stories = root["stories"] as? JsonArray ?: return@withContext emptyList()
+            val parsedWorks = stories.mapNotNull { el ->
+                (el as? JsonObject)?.let { parseWattpadStoryJson(it) }
+            }
+            parsedWorks.map { work ->
+                val resolvedType = targetMediaType ?: if (isLikelyWattpadFanfic(work.freeformTags, work.summary, work.title)) {
+                    MediaType.FANFICTION
+                } else {
+                    MediaType.NOVEL
+                }
+                work.toSearchResultItem(targetMediaType = resolvedType)
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            AppLogger.w("FanficSiteEngine", "searchWattpad error: ${e.message}")
+            emptyList()
+        }
+    }
+
+    suspend fun fetchWattpadDiscoverShelf(
+        shelfKey: String,
+        page: Int = 1,
+        cookie: String? = null
+    ): List<SearchResultItem> = when (shelfKey) {
+        "wattpad_fanfic" -> searchWattpad(
+            query = "fanfiction",
+            page = page,
+            cookie = cookie,
+            targetMediaType = MediaType.FANFICTION
+        )
+        "wattpad_webnovels" -> searchWattpad(
+            query = "fantasy romance",
+            page = page,
+            cookie = cookie,
+            targetMediaType = MediaType.NOVEL
+        )
+        "wattpad_scifi_novels" -> searchWattpad(
+            query = "sci-fi adventure",
+            page = page,
+            cookie = cookie,
+            targetMediaType = MediaType.NOVEL
+        )
+        else -> searchWattpad(
+            query = "popular",
+            page = page,
+            cookie = cookie,
+            targetMediaType = MediaType.FANFICTION
+        )
+    }
+
+    suspend fun fetchWattpadUserReadingLists(
+        username: String,
+        cookie: String? = null
+    ): Result<List<FanficParsedWork>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val cleanUser = username.trim().removePrefix("@")
+            require(cleanUser.isNotBlank()) { "Enter a Wattpad username" }
+            val encUser = URLEncoder.encode(cleanUser, "UTF-8")
+            val listsUrl = "https://www.wattpad.com/api/v3/users/$encUser/lists?limit=20&fields=lists(id,name,numStories)"
+            val (code, _, body) = withWattpadDelay {
+                executeGet(url = listsUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+            }
+            if (code !in 200..299 || !body.trimStart().startsWith("{")) {
+                throw IllegalStateException("Could not load Wattpad reading lists for @$cleanUser (HTTP $code)")
+            }
+            val root = json.parseToJsonElement(body).jsonObject
+            val lists = (root["lists"] as? JsonArray).orEmpty()
+            val collected = mutableListOf<FanficParsedWork>()
+            for (el in lists.take(10)) {
+                val listObj = el as? JsonObject ?: continue
+                val listId = listObj["id"]?.jsonPrimitive?.contentOrNull?.trim() ?: continue
+                val storiesUrl = "https://www.wattpad.com/api/v3/lists/$listId/stories?limit=30&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}"
+                val (sCode, _, sBody) = withWattpadDelay {
+                    executeGet(url = storiesUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+                }
+                if (sCode in 200..299 && sBody.trimStart().startsWith("{")) {
+                    val sRoot = runCatching { json.parseToJsonElement(sBody).jsonObject }.getOrNull()
+                    val arr = sRoot?.get("stories") as? JsonArray ?: continue
+                    arr.forEach { st ->
+                        (st as? JsonObject)?.let { parseWattpadStoryJson(it) }?.let { collected.add(it) }
+                    }
+                }
+            }
+            collected.distinctBy { it.workId ?: it.canonicalUrl }
+        }
+    }
+
+    suspend fun fetchWattpadPrivateLibrary(
+        username: String?,
+        cookie: String
+    ): Result<List<FanficParsedWork>> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(cookie.isNotBlank()) { "Sign in to Wattpad in WebView first" }
+            val cleanUser = username?.trim()?.removePrefix("@").orEmpty()
+            val candidateUrls = buildList {
+                if (cleanUser.isNotBlank()) {
+                    val enc = URLEncoder.encode(cleanUser, "UTF-8")
+                    add("https://www.wattpad.com/api/v3/users/$enc/library?limit=50&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}")
+                }
+                add("https://www.wattpad.com/api/v3/library?limit=50&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}")
+            }
+            for (url in candidateUrls) {
+                val (code, _, body) = withWattpadDelay {
+                    executeGet(url = url, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+                }
+                if (code == 401 || code == 403) {
+                    throw IllegalStateException("Wattpad session expired — sign in again in WebView")
+                }
+                if (code in 200..299 && body.trimStart().startsWith("{")) {
+                    val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: continue
+                    val arr = root["stories"] as? JsonArray ?: continue
+                    val parsed = arr.mapNotNull { (it as? JsonObject)?.let { o -> parseWattpadStoryJson(o) } }
+                    if (parsed.isNotEmpty() || url == candidateUrls.last()) {
+                        return@runCatching parsed.distinctBy { it.workId ?: it.canonicalUrl }
+                    }
+                }
+            }
+            throw IllegalStateException("Enter your Wattpad username and refresh your WebView session to import Private Library")
+        }
+    }
+
+    private fun parseWattpadHtmlDocument(doc: Document, canonicalUrl: String, workId: String?): FanficFetchResult {
+        val storyId = workId?.takeIf { it.startsWith("wp:") }?.removePrefix("wp:")
+            ?: Regex("""/story/(\d+)""").find(canonicalUrl)?.groupValues?.getOrNull(1)
+            ?: doc.selectFirst("link[rel=canonical]")?.attr("href")?.let { Regex("""/story/(\d+)""").find(it)?.groupValues?.getOrNull(1) }
+
+        val title = doc.selectFirst("meta[property=og:title]")?.attr("content")?.trim()
+            ?.removeSuffix(" - Wattpad")?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: doc.selectFirst("h1")?.text()?.trim()?.takeIf { it.isNotBlank() }
+            ?: return FanficFetchResult.Error("Navigate to a Wattpad story page before importing")
+        val description = doc.selectFirst("meta[property=og:description], meta[name=description]")?.attr("content")?.trim()
+        val cover = doc.selectFirst("meta[property=og:image]")?.attr("content")?.trim()?.takeIf { it.startsWith("http") }
+        val authorEl = doc.selectFirst("a[href*='/user/']")
+        val author = authorEl?.text()?.trim()?.takeIf { it.isNotBlank() } ?: "Wattpad Author"
+        val authorUrl = authorEl?.absUrl("href")?.takeIf { it.startsWith("http") }
+        val tags = doc.select("a[href*='/stories/']").map { it.text().trim() }.filter { it.isNotBlank() }.distinct().take(15)
+
+        val tocLinks = doc.select("ul.table-of-contents a[href], .story-parts a[href], a[href*='wattpad.com/']").filter { a ->
+            val href = a.absUrl("href")
+            Regex("""wattpad\.com/\d+-""").containsMatchIn(href)
+        }
+        val chapters = tocLinks.mapIndexed { idx, a ->
+            val chTitle = a.text().trim().ifBlank { "Part ${idx + 1}" }
+            FanficParsedChapter(
+                chapterNumber = idx + 1,
+                title = chTitle,
+                category = FanficThreadmarkCategory.MAIN,
+                sourceSite = FanficSite.WATTPAD,
+                chapterUrl = a.absUrl("href").substringBefore("?")
+            )
+        }.distinctBy { it.chapterUrl }
+
+        val finalCanonical = storyId?.let { "https://www.wattpad.com/story/$it" } ?: canonicalUrl
+        val finalWorkId = storyId?.let { "wp:$it" } ?: workId
+        val isFanfic = isLikelyWattpadFanfic(tags, description, title)
+
+        return FanficFetchResult.Success(
+            FanficParsedWork(
+                site = FanficSite.WATTPAD,
+                canonicalUrl = finalCanonical,
+                workId = finalWorkId,
+                title = title,
+                author = author,
+                authorUrl = authorUrl,
+                summary = description,
+                coverUrl = cover,
+                rating = if (doc.text().contains("Mature", ignoreCase = true) && doc.selectFirst(".mature-badge, [data-testid*='mature']") != null) {
+                    FanficRating.MATURE
+                } else FanficRating.TEEN,
+                workStatus = if (doc.selectFirst(".completed-badge, [data-testid*='completed']") != null) {
+                    FanficWorkStatus.COMPLETE
+                } else FanficWorkStatus.ONGOING,
+                totalChapters = chapters.size.takeIf { it > 0 },
+                fandoms = if (isFanfic) tags.take(3) else emptyList(),
+                freeformTags = tags,
                 chapters = chapters
             )
         )

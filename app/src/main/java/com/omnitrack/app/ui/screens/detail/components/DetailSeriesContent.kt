@@ -434,8 +434,8 @@ fun LazyListScope.detailSeriesItems(
                                 Text(
                                     text = "+1",
                                     fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                                    fontWeight = FontWeight.Bold,
+                                    color = com.omnitrack.app.ui.theme.AccentGold
                                 )
                             }
                         }

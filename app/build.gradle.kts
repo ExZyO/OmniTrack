@@ -43,16 +43,12 @@ android {
 
         val envTraktClientId = readSecretProp("TRAKT_CLIENT_ID")
         val envTraktClientSecret = readSecretProp("TRAKT_CLIENT_SECRET")
-        val rawMalClientId = readSecretProp("MAL_CLIENT_ID")
-        val envMalClientId = if (rawMalClientId.isBlank() || rawMalClientId == "2db7880d919b9231be3031ec80e77f15") {
-            "3342466cfb744b714350df413002f5ef"
-        } else {
-            rawMalClientId
-        }
+        val envMalClientId = readSecretProp("MAL_CLIENT_ID")
         val envSimklClientId = readSecretProp("SIMKL_CLIENT_ID")
         val envSimklClientSecret = readSecretProp("SIMKL_CLIENT_SECRET")
         val envBangumiClientId = readSecretProp("BANGUMI_CLIENT_ID")
         val envBangumiClientSecret = readSecretProp("BANGUMI_CLIENT_SECRET")
+        val envComickClientId = readSecretProp("COMICK_CLIENT_ID")
 
         buildConfigField("String", "TRAKT_CLIENT_ID", "\"${escapeBuildConfig(envTraktClientId)}\"")
         buildConfigField("String", "TRAKT_CLIENT_SECRET", "\"${escapeBuildConfig(envTraktClientSecret)}\"")
@@ -61,6 +57,7 @@ android {
         buildConfigField("String", "SIMKL_CLIENT_SECRET", "\"${escapeBuildConfig(envSimklClientSecret)}\"")
         buildConfigField("String", "BANGUMI_CLIENT_ID", "\"${escapeBuildConfig(envBangumiClientId)}\"")
         buildConfigField("String", "BANGUMI_CLIENT_SECRET", "\"${escapeBuildConfig(envBangumiClientSecret)}\"")
+        buildConfigField("String", "COMICK_CLIENT_ID", "\"${escapeBuildConfig(envComickClientId)}\"")
 
         manifestPlaceholders["appName"] = "OmniTrack"
 

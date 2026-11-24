@@ -899,6 +899,9 @@ fun DetailFanficTrackingSection(
                 } else {
                     filteredChapters.forEach { ch ->
                         val chUrl = ch.chapterUrl?.takeIf { it.isNotBlank() } ?: item.fanficSourceUrl
+                        val isPaidChapter = ch.title.contains("[Paid]", ignoreCase = true)
+                        val displayChapterTitle = ch.title.replace(Regex("""\s*\[Paid\]""", RegexOption.IGNORE_CASE), "").trim()
+                        val chSite = FanficSite.fromCode(ch.sourceSite).let { if (it == FanficSite.OTHER) primarySite else it }
                         val isHighlighted = highlightedChapterNumber == ch.chapterNumber
                         val isChapSelected = ch.id in selectedChapterIds
                         Column(
@@ -919,7 +922,11 @@ fun DetailFanficTrackingSection(
                                         if (isChapterMultiSelect) {
                                             selectedChapterIds = if (isChapSelected) selectedChapterIds - ch.id else selectedChapterIds + ch.id
                                         } else if (!chUrl.isNullOrBlank()) {
-                                            onOpenExternalUrl(chUrl)
+                                            if (chSite == FanficSite.WATTPAD) {
+                                                onOpenChapterInWebView(chUrl, chSite, ch)
+                                            } else {
+                                                onOpenExternalUrl(chUrl)
+                                            }
                                         } else {
                                             onToggleChapterRead(ch)
                                         }
@@ -956,14 +963,36 @@ fun DetailFanficTrackingSection(
                                 }
 
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "${ch.chapterNumber}. ${ch.title}",
-                                        color = if (ch.isRead) TextSecondary.copy(alpha = 0.72f) else TextPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (ch.isRead) FontWeight.Medium else FontWeight.SemiBold,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "${ch.chapterNumber}. $displayChapterTitle",
+                                            color = if (ch.isRead) TextSecondary.copy(alpha = 0.72f) else TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (ch.isRead) FontWeight.Medium else FontWeight.SemiBold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (isPaidChapter) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(AccentGold.copy(alpha = 0.18f))
+                                                    .border(0.6.dp, AccentGold.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                                            ) {
+                                                Text(
+                                                    text = "PAID",
+                                                    color = AccentGold,
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.ExtraBold
+                                                )
+                                            }
+                                        }
+                                    }
                                     val subParts = listOfNotNull(
                                         formatWordCount(ch.wordCount).takeIf { it.isNotBlank() },
                                         ch.publishedDate?.takeIf { it.isNotBlank() },

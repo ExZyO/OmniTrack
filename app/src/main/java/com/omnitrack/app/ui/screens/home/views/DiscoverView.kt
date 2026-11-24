@@ -103,8 +103,15 @@ import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.GeminiModelSelectorSection
+import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
+import com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE
+import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
+import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.components.heroPageForItem
+import com.omnitrack.app.ui.components.heroVisibleLayers
+import com.omnitrack.app.ui.components.homeHeroPagerGesture
 import com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
@@ -156,7 +163,10 @@ fun DiscoverView(
     val discoverSettings by prefManager.discoverCustomizationSettings.collectAsState(
         initial = DiscoverCustomizationSettings()
     )
-    val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+    val mediaCategoryPrefs by prefManager.mediaCategoryPrefs.collectAsState(
+        initial = com.omnitrack.app.data.preferences.MediaCategoryPrefs()
+    )
+    val fanfictionEnabled = !mediaCategoryPrefs.isHidden(MediaType.FANFICTION)
     val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(
         initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP
     )
@@ -188,20 +198,8 @@ fun DiscoverView(
         }
     }
 
-    val allCategories = remember(fanfictionEnabled) {
-        buildList {
-            add(MediaType.ALL)
-            add(MediaType.ANIME)
-            add(MediaType.MANGA)
-            add(MediaType.COMIC)
-            add(MediaType.NOVEL)
-            if (fanfictionEnabled) add(MediaType.FANFICTION)
-            add(MediaType.BOOK)
-            add(MediaType.SHOW)
-            add(MediaType.MOVIE)
-            add(MediaType.GAME)
-            add(MediaType.VISUAL_NOVEL)
-        }
+    val allCategories = remember(mediaCategoryPrefs) {
+        mediaCategoryPrefs.visibleFilterTabs(includeAll = true)
     }
     val visibleCategories = remember(allCategories, discoverSettings.disabledCategories) {
         allCategories.filter { it.name !in discoverSettings.disabledCategories }.ifEmpty { listOf(MediaType.ALL) }
@@ -900,7 +898,9 @@ fun DiscoverView(
         }
 
         val detectedFanficUrl = remember(searchQuery, fanfictionEnabled) {
-            if (!fanfictionEnabled) null else com.omnitrack.app.data.model.extractFirstFanficUrl(searchQuery)
+            val extracted = com.omnitrack.app.data.model.extractFirstFanficUrl(searchQuery) ?: return@remember null
+            val site = com.omnitrack.app.data.model.FanficSite.fromUrl(extracted)
+            if (site == com.omnitrack.app.data.model.FanficSite.WATTPAD || fanfictionEnabled) extracted else null
         }
         if (detectedFanficUrl != null) {
             val detectedSite = com.omnitrack.app.data.model.FanficSite.fromUrl(detectedFanficUrl)
@@ -1810,61 +1810,291 @@ private fun DiscoverHeroCarousel(
         }
     }
     val perf = com.omnitrack.app.ui.components.LocalPerformanceSettings.current
+    val animateHero = !perf.disableCardAnimations
+    val scope = rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val currentActualIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage.coerceIn(0, items.lastIndex)
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.fillMaxWidth()
-        ) { page ->
-            val idx = if (isLooping) page % items.size else page
-            val item = items[idx]
-            val match = findLibraryMatch(allMedia, item)
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(224.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .homeHeroPagerGesture(
+                    pagerState = pagerState,
+                    itemCount = items.size,
+                    coroutineScope = scope
+                )
+        ) {
+            val heroWidthPx = with(density) { maxWidth.toPx() }
+            val visibleLayers = if (animateHero) {
+                heroVisibleLayers(pagerState, items.size)
+            } else {
+                listOf(HeroPageLayer(currentActualIdx, 1f, 0f))
+            }
+            val activeItem = visibleLayers.lastOrNull()?.itemIndex?.let(items::getOrNull) ?: items[currentActualIdx]
+            val activeMatch = findLibraryMatch(allMedia, activeItem)
+
+            // Invisible state-driver pager (zero sliding card seam)
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = false,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = 0.01f }
+            ) {
+                Box(modifier = Modifier.fillMaxSize())
+            }
+
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        if (!perf.disableCardAnimations) {
-                            val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                            val vis = (1f - kotlin.math.abs(pageOffset)).coerceIn(0f, 1f)
-                            alpha = 0.25f + 0.75f * vis
-                            translationX = pageOffset * size.width * 0.10f
+                    .fillMaxSize()
+                    .clickable {
+                        if (activeMatch != null) onItemClick(activeMatch.id) else {
+                            EphemeralPreviewHolder.previewItem = activeItem.toMediaItemEntity()
+                            onItemClick(-1L)
                         }
                     }
             ) {
-                DiscoverSpotlightBanner(
-                    item = item,
-                    libraryMatch = match,
-                    dimBanner = dimBanner,
-                    bannerBlurDp = resolveBlurDp(item.mediaType),
-                    onDetails = {
-                        if (match != null) onItemClick(match.id) else {
-                            EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
-                            onItemClick(-1L)
+                // 1. Stacked Backdrops (seamless in-place crossfade + 5.5% horizontal parallax)
+                visibleLayers.forEach { layer ->
+                    val item = items[layer.itemIndex]
+                    val match = findLibraryMatch(allMedia, item)
+                    androidx.compose.runtime.key("${item.mediaType}_${item.title}_${layer.itemIndex}") {
+                        val bannerDisabled = match != null && ArtworkModelResolver.isBannerDisabled(match)
+                        val coverModel = remember(match?.customCoverPath, match?.coverUrl, item.coverUrl) {
+                            ArtworkModelResolver.toCoilModel(match?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
                         }
-                    },
-                    onAdd = { onAddMedia(item) }
-                )
+                        val bannerModel = remember(
+                            match?.customBannerPath, match?.bannerUrl, match?.artworkRole,
+                            item.bannerUrl, item.coverUrl, bannerDisabled
+                        ) {
+                            if (bannerDisabled) null
+                            else ArtworkModelResolver.toCoilModel(
+                                match?.let { ArtworkModelResolver.preferredBanner(it) }
+                                    ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }
+                            )
+                        }
+                        val focalX = match?.bannerFocalX ?: 0f
+                        val focalY = match?.bannerFocalY ?: 0f
+                        val zoom = (match?.bannerZoom ?: 1f).coerceIn(1f, 2.5f)
+                        val bannerBlurDp = resolveBlurDp(item.mediaType)
+                        val overscan = if (animateHero) com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE else 1f
+
+                        if (bannerModel != null) {
+                            AsyncImage(
+                                model = bannerModel,
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                alignment = BiasAlignment(focalX.coerceIn(-1f, 1f), focalY.coerceIn(-1f, 1f)),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        val fx = focalX.coerceIn(-1f, 1f)
+                                        val fy = focalY.coerceIn(-1f, 1f)
+                                        val totalZoom = zoom * overscan
+                                        scaleX = totalZoom
+                                        scaleY = totalZoom
+                                        translationX = -fx * size.width * (zoom - 1f) * 0.5f -
+                                            (if (animateHero) layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX else 0f)
+                                        translationY = -fy * size.height * (zoom - 1f) * 0.5f
+                                        alpha = layer.visibility
+                                    }
+                                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
+                            )
+                        } else if (!bannerDisabled && coverModel != null) {
+                            val fallbackBlur = maxOf(bannerBlurDp, if (dimBanner) 18 else 10)
+                            AsyncImage(
+                                model = coverModel,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = overscan
+                                        scaleY = overscan
+                                        translationX = if (animateHero) -layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX else 0f
+                                        alpha = (if (dimBanner) 0.45f else 0.84f) * layer.visibility
+                                    }
+                                    .blur(fallbackBlur.dp)
+                            )
+                        }
+                    }
+                }
+
+                // 2. Stationary Vignettes (zero seam between slides)
+                if (dimBanner) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0.0f to Color.Transparent,
+                                    0.42f to AmoledBlack.copy(alpha = 0.35f),
+                                    0.78f to AmoledBlack.copy(alpha = 0.82f),
+                                    1.0f to AmoledBlack.copy(alpha = 0.96f)
+                                )
+                            )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    0.0f to AmoledBlack.copy(alpha = 0.62f),
+                                    0.48f to AmoledBlack.copy(alpha = 0.18f),
+                                    1.0f to Color.Transparent
+                                )
+                            )
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    0.60f to Color.Transparent,
+                                    0.86f to AmoledBlack.copy(alpha = 0.46f),
+                                    1.0f to AmoledBlack.copy(alpha = 0.76f)
+                                )
+                            )
+                    )
+                }
+
+                // 3. Stacked Foreground Content (seamless crossfade + 18% parallax)
+                visibleLayers.forEach { layer ->
+                    val item = items[layer.itemIndex]
+                    val match = findLibraryMatch(allMedia, item)
+                    androidx.compose.runtime.key("fg_${item.mediaType}_${item.title}_${layer.itemIndex}") {
+                        val coverModel = remember(match?.customCoverPath, match?.coverUrl, item.coverUrl) {
+                            ArtworkModelResolver.toCoilModel(match?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
+                        }
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .fillMaxWidth()
+                                .padding(14.dp)
+                                .graphicsLayer {
+                                    alpha = layer.visibility
+                                    translationX = if (animateHero) -layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX else 0f
+                                },
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(72.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                            ) {
+                                if (coverModel != null) {
+                                    AsyncImage(
+                                        model = coverModel,
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                } else if (item.mediaType == MediaType.FANFICTION) {
+                                    FanficTypographicCover(
+                                        title = item.title,
+                                        author = match?.bookAuthor ?: item.bookAuthor,
+                                        primaryFandom = match?.fanficPrimaryFandom ?: item.fanficPrimaryFandom,
+                                        sourceSite = match?.fanficSourceSite ?: item.fanficSourceSite,
+                                        ratingCode = match?.fanficRating ?: item.fanficRating,
+                                        wordCount = match?.fanficWordCount ?: item.fanficWordCount,
+                                        isCrossover = match?.fanficIsCrossover ?: item.fanficIsCrossover,
+                                        compact = true,
+                                        isBlurred = false
+                                    )
+                                }
+                            }
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "TRENDING SPOTLIGHT \u00B7 ${item.mediaType.displayName.uppercase()}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccentGold,
+                                    letterSpacing = 0.9.sp
+                                )
+                                Text(
+                                    text = item.title,
+                                    fontSize = 16.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = TextPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val meta = listOfNotNull(
+                                    item.releaseYear,
+                                    item.communityScore?.takeIf { it > 0f }?.let { "\u2605 ${formatSmartRating(it.toDouble())}" },
+                                    item.sourceProvider
+                                ).joinToString(" \u00B7 ")
+                                if (meta.isNotBlank()) {
+                                    Text(
+                                        text = meta,
+                                        fontSize = 11.5.sp,
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = if (match != null) "In Library" else "+ Library",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(AccentGold.copy(alpha = 0.18f))
+                                            .clickable {
+                                                if (match != null) onItemClick(match.id) else onAddMedia(item)
+                                            }
+                                            .padding(horizontal = 11.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         if (items.size > 1) {
-            val activeIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage
-            val curReal = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage
+            val visibleForDots = if (animateHero) {
+                com.omnitrack.app.ui.components.heroVisibleLayers(pagerState, items.size)
+            } else {
+                listOf(com.omnitrack.app.ui.components.HeroPageLayer(currentActualIdx, 1f, 0f))
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 repeat(items.size) { idx ->
-                    val frac = if (perf.disableCardAnimations) {
-                        if (activeIdx == idx) 1f else 0f
-                    } else if (isLooping) {
-                        val raw = curReal + pagerState.currentPageOffsetFraction - idx
-                        val wrapped = ((raw + items.size * 1.5f) % items.size) - items.size * 0.5f
-                        (1f - kotlin.math.abs(wrapped)).coerceIn(0f, 1f)
-                    } else {
-                        (1f - kotlin.math.abs((pagerState.currentPage - idx) + pagerState.currentPageOffsetFraction)).coerceIn(0f, 1f)
-                    }
+                    val frac = visibleForDots.firstOrNull { it.itemIndex == idx }?.visibility ?: 0f
                     Box(
                         modifier = Modifier
+                            .clickable {
+                                scope.launch {
+                                    runCatching {
+                                        pagerState.animateScrollToPage(
+                                            com.omnitrack.app.ui.components.heroPageForItem(
+                                                pagerState.currentPage, idx, items.size
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                             .padding(horizontal = 3.dp)
                             .width((5f + 13f * frac).dp)
                             .height(4.dp)

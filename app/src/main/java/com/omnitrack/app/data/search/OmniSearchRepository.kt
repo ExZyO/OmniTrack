@@ -242,6 +242,17 @@ class OmniSearchRepository(
                     deferreds.add(launchProvider { searchGoodreads(trimmed, MediaType.NOVEL) })
                     deferreds.add(launchProvider { searchSyosetu(trimmed) })
                     deferreds.add(launchProvider { searchOpenLibraryNovels(trimmed) })
+                    deferreds.add(launchProvider {
+                        val wpCookie = runCatching {
+                            com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                                .getFanficCookie(com.omnitrack.app.data.model.FanficSite.WATTPAD)
+                        }.getOrNull()
+                        com.omnitrack.app.data.fanfic.FanficSiteEngine.searchWattpad(
+                            query = trimmed,
+                            cookie = wpCookie,
+                            targetMediaType = MediaType.NOVEL
+                        )
+                    })
                 }
                 MediaType.SHOW -> {
                     deferreds.add(launchProvider { searchShowsAndMovies(trimmed, tmdbApiKey, preferType = MediaType.SHOW) })
@@ -267,6 +278,17 @@ class OmniSearchRepository(
                         com.omnitrack.app.data.fanfic.FanficSiteEngine.searchAo3(
                             query = trimmed,
                             cookie = ao3Cookie
+                        )
+                    })
+                    deferreds.add(launchProvider {
+                        val wpCookie = runCatching {
+                            com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                                .getFanficCookie(com.omnitrack.app.data.model.FanficSite.WATTPAD)
+                        }.getOrNull()
+                        com.omnitrack.app.data.fanfic.FanficSiteEngine.searchWattpad(
+                            query = trimmed,
+                            cookie = wpCookie,
+                            targetMediaType = MediaType.FANFICTION
                         )
                     })
                 }
@@ -2368,6 +2390,13 @@ class OmniSearchRepository(
                 val live = fetchGoodreadsWebFictionShelf("web-fiction", safePage)
                 if (live.isNotEmpty() || safePage > 1) live
                 else fetchGoodreadsWebFictionShelf("web-novels", 1)
+            }
+            "wattpad_webnovels" -> {
+                val wpCookie = runCatching {
+                    com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                        .getFanficCookie(com.omnitrack.app.data.model.FanficSite.WATTPAD)
+                }.getOrNull()
+                com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchWattpadDiscoverShelf("wattpad_webnovels", safePage, wpCookie)
             }
             "progression_webnovels" -> fetchGoodreadsWebFictionShelf("progression-fantasy", safePage)
             "top_rated_ln" -> fetchAniListDiscoverShelf(

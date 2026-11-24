@@ -51,10 +51,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.ChimanewLibrarySettings
+import com.omnitrack.app.data.preferences.DEFAULT_MEDIA_TYPE_ORDER
 import com.omnitrack.app.data.preferences.LibraryDisplayMode
 import com.omnitrack.app.data.preferences.LibraryGroupMode
 import com.omnitrack.app.data.preferences.LibrarySortOption
@@ -68,6 +72,47 @@ import com.omnitrack.app.ui.theme.TextSecondary
 import kotlin.math.roundToInt
 
 /**
+ * Context-aware per-category sub-filters hosted cleanly inside the Filter sheet
+ * (replaces stacked inline filter bars on Games, VNs, Manga, Novels, Books, Comics & Fanfic).
+ */
+data class LibraryCategorySubFilters(
+    val activeMediaTabType: MediaType? = null,
+    val mangaSubtype: String = "ALL",
+    val onMangaSubtype: (String) -> Unit = {},
+    val novelSubtype: String = "ALL",
+    val onNovelSubtype: (String) -> Unit = {},
+    val vnOrigin: String = "ALL",
+    val onVnOrigin: (String) -> Unit = {},
+    val vnLength: String = "ALL",
+    val onVnLength: (String) -> Unit = {},
+    val gamePlatform: String = "ALL",
+    val onGamePlatform: (String) -> Unit = {},
+    val gameCompletion: String = "ALL",
+    val onGameCompletion: (String) -> Unit = {},
+    val bookFormat: String = "ALL",
+    val onBookFormat: (String) -> Unit = {},
+    val bookCategory: String = "ALL",
+    val onBookCategory: (String) -> Unit = {},
+    val comicPublisher: String = "ALL",
+    val onComicPublisher: (String) -> Unit = {},
+    val comicFormat: String = "ALL",
+    val onComicFormat: (String) -> Unit = {},
+    val fanficSite: String = "ALL",
+    val onFanficSite: (String) -> Unit = {},
+    val fanficRating: String = "ALL",
+    val onFanficRating: (String) -> Unit = {},
+    val fanficStatus: String = "ALL",
+    val onFanficStatus: (String) -> Unit = {},
+    val fanficMinWords: Int = 0,
+    val onFanficMinWords: (Int) -> Unit = {},
+    val fanficCrossoverOnly: Boolean = false,
+    val onFanficCrossoverToggle: () -> Unit = {},
+    val fanficTagFilter: String = "",
+    val onFanficTagFilter: (String) -> Unit = {},
+    val onOpenFanficImport: () -> Unit = {}
+)
+
+/**
  * 4-Tab Chimanew Library Settings Sheet (Filter, Sort, Display, Group) in Option A Frameless AMOLED style.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -77,6 +122,8 @@ fun ChimanewLibrarySheet(
     selectedStatus: TrackingStatus,
     categories: List<CategoryEntity>,
     fanfictionEnabled: Boolean,
+    visibleMediaTypes: List<MediaType> = DEFAULT_MEDIA_TYPE_ORDER.filter { fanfictionEnabled || it != MediaType.FANFICTION },
+    subFilters: LibraryCategorySubFilters = LibraryCategorySubFilters(),
     onSelectStatus: (TrackingStatus) -> Unit,
     onToggleTriStateFilter: (String, TriStateFilter) -> Unit,
     onSetFilterMediaTypes: (Set<String>) -> Unit,
@@ -190,6 +237,13 @@ fun ChimanewLibrarySheet(
             ) {
                 when (activeTab) {
                     0 -> {
+                        // Contextual per-category sub-filters right at top when inside a specific media tab
+                        val activeCat = subFilters.activeMediaTabType
+                        if (activeCat != null && activeCat != MediaType.ALL && activeCat !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)) {
+                            CategorySubFiltersBlock(activeCat = activeCat, subFilters = subFilters)
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                        }
+
                         // TAB 0: FILTER (Tri-state Quick Filters + Status + Categories + Media Types + Trackers)
                         SheetSectionLabel("QUICK FILTERS (TAP TO CYCLE INCLUDE / EXCLUDE)")
                         FlowRow(
@@ -298,14 +352,33 @@ fun ChimanewLibrarySheet(
 
                         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-                        SheetSectionLabel("MEDIA VERTICALS (EMPTY = ALL)")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SheetSectionLabel("MEDIA VERTICALS (EMPTY = ALL)")
+                            Text(
+                                text = "Hide / Reorder \u2192",
+                                color = AccentGold,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        onDismiss()
+                                        onOpenManageCategories()
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            MediaType.filterTabs
-                                .filter { it != MediaType.ALL && (fanfictionEnabled || it != MediaType.FANFICTION) }
+                            visibleMediaTypes
+                                .filter { it != MediaType.ALL }
                                 .forEach { mt ->
                                     val sel = mt.name in settings.filterMediaTypes
                                     LibChoiceChip(
@@ -704,5 +777,273 @@ private fun LibSwitchRow(
                 uncheckedTrackColor = Color.White.copy(alpha = 0.12f)
             )
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CategorySubFiltersBlock(
+    activeCat: MediaType,
+    subFilters: LibraryCategorySubFilters
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        when (activeCat) {
+            MediaType.MANGA -> {
+                SheetSectionLabel("MANGA SUBTYPE")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("ALL" to "All", "MANGA" to "Manga", "MANHWA" to "Manhwa", "MANHUA" to "Manhua").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.mangaSubtype == k, onClick = { subFilters.onMangaSubtype(k) })
+                    }
+                }
+            }
+            MediaType.NOVEL -> {
+                SheetSectionLabel("NOVEL SUBTYPE")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.novelSubtype == k, onClick = { subFilters.onNovelSubtype(k) })
+                    }
+                }
+            }
+            MediaType.VISUAL_NOVEL -> {
+                SheetSectionLabel("VISUAL NOVEL \u00B7 ORIGIN")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("ALL" to "All", "JP" to "Japanese", "EN" to "English / OELVN", "CNKR" to "CN / KR").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.vnOrigin == k, onClick = { subFilters.onVnOrigin(k) })
+                    }
+                }
+                SheetSectionLabel("VISUAL NOVEL \u00B7 LENGTH")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("ALL" to "Any Length", "SHORT" to "Short (<10h)", "MEDIUM" to "Medium", "LONG" to "Long", "VLONG" to "Very Long (50h+)").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.vnLength == k, onClick = { subFilters.onVnLength(k) })
+                    }
+                }
+            }
+            MediaType.GAME -> {
+                SheetSectionLabel("GAMES \u00B7 PLATFORM")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All",
+                        "PC" to "PC",
+                        "PS" to "PlayStation",
+                        "SWI" to "Switch",
+                        "XBOX" to "Xbox",
+                        "DECK" to "Steam Deck",
+                        "MOBILE" to "Mobile",
+                        "RETRO" to "Retro"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.gamePlatform == k, onClick = { subFilters.onGamePlatform(k) })
+                    }
+                }
+                SheetSectionLabel("GAMES \u00B7 COMPLETION TIER")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All Tiers",
+                        "MAIN" to "Main / Main+",
+                        "COMP" to "100% / Plat",
+                        "BEATEN" to "Completed",
+                        "BACKLOG" to "Backlog"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.gameCompletion == k, onClick = { subFilters.onGameCompletion(k) })
+                    }
+                }
+            }
+            MediaType.BOOK -> {
+                SheetSectionLabel("BOOKS \u00B7 FORMAT")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All Formats",
+                        "PAPERBACK" to "Paperback",
+                        "HARDCOVER" to "Hardcover",
+                        "EBOOK" to "Ebook",
+                        "AUDIOBOOK" to "Audiobook"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.bookFormat == k, onClick = { subFilters.onBookFormat(k) })
+                    }
+                }
+                SheetSectionLabel("BOOKS \u00B7 CATEGORY")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All",
+                        "FICTION" to "Fiction",
+                        "NONFICTION" to "Non-Fiction",
+                        "FANTASY" to "Fantasy",
+                        "SCIFI" to "Sci-Fi",
+                        "MYSTERY" to "Mystery",
+                        "CLASSIC" to "Classics"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.bookCategory == k, onClick = { subFilters.onBookCategory(k) })
+                    }
+                }
+            }
+            MediaType.COMIC -> {
+                SheetSectionLabel("COMICS \u00B7 PUBLISHER")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All Publishers",
+                        "MARVEL" to "Marvel",
+                        "DC" to "DC",
+                        "IMAGE" to "Image",
+                        "DARKHORSE" to "Dark Horse",
+                        "INDIE" to "Indie / Other"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.comicPublisher == k, onClick = { subFilters.onComicPublisher(k) })
+                    }
+                }
+                SheetSectionLabel("COMICS \u00B7 FORMAT")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All Formats",
+                        "SINGLE_ISSUE" to "Issues",
+                        "TPB" to "TPB",
+                        "OMNIBUS" to "Omnibus",
+                        "GRAPHIC_NOVEL" to "Graphic Novel"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.comicFormat == k, onClick = { subFilters.onComicFormat(k) })
+                    }
+                }
+            }
+            MediaType.FANFICTION -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SheetSectionLabel("FANFICTION \u00B7 SITE")
+                    Text(
+                        text = "+ Import URL",
+                        color = AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = subFilters.onOpenFanficImport)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "ALL" to "All Sites",
+                        "AO3" to "AO3",
+                        "WATTPAD" to "Wattpad",
+                        "FFN" to "FF.net",
+                        "SB" to "SpaceBattles",
+                        "SV" to "SV",
+                        "QQ" to "QQ"
+                    ).forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.fanficSite == k, onClick = { subFilters.onFanficSite(k) })
+                    }
+                }
+                SheetSectionLabel("RATING & WORK STATUS")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("ALL" to "Any Rating", "G" to "G", "T" to "T", "M" to "M", "E" to "E").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.fanficRating == k, onClick = { subFilters.onFanficRating(k) })
+                    }
+                    listOf("ALL" to "Any Status", "COMPLETE" to "Complete", "ONGOING" to "Ongoing", "HIATUS" to "Hiatus").forEach { (k, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.fanficStatus == k, onClick = { subFilters.onFanficStatus(k) })
+                    }
+                    LibChoiceChip(
+                        label = "Crossovers",
+                        selected = subFilters.fanficCrossoverOnly,
+                        onClick = subFilters.onFanficCrossoverToggle
+                    )
+                }
+                SheetSectionLabel("MIN WORDS")
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(0 to "Any", 10_000 to "10k+", 50_000 to "50k+", 100_000 to "100k+").forEach { (w, lbl) ->
+                        LibChoiceChip(label = lbl, selected = subFilters.fanficMinWords == w, onClick = { subFilters.onFanficMinWords(w) })
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    BasicTextField(
+                        value = subFilters.fanficTagFilter,
+                        onValueChange = subFilters.onFanficTagFilter,
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                        cursorBrush = SolidColor(AccentGold),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            if (subFilters.fanficTagFilter.isEmpty()) {
+                                Text("Filter by fandom, ship, character, or tag...", color = TextMuted, fontSize = 12.5.sp)
+                            }
+                            inner()
+                        }
+                    )
+                    if (subFilters.fanficTagFilter.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear tag",
+                            tint = TextMuted,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { subFilters.onFanficTagFilter("") }
+                        )
+                    }
+                }
+            }
+            else -> Unit
+        }
     }
 }

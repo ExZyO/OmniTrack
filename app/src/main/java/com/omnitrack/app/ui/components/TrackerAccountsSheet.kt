@@ -325,10 +325,18 @@ fun TrackerAccountsSheet(
                                     syncStatusNote = "Syncing connected accounts..."
                                     scope.launch {
                                         try {
+                                            val drain = syncEngine.drainQueueDetailed()
                                             val count = syncEngine.pullRemoteLibraries { status ->
                                                 syncStatusNote = status
                                             }
-                                            Toast.makeText(context, "Sync complete ($count updated/imported)", Toast.LENGTH_SHORT).show()
+                                            val summaryText = buildString {
+                                                append("Sync complete")
+                                                if (drain.pushed > 0) append(" · pushed ${drain.pushed}")
+                                                if (drain.failed > 0) append(" · ${drain.failed} push failed")
+                                                append(" · $count pulled/updated")
+                                            }
+                                            syncStatusNote = summaryText
+                                            Toast.makeText(context, summaryText, Toast.LENGTH_LONG).show()
                                         } catch (e: CancellationException) {
                                             throw e
                                         } catch (e: Exception) {
@@ -486,15 +494,23 @@ fun TrackerAccountsSheet(
                             }
                             TrackerServiceId.MAL -> {
                                 scope.launch {
+                                    val customMal = customMalClientId.takeIf { it.isNotBlank() }
+                                    val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
+                                    if (effectiveClientId.isBlank()) {
+                                        Toast.makeText(
+                                            context,
+                                            "MAL Client ID not configured — add MAL_CLIENT_ID in Settings -> API Keys or GitHub Secrets",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        return@launch
+                                    }
                                     val verifier = PkceUtil.generateCodeVerifier()
                                     val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingMalVerifier = verifier
                                     TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveMalVerifier(verifier)
                                     tokenManager.saveOAuthState(state)
-                                    val customMal = customMalClientId.takeIf { it.isNotBlank() && it != "2db7880d919b9231be3031ec80e77f15" }
-                                    val effectiveClientId = customMal ?: TrackerAccountVerifier.MAL_CLIENT_ID
-                                    val redirectUri = if (customMal != null) "omnitrack://auth/mal" else "chimahon://myanimelist-auth"
+                                    val redirectUri = "omnitrack://auth/mal"
                                     val url = "https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=$effectiveClientId&code_challenge=$verifier&code_challenge_method=plain&redirect_uri=$redirectUri&state=$state"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
@@ -528,26 +544,42 @@ fun TrackerAccountsSheet(
                             }
                             TrackerServiceId.BANGUMI -> {
                                 scope.launch {
+                                    if (TrackerAccountVerifier.BANGUMI_CLIENT_ID.isBlank()) {
+                                        Toast.makeText(
+                                            context,
+                                            "Bangumi Client ID not configured — add BANGUMI_CLIENT_ID in GitHub Secrets",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        return@launch
+                                    }
                                     val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveOAuthState(state)
                                     context.startActivity(
                                         Intent(
                                             Intent.ACTION_VIEW,
-                                            Uri.parse("https://bgm.tv/oauth/authorize?client_id=${TrackerAccountVerifier.BANGUMI_CLIENT_ID}&response_type=code&redirect_uri=komikku://bangumi-auth&state=$state")
+                                            Uri.parse("https://bgm.tv/oauth/authorize?client_id=${TrackerAccountVerifier.BANGUMI_CLIENT_ID}&response_type=code&redirect_uri=omnitrack://auth/bangumi&state=$state")
                                         )
                                     )
                                 }
                             }
                             TrackerServiceId.COMICK -> {
                                 scope.launch {
+                                    if (TrackerAccountVerifier.COMICK_CLIENT_ID.isBlank()) {
+                                        Toast.makeText(
+                                            context,
+                                            "Comick Client ID not configured — add COMICK_CLIENT_ID in GitHub Secrets",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        return@launch
+                                    }
                                     val pkce = PkceUtil.generateS256Codes()
                                     val state = TrackerAccountVerifier.generateOAuthState()
                                     TrackerAccountVerifier.pendingComickVerifier = pkce.codeVerifier
                                     TrackerAccountVerifier.pendingOAuthState = state
                                     tokenManager.saveComickVerifier(pkce.codeVerifier)
                                     tokenManager.saveOAuthState(state)
-                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=${TrackerAccountVerifier.COMICK_CLIENT_ID}&redirect_uri=app.mihon://comick-auth&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256&state=$state"
+                                    val url = "https://comick.dev/api/auth/oauth2/authorize?client_id=${TrackerAccountVerifier.COMICK_CLIENT_ID}&redirect_uri=omnitrack://auth/comick&response_type=code&scope=library:read%20library:write%20offline_access&resource=https://api.comick.dev/integrations/v1&code_challenge=${pkce.codeChallenge}&code_challenge_method=S256&state=$state"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
                             }
@@ -605,15 +637,35 @@ fun TrackerAccountsSheet(
                         }
                     },
                     onSyncNow = {
-                        scope.launch {
-                            try {
-                                syncEngine.drainQueue()
-                                Toast.makeText(context, "Synced queued changes", Toast.LENGTH_SHORT).show()
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Sync error: ${e.message}", Toast.LENGTH_SHORT).show()
+                        try {
+                            val verify = TrackerAccountVerifier.verifyWithAutoRefresh(
+                                serviceKey = activeService.name,
+                                tokenManager = tokenManager,
+                                customTraktClientId = customTraktClientId
+                            )
+                            verifiedNames = verifiedNames + (activeService to verify)
+                            if (verify is VerificationState.Failed) {
+                                val errMsg = "${activeService.title}: ${verify.message}"
+                                Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
+                                errMsg
+                            } else {
+                                val summary = syncEngine.drainQueueDetailed(activeService.name)
+                                val handle = (verify as? VerificationState.Verified)?.username
+                                val msg = when {
+                                    summary.expiredAuth -> "${activeService.title} session expired — tap Reconnect"
+                                    summary.failed > 0 -> "${activeService.title}: pushed ${summary.pushed}, ${summary.failed} failed (${summary.lastError ?: "network error"})"
+                                    summary.pushed > 0 -> "${activeService.title}${handle?.let { " ($it)" }.orEmpty()} · pushed ${summary.pushed} queued change(s)"
+                                    else -> "${activeService.title} verified${handle?.let { " ($it)" }.orEmpty()} · 0 queued pushes"
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                msg
                             }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            val err = "Sync error: ${e.message}"
+                            Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            err
                         }
                     },
                     onDisconnect = {
@@ -833,7 +885,7 @@ private fun TrackerAccountDetailView(
     onSaveManualToken: (String) -> Unit,
     onSaveSteam: (String, String) -> Unit,
     onImportLibrary: suspend () -> TrackerImportResult?,
-    onSyncNow: () -> Unit,
+    onSyncNow: suspend () -> String,
     onDisconnect: () -> Unit,
     onTmdbSignIn: () -> Unit = {}
 ) {
@@ -843,6 +895,8 @@ private fun TrackerAccountDetailView(
 
     var isImporting by remember(service) { mutableStateOf(false) }
     var lastImportResult by remember(service) { mutableStateOf<TrackerImportResult?>(null) }
+    var isSyncingNow by remember(service) { mutableStateOf(false) }
+    var lastSyncMessage by remember(service) { mutableStateOf<String?>(null) }
 
     var manualTokenInput by remember(service) { mutableStateOf("") }
     var showTokenText by remember { mutableStateOf(false) }
@@ -1047,17 +1101,51 @@ private fun TrackerAccountDetailView(
                 }
             }
 
+            lastSyncMessage?.let { msg ->
+                val isError = msg.contains("failed", ignoreCase = true) ||
+                    msg.contains("error", ignoreCase = true) ||
+                    msg.contains("expired", ignoreCase = true)
+                Text(
+                    text = msg,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (isError) Color(0xFFFCA5A5) else AccentGold
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
-                    onClick = onSyncNow,
+                    onClick = {
+                        if (!isSyncingNow) {
+                            scope.launch {
+                                isSyncingNow = true
+                                try {
+                                    lastSyncMessage = onSyncNow()
+                                } finally {
+                                    isSyncingNow = false
+                                }
+                            }
+                        }
+                    },
+                    enabled = !isSyncingNow,
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, GlassBorder),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Sync Now", color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    if (isSyncingNow) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Syncing...", color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    } else {
+                        Text("Sync Now", color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
 
                 OutlinedButton(

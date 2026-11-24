@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -87,6 +88,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -117,12 +119,21 @@ import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
+import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
+import com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE
+import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
+import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
 import com.omnitrack.app.ui.components.glassCardDepth
+import com.omnitrack.app.ui.components.heroPageForItem
 import com.omnitrack.app.ui.components.heroScrollBackdropAlpha
 import com.omnitrack.app.ui.components.heroScrollBackdropScale
 import com.omnitrack.app.ui.components.heroScrollForegroundAlpha
+import com.omnitrack.app.ui.components.heroStretchHeight
+import com.omnitrack.app.ui.components.heroStretchZoom
+import com.omnitrack.app.ui.components.heroVisibleLayers
+import com.omnitrack.app.ui.components.homeHeroPagerGesture
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -186,6 +197,7 @@ fun HomeDashboardView(
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     fanfictionEnabled: Boolean = true,
+    visibleFilterTabs: List<MediaType> = MediaType.filterTabs,
     fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP,
     customCategories: List<CategoryEntity> = emptyList(),
     categoryAssignments: Map<Long, Set<Long>> = emptyMap(),
@@ -624,106 +636,210 @@ fun HomeDashboardView(
                             }
                         }
 
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            HorizontalPager(
-                                state = pagerState,
-                                key = { page ->
-                                    val idx = if (isLooping) page % heroSlides.size else page
-                                    val slide = heroSlides.getOrNull(idx)
-                                    "${slide?.slideKey() ?: idx}_$page"
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) { page ->
-                                val idx = if (isLooping) page % heroSlides.size else page
-                                val pageOffsetProvider: () -> Float = {
-                                    if (!animateHero) 0f
-                                    else (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                                }
-                                when (val slide = heroSlides.getOrNull(idx)) {
-                                    is HomeHeroSlide.LocalSlide -> LocalMediaHeroCard(
-                                        item = slide.item,
-                                        cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(slide.item.id, slide.item.mediaType, slide.item.title)],
-                                        heroSettings = heroSettings,
-                                        scrollOffsetPx = heroScrollPx,
-                                        pullFraction = pullStretchFraction,
-                                        pageOffsetProvider = pageOffsetProvider,
-                                        onDetails = { onItemClick(slide.item.id) }
+                        val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
+                            "COMPACT" -> 336.dp
+                            "TALL" -> 472.dp
+                            else -> 404.dp
+                        }
+                        val density = LocalDensity.current
+                        val heroHeightPx = with(density) { heroHeightDp.toPx() }
+                        val pullStretchPx: () -> Float = {
+                            if (!animateHero) 0f
+                            else (pullStretchFraction() * 96f * density.density).coerceIn(0f, 150f * density.density)
+                        }
+
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .homeHeroPagerGesture(
+                                    pagerState = pagerState,
+                                    itemCount = heroSlides.size,
+                                    coroutineScope = scope
+                                )
+                        ) {
+                            val heroWidthPx = with(density) { maxWidth.toPx() }
+                            val visibleLayers = if (animateHero) {
+                                heroVisibleLayers(pagerState, heroSlides.size)
+                            } else {
+                                listOf(HeroPageLayer(currentActualIndex, 1f, 0f))
+                            }
+                            val activeSlideIndex = visibleLayers.lastOrNull()?.itemIndex ?: currentActualIndex
+                            val activeSlide = heroSlides.getOrNull(activeSlideIndex)
+                            val activeLibMatch = remember(activeSlide, allMedia) {
+                                when (activeSlide) {
+                                    is HomeHeroSlide.LocalSlide -> activeSlide.item
+                                    is HomeHeroSlide.TrendingSlide -> ArtworkModelResolver.findLibraryMatch(
+                                        library = allMedia,
+                                        mediaType = activeSlide.item.mediaType,
+                                        anilistId = activeSlide.item.anilistId,
+                                        malId = activeSlide.item.malId,
+                                        tmdbId = activeSlide.item.tmdbId,
+                                        imdbId = activeSlide.item.imdbId,
+                                        steamAppId = activeSlide.item.steamAppId,
+                                        comicVineId = activeSlide.item.comicVineId,
+                                        metronId = activeSlide.item.metronId,
+                                        openLibraryId = activeSlide.item.openLibraryId,
+                                        title = activeSlide.item.title,
+                                        nativeTitle = activeSlide.item.nativeTitle
                                     )
-                                    is HomeHeroSlide.TrendingSlide -> {
-                                        val libMatch = ArtworkModelResolver.findLibraryMatch(
-                                            library = allMedia,
-                                            mediaType = slide.item.mediaType,
-                                            anilistId = slide.item.anilistId,
-                                            malId = slide.item.malId,
-                                            tmdbId = slide.item.tmdbId,
-                                            imdbId = slide.item.imdbId,
-                                            steamAppId = slide.item.steamAppId,
-                                            comicVineId = slide.item.comicVineId,
-                                            metronId = slide.item.metronId,
-                                            openLibraryId = slide.item.openLibraryId,
-                                            title = slide.item.title,
-                                            nativeTitle = slide.item.nativeTitle
-                                        )
-                                        if (libMatch != null) {
-                                            LocalMediaHeroCard(
-                                                item = libMatch,
-                                                cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(libMatch.id, libMatch.mediaType, libMatch.title)],
-                                                heroSettings = heroSettings,
-                                                scrollOffsetPx = heroScrollPx,
-                                                pullFraction = pullStretchFraction,
-                                                pageOffsetProvider = pageOffsetProvider,
-                                                onDetails = { onItemClick(libMatch.id) }
-                                            )
-                                        } else {
-                                            TrendingMediaHeroCard(
-                                                item = slide.item,
-                                                cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(null, slide.item.mediaType, slide.item.title)],
-                                                heroSettings = heroSettings,
-                                                scrollOffsetPx = heroScrollPx,
-                                                pullFraction = pullStretchFraction,
-                                                pageOffsetProvider = pageOffsetProvider,
-                                                onDetails = { onPreviewSearchItem(slide.item) }
-                                            )
-                                        }
-                                    }
-                                    null -> Unit
+                                    null -> null
                                 }
                             }
 
-                            if (isLooping && heroSettings.slideCount > 0 && heroSlides.size <= 15) {
-                                val heroHeightPxEst = when (heroSettings.heroHeightPreset.uppercase()) {
-                                    "COMPACT" -> 920f
-                                    "TALL" -> 1300f
-                                    else -> 1120f
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .padding(bottom = 10.dp)
-                                        .graphicsLayer {
-                                            alpha = heroScrollForegroundAlpha(heroScrollPx(), heroHeightPxEst)
-                                        },
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    repeat(heroSlides.size) { index ->
-                                        val activeFraction = if (!animateHero) {
-                                            if (index == currentActualIndex) 1f else 0f
-                                        } else {
-                                            val raw = currentActualIndex + pagerState.currentPageOffsetFraction - index
-                                            val wrapped = ((raw + heroSlides.size * 1.5f) % heroSlides.size) - heroSlides.size * 0.5f
-                                            (1f - kotlin.math.abs(wrapped)).coerceIn(0f, 1f)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (animateHero) Modifier.heroStretchHeight(heroHeightDp, pullStretchPx)
+                                        else Modifier.height(heroHeightDp)
+                                    )
+                                    .clipToBounds()
+                                    .clickable(enabled = activeSlide != null) {
+                                        if (activeLibMatch != null) {
+                                            onItemClick(activeLibMatch.id)
+                                        } else if (activeSlide is HomeHeroSlide.TrendingSlide) {
+                                            onPreviewSearchItem(activeSlide.item)
                                         }
-                                        Box(
-                                            modifier = Modifier
-                                                .width((6f + 14f * activeFraction).dp)
-                                                .height(5.dp)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    if (activeFraction > 0.5f) AccentGold.copy(alpha = 0.45f + 0.55f * activeFraction)
-                                                    else Color.White.copy(alpha = 0.35f + 0.50f * activeFraction)
-                                                )
+                                    }
+                            ) {
+                                // Invisible state-driver pager (Nuvio pattern: zero sliding card seam)
+                                HorizontalPager(
+                                    state = pagerState,
+                                    userScrollEnabled = false,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer { alpha = 0.01f }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize())
+                                }
+
+                                // 1. Stacked Backdrops (seamless in-place crossfade + 5.5% horizontal parallax + vertical scroll motion + pull stretch)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(heroHeightDp)
+                                        .then(if (animateHero) Modifier.heroStretchZoom(pullStretchPx) else Modifier)
+                                ) {
+                                    visibleLayers.forEach { layer ->
+                                        val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
+                                        androidx.compose.runtime.key(slide.slideKey()) {
+                                            val resolved = rememberResolvedHomeHeroSlide(
+                                                slide = slide,
+                                                allMedia = allMedia,
+                                                heroMultiRatingsCache = heroMultiRatingsCache,
+                                                heroSettings = heroSettings
+                                            )
+                                            ChimanewHeroBackdropLayer(
+                                                data = resolved,
+                                                heroSettings = heroSettings,
+                                                visibility = layer.visibility,
+                                                pageOffset = layer.offset,
+                                                heroWidthPx = heroWidthPx,
+                                                animateHero = animateHero,
+                                                scrollOffsetPx = heroScrollPx
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // 2. Stationary Top Bar Scrim
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(92.dp)
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(AmoledBlack.copy(alpha = 0.65f), Color.Transparent)
+                                            )
                                         )
+                                )
+
+                                // 3. Stationary Bottom Vignette into pure AMOLED black
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                0.0f to Color.Transparent,
+                                                0.40f to Color.Transparent,
+                                                0.80f to AmoledBlack.copy(alpha = 0.86f),
+                                                1.0f to AmoledBlack
+                                            )
+                                        )
+                                )
+
+                                // 4. Stacked Foreground Content (seamless in-place crossfade + 18% horizontal parallax)
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .fillMaxWidth()
+                                        .padding(start = 18.dp, end = 18.dp, bottom = 28.dp),
+                                    contentAlignment = Alignment.BottomStart
+                                ) {
+                                    visibleLayers.forEach { layer ->
+                                        val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
+                                        androidx.compose.runtime.key(slide.slideKey()) {
+                                            val resolved = rememberResolvedHomeHeroSlide(
+                                                slide = slide,
+                                                allMedia = allMedia,
+                                                heroMultiRatingsCache = heroMultiRatingsCache,
+                                                heroSettings = heroSettings
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .graphicsLayer {
+                                                        val sPx = heroScrollPx()
+                                                        alpha = layer.visibility * heroScrollForegroundAlpha(sPx, heroHeightPx)
+                                                        translationX = if (animateHero) -layer.offset * heroWidthPx * HERO_CONTENT_PARALLAX else 0f
+                                                        translationY = if (animateHero) -sPx * 0.10f else 0f
+                                                    }
+                                            ) {
+                                                ChimanewHeroForegroundRow(
+                                                    data = resolved,
+                                                    heroSettings = heroSettings
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 5. Interactive Indicator Pills
+                                if (isLooping && heroSettings.slideCount > 0 && heroSlides.size <= 15) {
+                                    Row(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 10.dp)
+                                            .graphicsLayer {
+                                                alpha = heroScrollForegroundAlpha(heroScrollPx(), heroHeightPx)
+                                            },
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        repeat(heroSlides.size) { index ->
+                                            val activeFraction = visibleLayers
+                                                .firstOrNull { it.itemIndex == index }
+                                                ?.visibility ?: 0f
+                                            Box(
+                                                modifier = Modifier
+                                                    .clickable {
+                                                        scope.launch {
+                                                            runCatching {
+                                                                pagerState.animateScrollToPage(
+                                                                    heroPageForItem(pagerState.currentPage, index, heroSlides.size)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    .width((6f + 14f * activeFraction).dp)
+                                                    .height(5.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        if (activeFraction > 0.5f) AccentGold.copy(alpha = 0.45f + 0.55f * activeFraction)
+                                                        else Color.White.copy(alpha = 0.35f + 0.50f * activeFraction)
+                                                    )
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -742,8 +858,24 @@ fun HomeDashboardView(
                 }
             }
 
-            // Customizable Ordered Home Shelves
-            homeRows.filter { it.isEnabled && (fanfictionEnabled || it.key != HomeRowKey.DISCOVER_FANFICTION) }.forEach { row ->
+            // Customizable Ordered Home Shelves (respects globally hidden categories)
+            val visibleTypesSet = remember(visibleFilterTabs) { visibleFilterTabs.toSet() }
+            homeRows.filter { row ->
+                if (!row.isEnabled) return@filter false
+                when (row.key) {
+                    HomeRowKey.DISCOVER_ANIME -> MediaType.ANIME in visibleTypesSet
+                    HomeRowKey.DISCOVER_SHOWS -> MediaType.SHOW in visibleTypesSet
+                    HomeRowKey.DISCOVER_MOVIES -> MediaType.MOVIE in visibleTypesSet
+                    HomeRowKey.DISCOVER_MANGA -> MediaType.MANGA in visibleTypesSet
+                    HomeRowKey.DISCOVER_NOVELS -> MediaType.NOVEL in visibleTypesSet
+                    HomeRowKey.DISCOVER_VNS -> MediaType.VISUAL_NOVEL in visibleTypesSet
+                    HomeRowKey.DISCOVER_GAMES -> MediaType.GAME in visibleTypesSet
+                    HomeRowKey.DISCOVER_BOOKS -> MediaType.BOOK in visibleTypesSet
+                    HomeRowKey.DISCOVER_COMICS -> MediaType.COMIC in visibleTypesSet
+                    HomeRowKey.DISCOVER_FANFICTION -> fanfictionEnabled && MediaType.FANFICTION in visibleTypesSet
+                    else -> true
+                }
+            }.forEach { row ->
                 when (row.key) {
                     HomeRowKey.CONTINUE -> {
                         if (continueItems.isNotEmpty()) {
@@ -1239,7 +1371,7 @@ fun HomeDashboardView(
                     onDismissRequest = { categoryMenuExpanded = false },
                     containerColor = AmoledBlack
                 ) {
-                    (if (fanfictionEnabled) MediaType.filterTabs else MediaType.filterTabs.filter { it != MediaType.FANFICTION }).forEach { type ->
+                    visibleFilterTabs.filter { fanfictionEnabled || it != MediaType.FANFICTION }.forEach { type ->
                         val selected = type == selectedCategory
                         DropdownMenuItem(
                             text = {
@@ -1487,333 +1619,306 @@ private fun heroPrimaryCtaLabel(item: MediaCardSummary): String = when (item.med
     else -> "+1 ${item.mediaType.unitLabel}"
 }
 
-@Composable
-private fun LocalMediaHeroCard(
-    item: MediaCardSummary,
-    cachedRatings: CachedMultiRatings? = null,
-    heroSettings: HomeHeroSettings,
-    scrollOffsetPx: () -> Float = { 0f },
-    pullFraction: () -> Float = { 0f },
-    pageOffsetProvider: () -> Float = { 0f },
-    onDetails: () -> Unit
-) {
-    val coverModel: Any? = remember(item.customCoverPath, item.coverUrl) {
-        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item))
-    }
-    val authenticBannerModel = remember(item.customBannerPath, item.bannerUrl, item.artworkRole, item.coverUrl) {
-        ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredBanner(item))
-    }
-    val remainingCount = remember(item.totalProgress, item.currentProgress, item.mediaType) {
-        val tot = item.totalProgress?.toInt() ?: 0
-        val cur = item.currentProgress.toInt()
-        if (item.mediaType != MediaType.GAME && item.mediaType != MediaType.VISUAL_NOVEL && tot > cur) {
-            (tot - cur).coerceAtLeast(0)
-        } else 0
-    }
-    val progressLabel = remember(item) { formatConciseProgress(item) }
+private data class ResolvedHomeHeroSlide(
+    val title: String,
+    val categoryBadge: String,
+    val posterModel: Any?,
+    val posterFallback: (@Composable () -> Unit)? = null,
+    val authenticBannerModel: Any?,
+    val forceCoverBackdrop: Boolean = false,
+    val bannerFocalX: Float = 0f,
+    val bannerFocalY: Float = 0f,
+    val bannerZoom: Float = 1f,
+    val bannerBlurDp: Int = 0,
+    val userRating: Float? = null,
+    val communityScore: Float? = null,
+    val imdbScore: Float? = null,
+    val rtScore: Int? = null,
+    val metacriticScore: Int? = null,
+    val traktScore: Int? = null,
+    val audienceScore: Int? = null,
+    val cachedRatings: CachedMultiRatings? = null,
+    val mediaType: MediaType = MediaType.ALL,
+    val hasAnilist: Boolean = false,
+    val hasMal: Boolean = false,
+    val hasTmdb: Boolean = false,
+    val hasVndb: Boolean = false,
+    val hasBangumi: Boolean = false,
+    val hasIgdb: Boolean = false,
+    val hasSteam: Boolean = false,
+    val progressLabel: String = "",
+    val remainingCount: Int = 0
+)
 
-    ChimanewComboHeroCard(
-        title = item.title,
-        categoryBadge = "${item.mediaType.displayName.uppercase()} \u00B7 ${item.status.displayName.uppercase()}",
-        posterModel = coverModel,
-        posterFallback = if (item.mediaType == MediaType.FANFICTION && coverModel == null) {
-            {
-                FanficTypographicCover(
-                    title = item.title,
-                    author = item.bookAuthor,
-                    primaryFandom = item.fanficPrimaryFandom,
-                    sourceSite = item.fanficSourceSite,
-                    ratingCode = item.fanficRating,
-                    wordCount = item.fanficWordCount,
-                    isCrossover = item.fanficIsCrossover,
-                    compact = true,
-                    isBlurred = false
-                )
-            }
-        } else null,
-        authenticBannerModel = authenticBannerModel,
-        forceCoverBackdrop = item.mediaType == MediaType.BOOK && !ArtworkModelResolver.isBannerDisabled(item),
-        bannerFocalX = item.bannerFocalX,
-        bannerFocalY = item.bannerFocalY,
-        bannerZoom = item.bannerZoom,
-        bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
-        userRating = item.userRating,
-        communityScore = item.communityScore,
-        imdbScore = item.imdbScore,
-        rtScore = item.rtScore,
-        metacriticScore = item.metacriticScore,
-        traktScore = item.traktScore,
-        audienceScore = item.audienceScore,
-        cachedRatings = cachedRatings,
-        mediaType = item.mediaType,
-        hasAnilist = item.anilistId != null,
-        hasMal = item.malId != null,
-        hasTmdb = item.tmdbId != null,
-        hasVndb = item.vndbId != null,
-        hasBangumi = item.bangumiId != null,
-        hasIgdb = item.igdbId != null,
-        hasSteam = item.steamAppId != null,
-        progressLabel = progressLabel,
-        remainingCount = remainingCount,
-        heroSettings = heroSettings,
-        scrollOffsetPx = scrollOffsetPx,
-        pullFraction = pullFraction,
-        pageOffsetProvider = pageOffsetProvider,
-        onDetailsClick = onDetails
-    )
+@Composable
+private fun rememberResolvedHomeHeroSlide(
+    slide: HomeHeroSlide,
+    allMedia: List<MediaCardSummary>,
+    heroMultiRatingsCache: Map<String, CachedMultiRatings>,
+    heroSettings: HomeHeroSettings
+): ResolvedHomeHeroSlide {
+    val localItem: MediaCardSummary? = remember(slide, allMedia) {
+        when (slide) {
+            is HomeHeroSlide.LocalSlide -> slide.item
+            is HomeHeroSlide.TrendingSlide -> ArtworkModelResolver.findLibraryMatch(
+                library = allMedia,
+                mediaType = slide.item.mediaType,
+                anilistId = slide.item.anilistId,
+                malId = slide.item.malId,
+                tmdbId = slide.item.tmdbId,
+                imdbId = slide.item.imdbId,
+                steamAppId = slide.item.steamAppId,
+                comicVineId = slide.item.comicVineId,
+                metronId = slide.item.metronId,
+                openLibraryId = slide.item.openLibraryId,
+                title = slide.item.title,
+                nativeTitle = slide.item.nativeTitle
+            )
+        }
+    }
+    return if (localItem != null) {
+        val coverModel: Any? = remember(localItem.customCoverPath, localItem.coverUrl) {
+            ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(localItem))
+        }
+        val authenticBannerModel = remember(localItem.customBannerPath, localItem.bannerUrl, localItem.artworkRole, localItem.coverUrl) {
+            ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredBanner(localItem))
+        }
+        val remainingCount = remember(localItem.totalProgress, localItem.currentProgress, localItem.mediaType) {
+            val tot = localItem.totalProgress?.toInt() ?: 0
+            val cur = localItem.currentProgress.toInt()
+            if (localItem.mediaType != MediaType.GAME && localItem.mediaType != MediaType.VISUAL_NOVEL && tot > cur) {
+                (tot - cur).coerceAtLeast(0)
+            } else 0
+        }
+        val progressLabel = remember(localItem) { formatConciseProgress(localItem) }
+        val cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(localItem.id, localItem.mediaType, localItem.title)]
+        ResolvedHomeHeroSlide(
+            title = localItem.title,
+            categoryBadge = "${localItem.mediaType.displayName.uppercase()} \u00B7 ${localItem.status.displayName.uppercase()}",
+            posterModel = coverModel,
+            posterFallback = if (localItem.mediaType == MediaType.FANFICTION && coverModel == null) {
+                {
+                    FanficTypographicCover(
+                        title = localItem.title,
+                        author = localItem.bookAuthor,
+                        primaryFandom = localItem.fanficPrimaryFandom,
+                        sourceSite = localItem.fanficSourceSite,
+                        ratingCode = localItem.fanficRating,
+                        wordCount = localItem.fanficWordCount,
+                        isCrossover = localItem.fanficIsCrossover,
+                        compact = true,
+                        isBlurred = false
+                    )
+                }
+            } else null,
+            authenticBannerModel = authenticBannerModel,
+            forceCoverBackdrop = localItem.mediaType == MediaType.BOOK && !ArtworkModelResolver.isBannerDisabled(localItem),
+            bannerFocalX = localItem.bannerFocalX,
+            bannerFocalY = localItem.bannerFocalY,
+            bannerZoom = localItem.bannerZoom,
+            bannerBlurDp = heroSettings.resolveBannerBlurDp(localItem.mediaType),
+            userRating = localItem.userRating,
+            communityScore = localItem.communityScore,
+            imdbScore = localItem.imdbScore,
+            rtScore = localItem.rtScore,
+            metacriticScore = localItem.metacriticScore,
+            traktScore = localItem.traktScore,
+            audienceScore = localItem.audienceScore,
+            cachedRatings = cachedRatings,
+            mediaType = localItem.mediaType,
+            hasAnilist = localItem.anilistId != null,
+            hasMal = localItem.malId != null,
+            hasTmdb = localItem.tmdbId != null,
+            hasVndb = localItem.vndbId != null,
+            hasBangumi = localItem.bangumiId != null,
+            hasIgdb = localItem.igdbId != null,
+            hasSteam = localItem.steamAppId != null,
+            progressLabel = progressLabel,
+            remainingCount = remainingCount
+        )
+    } else {
+        val item = (slide as HomeHeroSlide.TrendingSlide).item
+        val coverModel: Any? = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) }
+        val authenticBannerModel = remember(item.bannerUrl, item.coverUrl) {
+            item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+        }
+        val progressHint = remember(item) {
+            listOfNotNull(item.releaseYear, item.bookAuthor).joinToString(" \u00B7 ")
+        }
+        val cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(null, item.mediaType, item.title)]
+        ResolvedHomeHeroSlide(
+            title = item.title,
+            categoryBadge = "TRENDING \u00B7 ${item.mediaType.displayName.uppercase()}",
+            posterModel = coverModel,
+            posterFallback = if (item.mediaType == MediaType.FANFICTION && coverModel == null) {
+                {
+                    FanficTypographicCover(
+                        title = item.title,
+                        author = item.bookAuthor,
+                        primaryFandom = item.fanficPrimaryFandom,
+                        sourceSite = item.fanficSourceSite,
+                        ratingCode = item.fanficRating,
+                        wordCount = item.fanficWordCount,
+                        isCrossover = item.fanficIsCrossover,
+                        compact = true,
+                        isBlurred = false
+                    )
+                }
+            } else null,
+            authenticBannerModel = authenticBannerModel,
+            forceCoverBackdrop = item.mediaType == MediaType.BOOK,
+            bannerFocalX = 0f,
+            bannerFocalY = 0f,
+            bannerZoom = 1f,
+            bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
+            userRating = null,
+            communityScore = item.communityScore,
+            cachedRatings = cachedRatings,
+            mediaType = item.mediaType,
+            hasAnilist = item.anilistId != null,
+            hasMal = item.malId != null,
+            hasTmdb = item.tmdbId != null,
+            hasVndb = item.vndbId != null,
+            hasBangumi = item.bangumiId != null,
+            hasIgdb = false,
+            hasSteam = item.steamAppId != null,
+            progressLabel = progressHint,
+            remainingCount = 0
+        )
+    }
 }
 
 @Composable
-private fun TrendingMediaHeroCard(
-    item: SearchResultItem,
-    cachedRatings: CachedMultiRatings? = null,
+private fun ChimanewHeroBackdropLayer(
+    data: ResolvedHomeHeroSlide,
     heroSettings: HomeHeroSettings,
-    scrollOffsetPx: () -> Float = { 0f },
-    pullFraction: () -> Float = { 0f },
-    pageOffsetProvider: () -> Float = { 0f },
-    onDetails: () -> Unit
+    visibility: Float,
+    pageOffset: Float,
+    heroWidthPx: Float,
+    animateHero: Boolean,
+    scrollOffsetPx: () -> Float
 ) {
-    val coverModel: Any? = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) }
-    val authenticBannerModel = remember(item.bannerUrl, item.coverUrl) {
-        item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }?.let { LosslessCoverMapper.toLosslessUrl(it) }
-    }
-    val progressHint = remember(item) {
-        listOfNotNull(item.releaseYear, item.bookAuthor).joinToString(" \u00B7 ")
-    }
-
-    ChimanewComboHeroCard(
-        title = item.title,
-        categoryBadge = "TRENDING \u00B7 ${item.mediaType.displayName.uppercase()}",
-        posterModel = coverModel,
-        posterFallback = if (item.mediaType == MediaType.FANFICTION && coverModel == null) {
-            {
-                FanficTypographicCover(
-                    title = item.title,
-                    author = item.bookAuthor,
-                    primaryFandom = item.fanficPrimaryFandom,
-                    sourceSite = item.fanficSourceSite,
-                    ratingCode = item.fanficRating,
-                    wordCount = item.fanficWordCount,
-                    isCrossover = item.fanficIsCrossover,
-                    compact = true,
-                    isBlurred = false
+    val overscanScale = if (animateHero) HERO_BACKGROUND_SCALE else 1f
+    if (data.authenticBannerModel != null) {
+        val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
+        AsyncImage(
+            model = data.authenticBannerModel,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alignment = BiasAlignment(data.bannerFocalX.coerceIn(-1f, 1f), data.bannerFocalY.coerceIn(-1f, 1f)),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val fx = data.bannerFocalX.coerceIn(-1f, 1f)
+                    val fy = data.bannerFocalY.coerceIn(-1f, 1f)
+                    val effZoom = data.bannerZoom.coerceIn(1f, 2.5f)
+                    val sPx = scrollOffsetPx()
+                    val scrollScale = if (animateHero) heroScrollBackdropScale(sPx) else 1f
+                    val totalZoom = effZoom * overscanScale * scrollScale
+                    scaleX = totalZoom
+                    scaleY = totalZoom
+                    translationX = -fx * size.width * (effZoom - 1f) * 0.5f -
+                        (if (animateHero) pageOffset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f)
+                    translationY = -fy * size.height * (effZoom - 1f) * 0.5f +
+                        (if (animateHero) sPx * 0.34f else 0f)
+                    alpha = baseAlpha * visibility * heroScrollBackdropAlpha(sPx, size.height)
+                }
+                .then(if (data.bannerBlurDp > 0) Modifier.blur(data.bannerBlurDp.dp) else Modifier)
+        )
+    } else if ((heroSettings.allowCroppedFallback || data.forceCoverBackdrop) && data.posterModel != null) {
+        val fallbackBlur = if (data.bannerBlurDp > 0) maxOf(data.bannerBlurDp, 16) else 20
+        val baseAlpha = if (heroSettings.dimBanner) 0.38f else 0.76f
+        AsyncImage(
+            model = data.posterModel,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            alignment = Alignment.TopCenter,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val sPx = scrollOffsetPx()
+                    val scrollScale = if (animateHero) heroScrollBackdropScale(sPx) else 1f
+                    val totalZoom = overscanScale * scrollScale
+                    scaleX = totalZoom
+                    scaleY = totalZoom
+                    translationX = if (animateHero) -pageOffset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f
+                    translationY = if (animateHero) sPx * 0.34f else 0f
+                    alpha = baseAlpha * visibility * heroScrollBackdropAlpha(sPx, size.height)
+                }
+                .blur(fallbackBlur.dp)
+        )
+    } else {
+        val auraAlpha = if (heroSettings.dimBanner) 0.24f else 0.42f
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val sPx = scrollOffsetPx()
+                    translationY = if (animateHero) sPx * 0.25f else 0f
+                    alpha = visibility * heroScrollBackdropAlpha(sPx, size.height)
+                }
+        ) {
+            drawRect(color = Color(0xFF0D0C0B))
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        AccentGold.copy(alpha = auraAlpha),
+                        AccentGold.copy(alpha = auraAlpha * 0.30f),
+                        Color.Transparent
+                    ),
+                    center = Offset(size.width * 0.82f, size.height * 0.24f),
+                    radius = size.width * 0.88f
                 )
-            }
-        } else null,
-        authenticBannerModel = authenticBannerModel,
-        forceCoverBackdrop = item.mediaType == MediaType.BOOK,
-        bannerFocalX = 0f,
-        bannerFocalY = 0f,
-        bannerZoom = 1f,
-        bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
-        userRating = null,
-        communityScore = item.communityScore,
-        cachedRatings = cachedRatings,
-        mediaType = item.mediaType,
-        hasAnilist = item.anilistId != null,
-        hasMal = item.malId != null,
-        hasTmdb = item.tmdbId != null,
-        hasVndb = item.vndbId != null,
-        hasBangumi = item.bangumiId != null,
-        hasIgdb = false,
-        hasSteam = item.steamAppId != null,
-        progressLabel = progressHint,
-        remainingCount = 0,
-        heroSettings = heroSettings,
-        scrollOffsetPx = scrollOffsetPx,
-        pullFraction = pullFraction,
-        pageOffsetProvider = pageOffsetProvider,
-        onDetailsClick = onDetails
-    )
+            )
+            drawRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFFB4692E).copy(alpha = auraAlpha * 0.55f),
+                        Color.Transparent
+                    ),
+                    center = Offset(size.width * 0.16f, size.height * 0.72f),
+                    radius = size.width * 0.72f
+                )
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChimanewComboHeroCard(
-    title: String,
-    categoryBadge: String,
-    posterModel: Any?,
-    posterFallback: (@Composable () -> Unit)? = null,
-    authenticBannerModel: Any?,
-    forceCoverBackdrop: Boolean = false,
-    bannerFocalX: Float,
-    bannerFocalY: Float,
-    bannerZoom: Float,
-    bannerBlurDp: Int = 0,
-    userRating: Float?,
-    communityScore: Float?,
-    imdbScore: Float? = null,
-    rtScore: Int? = null,
-    metacriticScore: Int? = null,
-    traktScore: Int? = null,
-    audienceScore: Int? = null,
-    cachedRatings: CachedMultiRatings? = null,
-    mediaType: MediaType = MediaType.ALL,
-    hasAnilist: Boolean = false,
-    hasMal: Boolean = false,
-    hasTmdb: Boolean = false,
-    hasVndb: Boolean = false,
-    hasBangumi: Boolean = false,
-    hasIgdb: Boolean = false,
-    hasSteam: Boolean = false,
-    progressLabel: String,
-    remainingCount: Int,
-    heroSettings: HomeHeroSettings,
-    scrollOffsetPx: () -> Float = { 0f },
-    pullFraction: () -> Float = { 0f },
-    pageOffsetProvider: () -> Float = { 0f },
-    onDetailsClick: () -> Unit
+private fun ChimanewHeroForegroundRow(
+    data: ResolvedHomeHeroSlide,
+    heroSettings: HomeHeroSettings
 ) {
-    val showUnread = heroSettings.showUnreadBadge && remainingCount > 0
+    val showUnread = heroSettings.showUnreadBadge && data.remainingCount > 0
+    val title = data.title
+    val categoryBadge = data.categoryBadge
+    val posterModel = data.posterModel
+    val posterFallback = data.posterFallback
+    val userRating = data.userRating
+    val communityScore = data.communityScore
+    val imdbScore = data.imdbScore
+    val rtScore = data.rtScore
+    val metacriticScore = data.metacriticScore
+    val traktScore = data.traktScore
+    val audienceScore = data.audienceScore
+    val cachedRatings = data.cachedRatings
+    val mediaType = data.mediaType
+    val hasAnilist = data.hasAnilist
+    val hasMal = data.hasMal
+    val hasTmdb = data.hasTmdb
+    val hasVndb = data.hasVndb
+    val hasBangumi = data.hasBangumi
+    val hasIgdb = data.hasIgdb
+    val hasSteam = data.hasSteam
+    val progressLabel = data.progressLabel
+    val remainingCount = data.remainingCount
 
-    val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
-        "COMPACT" -> 336.dp
-        "TALL" -> 472.dp
-        else -> 404.dp
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(heroHeightDp)
-            .clipToBounds()
-            .clickable(onClick = onDetailsClick)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Backdrop Layer: Authentic Wide Banner -> Cropped/Blurred Cover -> Warm Obsidian Procedural Ambient Glow
-        if (authenticBannerModel != null) {
-            val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
-            AsyncImage(
-                model = authenticBannerModel,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                alignment = BiasAlignment(bannerFocalX.coerceIn(-1f, 1f), bannerFocalY.coerceIn(-1f, 1f)),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val fx = bannerFocalX.coerceIn(-1f, 1f)
-                        val fy = bannerFocalY.coerceIn(-1f, 1f)
-                        val effZoom = bannerZoom.coerceIn(1f, 2.5f)
-                        val sPx = scrollOffsetPx()
-                        val pFrac = pullFraction()
-                        val pOff = pageOffsetProvider()
-                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
-                        val scrollScale = heroScrollBackdropScale(sPx) * (1f + pFrac * 0.14f)
-                        val totalZoom = effZoom * scrollScale
-                        scaleX = totalZoom
-                        scaleY = totalZoom
-                        translationX = -fx * size.width * (effZoom - 1f) * 0.5f + pOff * size.width * 0.24f
-                        translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.34f
-                        alpha = baseAlpha * swipeVis * heroScrollBackdropAlpha(sPx, size.height)
-                    }
-                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
-            )
-        } else if ((heroSettings.allowCroppedFallback || forceCoverBackdrop) && posterModel != null) {
-            val fallbackBlur = if (bannerBlurDp > 0) maxOf(bannerBlurDp, 16) else 20
-            val baseAlpha = if (heroSettings.dimBanner) 0.38f else 0.76f
-            AsyncImage(
-                model = posterModel,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val sPx = scrollOffsetPx()
-                        val pFrac = pullFraction()
-                        val pOff = pageOffsetProvider()
-                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
-                        val scrollScale = heroScrollBackdropScale(sPx) * (1f + pFrac * 0.12f)
-                        scaleX = scrollScale
-                        scaleY = scrollScale
-                        translationX = pOff * size.width * 0.24f
-                        translationY = sPx * 0.34f
-                        alpha = baseAlpha * swipeVis * heroScrollBackdropAlpha(sPx, size.height)
-                    }
-                    .blur(fallbackBlur.dp)
-            )
-        } else {
-            // Default Gentle Ambient Glow procedural canvas (never crops portrait covers)
-            val auraAlpha = if (heroSettings.dimBanner) 0.24f else 0.42f
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val sPx = scrollOffsetPx()
-                        val pOff = pageOffsetProvider()
-                        val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
-                        translationY = sPx * 0.25f
-                        alpha = swipeVis * heroScrollBackdropAlpha(sPx, size.height)
-                    }
-            ) {
-                drawRect(color = Color(0xFF0D0C0B))
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            AccentGold.copy(alpha = auraAlpha),
-                            AccentGold.copy(alpha = auraAlpha * 0.30f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.82f, size.height * 0.24f),
-                        radius = size.width * 0.88f
-                    )
-                )
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFB4692E).copy(alpha = auraAlpha * 0.55f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width * 0.16f, size.height * 0.72f),
-                        radius = size.width * 0.72f
-                    )
-                )
-            }
-        }
-
-        // Top bar scrim
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(92.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(AmoledBlack.copy(alpha = 0.65f), Color.Transparent)
-                    )
-                )
-        )
-
-        // Bottom vignette into pure black
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to Color.Transparent,
-                        0.40f to Color.Transparent,
-                        0.80f to AmoledBlack.copy(alpha = 0.86f),
-                        1.0f to AmoledBlack
-                    )
-                )
-        )
-
-        // Foreground: Chimanew Dual-Artwork Row (Crisp 2:3 Portrait Poster + Right Info Stack)
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, bottom = 28.dp)
-                .graphicsLayer {
-                    val sPx = scrollOffsetPx()
-                    val pOff = pageOffsetProvider()
-                    val swipeVis = (1f - kotlin.math.abs(pOff)).coerceIn(0f, 1f)
-                    val approxHeroPx = heroHeightDp.toPx()
-                    alpha = swipeVis * heroScrollForegroundAlpha(sPx, approxHeroPx)
-                    translationX = -pOff * size.width * 0.14f
-                    translationY = -sPx * 0.10f
-                },
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
             Box(
                 modifier = Modifier
                     .width(114.dp)
@@ -2049,7 +2154,6 @@ private fun ChimanewComboHeroCard(
             }
         }
     }
-}
 
 @Composable
 private fun RemainingCountBadge(count: Int) {

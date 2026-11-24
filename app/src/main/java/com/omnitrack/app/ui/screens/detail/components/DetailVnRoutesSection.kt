@@ -82,7 +82,8 @@ fun DetailVnRoutesSection(
     onStepPlaytime: (Double) -> Unit,
     onSetExactPlaytime: (Double) -> Unit,
     onToggleRouteCompleted: (VnRouteEntity) -> Unit,
-    onAddCustomRoute: (routeName: String, routeType: String, playtimeHours: Double?, isSpoiler: Boolean) -> Unit,
+    onAddCustomRoute: (routeName: String, routeType: String, playtimeHours: Double?, isSpoiler: Boolean, photo: VnRoutePhotoSelection) -> Unit,
+    onUpdateRoutePhoto: ((VnRouteEntity, VnRoutePhotoSelection) -> Unit)? = null,
     onOpenRouteDetail: (VnRouteEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -93,6 +94,9 @@ fun DetailVnRoutesSection(
     var newRouteType by remember { mutableStateOf("HEROINE") }
     var newRouteHours by remember { mutableStateOf("") }
     var newRouteSpoiler by remember { mutableStateOf(false) }
+    var newRoutePhoto by remember { mutableStateOf(VnRoutePhotoSelection(null)) }
+    var showNewRoutePhotoPicker by remember { mutableStateOf(false) }
+    var editingPhotoRoute by remember { mutableStateOf<VnRouteEntity?>(null) }
     var showHoursDialog by remember { mutableStateOf(false) }
     var hoursInput by remember(item.playtimeHours) {
         mutableStateOf(String.format(Locale.US, "%.1f", item.playtimeHours))
@@ -111,10 +115,11 @@ fun DetailVnRoutesSection(
         val trimmed = newRouteName.trim()
         if (trimmed.isEmpty()) return
         val parsedHours = newRouteHours.trim().toDoubleOrNull()?.takeIf { it > 0.0 }
-        onAddCustomRoute(trimmed, newRouteType, parsedHours, newRouteSpoiler)
+        onAddCustomRoute(trimmed, newRouteType, parsedHours, newRouteSpoiler, newRoutePhoto)
         newRouteName = ""
         newRouteHours = ""
         newRouteSpoiler = false
+        newRoutePhoto = VnRoutePhotoSelection(null)
         showAddBar = false
     }
 
@@ -304,6 +309,17 @@ fun DetailVnRoutesSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    VnRoutePhotoThumb(
+                        imageUrl = newRoutePhoto.imageUrl,
+                        focalX = newRoutePhoto.focalX,
+                        focalY = newRoutePhoto.focalY,
+                        zoom = newRoutePhoto.zoom,
+                        contentDescription = "Route Photo",
+                        size = 44.dp,
+                        cornerRadius = 10.dp,
+                        fallbackText = "+",
+                        modifier = Modifier.clickable { showNewRoutePhotoPicker = true }
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         BasicTextField(
                             value = newRouteName,
@@ -492,48 +508,20 @@ fun DetailVnRoutesSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (!route.characterImageUrl.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(route.characterImageUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = route.routeName,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .let { if (isSpoilerHidden) it.blur(12.dp) else it }
-                            )
-                            if (isSpoilerHidden) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .background(Color.Black.copy(alpha = 0.35f))
-                                )
-                            }
+                    VnRoutePhotoThumb(
+                        imageUrl = route.characterImageUrl,
+                        focalX = route.imageFocalX,
+                        focalY = route.imageFocalY,
+                        zoom = route.imageZoom,
+                        contentDescription = route.routeName,
+                        size = 52.dp,
+                        cornerRadius = 10.dp,
+                        isBlurred = isSpoilerHidden,
+                        fallbackText = formatRouteTypeLabel(route.routeType).firstOrNull()?.toString() ?: "R",
+                        modifier = Modifier.clickable(enabled = !isSpoilerHidden && onUpdateRoutePhoto != null) {
+                            editingPhotoRoute = route
                         }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .let { if (isSpoilerHidden) it.blur(6.dp) else it },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = formatRouteTypeLabel(route.routeType).firstOrNull()?.toString() ?: "R",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.72f)
-                            )
-                        }
-                    }
+                    )
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
@@ -642,6 +630,34 @@ fun DetailVnRoutesSection(
                     Text("Cancel", color = Color.White.copy(alpha = 0.7f))
                 }
             }
+        )
+    }
+
+    if (showNewRoutePhotoPicker) {
+        VnRoutePhotoPickerSheet(
+            routeTitle = newRouteName.ifBlank { "New Route" },
+            initialSelection = newRoutePhoto,
+            mediaItem = item,
+            vnMeta = vnMeta,
+            onApply = { sel -> newRoutePhoto = sel },
+            onDismiss = { showNewRoutePhotoPicker = false }
+        )
+    }
+
+    val photoTarget = editingPhotoRoute
+    if (photoTarget != null && onUpdateRoutePhoto != null) {
+        VnRoutePhotoPickerSheet(
+            routeTitle = photoTarget.routeName,
+            initialSelection = VnRoutePhotoSelection(
+                imageUrl = photoTarget.characterImageUrl,
+                focalX = photoTarget.imageFocalX,
+                focalY = photoTarget.imageFocalY,
+                zoom = photoTarget.imageZoom
+            ),
+            mediaItem = item,
+            vnMeta = vnMeta,
+            onApply = { sel -> onUpdateRoutePhoto(photoTarget, sel) },
+            onDismiss = { editingPhotoRoute = null }
         )
     }
 }

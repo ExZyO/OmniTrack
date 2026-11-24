@@ -585,9 +585,15 @@ class HomeViewModel(
             MediaType.GAME -> homeSearchRepository.fetchDiscoverGamesShelves(def.shelfKey, page)
             MediaType.VISUAL_NOVEL -> homeSearchRepository.fetchDiscoverVisualNovelsShelves(def.shelfKey, page)
             MediaType.FANFICTION -> {
-                val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
-                    .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
-                com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf(def.shelfKey, page, ao3Cookie)
+                if (def.shelfKey.startsWith("wattpad_")) {
+                    val wpCookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                        .getFanficCookie(com.omnitrack.app.data.model.FanficSite.WATTPAD)
+                    com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchWattpadDiscoverShelf(def.shelfKey, page, wpCookie)
+                } else {
+                    val ao3Cookie = com.omnitrack.app.OmniTrackApplication.instance.trackerTokenManager
+                        .getFanficCookie(com.omnitrack.app.data.model.FanficSite.AO3)
+                    com.omnitrack.app.data.fanfic.FanficSiteEngine.fetchAo3DiscoverShelf(def.shelfKey, page, ao3Cookie)
+                }
             }
         }
     }
@@ -949,6 +955,10 @@ class HomeViewModel(
                         mediaId = insertedId,
                         routeName = clean,
                         routeType = draft.routeType,
+                        characterImageUrl = draft.imageUrl,
+                        imageFocalX = draft.imageFocalX,
+                        imageFocalY = draft.imageFocalY,
+                        imageZoom = draft.imageZoom,
                         isCompleted = draft.isCompleted,
                         completedAtMs = if (draft.isCompleted) now else null,
                         isSpoiler = draft.isSpoiler,

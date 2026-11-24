@@ -203,8 +203,8 @@ fun SettingsView(
         ),
         SettingRowEntry(
             icon = Icons.Default.Folder,
-            title = "Library Categories",
-            keywords = "categories folders tabs library chimanew group order visibility",
+            title = "Categories & Media Types",
+            keywords = "categories media types hide disable reorder games anime comics fanfiction folders tabs library chimanew order visibility",
             onClick = onNavigateToManageCategories
         ),
         SettingRowEntry(
@@ -242,7 +242,7 @@ fun SettingsView(
             icon = Icons.Default.Info,
             title = "About OmniTrack",
             keywords = "about schema version database library count",
-            trailingText = "v22",
+            trailingText = "v23",
             onClick = { showAboutDialog = true }
         )
     )
@@ -423,13 +423,13 @@ fun SettingsView(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Room Database Schema v22",
+                        text = "Room Database Schema v23",
                         fontSize = 13.sp,
                         color = AccentGold,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Tracking ${allMedia.size} titles across 9 media categories.",
+                        text = "Tracking ${allMedia.size} titles across 10 media categories.",
                         fontSize = 12.5.sp,
                         color = TextSecondary
                     )

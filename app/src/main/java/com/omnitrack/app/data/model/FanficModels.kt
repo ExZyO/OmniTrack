@@ -54,6 +54,14 @@ enum class FanficSite(
         loginUrl = "https://forum.questionablequesting.com/login/",
         accentHex = 0xFFD97706L
     ),
+    WATTPAD(
+        code = "WATTPAD",
+        displayName = "Wattpad",
+        shortBadge = "WP",
+        baseUrl = "https://www.wattpad.com",
+        loginUrl = "https://www.wattpad.com/login",
+        accentHex = 0xFFFF500AL
+    ),
     OTHER(
         code = "OTHER",
         displayName = "Web Fanfiction",
@@ -70,6 +78,7 @@ enum class FanficSite(
             "SB", "SPACEBATTLES" -> SB
             "SV", "SUFFICIENTVELOCITY", "SUFFICIENT VELOCITY" -> SV
             "QQ", "QUESTIONABLEQUESTING", "QUESTIONABLE QUESTING" -> QQ
+            "WATTPAD", "WP" -> WATTPAD
             else -> OTHER
         }
 
@@ -81,6 +90,7 @@ enum class FanficSite(
                 "spacebattles.com" in u -> SB
                 "sufficientvelocity.com" in u -> SV
                 "questionablequesting.com" in u -> QQ
+                "wattpad.com" in u -> WATTPAD
                 else -> OTHER
             }
         }
@@ -252,8 +262,45 @@ fun canonicalizeFanficUrl(rawUrl: String): Triple<FanficSite, String, String?> {
             val prefix = site.code.lowercase()
             Triple(site, canonical, threadId?.let { "$prefix:$it" })
         }
+        FanficSite.WATTPAD -> {
+            val storyId = Regex("""/story/(\d+)""").find(withScheme)?.groupValues?.getOrNull(1)
+            if (storyId != null) {
+                Triple(FanficSite.WATTPAD, "https://www.wattpad.com/story/$storyId", "wp:$storyId")
+            } else {
+                val partId = Regex("""wattpad\.com/(\d+)(?:-[^/?#]+)?""").find(withScheme)?.groupValues?.getOrNull(1)
+                val cleanUrl = withScheme.substringBefore("?").substringBefore("#")
+                Triple(FanficSite.WATTPAD, cleanUrl, partId?.let { "wp_part:$it" })
+            }
+        }
         FanficSite.OTHER -> Triple(FanficSite.OTHER, withScheme, null)
     }
+}
+
+private val WATTPAD_FANFIC_MARKERS = listOf(
+    "fanfic", "fanfiction", "xreader", "readerinsert", "au", "crossover",
+    "harrypotter", "naruto", "bts", "kpop", "anime", "marvel", "mcu", "dc",
+    "percyjackson", "starwars", "myheroacademia", "bnha", "jujutsukaisen",
+    "onepiece", "demonslayer", "genshin", "haikyuu", "strangerthings",
+    "twilight", "avengers", "spiderman", "batman", "pokemon", "undertale",
+    "hogwarts", "dracomalfoy", "bakugo", "deku", "taehyung", "jungkook", "jimin"
+)
+
+fun isLikelyWattpadFanfic(
+    tags: List<String>,
+    description: String? = null,
+    title: String? = null
+): Boolean {
+    val normTags = tags.map { it.lowercase().replace(Regex("[^a-z0-9]"), "") }
+    if (normTags.any { t ->
+            t == "fanfiction" || t == "fanfic" || t.endsWith("fanfic") ||
+                t.endsWith("xreader") || t in WATTPAD_FANFIC_MARKERS
+        }
+    ) {
+        return true
+    }
+    val combinedText = "${title.orEmpty()} ${description.orEmpty()}".lowercase()
+    return "fanfic" in combinedText || "fan fiction" in combinedText ||
+        "x reader" in combinedText || "reader insert" in combinedText
 }
 
 private val URL_EXTRACT_REGEX = Regex("""https?://[^\s<>"'\]\)]+""", RegexOption.IGNORE_CASE)

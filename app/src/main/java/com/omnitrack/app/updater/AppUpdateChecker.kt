@@ -250,37 +250,44 @@ class AppUpdateChecker(
     }
 
     private fun fetchFromRawVersionJson(): AppRelease? {
-        val url = "https://raw.githubusercontent.com/$githubRepo/main/version.json?t=${System.currentTimeMillis()}"
-        val request = Request.Builder()
-            .url(url)
-            .header("Cache-Control", "no-store")
-            .build()
+        val urls = listOf(
+            "https://github.com/$githubRepo/releases/latest/download/version.json?t=${System.currentTimeMillis()}",
+            "https://raw.githubusercontent.com/$githubRepo/main/version.json?t=${System.currentTimeMillis()}"
+        )
+        for (url in urls) {
+            val request = Request.Builder()
+                .url(url)
+                .header("Cache-Control", "no-store")
+                .build()
 
-        return runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val manifest = json.decodeFromString<VersionManifest>(body)
-                val downloadUrl = if (BuildConfig.DEBUG) {
-                    manifest.debugApkUrl.takeIf { it.isNotBlank() } ?: manifest.apkUrl
-                } else {
-                    manifest.apkUrl
+            val parsed = runCatching {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@runCatching null
+                    val body = response.body?.string() ?: return@runCatching null
+                    val manifest = json.decodeFromString<VersionManifest>(body)
+                    val downloadUrl = if (BuildConfig.DEBUG) {
+                        manifest.debugApkUrl.takeIf { it.isNotBlank() } ?: manifest.apkUrl
+                    } else {
+                        manifest.apkUrl
+                    }
+                    val expectedSha = if (BuildConfig.DEBUG && manifest.debugApkUrl.isNotBlank()) {
+                        manifest.debugApkSha256.takeIf { it.isNotBlank() } ?: manifest.apkSha256
+                    } else {
+                        manifest.apkSha256
+                    }
+                    AppRelease(
+                        version = manifest.version.removePrefix("v"),
+                        versionCode = manifest.versionCode,
+                        releaseNotes = manifest.releaseNotes,
+                        apkDownloadUrl = downloadUrl,
+                        releasePageUrl = "https://github.com/$githubRepo/releases",
+                        apkSha256 = expectedSha
+                    )
                 }
-                val expectedSha = if (BuildConfig.DEBUG && manifest.debugApkUrl.isNotBlank()) {
-                    manifest.debugApkSha256.takeIf { it.isNotBlank() } ?: manifest.apkSha256
-                } else {
-                    manifest.apkSha256
-                }
-                AppRelease(
-                    version = manifest.version.removePrefix("v"),
-                    versionCode = manifest.versionCode,
-                    releaseNotes = manifest.releaseNotes,
-                    apkDownloadUrl = downloadUrl,
-                    releasePageUrl = "https://github.com/$githubRepo/releases",
-                    apkSha256 = expectedSha
-                )
-            }
-        }.getOrNull()
+            }.getOrNull()
+            if (parsed != null) return parsed
+        }
+        return null
     }
 
     /**

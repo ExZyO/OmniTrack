@@ -64,6 +64,15 @@ data class TrackerImportResult(
     val error: String? = null
 )
 
+data class TrackerDrainSummary(
+    val trackerKey: String?,
+    val totalPending: Int,
+    val pushed: Int,
+    val failed: Int,
+    val expiredAuth: Boolean,
+    val lastError: String? = null
+)
+
 @Serializable
 data class TrackerSyncOutcome(
     val trackerKey: String,
@@ -208,22 +217,57 @@ class TrackerSyncEngine(
         if (!item.hardcoverId.isNullOrBlank() && !tokens.hardcoverToken.isNullOrBlank()) enqueueCoalesced("HARDCOVER")
     }
 
-    suspend fun drainQueue() = withContext(Dispatchers.IO) {
-        pushMutex.withLock {
-            val tasks = syncQueueDao.getPendingTasksSnapshot()
-            if (tasks.isEmpty()) return@withLock
+    suspend fun drainQueue() {
+        drainQueueDetailed(targetTrackerKey = null)
+    }
 
-            var activeTokens = tokenManager.tokens.firstOrNull() ?: return@withLock
+    suspend fun drainQueueDetailed(targetTrackerKey: String? = null): TrackerDrainSummary = withContext(Dispatchers.IO) {
+        pushMutex.withLock {
+            val normalizedTarget = targetTrackerKey?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+            val allTasks = syncQueueDao.getPendingTasksSnapshot()
+            val tasks = if (normalizedTarget != null) {
+                allTasks.filter { it.trackerType.equals(normalizedTarget, ignoreCase = true) }
+            } else {
+                allTasks
+            }
+            if (tasks.isEmpty()) {
+                AppLogger.i("TrackerSync", "drainQueue(${normalizedTarget ?: "ALL"}): 0 pending tasks")
+                return@withLock TrackerDrainSummary(
+                    trackerKey = normalizedTarget,
+                    totalPending = 0,
+                    pushed = 0,
+                    failed = 0,
+                    expiredAuth = false
+                )
+            }
+
+            AppLogger.i("TrackerSync", "drainQueue(${normalizedTarget ?: "ALL"}): pushing ${tasks.size} pending task(s)")
+            var activeTokens = tokenManager.tokens.firstOrNull() ?: return@withLock TrackerDrainSummary(
+                trackerKey = normalizedTarget,
+                totalPending = tasks.size,
+                pushed = 0,
+                failed = tasks.size,
+                expiredAuth = true,
+                lastError = "Not signed in"
+            )
             val refreshableServices = setOf("MAL", "TRAKT", "SIMKL", "BANGUMI", "COMICK")
             val expiredTrackers = mutableSetOf<String>()
+            var pushedCount = 0
+            var failedCount = 0
+            var lastError: String? = null
 
             for (task in tasks) {
                 val key = task.trackerType.uppercase()
-                if (key in expiredTrackers) continue
+                if (key in expiredTrackers) {
+                    failedCount++
+                    continue
+                }
 
                 if (key == "TMDB" && activeTokens.tmdbSessionId.isNullOrBlank()) {
                     expiredTrackers.add(key)
                     syncQueueDao.deleteAllForTracker(key)
+                    failedCount++
+                    lastError = "TMDb write session inactive"
                     AppLogger.w("TrackerSync", "TMDb write session inactive — cleared stale queued TMDB tasks")
                     continue
                 }
@@ -242,6 +286,7 @@ class TrackerSyncEngine(
                 )
 
                 if (!outcome.success && (outcome.httpCode == 401 || outcome.httpCode == 403) && key in refreshableServices) {
+                    AppLogger.i("TrackerSync", "$key returned HTTP ${outcome.httpCode}; attempting token refresh")
                     val refreshed = TrackerAccountVerifier.refreshAccessToken(key, tokenManager)
                     if (!refreshed.isNullOrBlank()) {
                         activeTokens = tokenManager.tokens.firstOrNull() ?: activeTokens
@@ -255,19 +300,41 @@ class TrackerSyncEngine(
                 }
 
                 when {
-                    outcome.success -> syncQueueDao.deleteTask(task.id)
+                    outcome.success -> {
+                        syncQueueDao.deleteTask(task.id)
+                        pushedCount++
+                        AppLogger.i("TrackerSync", "Pushed ${mediaItem.title} -> $key (HTTP ${outcome.httpCode ?: 200})")
+                    }
                     outcome.httpCode == 401 || outcome.httpCode == 403 -> {
                         expiredTrackers.add(key)
                         syncQueueDao.deleteAllForTracker(key)
+                        failedCount++
+                        lastError = "$key session expired (HTTP ${outcome.httpCode})"
                         AppLogger.w("TrackerSync", "Auth expired for $key — reconnect in Tracker Accounts")
                     }
                     task.retryCount >= 4 -> {
                         syncQueueDao.deleteTask(task.id)
-                        AppLogger.w("TrackerSync", "Dropped queued $key task after max retries (code=${outcome.httpCode})")
+                        failedCount++
+                        lastError = outcome.message.ifBlank { "HTTP ${outcome.httpCode}" }
+                        AppLogger.w("TrackerSync", "Dropped queued $key task after max retries (code=${outcome.httpCode}, msg=${outcome.message})")
                     }
-                    else -> syncQueueDao.incrementRetryCount(task.id)
+                    else -> {
+                        syncQueueDao.incrementRetryCount(task.id)
+                        failedCount++
+                        lastError = outcome.message.ifBlank { "HTTP ${outcome.httpCode}" }
+                        AppLogger.w("TrackerSync", "Failed pushing ${mediaItem.title} -> $key (code=${outcome.httpCode}, msg=${outcome.message})")
+                    }
                 }
             }
+
+            TrackerDrainSummary(
+                trackerKey = normalizedTarget,
+                totalPending = tasks.size,
+                pushed = pushedCount,
+                failed = failedCount,
+                expiredAuth = expiredTrackers.isNotEmpty(),
+                lastError = lastError
+            )
         }
     }
 
