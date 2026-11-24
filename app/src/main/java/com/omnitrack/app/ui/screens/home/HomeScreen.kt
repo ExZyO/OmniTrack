@@ -1,6 +1,7 @@
 package com.omnitrack.app.ui.screens.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -36,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -80,13 +82,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -97,17 +104,23 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import coil3.compose.AsyncImage
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.ChimanewLibrarySettings
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
 import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeLayoutDefaults
+import com.omnitrack.app.data.preferences.LibraryDisplayMode
+import com.omnitrack.app.data.preferences.LibraryGroupMode
+import com.omnitrack.app.data.preferences.LibrarySortOption
 import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.data.preferences.TriStateFilter
 import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.LibraryFastScroller
 import com.omnitrack.app.ui.components.MediaCard
-import com.omnitrack.app.ui.components.MediaTypeTabRow
 import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
+import com.omnitrack.app.ui.components.MultiSelectCategoriesSheet
 import com.omnitrack.app.ui.components.MultiSelectCheckBadge
 import com.omnitrack.app.ui.components.MultiSelectTopBar
 import com.omnitrack.app.ui.components.NavDestination
@@ -118,12 +131,12 @@ import com.omnitrack.app.ui.components.rememberOmniNavBarScrollState
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.screens.home.views.ActivityHeatmapSheet
+import com.omnitrack.app.ui.screens.home.views.ChimanewLibrarySheet
 import com.omnitrack.app.ui.screens.home.views.DiscoverCustomizerSheet
 import com.omnitrack.app.ui.screens.home.views.DiscoverView
 import com.omnitrack.app.ui.screens.home.views.HistoryView
 import com.omnitrack.app.ui.screens.home.views.HomeCustomizerSheet
 import com.omnitrack.app.ui.screens.home.views.HomeDashboardView
-import com.omnitrack.app.ui.screens.home.views.LibraryFilterSortSheet
 import com.omnitrack.app.ui.screens.home.views.ReleaseCalendarSheet
 import com.omnitrack.app.ui.screens.home.views.SettingsView
 import com.omnitrack.app.ui.screens.home.views.formatConciseProgress
@@ -149,6 +162,16 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
+private data class LibraryGroupTab(
+    val key: String,
+    val label: String,
+    val mediaTypeFilter: MediaType? = null,
+    val categoryId: Long? = null,
+    val isUncategorized: Boolean = false,
+    val statusFilter: TrackingStatus? = null,
+    val trackerKey: String? = null
+)
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -157,9 +180,11 @@ fun HomeScreen(
     onNavigateToArtworkPriority: () -> Unit = {},
     onNavigateToVisualPresentation: () -> Unit = {},
     onNavigateToDetailsPageLayout: () -> Unit = {},
+    onNavigateToManageCategories: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
     val prefManager = remember(context) { (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager }
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
@@ -182,10 +207,13 @@ fun HomeScreen(
     }
 
     val uiState by viewModel.uiState.collectAsState()
+    val allCategories by viewModel.allCategories.collectAsState()
+    val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
+    val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
-    val gridStates = remember { MediaType.filterTabs.associateWith { androidx.compose.foundation.lazy.grid.LazyGridState() } }
-    val listStates = remember { MediaType.filterTabs.associateWith { LazyListState() } }
+    val tabGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
+    val tabListStates = remember { mutableMapOf<String, LazyListState>() }
 
     var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.HOME) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -196,22 +224,22 @@ fun HomeScreen(
     var showReleaseCalendarSheet by remember { mutableStateOf(false) }
     var showActivityHeatmapSheet by remember { mutableStateOf(false) }
     var showLibraryFilterSheet by remember { mutableStateOf(false) }
+    var showMultiSelectCategoriesSheet by remember { mutableStateOf(false) }
     var showCustomEntrySheet by remember { mutableStateOf(false) }
     var customEntryInitTitle by remember { mutableStateOf("") }
     var customEntryInitType by remember { mutableStateOf(MediaType.NOVEL) }
     var isSearchVisible by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var libraryActionTarget by remember { mutableStateOf<com.omnitrack.app.data.db.dto.MediaCardSummary?>(null) }
     var isLibraryMultiSelect by remember { mutableStateOf(false) }
+    var isHistoryMultiSelect by remember { mutableStateOf(false) }
     var selectedLibraryIds by remember { mutableStateOf(setOf<Long>()) }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+    var pendingLibraryTabKey by remember { mutableStateOf<String?>(null) }
 
     val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
     val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
     val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
-    val libraryViewMode by prefManager.libraryViewMode.collectAsState(initial = "GRID_3")
-    val librarySortMode by prefManager.librarySortMode.collectAsState(initial = "RECENT")
     val calendarReleases by viewModel.calendarReleases.collectAsState()
     val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
     val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
@@ -279,30 +307,94 @@ fun HomeScreen(
         }
     }
 
-    // Kinematic category pager
+    // Dynamic Chimanew Library Group Tabs
+    val dynamicTabs = remember(
+        libSettings.groupMode,
+        libSettings.showHiddenCategories,
+        visibleFilterTabs,
+        allCategories,
+        uiState.allMediaSummaries,
+        categoryAssignments
+    ) {
+        when (libSettings.groupMode) {
+            LibraryGroupMode.BY_MEDIA_TYPE -> visibleFilterTabs.map {
+                LibraryGroupTab(key = "MT_${it.name}", label = it.displayName, mediaTypeFilter = it)
+            }
+            LibraryGroupMode.BY_CATEGORY -> buildList {
+                add(LibraryGroupTab(key = "CAT_ALL", label = "All"))
+                allCategories
+                    .filter { libSettings.showHiddenCategories || it.isVisible }
+                    .forEach { cat ->
+                        add(LibraryGroupTab(key = "CAT_${cat.id}", label = cat.name, categoryId = cat.id))
+                    }
+                val hasUncategorized = uiState.allMediaSummaries.any { categoryAssignments[it.id].isNullOrEmpty() }
+                if (hasUncategorized && allCategories.isNotEmpty()) {
+                    add(LibraryGroupTab(key = "CAT_NONE", label = "Uncategorized", isUncategorized = true))
+                }
+            }
+            LibraryGroupMode.BY_STATUS -> buildList {
+                add(LibraryGroupTab(key = "ST_ALL", label = "All", statusFilter = TrackingStatus.ALL))
+                listOf(
+                    TrackingStatus.IN_PROGRESS,
+                    TrackingStatus.COMPLETED,
+                    TrackingStatus.PLAN_TO_TRACK,
+                    TrackingStatus.ON_HOLD,
+                    TrackingStatus.DROPPED
+                ).forEach { st ->
+                    add(LibraryGroupTab(key = "ST_${st.name}", label = st.displayName, statusFilter = st))
+                }
+            }
+            LibraryGroupMode.BY_TRACKER -> listOf(
+                LibraryGroupTab(key = "TR_ALL", label = "All"),
+                LibraryGroupTab(key = "TR_ANILIST", label = "AniList", trackerKey = "ANILIST"),
+                LibraryGroupTab(key = "TR_MAL", label = "MAL", trackerKey = "MAL"),
+                LibraryGroupTab(key = "TR_TMDB", label = "TMDb", trackerKey = "TMDB"),
+                LibraryGroupTab(key = "TR_TRAKT", label = "Trakt", trackerKey = "TRAKT"),
+                LibraryGroupTab(key = "TR_SIMKL", label = "Simkl", trackerKey = "SIMKL"),
+                LibraryGroupTab(key = "TR_STEAM", label = "Steam", trackerKey = "STEAM"),
+                LibraryGroupTab(key = "TR_VNDB", label = "VNDB", trackerKey = "VNDB"),
+                LibraryGroupTab(key = "TR_HARDCOVER", label = "Hardcover", trackerKey = "HARDCOVER"),
+                LibraryGroupTab(key = "TR_LOCAL", label = "Local Only", trackerKey = "LOCAL")
+            )
+            LibraryGroupMode.UNGROUPED -> listOf(LibraryGroupTab(key = "UNGROUPED_ALL", label = "All"))
+        }
+    }
+
+    // Kinematic library pager
     val pagerState = rememberPagerState(
         initialPage = 0,
-        pageCount = { visibleFilterTabs.size }
+        pageCount = { dynamicTabs.size.coerceAtLeast(1) }
     )
 
-    // Sync pager swipe with viewmodel tab selection
-    LaunchedEffect(visibleFilterTabs.size) {
-        if (pagerState.currentPage >= visibleFilterTabs.size) {
+    LaunchedEffect(dynamicTabs.size, libSettings.groupMode) {
+        if (pagerState.currentPage >= dynamicTabs.size) {
             pagerState.scrollToPage(0)
         }
     }
-    LaunchedEffect(pagerState.currentPage, visibleFilterTabs) {
-        val target = visibleFilterTabs.getOrNull(pagerState.currentPage) ?: MediaType.ALL
-        viewModel.selectMediaType(target)
+    LaunchedEffect(pendingLibraryTabKey, dynamicTabs) {
+        val targetKey = pendingLibraryTabKey ?: return@LaunchedEffect
+        val targetIdx = dynamicTabs.indexOfFirst { it.key == targetKey }
+        if (targetIdx >= 0) {
+            runCatching { pagerState.scrollToPage(targetIdx) }
+            pendingLibraryTabKey = null
+        }
+    }
+    LaunchedEffect(pagerState.currentPage, dynamicTabs) {
+        val activeTab = dynamicTabs.getOrNull(pagerState.currentPage)
+        viewModel.selectMediaType(activeTab?.mediaTypeFilter ?: MediaType.ALL)
     }
 
     val pendingFanficTag by com.omnitrack.app.data.model.FanficTagFilterBus.pendingTag.collectAsState()
-    LaunchedEffect(pendingFanficTag, visibleFilterTabs) {
+    LaunchedEffect(pendingFanficTag, dynamicTabs) {
         val tag = pendingFanficTag ?: return@LaunchedEffect
         fanficTagFilter = tag
-        val targetPage = visibleFilterTabs.indexOf(MediaType.FANFICTION).coerceAtLeast(0)
+        if (libSettings.groupMode != LibraryGroupMode.BY_MEDIA_TYPE) {
+            prefManager.setChimanewGroupMode(LibraryGroupMode.BY_MEDIA_TYPE)
+        }
+        val targetPage = dynamicTabs.indexOfFirst { it.mediaTypeFilter == MediaType.FANFICTION }.coerceAtLeast(0)
         viewModel.selectMediaType(MediaType.FANFICTION)
         runCatching { pagerState.scrollToPage(targetPage) }
+        pendingLibraryTabKey = "MT_FANFICTION"
         currentNavDestination = NavDestination.LIBRARY
         com.omnitrack.app.data.model.FanficTagFilterBus.consume()
     }
@@ -394,9 +486,11 @@ fun HomeScreen(
                             }
                         },
                         onNavigateToLibraryCategory = { type ->
-                            val targetPage = visibleFilterTabs.indexOf(type).coerceAtLeast(0)
+                            coroutineScope.launch {
+                                prefManager.setChimanewGroupMode(LibraryGroupMode.BY_MEDIA_TYPE)
+                            }
+                            pendingLibraryTabKey = "MT_${type.name}"
                             viewModel.selectMediaType(type)
-                            coroutineScope.launch { pagerState.scrollToPage(targetPage) }
                             currentNavDestination = NavDestination.LIBRARY
                         },
                         onNavigateToDiscover = { currentNavDestination = NavDestination.DISCOVER },
@@ -408,189 +502,280 @@ fun HomeScreen(
                             viewModel.loadReleaseCalendar(force = true)
                         },
                         fanfictionEnabled = fanfictionEnabled,
-                        fanficNsfwMode = fanficNsfwMode
+                        fanficNsfwMode = fanficNsfwMode,
+                        customCategories = allCategories,
+                        categoryAssignments = categoryAssignments,
+                        onNavigateToCustomCategory = { catId ->
+                            coroutineScope.launch {
+                                prefManager.setChimanewGroupMode(LibraryGroupMode.BY_CATEGORY)
+                            }
+                            pendingLibraryTabKey = "CAT_$catId"
+                            currentNavDestination = NavDestination.LIBRARY
+                        }
                     )
                 }
 
                 NavDestination.LIBRARY -> {
+                    val activeTab = dynamicTabs.getOrNull(pagerState.currentPage)
+                    val activeTabFilteredItems = remember(
+                        uiState.allMediaSummaries,
+                        uiState.selectedStatus,
+                        searchQuery,
+                        activeTab,
+                        libSettings,
+                        categoryAssignments,
+                        selectedMangaSubtype,
+                        selectedNovelSubtype,
+                        selectedVnOriginSubtype,
+                        selectedVnLengthSubtype,
+                        selectedGamePlatform,
+                        selectedGameCompletion,
+                        selectedBookFormat,
+                        selectedBookCategory,
+                        selectedComicPublisher,
+                        selectedComicFormat,
+                        selectedFanficSite,
+                        selectedFanficRating,
+                        selectedFanficStatus,
+                        selectedFanficMinWords,
+                        fanficCrossoverOnly,
+                        fanficTagFilter,
+                        fanficNsfwMode
+                    ) {
+                        if (activeTab == null) emptyList()
+                        else computeLibraryTabItems(
+                            allSummaries = uiState.allMediaSummaries,
+                            tab = activeTab,
+                            selectedStatus = uiState.selectedStatus,
+                            searchQuery = searchQuery,
+                            libSettings = libSettings,
+                            categoryAssignments = categoryAssignments,
+                            fanficNsfwMode = fanficNsfwMode,
+                            selectedMangaSubtype = selectedMangaSubtype,
+                            selectedNovelSubtype = selectedNovelSubtype,
+                            selectedVnOriginSubtype = selectedVnOriginSubtype,
+                            selectedVnLengthSubtype = selectedVnLengthSubtype,
+                            selectedGamePlatform = selectedGamePlatform,
+                            selectedGameCompletion = selectedGameCompletion,
+                            selectedBookFormat = selectedBookFormat,
+                            selectedBookCategory = selectedBookCategory,
+                            selectedComicPublisher = selectedComicPublisher,
+                            selectedComicFormat = selectedComicFormat,
+                            selectedFanficSite = selectedFanficSite,
+                            selectedFanficRating = selectedFanficRating,
+                            selectedFanficStatus = selectedFanficStatus,
+                            selectedFanficMinWords = selectedFanficMinWords,
+                            fanficCrossoverOnly = fanficCrossoverOnly,
+                            fanficTagFilter = fanficTagFilter
+                        )
+                    }
+                    val hasActiveChimanewFilters = remember(libSettings, uiState.selectedStatus) {
+                        uiState.selectedStatus != TrackingStatus.ALL ||
+                            libSettings.filterStarted != TriStateFilter.OFF ||
+                            libSettings.filterCompleted != TriStateFilter.OFF ||
+                            libSettings.filterUnread != TriStateFilter.OFF ||
+                            libSettings.filterRated != TriStateFilter.OFF ||
+                            libSettings.filterFavorite != TriStateFilter.OFF ||
+                            libSettings.filterMediaTypes.isNotEmpty() ||
+                            libSettings.filterTrackers.isNotEmpty() ||
+                            libSettings.filterIncludeCategoryIds.isNotEmpty() ||
+                            libSettings.filterExcludeCategoryIds.isNotEmpty()
+                    }
+                    val scrollerSortMode = remember(libSettings.sortOption) {
+                        when (libSettings.sortOption) {
+                            LibrarySortOption.ALPHA -> "TITLE"
+                            LibrarySortOption.RATING -> "RATING"
+                            else -> "RECENT"
+                        }
+                    }
+
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .statusBarsPadding()
                     ) {
-                        // Header: Title + Actions (Update Pill + Diagnostics + Filter/Sort + Search)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text(
-                                    text = "Library",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 24.sp,
-                                    color = TextPrimary,
-                                    letterSpacing = (-0.5).sp
-                                )
-                                Text(
-                                    text = "${uiState.allMediaSummaries.size} titles tracked",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                    letterSpacing = 0.2.sp
-                                )
-                            }
+                        // Top Header: Directly replaced by Option A MultiSelectTopBar during Multi-Select!
+                        if (isLibraryMultiSelect) {
+                            MultiSelectTopBar(
+                                selectedCount = selectedLibraryIds.size,
+                                totalCount = activeTabFilteredItems.size,
+                                onSelectAll = {
+                                    selectedLibraryIds = activeTabFilteredItems.map { it.id }.toSet()
+                                },
+                                onInvertSelection = {
+                                    val currentIds = activeTabFilteredItems.map { it.id }.toSet()
+                                    selectedLibraryIds = (selectedLibraryIds - currentIds) + (currentIds - selectedLibraryIds)
+                                },
+                                onClearSelection = {
+                                    selectedLibraryIds = emptySet()
+                                },
+                                onExitMultiSelect = {
+                                    isLibraryMultiSelect = false
+                                    selectedLibraryIds = emptySet()
+                                }
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Library",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 24.sp,
+                                        color = TextPrimary,
+                                        letterSpacing = (-0.5).sp
+                                    )
+                                    Text(
+                                        text = "${uiState.allMediaSummaries.size} titles tracked",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                        letterSpacing = 0.2.sp
+                                    )
+                                }
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                // Update Available Tag
-                                val upd = availableUpdate
-                                if (upd != null) {
-                                    Box(
-                                        modifier = Modifier
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(AccentGold.copy(alpha = 0.16f))
-                                            .clickable { showUpdateSheet = true }
-                                            .padding(horizontal = 10.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    val upd = availableUpdate
+                                    if (upd != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .height(36.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(AccentGold.copy(alpha = 0.16f))
+                                                .clickable { showUpdateSheet = true }
+                                                .padding(horizontal = 10.dp),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                imageVector = Icons.Default.SystemUpdate,
-                                                contentDescription = "Update Available",
-                                                tint = AccentGold,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Text(
-                                                text = if (upd.isBuilding) "Building b${upd.buildRunNumber}" else "v${upd.version}",
-                                                color = AccentGold,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.SystemUpdate,
+                                                    contentDescription = "Update Available",
+                                                    tint = AccentGold,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Text(
+                                                    text = if (upd.isBuilding) "Building b${upd.buildRunNumber}" else "v${upd.version}",
+                                                    color = AccentGold,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
                                     }
-                                }
 
-                                // Diagnostics button
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(DarkSurfaceElevated)
-                                        .clickable { showDiagnostics = true },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.BugReport,
-                                        contentDescription = "Diagnostics",
-                                        tint = TextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                // Add Custom Entry or Import Fanfic button
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(DarkSurfaceElevated)
-                                        .clickable {
-                                            if (uiState.selectedMediaType == MediaType.FANFICTION) {
-                                                fanficImportInitialTab = 0
-                                                fanficImportInitialUrl = ""
-                                                showFanficImportSheet = true
-                                            } else {
-                                                customEntryInitTitle = ""
-                                                customEntryInitType = if (uiState.selectedMediaType == MediaType.ALL) MediaType.NOVEL else uiState.selectedMediaType
-                                                showCustomEntrySheet = true
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Add Custom Entry",
-                                        tint = AccentGold,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                // Multi-Select toggle button
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isLibraryMultiSelect) AccentGold.copy(alpha = 0.22f) else DarkSurfaceElevated)
-                                        .clickable {
-                                            isLibraryMultiSelect = !isLibraryMultiSelect
-                                            if (!isLibraryMultiSelect) selectedLibraryIds = emptySet()
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Checklist,
-                                        contentDescription = "Select Multiple",
-                                        tint = if (isLibraryMultiSelect) AccentGold else TextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-
-                                // Filter & Sort Sheet Trigger
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (uiState.selectedStatus != com.omnitrack.app.data.model.TrackingStatus.ALL ||
-                                                librarySortMode != "RECENT" ||
-                                                libraryViewMode != "GRID_3"
-                                            ) AccentGold.copy(alpha = 0.18f) else DarkSurfaceElevated
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(DarkSurfaceElevated)
+                                            .clickable { showDiagnostics = true },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.BugReport,
+                                            contentDescription = "Diagnostics",
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(18.dp)
                                         )
-                                        .clickable { showLibraryFilterSheet = true },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Tune,
-                                        contentDescription = "Filter & Sort",
-                                        tint = AccentGold,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
+                                    }
 
-                                // Search trigger
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isSearchVisible) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
-                                        .clickable {
-                                            isSearchVisible = !isSearchVisible
-                                            if (!isSearchVisible) searchQuery = ""
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isSearchVisible) Icons.Default.Close else Icons.Default.Search,
-                                        contentDescription = "Search",
-                                        tint = if (isSearchVisible) AccentGold else TextPrimary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(DarkSurfaceElevated)
+                                            .clickable {
+                                                if (uiState.selectedMediaType == MediaType.FANFICTION) {
+                                                    fanficImportInitialTab = 0
+                                                    fanficImportInitialUrl = ""
+                                                    showFanficImportSheet = true
+                                                } else {
+                                                    customEntryInitTitle = ""
+                                                    customEntryInitType = if (uiState.selectedMediaType == MediaType.ALL) MediaType.NOVEL else uiState.selectedMediaType
+                                                    showCustomEntrySheet = true
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Add Custom Entry",
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(DarkSurfaceElevated)
+                                            .clickable {
+                                                isLibraryMultiSelect = true
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Checklist,
+                                            contentDescription = "Select Multiple",
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(if (hasActiveChimanewFilters) AccentGold.copy(alpha = 0.18f) else DarkSurfaceElevated)
+                                            .clickable { showLibraryFilterSheet = true },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Tune,
+                                            contentDescription = "Library Settings",
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSearchVisible) AccentGold.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                                            .clickable {
+                                                isSearchVisible = !isSearchVisible
+                                                if (!isSearchVisible) searchQuery = ""
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSearchVisible) Icons.Default.Close else Icons.Default.Search,
+                                            contentDescription = "Search",
+                                            tint = if (isSearchVisible) AccentGold else TextPrimary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         // Animated In-Library Search Field
-                        AnimatedVisibility(visible = isSearchVisible) {
+                        AnimatedVisibility(visible = isSearchVisible && !isLibraryMultiSelect) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 14.dp, vertical = 6.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(DarkSurfaceElevated)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
                                     .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -612,7 +797,7 @@ fun HomeScreen(
                                     cursorBrush = SolidColor(AccentGold),
                                     decorationBox = { innerTextField ->
                                         if (searchQuery.isEmpty()) {
-                                            Text("Filter library titles, native names...", color = TextMuted, fontSize = 13.5.sp)
+                                            Text("Filter library titles, native names, creators...", color = TextMuted, fontSize = 13.5.sp)
                                         }
                                         innerTextField()
                                     }
@@ -630,35 +815,62 @@ fun HomeScreen(
                             }
                         }
 
-                        // Media type tabs with fluid click animation to slide pager
-                        MediaTypeTabRow(
-                            selectedType = uiState.selectedMediaType,
-                            tabs = visibleFilterTabs,
-                            onTypeSelected = { type ->
-                                val targetPage = visibleFilterTabs.indexOf(type)
-                                if (targetPage >= 0 && targetPage != pagerState.currentPage) {
-                                    coroutineScope.launch {
-                                        pagerState.animateScrollToPage(
-                                            page = targetPage,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow
+                        // Dynamic Chimanew Underline Group Tabs (driven by LibraryGroupMode)
+                        val tabCounts = remember(
+                            dynamicTabs,
+                            uiState.allMediaSummaries,
+                            uiState.selectedStatus,
+                            searchQuery,
+                            libSettings,
+                            categoryAssignments,
+                            fanficNsfwMode
+                        ) {
+                            if (!libSettings.showTabItemCounts) emptyMap()
+                            else dynamicTabs.associate { tab ->
+                                tab.key to computeLibraryTabItems(
+                                    allSummaries = uiState.allMediaSummaries,
+                                    tab = tab,
+                                    selectedStatus = uiState.selectedStatus,
+                                    searchQuery = searchQuery,
+                                    libSettings = libSettings,
+                                    categoryAssignments = categoryAssignments,
+                                    fanficNsfwMode = fanficNsfwMode
+                                ).size
+                            }
+                        }
+
+                        if (libSettings.showCategoryTabs && dynamicTabs.size > 1) {
+                            ChimanewLibraryGroupTabRow(
+                                tabs = dynamicTabs,
+                                selectedPage = pagerState.currentPage.coerceIn(0, dynamicTabs.lastIndex),
+                                showCounts = libSettings.showTabItemCounts,
+                                countsByKey = tabCounts,
+                                onTabSelected = { idx ->
+                                    if (idx != pagerState.currentPage) {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(
+                                                page = idx,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
-                            },
-                            modifier = Modifier.padding(horizontal = 14.dp)
-                        )
+                            )
+                        }
 
-                        // Status filter chips (fluid row)
-                        StatusFilterChips(
-                            selectedStatus = uiState.selectedStatus,
-                            onStatusSelected = { viewModel.selectStatus(it) },
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-                        )
+                        if (libSettings.groupMode != LibraryGroupMode.BY_STATUS && !isLibraryMultiSelect) {
+                            StatusFilterChips(
+                                selectedStatus = uiState.selectedStatus,
+                                onStatusSelected = { viewModel.selectStatus(it) },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                            )
+                        }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.MANGA) {
+                        val activeMediaTabType = activeTab?.mediaTypeFilter
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.MANGA) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -671,13 +883,8 @@ fun HomeScreen(
                                     val isSelected = selectedMangaSubtype == key
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(999.dp))
-                                            .background(if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
-                                            .border(
-                                                width = 1.dp,
-                                                color = if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f),
-                                                shape = RoundedCornerShape(999.dp)
-                                            )
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                             .clickable { selectedMangaSubtype = key }
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
                                         contentAlignment = Alignment.Center
@@ -686,14 +893,14 @@ fun HomeScreen(
                                             text = label,
                                             fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.60f)
+                                            color = if (isSelected) AccentGold else TextSecondary
                                         )
                                     }
                                 }
                             }
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.NOVEL) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.NOVEL) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -706,13 +913,8 @@ fun HomeScreen(
                                     val isSelected = selectedNovelSubtype == key
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(999.dp))
-                                            .background(if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
-                                            .border(
-                                                width = 1.dp,
-                                                color = if (isSelected) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f),
-                                                shape = RoundedCornerShape(999.dp)
-                                            )
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isSelected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                             .clickable { selectedNovelSubtype = key }
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
                                         contentAlignment = Alignment.Center
@@ -721,14 +923,14 @@ fun HomeScreen(
                                             text = label,
                                             fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.White.copy(alpha = 0.60f)
+                                            color = if (isSelected) AccentGold else TextSecondary
                                         )
                                     }
                                 }
                             }
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.VISUAL_NOVEL) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.VISUAL_NOVEL) {
                             VnUnderlineFilterBar(
                                 selectedOrigin = selectedVnOriginSubtype,
                                 selectedLength = selectedVnLengthSubtype,
@@ -738,7 +940,7 @@ fun HomeScreen(
                             )
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.GAME) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.GAME) {
                             GameUnderlineFilterBar(
                                 selectedPlatform = selectedGamePlatform,
                                 selectedCompletion = selectedGameCompletion,
@@ -748,7 +950,7 @@ fun HomeScreen(
                             )
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.BOOK) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.BOOK) {
                             BookUnderlineFilterBar(
                                 selectedFormat = selectedBookFormat,
                                 selectedCategory = selectedBookCategory,
@@ -758,7 +960,7 @@ fun HomeScreen(
                             )
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.COMIC) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.COMIC) {
                             ComicUnderlineFilterBar(
                                 selectedPublisher = selectedComicPublisher,
                                 selectedFormat = selectedComicFormat,
@@ -768,7 +970,7 @@ fun HomeScreen(
                             )
                         }
 
-                        AnimatedVisibility(visible = uiState.selectedMediaType == MediaType.FANFICTION) {
+                        AnimatedVisibility(visible = activeMediaTabType == MediaType.FANFICTION) {
                             FanficUnderlineFilterBar(
                                 selectedSite = selectedFanficSite,
                                 selectedRating = selectedFanficRating,
@@ -793,7 +995,7 @@ fun HomeScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Main Content: Horizontal Pager for Category Swiping
+                        // Main Content: Horizontal Pager across dynamic tabs
                         if (uiState.isLoading) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -808,86 +1010,72 @@ fun HomeScreen(
                         } else {
                             HorizontalPager(
                                 state = pagerState,
+                                key = { idx -> dynamicTabs.getOrNull(idx)?.key ?: "page_$idx" },
                                 modifier = Modifier.fillMaxSize()
                             ) { pageIndex ->
-                                val pageMediaType = visibleFilterTabs.getOrElse(pageIndex) { MediaType.ALL }
-                                val pageGridState = gridStates[pageMediaType] ?: gridStates.getValue(MediaType.ALL)
-                                val pageListState = listStates[pageMediaType] ?: listStates.getValue(MediaType.ALL)
-
-                                val displayedItems = remember(uiState.allMediaSummaries, uiState.selectedStatus, searchQuery, pageMediaType, selectedMangaSubtype, selectedNovelSubtype, selectedVnOriginSubtype, selectedVnLengthSubtype, selectedGamePlatform, selectedGameCompletion, selectedBookFormat, selectedBookCategory, selectedComicPublisher, selectedComicFormat, selectedFanficSite, selectedFanficRating, selectedFanficStatus, selectedFanficMinWords, fanficCrossoverOnly, fanficTagFilter, fanficNsfwMode, librarySortMode) {
-                                    val filtered = uiState.allMediaSummaries.filter { item ->
-                                        !(item.mediaType == MediaType.FANFICTION && com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode)) &&
-                                        (pageMediaType == MediaType.ALL || item.mediaType == pageMediaType) &&
-                                        (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
-                                        (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
-                                        (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnOriginSubtype == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(item.originCountry, item.nativeTitle) == selectedVnOriginSubtype) &&
-                                        (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnLengthSubtype == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(item.runtimeMinutes) == selectedVnLengthSubtype) &&
-                                        (pageMediaType != MediaType.GAME || selectedGamePlatform == "ALL" || selectedGamePlatform in com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platforms, item.platform)) &&
-                                        (pageMediaType != MediaType.GAME || selectedGameCompletion == "ALL" || when (selectedGameCompletion) {
-                                            "MAIN" -> item.gameCompletionTier.equals("MAIN", true) || item.gameCompletionTier.equals("MAIN_PLUS", true)
-                                            "COMP" -> item.gameCompletionTier.equals("COMPLETIONIST", true) || item.gameCompletionTier.equals("PLATINUM", true)
-                                            "BEATEN" -> item.status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED
-                                            "BACKLOG" -> item.status == com.omnitrack.app.data.model.TrackingStatus.PLAN_TO_TRACK
-                                            else -> true
-                                        }) &&
-                                        (pageMediaType != MediaType.BOOK || selectedBookFormat == "ALL" || com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormat) &&
-                                        (pageMediaType != MediaType.BOOK || selectedBookCategory == "ALL" || com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, null) == selectedBookCategory) &&
-                                        (pageMediaType != MediaType.COMIC || selectedComicPublisher == "ALL" || com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisher) &&
-                                        (pageMediaType != MediaType.COMIC || selectedComicFormat == "ALL" || com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormat) &&
-                                        (pageMediaType != MediaType.FANFICTION || selectedFanficSite == "ALL" || item.fanficSourceSite.equals(selectedFanficSite, ignoreCase = true)) &&
-                                        (pageMediaType != MediaType.FANFICTION || selectedFanficRating == "ALL" || com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).code == selectedFanficRating) &&
-                                        (pageMediaType != MediaType.FANFICTION || selectedFanficStatus == "ALL" || com.omnitrack.app.data.model.FanficWorkStatus.fromRaw(item.fanficWorkStatus).name == selectedFanficStatus) &&
-                                        (pageMediaType != MediaType.FANFICTION || selectedFanficMinWords <= 0 || (item.fanficWordCount ?: 0) >= selectedFanficMinWords) &&
-                                        (pageMediaType != MediaType.FANFICTION || !fanficCrossoverOnly || item.fanficIsCrossover) &&
-                                        (pageMediaType != MediaType.FANFICTION || fanficTagFilter.isBlank() ||
-                                            item.fanficPrimaryFandom?.contains(fanficTagFilter, ignoreCase = true) == true ||
-                                            item.fanficTagsSearch?.contains(fanficTagFilter, ignoreCase = true) == true) &&
-                                        (uiState.selectedStatus == com.omnitrack.app.data.model.TrackingStatus.ALL || item.status == uiState.selectedStatus) &&
-                                        (searchQuery.isBlank() ||
-                                            item.title.contains(searchQuery, ignoreCase = true) ||
-                                            item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.comicPublisher?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.fanficPrimaryFandom?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.fanficTagsSearch?.contains(searchQuery, ignoreCase = true) == true ||
-                                            item.fanficSourceSite?.contains(searchQuery, ignoreCase = true) == true)
-                                    }
-                                    when (librarySortMode) {
-                                        "RATING" -> filtered.sortedWith(
-                                            compareByDescending<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }
-                                                .thenByDescending { it.lastUpdated }
-                                        )
-                                        "TITLE" -> filtered.sortedBy { it.title.lowercase() }
-                                        else -> filtered.sortedByDescending { it.lastUpdated }
-                                    }
+                                val pageTab = dynamicTabs.getOrNull(pageIndex) ?: LibraryGroupTab("ALL", "All")
+                                val pageGridState = remember(pageTab.key) {
+                                    tabGridStates.getOrPut(pageTab.key) { androidx.compose.foundation.lazy.grid.LazyGridState() }
+                                }
+                                val pageListState = remember(pageTab.key) {
+                                    tabListStates.getOrPut(pageTab.key) { LazyListState() }
                                 }
 
-                                // Kinematic Layer: Scale decay and gentle parallax during finger drag (RenderNode layer only — zero recomposition)
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    AnimatedVisibility(visible = isLibraryMultiSelect) {
-                                        MultiSelectTopBar(
-                                            selectedCount = selectedLibraryIds.size,
-                                            totalCount = displayedItems.size,
-                                            onSelectAll = {
-                                                selectedLibraryIds = displayedItems.map { it.id }.toSet()
-                                            },
-                                            onInvertSelection = {
-                                                val currentIds = displayedItems.map { it.id }.toSet()
-                                                selectedLibraryIds = currentIds - selectedLibraryIds
-                                            },
-                                            onClearSelection = {
-                                                selectedLibraryIds = emptySet()
-                                            },
-                                            onExitMultiSelect = {
-                                                isLibraryMultiSelect = false
-                                                selectedLibraryIds = emptySet()
-                                            }
-                                        )
-                                    }
+                                val displayedItems = remember(
+                                    uiState.allMediaSummaries,
+                                    uiState.selectedStatus,
+                                    searchQuery,
+                                    pageTab,
+                                    libSettings,
+                                    categoryAssignments,
+                                    selectedMangaSubtype,
+                                    selectedNovelSubtype,
+                                    selectedVnOriginSubtype,
+                                    selectedVnLengthSubtype,
+                                    selectedGamePlatform,
+                                    selectedGameCompletion,
+                                    selectedBookFormat,
+                                    selectedBookCategory,
+                                    selectedComicPublisher,
+                                    selectedComicFormat,
+                                    selectedFanficSite,
+                                    selectedFanficRating,
+                                    selectedFanficStatus,
+                                    selectedFanficMinWords,
+                                    fanficCrossoverOnly,
+                                    fanficTagFilter,
+                                    fanficNsfwMode
+                                ) {
+                                    computeLibraryTabItems(
+                                        allSummaries = uiState.allMediaSummaries,
+                                        tab = pageTab,
+                                        selectedStatus = uiState.selectedStatus,
+                                        searchQuery = searchQuery,
+                                        libSettings = libSettings,
+                                        categoryAssignments = categoryAssignments,
+                                        fanficNsfwMode = fanficNsfwMode,
+                                        selectedMangaSubtype = selectedMangaSubtype,
+                                        selectedNovelSubtype = selectedNovelSubtype,
+                                        selectedVnOriginSubtype = selectedVnOriginSubtype,
+                                        selectedVnLengthSubtype = selectedVnLengthSubtype,
+                                        selectedGamePlatform = selectedGamePlatform,
+                                        selectedGameCompletion = selectedGameCompletion,
+                                        selectedBookFormat = selectedBookFormat,
+                                        selectedBookCategory = selectedBookCategory,
+                                        selectedComicPublisher = selectedComicPublisher,
+                                        selectedComicFormat = selectedComicFormat,
+                                        selectedFanficSite = selectedFanficSite,
+                                        selectedFanficRating = selectedFanficRating,
+                                        selectedFanficStatus = selectedFanficStatus,
+                                        selectedFanficMinWords = selectedFanficMinWords,
+                                        fanficCrossoverOnly = fanficCrossoverOnly,
+                                        fanficTagFilter = fanficTagFilter
+                                    )
+                                }
+
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .weight(1f)
                                         .graphicsLayer {
                                             val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
                                             val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
@@ -917,7 +1105,7 @@ fun HomeScreen(
                                                     text = when {
                                                         searchQuery.isNotEmpty() -> "No results matching \"$searchQuery\""
                                                         uiState.allMediaSummaries.isEmpty() -> "Your library is empty"
-                                                        else -> "No items in ${pageMediaType.displayName}"
+                                                        else -> "No items in ${pageTab.label}"
                                                     },
                                                     color = TextPrimary.copy(alpha = 0.85f),
                                                     fontSize = 15.sp,
@@ -933,19 +1121,18 @@ fun HomeScreen(
                                                 }
                                             }
                                         }
-                                    } else if (libraryViewMode == "LIST") {
+                                    } else if (libSettings.displayMode == LibraryDisplayMode.LIST) {
                                         Box(modifier = Modifier.fillMaxSize()) {
                                             LazyColumn(
                                                 state = pageListState,
-                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 168.dp else 112.dp),
-                                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 128.dp else 112.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
                                                 items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
                                                     val isItemSelected = item.id in selectedLibraryIds
                                                     LibraryListRow(
                                                         item = item,
-                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards && !isLibraryMultiSelect,
+                                                        showQuickProgressButton = (posterStyle.showQuickProgressOnCards || libSettings.showQuickContinue) && !isLibraryMultiSelect,
                                                         isSelectionMode = isLibraryMultiSelect,
                                                         isSelected = isItemSelected,
                                                         onClick = {
@@ -958,7 +1145,9 @@ fun HomeScreen(
                                                             }
                                                         },
                                                         onLongClick = {
-                                                            libraryActionTarget = item
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            isLibraryMultiSelect = true
+                                                            selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
                                                         },
                                                         onQuickProgress = {
                                                             AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
@@ -969,30 +1158,32 @@ fun HomeScreen(
                                             }
                                             LibraryFastScroller(
                                                 items = displayedItems,
-                                                sortMode = librarySortMode,
+                                                sortMode = scrollerSortMode,
                                                 listState = pageListState,
                                                 columnsCount = 1
                                             )
                                         }
                                     } else {
                                         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                            val isPhoneScreen = maxWidth < 600.dp
-                                            val gridColumns = when {
-                                                posterStyle.isLandscape -> if (isPhoneScreen) GridCells.Fixed(1) else GridCells.Adaptive(minSize = 340.dp)
-                                                libraryViewMode == "GRID_2" -> GridCells.Fixed(2)
-                                                else -> GridCells.Adaptive(minSize = posterStyle.widthDp.dp)
-                                            }
-                                            val approxCols = when {
-                                                posterStyle.isLandscape -> if (isPhoneScreen) 1 else (maxWidth / 340.dp).toInt().coerceAtLeast(1)
-                                                libraryViewMode == "GRID_2" -> 2
+                                            val isLandscapeScreen = maxWidth >= 600.dp
+                                            val resolvedCols = when {
+                                                posterStyle.isLandscape -> if (isLandscapeScreen) 2 else 1
+                                                isLandscapeScreen -> libSettings.landscapeColumns.coerceIn(4, 8)
+                                                libSettings.portraitColumns > 0 -> libSettings.portraitColumns.coerceIn(2, 6)
                                                 else -> (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(2)
                                             }
+                                            val isDense = resolvedCols >= 4 && !posterStyle.isLandscape
                                             LazyVerticalGrid(
                                                 state = pageGridState,
-                                                columns = gridColumns,
-                                                contentPadding = PaddingValues(start = 14.dp, end = 16.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 168.dp else 112.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                                columns = GridCells.Fixed(resolvedCols),
+                                                contentPadding = PaddingValues(
+                                                    start = if (isDense) 12.dp else 14.dp,
+                                                    end = if (isDense) 14.dp else 16.dp,
+                                                    top = 6.dp,
+                                                    bottom = if (isLibraryMultiSelect) 128.dp else 112.dp
+                                                ),
+                                                horizontalArrangement = Arrangement.spacedBy(if (isDense) 7.dp else 10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(if (isDense) 10.dp else 14.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
                                                 itemsIndexed(
@@ -1004,15 +1195,20 @@ fun HomeScreen(
                                                         item = item,
                                                         isSelectionMode = isLibraryMultiSelect,
                                                         isSelected = isItemSelected,
-                                                        cornerRadiusDp = posterStyle.cornerRadiusDp,
+                                                        cornerRadiusDp = if (isDense) minOf(posterStyle.cornerRadiusDp, 8) else posterStyle.cornerRadiusDp,
                                                         isLandscape = posterStyle.isLandscape,
                                                         hideLabels = posterStyle.hideLabels,
                                                         cardDepthEnabled = posterStyle.cardDepthEnabled && posterStyle.cardDepthPostersEnabled,
                                                         cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
                                                         cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
                                                         cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
-                                                        showQuickProgressButton = posterStyle.showQuickProgressOnCards && !isLibraryMultiSelect,
+                                                        showQuickProgressButton = (posterStyle.showQuickProgressOnCards || libSettings.showQuickContinue) && !isLibraryMultiSelect,
                                                         showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
+                                                        displayMode = libSettings.displayMode,
+                                                        showRemainingBadge = libSettings.showRemainingBadge,
+                                                        showTypeBadge = libSettings.showTypeBadge,
+                                                        showScoreBadge = libSettings.showScoreBadge,
+                                                        isDenseGrid = isDense,
                                                         onCardClick = {
                                                             if (isLibraryMultiSelect) {
                                                                 selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
@@ -1023,7 +1219,9 @@ fun HomeScreen(
                                                             }
                                                         },
                                                         onCardLongClick = {
-                                                            libraryActionTarget = item
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            isLibraryMultiSelect = true
+                                                            selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
                                                         },
                                                         onQuickProgress = {
                                                             AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
@@ -1034,13 +1232,12 @@ fun HomeScreen(
                                             }
                                             LibraryFastScroller(
                                                 items = displayedItems,
-                                                sortMode = librarySortMode,
+                                                sortMode = scrollerSortMode,
                                                 gridState = pageGridState,
-                                                columnsCount = approxCols
+                                                columnsCount = resolvedCols
                                             )
                                         }
                                     }
-                                }
                                 }
                             }
                         }
@@ -1090,7 +1287,8 @@ fun HomeScreen(
                         onBatchRemoveFromHistory = { ids -> viewModel.batchRemoveFromHistory(ids) },
                         onBatchDeleteItems = { ids -> viewModel.batchDeleteItems(ids) },
                         watchedTimestamps90d = watchedTimestamps90d,
-                        onOpenHeatmap = { showActivityHeatmapSheet = true }
+                        onOpenHeatmap = { showActivityHeatmapSheet = true },
+                        onMultiSelectChanged = { isHistoryMultiSelect = it }
                     )
                 }
 
@@ -1124,6 +1322,7 @@ fun HomeScreen(
                         onNavigateToArtworkPriority = onNavigateToArtworkPriority,
                         onNavigateToVisualPresentation = onNavigateToVisualPresentation,
                         onNavigateToDetailsPageLayout = onNavigateToDetailsPageLayout,
+                        onNavigateToManageCategories = onNavigateToManageCategories,
                         onOpenHomeCustomizer = { showHomeCustomizerSheet = true },
                         onOpenDiscoverCustomizer = { showDiscoverCustomizerSheet = true },
                         onOpenFanficSites = {
@@ -1136,25 +1335,30 @@ fun HomeScreen(
             }
         }
 
-        // Floating Liquid Glass Navigation Dock
-        OmniFloatingNavBar(
-            selectedDestination = currentNavDestination,
-            onDestinationSelected = { destination ->
-                currentNavDestination = destination
-            },
-            scrollState = navScrollState,
-            hazeState = hazeState,
-            onActiveTabReSelected = { destination ->
-                if (destination == NavDestination.LIBRARY) {
-                    val activeGridState = visibleFilterTabs.getOrNull(pagerState.currentPage)?.let { gridStates[it] }
-                    coroutineScope.launch {
-                        activeGridState?.animateScrollToItem(0)
+        // Floating Liquid Glass Navigation Dock (automatically hidden when flush Multi-Select bottom bar is active)
+        val hideNavForMultiSelect = (isLibraryMultiSelect && currentNavDestination == NavDestination.LIBRARY) ||
+            (isHistoryMultiSelect && currentNavDestination == NavDestination.HISTORY)
+        if (!hideNavForMultiSelect) {
+            OmniFloatingNavBar(
+                selectedDestination = currentNavDestination,
+                onDestinationSelected = { destination ->
+                    currentNavDestination = destination
+                },
+                scrollState = navScrollState,
+                hazeState = hazeState,
+                onActiveTabReSelected = { destination ->
+                    if (destination == NavDestination.LIBRARY) {
+                        val activeKey = dynamicTabs.getOrNull(pagerState.currentPage)?.key
+                        val activeGridState = activeKey?.let { tabGridStates[it] }
+                        coroutineScope.launch {
+                            activeGridState?.animateScrollToItem(0)
+                        }
+                        isSearchVisible = !isSearchVisible
                     }
-                    isSearchVisible = !isSearchVisible
-                }
-            },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+                },
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
+        }
 
         // Live Diagnostics & System Logs Sheet
         if (showDiagnostics) {
@@ -1233,7 +1437,12 @@ fun HomeScreen(
         if (showHomeCustomizerSheet) {
             HomeCustomizerSheet(
                 preferenceManager = prefManager,
-                onDismiss = { showHomeCustomizerSheet = false }
+                onDismiss = { showHomeCustomizerSheet = false },
+                customCategories = allCategories,
+                onOpenManageCategories = {
+                    showHomeCustomizerSheet = false
+                    onNavigateToManageCategories()
+                }
             )
         }
 
@@ -1308,25 +1517,72 @@ fun HomeScreen(
         }
 
         if (showLibraryFilterSheet) {
-            LibraryFilterSortSheet(
+            ChimanewLibrarySheet(
+                settings = libSettings,
                 selectedStatus = uiState.selectedStatus,
-                sortMode = librarySortMode,
-                viewMode = libraryViewMode,
+                categories = allCategories,
+                fanfictionEnabled = fanfictionEnabled,
                 onSelectStatus = { viewModel.selectStatus(it) },
-                onSelectSortMode = { mode ->
-                    coroutineScope.launch { prefManager.setLibrarySortMode(mode) }
+                onToggleTriStateFilter = { key, next ->
+                    coroutineScope.launch { prefManager.setChimanewTriStateFilter(key, next) }
                 },
-                onSelectViewMode = { mode ->
-                    coroutineScope.launch { prefManager.setLibraryViewMode(mode) }
+                onSetFilterMediaTypes = { types ->
+                    coroutineScope.launch { prefManager.setChimanewFilterMediaTypes(types) }
+                },
+                onSetFilterTrackers = { trackers ->
+                    coroutineScope.launch { prefManager.setChimanewFilterTrackers(trackers) }
+                },
+                onSetCategoryFilterSets = { inc, exc ->
+                    coroutineScope.launch { prefManager.setChimanewFilterCategorySets(inc, exc) }
+                },
+                onSelectSort = { opt, asc ->
+                    coroutineScope.launch { prefManager.setChimanewSort(opt, asc) }
+                },
+                onSelectDisplayMode = { mode ->
+                    coroutineScope.launch { prefManager.setChimanewDisplayMode(mode) }
+                },
+                onSetPortraitColumns = { cols ->
+                    coroutineScope.launch { prefManager.setChimanewPortraitColumns(cols) }
+                },
+                onSetLandscapeColumns = { cols ->
+                    coroutineScope.launch { prefManager.setChimanewLandscapeColumns(cols) }
+                },
+                onToggleOverlay = { key, enabled ->
+                    coroutineScope.launch { prefManager.setChimanewOverlayToggle(key, enabled) }
+                },
+                onSelectGroupMode = { mode ->
+                    coroutineScope.launch { prefManager.setChimanewGroupMode(mode) }
+                },
+                onOpenManageCategories = {
+                    showLibraryFilterSheet = false
+                    onNavigateToManageCategories()
                 },
                 onResetFilters = {
                     viewModel.selectStatus(com.omnitrack.app.data.model.TrackingStatus.ALL)
-                    coroutineScope.launch {
-                        prefManager.setLibrarySortMode("RECENT")
-                        prefManager.setLibraryViewMode("GRID_3")
-                    }
+                    coroutineScope.launch { prefManager.resetChimanewLibraryFilters() }
                 },
                 onDismiss = { showLibraryFilterSheet = false }
+            )
+        }
+
+        if (showMultiSelectCategoriesSheet && selectedLibraryIds.isNotEmpty()) {
+            MultiSelectCategoriesSheet(
+                selectedMediaIds = selectedLibraryIds,
+                categories = allCategories,
+                categoryAssignments = categoryAssignments,
+                onCreateCategory = { name -> viewModel.createCategory(name) },
+                onApplyChanges = { addIds, removeIds ->
+                    val targetIds = selectedLibraryIds
+                    coroutineScope.launch {
+                        prefManager.assignCategoriesToMediaBatch(targetIds, addIds, removeIds)
+                    }
+                    Toast.makeText(context, "Updated categories for ${targetIds.size} items", Toast.LENGTH_SHORT).show()
+                },
+                onOpenManageCategories = {
+                    showMultiSelectCategoriesSheet = false
+                    onNavigateToManageCategories()
+                },
+                onDismiss = { showMultiSelectCategoriesSheet = false }
             )
         }
 
@@ -1335,9 +1591,24 @@ fun HomeScreen(
                 existingItem = null,
                 initialTitle = customEntryInitTitle,
                 initialMediaType = customEntryInitType,
+                availableCategories = allCategories,
+                initialCategoryIds = libSettings.defaultCategoryId?.let { setOf(it) } ?: emptySet(),
+                onCreateCategory = { name, onCreated ->
+                    viewModel.createCategory(name, onCreated)
+                },
+                onSaveWithCategories = { entity, catIds ->
+                    showCustomEntrySheet = false
+                    viewModel.createCustomMediaEntry(
+                        entity = entity,
+                        categoryIds = catIds,
+                        prefManager = prefManager
+                    ) { newId ->
+                        if (newId > 0L) onItemClick(newId)
+                    }
+                },
                 onSave = { entity ->
                     showCustomEntrySheet = false
-                    viewModel.createCustomMediaEntry(entity) { newId ->
+                    viewModel.createCustomMediaEntry(entity, prefManager = prefManager) { newId ->
                         if (newId > 0L) onItemClick(newId)
                     }
                 },
@@ -1345,18 +1616,26 @@ fun HomeScreen(
             )
         }
 
-        // Floating Multi-Select Batch Action Dock for Library
+        // Flush #000000 Option A Hairline Multi-Select Bottom Bar for Library
         AnimatedVisibility(
             visible = isLibraryMultiSelect && currentNavDestination == NavDestination.LIBRARY,
             enter = fadeIn(animationSpec = tween(160)) + slideInVertically(initialOffsetY = { it / 2 }),
             exit = fadeOut(animationSpec = tween(160)),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 14.dp)
-                .padding(bottom = 96.dp)
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             MultiSelectBottomActionDock(
                 selectedCount = selectedLibraryIds.size,
+                onOpenCategories = {
+                    showMultiSelectCategoriesSheet = true
+                },
+                onOpenDetails = {
+                    val singleId = selectedLibraryIds.firstOrNull()
+                    if (singleId != null && selectedLibraryIds.size == 1) {
+                        isLibraryMultiSelect = false
+                        selectedLibraryIds = emptySet()
+                        onItemClick(singleId)
+                    }
+                },
                 onMarkCompleted = {
                     val ids = selectedLibraryIds
                     viewModel.batchMarkCompleted(ids)
@@ -1437,162 +1716,6 @@ fun HomeScreen(
             )
         }
 
-        // Long-Press Quick Action Sheet for Library items (with "Select Multiple..." at the top)
-        val libSheetTarget = libraryActionTarget
-        if (libSheetTarget != null) {
-            @OptIn(ExperimentalMaterial3Api::class)
-            ModalBottomSheet(
-                onDismissRequest = { libraryActionTarget = null },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = AmoledBlack,
-                dragHandle = null
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(AmoledBlack)
-                        .padding(horizontal = 20.dp, vertical = 16.dp)
-                        .padding(bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Box(
-                            modifier = Modifier
-                                .size(width = 38.dp, height = 4.dp)
-                                .clip(CircleShape)
-                                .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.24f))
-                        )
-                    }
-                    Text(
-                        text = libSheetTarget.title,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "${libSheetTarget.mediaType.displayName} \u00B7 ${libSheetTarget.status.displayName} \u00B7 ${formatConciseProgress(libSheetTarget)}",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                    HorizontalDivider(color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
-
-                    // 1. Select Multiple...
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(AccentGold.copy(alpha = 0.14f))
-                            .border(0.8.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                            .clickable {
-                                val startId = libSheetTarget.id
-                                libraryActionTarget = null
-                                isLibraryMultiSelect = true
-                                selectedLibraryIds = selectedLibraryIds + startId
-                            }
-                            .padding(horizontal = 12.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Checklist, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
-                        Text("Select Multiple...", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    // 2. Open Details
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val id = libSheetTarget.id
-                                libraryActionTarget = null
-                                onItemClick(id)
-                            }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(19.dp))
-                        Text("Open Details Page", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // 3. Log +1 Progress
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val target = libSheetTarget
-                                libraryActionTarget = null
-                                viewModel.incrementProgress(target)
-                            }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
-                        Text("Log +1 Progress", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // 4. Mark Completed / Read
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val target = libSheetTarget
-                                libraryActionTarget = null
-                                viewModel.batchMarkCompleted(listOf(target.id))
-                            }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.DoneAll, contentDescription = null, tint = AccentGold, modifier = Modifier.size(19.dp))
-                        Text("Mark Read / Completed", color = AccentGold, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // 5. Mark Unread (Reset to 0)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val target = libSheetTarget
-                                libraryActionTarget = null
-                                viewModel.batchMarkUnread(listOf(target.id))
-                            }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.RemoveDone, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(19.dp))
-                        Text("Mark Unread (Reset to 0)", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-
-                    // 6. Delete from Library
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable {
-                                val targetId = libSheetTarget.id
-                                libraryActionTarget = null
-                                selectedLibraryIds = setOf(targetId)
-                                showBatchDeleteConfirm = true
-                            }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = androidx.compose.ui.graphics.Color(0xFFF87171), modifier = Modifier.size(19.dp))
-                        Text("Delete from Library", color = androidx.compose.ui.graphics.Color(0xFFF87171), fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        }
-
         if (showFanficImportSheet) {
             com.omnitrack.app.ui.components.FanficImportSheet(
                 initialTab = fanficImportInitialTab,
@@ -1609,6 +1732,281 @@ fun HomeScreen(
             )
         }
     }
+    }
+}
+
+@Composable
+private fun ChimanewLibraryGroupTabRow(
+    tabs: List<LibraryGroupTab>,
+    selectedPage: Int,
+    showCounts: Boolean,
+    countsByKey: Map<String, Int>,
+    onTabSelected: (Int) -> Unit
+) {
+    val tabListState = rememberLazyListState()
+    LaunchedEffect(selectedPage) {
+        tabListState.animateScrollToItem(selectedPage.coerceAtLeast(0))
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        androidx.compose.foundation.lazy.LazyRow(
+            state = tabListState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            items(tabs.size, key = { idx -> tabs[idx].key }) { idx ->
+                val tab = tabs[idx]
+                val isSelected = selectedPage == idx
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) TextPrimary else TextMuted,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "libTabText"
+                )
+                val barColor by animateColorAsState(
+                    targetValue = if (isSelected) AccentGold else Color.Transparent,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "libTabBar"
+                )
+                val countSuffix = if (showCounts) {
+                    countsByKey[tab.key]?.let { " $it" }.orEmpty()
+                } else ""
+
+                Column(
+                    modifier = Modifier
+                        .width(IntrinsicSize.Max)
+                        .clickable { onTabSelected(idx) }
+                        .padding(top = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = tab.label,
+                            color = textColor,
+                            fontSize = 13.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                        if (countSuffix.isNotEmpty()) {
+                            Text(
+                                text = countSuffix,
+                                color = if (isSelected) AccentGold else TextMuted.copy(alpha = 0.7f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(barColor)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.08f),
+            thickness = 0.6.dp
+        )
+    }
+}
+
+private fun itemMatchesTrackerKey(
+    item: com.omnitrack.app.data.db.dto.MediaCardSummary,
+    trackerKey: String
+): Boolean = when (trackerKey.uppercase()) {
+    "ANILIST" -> item.anilistId != null && item.anilistId > 0L
+    "MAL" -> item.malId != null && item.malId > 0L
+    "TMDB" -> item.tmdbId != null && item.tmdbId > 0L
+    "TRAKT" -> item.traktId != null && item.traktId > 0L
+    "SIMKL" -> item.simklId != null && item.simklId > 0L
+    "STEAM" -> item.steamAppId != null && item.steamAppId > 0L
+    "VNDB" -> !item.vndbId.isNullOrBlank()
+    "HARDCOVER" -> !item.hardcoverId.isNullOrBlank()
+    "LOCAL" -> item.anilistId == null && item.malId == null && item.tmdbId == null &&
+        item.traktId == null && item.simklId == null && item.steamAppId == null &&
+        item.vndbId.isNullOrBlank() && item.hardcoverId.isNullOrBlank() &&
+        item.comicVineId == null && item.metronId == null
+    else -> true
+}
+
+private fun computeLibraryTabItems(
+    allSummaries: List<com.omnitrack.app.data.db.dto.MediaCardSummary>,
+    tab: LibraryGroupTab,
+    selectedStatus: TrackingStatus,
+    searchQuery: String,
+    libSettings: ChimanewLibrarySettings,
+    categoryAssignments: Map<Long, Set<Long>>,
+    fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode,
+    selectedMangaSubtype: String = "ALL",
+    selectedNovelSubtype: String = "ALL",
+    selectedVnOriginSubtype: String = "ALL",
+    selectedVnLengthSubtype: String = "ALL",
+    selectedGamePlatform: String = "ALL",
+    selectedGameCompletion: String = "ALL",
+    selectedBookFormat: String = "ALL",
+    selectedBookCategory: String = "ALL",
+    selectedComicPublisher: String = "ALL",
+    selectedComicFormat: String = "ALL",
+    selectedFanficSite: String = "ALL",
+    selectedFanficRating: String = "ALL",
+    selectedFanficStatus: String = "ALL",
+    selectedFanficMinWords: Int = 0,
+    fanficCrossoverOnly: Boolean = false,
+    fanficTagFilter: String = ""
+): List<com.omnitrack.app.data.db.dto.MediaCardSummary> {
+    val pageMediaType = tab.mediaTypeFilter
+    val filtered = allSummaries.filter { item ->
+        if (item.mediaType == MediaType.FANFICTION && com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode)) {
+            return@filter false
+        }
+        // Group tab predicate
+        val tabMatches = when {
+            tab.mediaTypeFilter != null -> tab.mediaTypeFilter == MediaType.ALL || item.mediaType == tab.mediaTypeFilter
+            tab.categoryId != null -> tab.categoryId in categoryAssignments[item.id].orEmpty()
+            tab.isUncategorized -> categoryAssignments[item.id].isNullOrEmpty()
+            tab.statusFilter != null -> tab.statusFilter == TrackingStatus.ALL || item.status == tab.statusFilter
+            tab.trackerKey != null -> itemMatchesTrackerKey(item, tab.trackerKey)
+            else -> true
+        }
+        if (!tabMatches) return@filter false
+
+        // Media-specific subtype bars (when viewing a MediaType tab)
+        if (pageMediaType != null) {
+            val subtypeOk = (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
+                (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
+                (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnOriginSubtype == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(item.originCountry, item.nativeTitle) == selectedVnOriginSubtype) &&
+                (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnLengthSubtype == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(item.runtimeMinutes) == selectedVnLengthSubtype) &&
+                (pageMediaType != MediaType.GAME || selectedGamePlatform == "ALL" || selectedGamePlatform in com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platforms, item.platform)) &&
+                (pageMediaType != MediaType.GAME || selectedGameCompletion == "ALL" || when (selectedGameCompletion) {
+                    "MAIN" -> item.gameCompletionTier.equals("MAIN", true) || item.gameCompletionTier.equals("MAIN_PLUS", true)
+                    "COMP" -> item.gameCompletionTier.equals("COMPLETIONIST", true) || item.gameCompletionTier.equals("PLATINUM", true)
+                    "BEATEN" -> item.status == TrackingStatus.COMPLETED
+                    "BACKLOG" -> item.status == TrackingStatus.PLAN_TO_TRACK
+                    else -> true
+                }) &&
+                (pageMediaType != MediaType.BOOK || selectedBookFormat == "ALL" || com.omnitrack.app.data.model.normalizeBookFormatGroup(item.bookFormat) == selectedBookFormat) &&
+                (pageMediaType != MediaType.BOOK || selectedBookCategory == "ALL" || com.omnitrack.app.data.model.inferBookCategoryGroup(item.title, item.platform, null) == selectedBookCategory) &&
+                (pageMediaType != MediaType.COMIC || selectedComicPublisher == "ALL" || com.omnitrack.app.data.model.normalizeComicPublisherGroup(item.comicPublisher, item.platform) == selectedComicPublisher) &&
+                (pageMediaType != MediaType.COMIC || selectedComicFormat == "ALL" || com.omnitrack.app.data.model.normalizeComicFormatGroup(item.comicFormat) == selectedComicFormat) &&
+                (pageMediaType != MediaType.FANFICTION || selectedFanficSite == "ALL" || item.fanficSourceSite.equals(selectedFanficSite, ignoreCase = true)) &&
+                (pageMediaType != MediaType.FANFICTION || selectedFanficRating == "ALL" || com.omnitrack.app.data.model.FanficRating.fromRaw(item.fanficRating).code == selectedFanficRating) &&
+                (pageMediaType != MediaType.FANFICTION || selectedFanficStatus == "ALL" || com.omnitrack.app.data.model.FanficWorkStatus.fromRaw(item.fanficWorkStatus).name == selectedFanficStatus) &&
+                (pageMediaType != MediaType.FANFICTION || selectedFanficMinWords <= 0 || (item.fanficWordCount ?: 0) >= selectedFanficMinWords) &&
+                (pageMediaType != MediaType.FANFICTION || !fanficCrossoverOnly || item.fanficIsCrossover) &&
+                (pageMediaType != MediaType.FANFICTION || fanficTagFilter.isBlank() ||
+                    item.fanficPrimaryFandom?.contains(fanficTagFilter, ignoreCase = true) == true ||
+                    item.fanficTagsSearch?.contains(fanficTagFilter, ignoreCase = true) == true)
+            if (!subtypeOk) return@filter false
+        }
+
+        // Top quick status strip
+        if (selectedStatus != TrackingStatus.ALL && item.status != selectedStatus) return@filter false
+
+        // Chimanew Tri-State filters
+        val isStarted = item.currentProgress > 0.0 || item.playtimeHours > 0.0 || item.status == TrackingStatus.IN_PROGRESS
+        when (libSettings.filterStarted) {
+            TriStateFilter.INCLUDE -> if (!isStarted) return@filter false
+            TriStateFilter.EXCLUDE -> if (isStarted) return@filter false
+            TriStateFilter.OFF -> Unit
+        }
+        val isCompleted = item.status == TrackingStatus.COMPLETED
+        when (libSettings.filterCompleted) {
+            TriStateFilter.INCLUDE -> if (!isCompleted) return@filter false
+            TriStateFilter.EXCLUDE -> if (isCompleted) return@filter false
+            TriStateFilter.OFF -> Unit
+        }
+        val hasUnreadLeft = (item.totalProgress != null && item.totalProgress > item.currentProgress) ||
+            (item.status != TrackingStatus.COMPLETED && item.currentProgress == 0.0)
+        when (libSettings.filterUnread) {
+            TriStateFilter.INCLUDE -> if (!hasUnreadLeft) return@filter false
+            TriStateFilter.EXCLUDE -> if (hasUnreadLeft) return@filter false
+            TriStateFilter.OFF -> Unit
+        }
+        val isRated = (item.userRating ?: 0f) > 0f
+        when (libSettings.filterRated) {
+            TriStateFilter.INCLUDE -> if (!isRated) return@filter false
+            TriStateFilter.EXCLUDE -> if (isRated) return@filter false
+            TriStateFilter.OFF -> Unit
+        }
+        when (libSettings.filterFavorite) {
+            TriStateFilter.INCLUDE -> if (!item.isFavorite) return@filter false
+            TriStateFilter.EXCLUDE -> if (item.isFavorite) return@filter false
+            TriStateFilter.OFF -> Unit
+        }
+
+        // Chimanew Multi-Vertical & Multi-Tracker & Custom Category filters
+        if (libSettings.filterMediaTypes.isNotEmpty() && item.mediaType.name !in libSettings.filterMediaTypes) {
+            return@filter false
+        }
+        if (libSettings.filterTrackers.isNotEmpty() && libSettings.filterTrackers.none { itemMatchesTrackerKey(item, it) }) {
+            return@filter false
+        }
+        val itemCats = categoryAssignments[item.id].orEmpty()
+        if (libSettings.filterIncludeCategoryIds.isNotEmpty() && itemCats.none { it in libSettings.filterIncludeCategoryIds }) {
+            return@filter false
+        }
+        if (libSettings.filterExcludeCategoryIds.isNotEmpty() && itemCats.any { it in libSettings.filterExcludeCategoryIds }) {
+            return@filter false
+        }
+
+        // Search bar predicate
+        if (searchQuery.isNotBlank()) {
+            val matched = item.title.contains(searchQuery, ignoreCase = true) ||
+                item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
+                item.bookAuthor?.contains(searchQuery, ignoreCase = true) == true ||
+                item.studioOrNetwork?.contains(searchQuery, ignoreCase = true) == true ||
+                item.comicPublisher?.contains(searchQuery, ignoreCase = true) == true ||
+                item.fanficPrimaryFandom?.contains(searchQuery, ignoreCase = true) == true ||
+                item.fanficTagsSearch?.contains(searchQuery, ignoreCase = true) == true ||
+                item.fanficSourceSite?.contains(searchQuery, ignoreCase = true) == true
+            if (!matched) return@filter false
+        }
+        true
+    }
+
+    val asc = libSettings.sortAscending
+    return when (libSettings.sortOption) {
+        LibrarySortOption.ALPHA -> {
+            val base = filtered.sortedBy { it.title.lowercase() }
+            if (asc) base else base.reversed()
+        }
+        LibrarySortOption.RATING -> {
+            if (asc) {
+                filtered.sortedWith(compareBy<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
+            } else {
+                filtered.sortedWith(compareByDescending<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
+            }
+        }
+        LibrarySortOption.TOTAL -> {
+            if (asc) filtered.sortedBy { it.totalProgress ?: 0.0 }
+            else filtered.sortedByDescending { it.totalProgress ?: 0.0 }
+        }
+        LibrarySortOption.REMAINING -> {
+            val rem: (com.omnitrack.app.data.db.dto.MediaCardSummary) -> Double = {
+                val tot = it.totalProgress ?: 0.0
+                if (tot > it.currentProgress) tot - it.currentProgress else 0.0
+            }
+            if (asc) filtered.sortedBy(rem) else filtered.sortedByDescending(rem)
+        }
+        LibrarySortOption.PROGRESS -> {
+            val frac: (com.omnitrack.app.data.db.dto.MediaCardSummary) -> Double = {
+                val tot = it.totalProgress ?: 0.0
+                if (tot > 0.0) (it.currentProgress / tot).coerceIn(0.0, 1.0) else 0.0
+            }
+            if (asc) filtered.sortedBy(frac) else filtered.sortedByDescending(frac)
+        }
+        LibrarySortOption.RANDOM -> filtered.shuffled(java.util.Random(filtered.size.toLong() * 1337L + if (asc) 1L else 2L))
+        LibrarySortOption.RECENT -> {
+            if (asc) filtered.sortedBy { it.lastUpdated } else filtered.sortedByDescending { it.lastUpdated }
+        }
     }
 }
 
@@ -1642,15 +2040,17 @@ private fun LibraryListRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) AccentGold.copy(alpha = 0.10f) else DarkSurface)
-            .border(
-                width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) AccentGold else GlassBorder,
-                shape = RoundedCornerShape(12.dp)
-            )
+            .background(if (isSelected) AccentGold.copy(alpha = 0.08f) else Color.Transparent)
+            .drawBehind {
+                drawLine(
+                    color = Color.White.copy(alpha = 0.08f),
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, size.height),
+                    strokeWidth = 0.6.dp.toPx()
+                )
+            }
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(10.dp),
+            .padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {

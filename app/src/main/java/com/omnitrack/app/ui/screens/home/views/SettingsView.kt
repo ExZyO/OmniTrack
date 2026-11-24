@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
@@ -86,6 +87,7 @@ fun SettingsView(
     onNavigateToArtworkPriority: () -> Unit = {},
     onNavigateToVisualPresentation: () -> Unit = {},
     onNavigateToDetailsPageLayout: () -> Unit = {},
+    onNavigateToManageCategories: () -> Unit = {},
     onOpenHomeCustomizer: () -> Unit = {},
     onOpenDiscoverCustomizer: () -> Unit = {},
     onOpenFanficSites: () -> Unit = {},
@@ -193,6 +195,12 @@ fun SettingsView(
             title = "Artwork Priority",
             keywords = "artwork priority cover banner provider anilist tmdb openlibrary",
             onClick = onNavigateToArtworkPriority
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.Folder,
+            title = "Library Categories",
+            keywords = "categories folders tabs library chimanew group order visibility",
+            onClick = onNavigateToManageCategories
         ),
         SettingRowEntry(
             icon = Icons.Default.ViewCarousel,

@@ -3163,7 +3163,16 @@ class DetailViewModel(
                         _popularity.value = animeDetails.popularity
                         _favourites.value = animeDetails.favourites
                         _durationMinutes.value = animeDetails.durationMinutes
-                        if (!animeDetails.format.isNullOrBlank()) _format.value = animeDetails.format
+                        if (!animeDetails.format.isNullOrBlank()) {
+                            _format.value = animeDetails.format
+                            if (animeDetails.format.equals("MOVIE", ignoreCase = true) && isStillCurrentItem()) {
+                                seriesFetchJob?.cancel()
+                                _realSeasons.value = emptyList()
+                                _realEpisodes.value = emptyList()
+                                _episodesBySeason.value = emptyMap()
+                                markTransitionSeriesReady(activeTransitionGen)
+                            }
+                        }
                         if (!animeDetails.season.isNullOrBlank()) _season.value = animeDetails.season
                         if (animeDetails.seasonYear != null) _seasonYear.value = animeDetails.seasonYear
                         if (!animeDetails.source.isNullOrBlank()) _source.value = animeDetails.source
@@ -3797,19 +3806,37 @@ class DetailViewModel(
                 effectiveAnilistId = enrichmentRepository.searchAniListForAnime(item.title, item.nativeTitle)
             }
 
+            val aniZipMapping = if (item.mediaType == MediaType.ANIME && effectiveAnilistId != null && effectiveAnilistId > 0) {
+                enrichmentRepository.fetchAniZipMapping(effectiveAnilistId)
+            } else null
+
+            val isAnimeMovie = item.mediaType == MediaType.ANIME && (
+                aniZipMapping?.isMovie == true ||
+                    item.platform.equals("MOVIE", ignoreCase = true) ||
+                    _format.value.equals("MOVIE", ignoreCase = true) ||
+                    (item.totalProgress == 1.0 && aniZipMapping != null && aniZipMapping.episodeCount <= 1 && !aniZipMapping.type.equals("TV", ignoreCase = true))
+                )
+            if (isAnimeMovie) {
+                _realSeasons.value = emptyList()
+                _realEpisodes.value = emptyList()
+                _episodesBySeason.value = emptyMap()
+                markTransitionSeriesReady(seriesGen)
+                return@launch
+            }
+
             if (resolvedTmdbId == null && isShowOrAnime) {
                 if (item.id > 0L) {
                     resolvedTmdbId = SeriesContentMemoryCache.resolvedTmdbIdCache[item.id]
                 }
-                if (resolvedTmdbId == null && effectiveAnilistId != null && effectiveAnilistId > 0) {
-                    resolvedTmdbId = enrichmentRepository.fetchAniZipTmdbId(effectiveAnilistId)
-                    if (resolvedTmdbId != null && item.id > 0L) {
+                if (resolvedTmdbId == null && aniZipMapping != null && !aniZipMapping.isMovie && aniZipMapping.tmdbId != null) {
+                    resolvedTmdbId = aniZipMapping.tmdbId
+                    if (item.id > 0L) {
                         SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId
                     }
                 }
                 if (resolvedTmdbId == null && item.title.isNotBlank()) {
                     val found = enrichmentRepository.searchTmdbForAnime(item.title, tmdbKey, item.nativeTitle)
-                    if (found != null) {
+                    if (found != null && !found.second) {
                         resolvedTmdbId = found.first
                         if (item.id > 0L) {
                             SeriesContentMemoryCache.resolvedTmdbIdCache[item.id] = resolvedTmdbId

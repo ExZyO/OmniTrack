@@ -65,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
@@ -95,7 +96,9 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 @Composable
 fun HomeCustomizerSheet(
     preferenceManager: PreferenceManager,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    customCategories: List<CategoryEntity> = emptyList(),
+    onOpenManageCategories: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
@@ -599,7 +602,8 @@ fun HomeCustomizerSheet(
                         listOf(
                             "ALL" to "All Verticals",
                             "FOLLOW_HOME" to "Follow Home Filter",
-                            "CUSTOM" to "Pick Categories"
+                            "CUSTOM" to "Pick Verticals",
+                            "CUSTOM_CATEGORIES" to "Custom Categories"
                         ).forEach { (mode, label) ->
                             CustomizerChoiceChip(
                                 label = label,
@@ -628,6 +632,64 @@ fun HomeCustomizerSheet(
                                         coroutineScope.launch { preferenceManager.setHomeHeroCategories(next) }
                                     }
                                 )
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = heroSettings.heroCategoryMode.equals("CUSTOM_CATEGORIES", ignoreCase = true)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (customCategories.isEmpty()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "No custom categories created yet",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary
+                                    )
+                                    Text(
+                                        text = "Manage Categories \u2192",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGold,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable {
+                                                onDismiss()
+                                                onOpenManageCategories()
+                                            }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                    )
+                                }
+                            } else {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    customCategories.forEach { cat ->
+                                        val active = cat.id in heroSettings.heroCustomCategoryIds
+                                        CustomizerChoiceChip(
+                                            label = if (cat.isVisible) cat.name else "${cat.name} (Hidden)",
+                                            selected = active,
+                                            onClick = {
+                                                val next = heroSettings.heroCustomCategoryIds.toMutableSet()
+                                                if (active) next.remove(cat.id) else next.add(cat.id)
+                                                coroutineScope.launch { preferenceManager.setHomeHeroCustomCategoryIds(next) }
+                                            }
+                                        )
+                                    }
+                                    CustomizerChoiceChip(
+                                        label = "Manage \u2192",
+                                        selected = false,
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenManageCategories()
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -827,7 +889,7 @@ fun HomeCustomizerSheet(
                             Triple(0, "Clean Separation", "Spacious title & tags"),
                             Triple(1, "Stacked Rows", "Eyebrow, title & progress"),
                             Triple(2, "Compact Line", "Inline single-band specs"),
-                            Triple(3, "Minimal Inline", "Title & clean bottom action")
+                            Triple(3, "Minimal Inline", "Title & inline bottom strip")
                         ).chunked(2).forEach { pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

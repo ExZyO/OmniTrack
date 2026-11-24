@@ -1468,15 +1468,32 @@ private fun EpisodeHorizontalCard(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-            if (!formattedDate.isNullOrBlank()) {
-                Text(
-                    text = formattedDate,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.70f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            val epBadge = remember(episode.seasonNumber, episode.episodeNumber) {
+                formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+            }
+            if ((!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) || !formattedDate.isNullOrBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) {
+                        EpisodeCodeBadge(
+                            text = epBadge,
+                            textSize = 10.sp,
+                            backgroundAlpha = 0.58f
+                        )
+                    }
+                    if (!formattedDate.isNullOrBlank()) {
+                        Text(
+                            text = formattedDate,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.70f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
 
             val titleText = meta?.customLabel?.takeIf { it.isNotBlank() }
@@ -1607,12 +1624,27 @@ private fun EpisodeListCardItem(
                         .padding(top = 8.dp, end = 8.dp)
                 )
 
-                // Solid White FILLER / RECAP Badge at Top Start
-                if (episode.isFiller || episode.isRecap) {
-                    Box(
+                // 1:1 Nuvio Episode Code Badge ("S1 E1") pinned at Top Start
+                val epBadge = remember(episode.seasonNumber, episode.episodeNumber) {
+                    formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+                }
+                if (!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) {
+                    EpisodeCodeBadge(
+                        text = epBadge,
+                        textSize = 9.5.sp,
+                        backgroundAlpha = 0.82f,
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(top = 8.dp, start = 8.dp)
+                    )
+                }
+
+                // Solid White FILLER / RECAP Badge (below TopStart if epBadge present)
+                if (episode.isFiller || episode.isRecap) {
+                    Box(
+                        modifier = Modifier
+                            .align(if (!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) Alignment.BottomStart else Alignment.TopStart)
+                            .padding(8.dp)
                             .clip(RoundedCornerShape(4.dp))
                             .background(Color.White)
                             .padding(horizontal = 5.dp, vertical = 2.dp)
@@ -1631,8 +1663,8 @@ private fun EpisodeListCardItem(
                 EpisodeAvailabilityBadge(
                     episode = episode,
                     modifier = Modifier
-                        .align(if (isWatched || episode.isFiller || episode.isRecap) Alignment.BottomStart else Alignment.TopEnd)
-                        .padding(top = 8.dp, end = 8.dp, start = 8.dp, bottom = 8.dp)
+                        .align(Alignment.BottomEnd)
+                        .padding(8.dp)
                 )
             }
 
@@ -1858,15 +1890,32 @@ private fun EpisodeVerticalCardItem(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
-            if (!formattedDate.isNullOrBlank()) {
-                Text(
-                    text = formattedDate,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.70f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            val epBadge = remember(episode.seasonNumber, episode.episodeNumber) {
+                formatEpisodeBadge(episode.seasonNumber, episode.episodeNumber)
+            }
+            if ((!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) || !formattedDate.isNullOrBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (!isMangaMode && !isLightNovelVolumeMode && epBadge.isNotBlank()) {
+                        EpisodeCodeBadge(
+                            text = epBadge,
+                            textSize = 10.sp,
+                            backgroundAlpha = 0.58f
+                        )
+                    }
+                    if (!formattedDate.isNullOrBlank()) {
+                        Text(
+                            text = formattedDate,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.70f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
 
             val titleText = meta?.customLabel?.takeIf { it.isNotBlank() }

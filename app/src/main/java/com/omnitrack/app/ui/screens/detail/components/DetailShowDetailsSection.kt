@@ -385,12 +385,26 @@ fun DetailGeneralInfoSection(
         if (!item.platforms.isNullOrBlank() && (item.mediaType != MediaType.GAME || gameDetailMeta?.supportedPlatforms.isNullOrEmpty())) {
             add("Platform" to item.platforms)
         }
+        // Primary Creator / Author / Mangaka / Director (for non-Book entries where bookAuthor is set)
+        if (item.mediaType != MediaType.BOOK && !item.bookAuthor.isNullOrBlank()) {
+            val creatorLabel = when (item.mediaType) {
+                MediaType.MANGA -> "Mangaka / Author"
+                MediaType.ANIME -> "Original Author / Mangaka"
+                MediaType.SHOW -> "Creator / Showrunner"
+                MediaType.MOVIE -> "Director / Writer"
+                MediaType.COMIC -> "Writer / Artist"
+                MediaType.GAME -> "Developer / Director"
+                MediaType.VISUAL_NOVEL -> "Scenario Writer"
+                else -> "Author"
+            }
+            add(creatorLabel to item.bookAuthor)
+        }
         if (!item.studioOrNetwork.isNullOrBlank() && !isSeries && item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC) {
             val companyLabel = when (item.mediaType) {
                 MediaType.VISUAL_NOVEL, MediaType.GAME -> "Developer"
-                MediaType.MANGA, MediaType.NOVEL -> "Serialization"
+                MediaType.MANGA, MediaType.NOVEL -> "Serialization / Publisher"
                 MediaType.FANFICTION -> "Site / Forum"
-                else -> "Production"
+                else -> "Production / Studio"
             }
             add(companyLabel to item.studioOrNetwork)
         }

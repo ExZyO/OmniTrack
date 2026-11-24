@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
@@ -131,6 +132,8 @@ fun DiscoverView(
     onOpenFanficImport: (initialUrl: String, initialTab: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     homeViewModel: HomeViewModel? = null,
+    initialSearchQuery: String = "",
+    onBack: (() -> Unit)? = null,
     searchRepository: OmniSearchRepository = remember { OmniSearchRepository() },
     aiEngine: AiQueryEngine = remember { AiQueryEngine() }
 ) {
@@ -158,7 +161,9 @@ fun DiscoverView(
         initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP
     )
 
-    val queryFlow = remember(homeViewModel) { homeViewModel?.discoverSearchQuery ?: MutableStateFlow("") }
+    val queryFlow = remember(homeViewModel, initialSearchQuery) {
+        homeViewModel?.discoverSearchQuery ?: MutableStateFlow(initialSearchQuery)
+    }
     val filterFlow = remember(homeViewModel) { homeViewModel?.discoverSelectedFilter ?: MutableStateFlow(MediaType.ALL) }
     val isSearchingFlow = remember(homeViewModel) { homeViewModel?.discoverIsSearching ?: MutableStateFlow(false) }
     val resultsFlow = remember(homeViewModel) { homeViewModel?.discoverSearchResults ?: MutableStateFlow<List<SearchResultItem>>(emptyList()) }
@@ -454,24 +459,37 @@ fun DiscoverView(
             .fillMaxSize()
             .background(AmoledBlack)
     ) {
-        // Editorial Header + Customize button
+        // Editorial Header + Back button (when pushed from Details title tap) + Customize button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 10.dp, top = 12.dp, bottom = 8.dp),
+                .padding(start = if (onBack != null) 6.dp else 16.dp, end = 10.dp, top = 12.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (onBack != null) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Discover",
+                    text = if (onBack != null) "Search Discover" else "Discover",
                     fontWeight = FontWeight.Bold,
                     fontSize = 24.sp,
                     color = TextPrimary,
                     letterSpacing = (-0.5).sp
                 )
                 Text(
-                    text = "Live search & curated rails across all verticals",
+                    text = if (onBack != null) "Cross-source lookup \u00B7 tap Back to return to Details" else "Live search & curated rails across all verticals",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
@@ -1619,8 +1637,7 @@ private fun DiscoverSpotlightBanner(
                     .graphicsLayer {
                         val fx = focalX.coerceIn(-1f, 1f)
                         val fy = focalY.coerceIn(-1f, 1f)
-                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
-                        val effZoom = if (zoom <= 1.01f && hasPan) 1.24f else zoom.coerceIn(1f, 2.5f)
+                        val effZoom = zoom.coerceIn(1f, 2.5f)
                         scaleX = effZoom
                         scaleY = effZoom
                         translationX = -fx * size.width * (effZoom - 1f) * 0.5f

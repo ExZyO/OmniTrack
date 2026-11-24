@@ -2,6 +2,7 @@ package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,6 +10,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -79,6 +82,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -87,9 +91,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.R
 import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
+import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.enrichment.CalendarReleaseItem
 import com.omnitrack.app.data.model.BookTrackingMode
 import com.omnitrack.app.data.model.MediaType
@@ -167,7 +173,10 @@ fun HomeDashboardView(
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     fanfictionEnabled: Boolean = true,
-    fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP
+    fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP,
+    customCategories: List<CategoryEntity> = emptyList(),
+    categoryAssignments: Map<Long, Set<Long>> = emptyMap(),
+    onNavigateToCustomCategory: (Long) -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -238,6 +247,21 @@ fun HomeDashboardView(
     val favoriteItems = remember(allFavoriteItems, shelfLimit) {
         if (shelfLimit == Int.MAX_VALUE) allFavoriteItems else allFavoriteItems.take(shelfLimit)
     }
+    val inProgressItems = remember(allContinueItems, shelfLimit) {
+        if (shelfLimit == Int.MAX_VALUE) allContinueItems else allContinueItems.take(shelfLimit)
+    }
+    val completedItems = remember(categoryMedia, shelfLimit) {
+        val list = categoryMedia.filter { it.status == TrackingStatus.COMPLETED }.sortedByDescending { it.lastUpdated }
+        if (shelfLimit == Int.MAX_VALUE) list else list.take(shelfLimit)
+    }
+    val onHoldItems = remember(categoryMedia, shelfLimit) {
+        val list = categoryMedia.filter { it.status == TrackingStatus.ON_HOLD }.sortedByDescending { it.lastUpdated }
+        if (shelfLimit == Int.MAX_VALUE) list else list.take(shelfLimit)
+    }
+    val droppedItems = remember(categoryMedia, shelfLimit) {
+        val list = categoryMedia.filter { it.status == TrackingStatus.DROPPED }.sortedByDescending { it.lastUpdated }
+        if (shelfLimit == Int.MAX_VALUE) list else list.take(shelfLimit)
+    }
 
     val upNextReleases = remember(calendarReleases, shelfLimit) {
         val nowSec = System.currentTimeMillis() / 1000L
@@ -253,6 +277,7 @@ fun HomeDashboardView(
         heroSettings.heroSources,
         heroSettings.heroCategoryMode,
         heroSettings.heroCategories,
+        heroSettings.heroCustomCategoryIds,
         heroSettings.slideCount,
         heroSettings.slideOrder,
         heroSettings.strictMode,
@@ -261,23 +286,27 @@ fun HomeDashboardView(
         selectedCategory,
         visibleTrending,
         visibleAllMedia,
+        customCategories,
+        categoryAssignments,
         heroRefreshNonce
     ) {
-        fun matchesHeroCategory(type: MediaType): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
+        fun matchesHeroCategory(type: MediaType, mediaId: Long? = null): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
             "FOLLOW_HOME" -> selectedCategory == MediaType.ALL || type == selectedCategory
             "CUSTOM" -> heroSettings.heroCategories.isEmpty() || type.name in heroSettings.heroCategories
+            "CUSTOM_CATEGORIES" -> {
+                if (mediaId == null) false
+                else {
+                    val assigned = categoryAssignments[mediaId].orEmpty()
+                    if (heroSettings.heroCustomCategoryIds.isNotEmpty()) {
+                        assigned.any { it in heroSettings.heroCustomCategoryIds }
+                    } else {
+                        val visibleCatIds = customCategories.filter { it.isVisible }.map { it.id }.toSet()
+                        assigned.any { it in visibleCatIds }
+                    }
+                }
+            }
             else -> true // "ALL"
         }
-
-        val scopedMedia = visibleAllMedia.filter { matchesHeroCategory(it.mediaType) }
-        val scopedTrending = visibleTrending.filter { matchesHeroCategory(it.mediaType) }
-
-        val scopedContinue = scopedMedia.filter { it.status == TrackingStatus.IN_PROGRESS }.sortedByDescending { it.lastUpdated }
-        val scopedRecent = scopedMedia.sortedByDescending { it.lastUpdated }
-        val scopedPlan = scopedMedia.filter { it.status == TrackingStatus.PLAN_TO_TRACK }.sortedByDescending { it.lastUpdated }
-        val scopedFavorites = scopedMedia
-            .filter { (it.userRating ?: it.communityScore ?: 0f) > 0f }
-            .sortedWith(compareByDescending<MediaCardSummary> { it.userRating ?: 0f }.thenByDescending { it.communityScore ?: 0f })
 
         fun findLocalMatch(s: SearchResultItem): MediaCardSummary? = ArtworkModelResolver.findLibraryMatch(
             library = allMedia,
@@ -295,6 +324,23 @@ fun HomeDashboardView(
             title = s.title,
             nativeTitle = s.nativeTitle
         )
+
+        val scopedMedia = visibleAllMedia.filter { matchesHeroCategory(it.mediaType, it.id) }
+        val scopedTrending = visibleTrending.filter { t ->
+            if (heroSettings.heroCategoryMode.equals("CUSTOM_CATEGORIES", ignoreCase = true)) {
+                val m = findLocalMatch(t)
+                m != null && matchesHeroCategory(m.mediaType, m.id)
+            } else {
+                matchesHeroCategory(t.mediaType, null)
+            }
+        }
+
+        val scopedContinue = scopedMedia.filter { it.status == TrackingStatus.IN_PROGRESS }.sortedByDescending { it.lastUpdated }
+        val scopedRecent = scopedMedia.sortedByDescending { it.lastUpdated }
+        val scopedPlan = scopedMedia.filter { it.status == TrackingStatus.PLAN_TO_TRACK }.sortedByDescending { it.lastUpdated }
+        val scopedFavorites = scopedMedia
+            .filter { (it.userRating ?: it.communityScore ?: 0f) > 0f }
+            .sortedWith(compareByDescending<MediaCardSummary> { it.userRating ?: 0f }.thenByDescending { it.communityScore ?: 0f })
 
         fun hasAuthenticBanner(slide: HomeHeroSlide): Boolean = when (slide) {
             is HomeHeroSlide.LocalSlide -> ArtworkModelResolver.preferredBanner(slide.item) != null
@@ -886,6 +932,91 @@ fun HomeDashboardView(
                         }
                     }
 
+                    HomeRowKey.IN_PROGRESS -> {
+                        if (inProgressItems.isNotEmpty()) {
+                            item(key = "row_in_progress") {
+                                MediaSummaryRail(
+                                    title = "In Progress",
+                                    actionLabel = "Library",
+                                    items = inProgressItems,
+                                    cardWidth = posterWidthDp,
+                                    cardHeight = posterHeightDp,
+                                    onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
+                                    onItemClick = onItemClick
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.COMPLETED -> {
+                        if (completedItems.isNotEmpty()) {
+                            item(key = "row_completed") {
+                                MediaSummaryRail(
+                                    title = "Completed",
+                                    actionLabel = "Library",
+                                    items = completedItems,
+                                    cardWidth = posterWidthDp,
+                                    cardHeight = posterHeightDp,
+                                    onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
+                                    onItemClick = onItemClick
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.ON_HOLD -> {
+                        if (onHoldItems.isNotEmpty()) {
+                            item(key = "row_on_hold") {
+                                MediaSummaryRail(
+                                    title = "On Hold",
+                                    actionLabel = "Library",
+                                    items = onHoldItems,
+                                    cardWidth = posterWidthDp,
+                                    cardHeight = posterHeightDp,
+                                    onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
+                                    onItemClick = onItemClick
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DROPPED -> {
+                        if (droppedItems.isNotEmpty()) {
+                            item(key = "row_dropped") {
+                                MediaSummaryRail(
+                                    title = "Dropped",
+                                    actionLabel = "Library",
+                                    items = droppedItems,
+                                    cardWidth = posterWidthDp,
+                                    cardHeight = posterHeightDp,
+                                    onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
+                                    onItemClick = onItemClick
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.CUSTOM_CATEGORIES -> {
+                        customCategories.filter { it.isVisible }.forEach { cat ->
+                            val rawCatItems = categoryMedia.filter { cat.id in categoryAssignments[it.id].orEmpty() }
+                                .sortedByDescending { it.lastUpdated }
+                            val catItems = if (shelfLimit == Int.MAX_VALUE) rawCatItems else rawCatItems.take(shelfLimit)
+                            if (catItems.isNotEmpty()) {
+                                item(key = "row_custom_cat_${cat.id}") {
+                                    MediaSummaryRail(
+                                        title = cat.name,
+                                        actionLabel = "Open",
+                                        items = catItems,
+                                        cardWidth = posterWidthDp,
+                                        cardHeight = posterHeightDp,
+                                        onActionClick = { onNavigateToCustomCategory(cat.id) },
+                                        onItemClick = onItemClick
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     HomeRowKey.TRENDING -> {
                         val shownTrending = if (shelfLimit == Int.MAX_VALUE) categoryTrending else categoryTrending.take(shelfLimit)
                         if (shownTrending.isNotEmpty()) {
@@ -1310,6 +1441,17 @@ private fun LocalMediaHeroCard(
         bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
         userRating = item.userRating,
         communityScore = item.communityScore,
+        imdbScore = item.imdbScore,
+        rtScore = item.rtScore,
+        metacriticScore = item.metacriticScore,
+        traktScore = item.traktScore,
+        audienceScore = item.audienceScore,
+        mediaType = item.mediaType,
+        hasAnilist = item.anilistId != null,
+        hasMal = item.malId != null,
+        hasTmdb = item.tmdbId != null,
+        hasVndb = item.vndbId != null,
+        hasBangumi = item.bangumiId != null,
         progressLabel = progressLabel,
         remainingCount = remainingCount,
         heroSettings = heroSettings,
@@ -1358,6 +1500,12 @@ private fun TrendingMediaHeroCard(
         bannerBlurDp = heroSettings.resolveBannerBlurDp(item.mediaType),
         userRating = null,
         communityScore = item.communityScore,
+        mediaType = item.mediaType,
+        hasAnilist = item.anilistId != null,
+        hasMal = item.malId != null,
+        hasTmdb = item.tmdbId != null,
+        hasVndb = item.vndbId != null,
+        hasBangumi = item.bangumiId != null,
         progressLabel = progressHint,
         remainingCount = 0,
         heroSettings = heroSettings,
@@ -1365,6 +1513,7 @@ private fun TrendingMediaHeroCard(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChimanewComboHeroCard(
     title: String,
@@ -1379,6 +1528,17 @@ private fun ChimanewComboHeroCard(
     bannerBlurDp: Int = 0,
     userRating: Float?,
     communityScore: Float?,
+    imdbScore: Float? = null,
+    rtScore: Int? = null,
+    metacriticScore: Int? = null,
+    traktScore: Int? = null,
+    audienceScore: Int? = null,
+    mediaType: MediaType = MediaType.ALL,
+    hasAnilist: Boolean = false,
+    hasMal: Boolean = false,
+    hasTmdb: Boolean = false,
+    hasVndb: Boolean = false,
+    hasBangumi: Boolean = false,
     progressLabel: String,
     remainingCount: Int,
     heroSettings: HomeHeroSettings,
@@ -1411,8 +1571,7 @@ private fun ChimanewComboHeroCard(
                     .graphicsLayer {
                         val fx = bannerFocalX.coerceIn(-1f, 1f)
                         val fy = bannerFocalY.coerceIn(-1f, 1f)
-                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
-                        val effZoom = if (bannerZoom <= 1.01f && hasPan) 1.24f else bannerZoom.coerceIn(1f, 2.5f)
+                        val effZoom = bannerZoom.coerceIn(1f, 2.5f)
                         scaleX = effZoom
                         scaleY = effZoom
                         translationX = -fx * size.width * (effZoom - 1f) * 0.5f
@@ -1522,37 +1681,39 @@ private fun ChimanewComboHeroCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                // Top Tier: Category Pill (+ Progress if Clean Separation layout 0)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = categoryBadge,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentGold,
-                        letterSpacing = 0.6.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(
-                            shadow = Shadow(
-                                color = Color.Black.copy(alpha = 0.85f),
-                                blurRadius = 4f
-                            )
-                        )
-                    )
-                    if (heroSettings.metadataLayout == 0 && progressLabel.isNotBlank()) {
+                // Top Tier: Category Eyebrow (+ Progress if Clean Separation layout 0)
+                if (heroSettings.metadataLayout != 3) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "\u2022 $progressLabel",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary,
+                            text = categoryBadge,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold,
+                            letterSpacing = 0.6.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
+                            style = TextStyle(
+                                shadow = Shadow(
+                                    color = Color.Black.copy(alpha = 0.85f),
+                                    blurRadius = 4f
+                                )
+                            )
                         )
-                        if (showUnread) {
+                        if (heroSettings.metadataLayout == 0 && progressLabel.isNotBlank()) {
+                            Text(
+                                text = "\u2022 $progressLabel",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                        }
+                        if (heroSettings.metadataLayout == 0 && showUnread) {
                             RemainingCountBadge(count = remainingCount)
                         }
                     }
@@ -1578,12 +1739,42 @@ private fun ChimanewComboHeroCard(
                 when (heroSettings.metadataLayout) {
                     0 -> {
                         if (heroSettings.showRatings) {
-                            HeroRatingStrip(userRating, communityScore, heroSettings.ratingFormat)
+                            HeroRatingStrip(
+                                userRating = userRating,
+                                communityScore = communityScore,
+                                imdbScore = imdbScore,
+                                rtScore = rtScore,
+                                metacriticScore = metacriticScore,
+                                traktScore = traktScore,
+                                audienceScore = audienceScore,
+                                mediaType = mediaType,
+                                hasAnilist = hasAnilist,
+                                hasMal = hasMal,
+                                hasTmdb = hasTmdb,
+                                hasVndb = hasVndb,
+                                hasBangumi = hasBangumi,
+                                format = heroSettings.ratingFormat
+                            )
                         }
                     }
                     1 -> {
                         if (heroSettings.showRatings) {
-                            HeroRatingStrip(userRating, communityScore, heroSettings.ratingFormat)
+                            HeroRatingStrip(
+                                userRating = userRating,
+                                communityScore = communityScore,
+                                imdbScore = imdbScore,
+                                rtScore = rtScore,
+                                metacriticScore = metacriticScore,
+                                traktScore = traktScore,
+                                audienceScore = audienceScore,
+                                mediaType = mediaType,
+                                hasAnilist = hasAnilist,
+                                hasMal = hasMal,
+                                hasTmdb = hasTmdb,
+                                hasVndb = hasVndb,
+                                hasBangumi = hasBangumi,
+                                format = heroSettings.ratingFormat
+                            )
                         }
                         if (progressLabel.isNotBlank() || showUnread) {
                             Row(
@@ -1610,7 +1801,23 @@ private fun ChimanewComboHeroCard(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (heroSettings.showRatings) {
-                                HeroRatingStrip(userRating, communityScore, heroSettings.ratingFormat, compact = true)
+                                HeroRatingStrip(
+                                    userRating = userRating,
+                                    communityScore = communityScore,
+                                    imdbScore = imdbScore,
+                                    rtScore = rtScore,
+                                    metacriticScore = metacriticScore,
+                                    traktScore = traktScore,
+                                    audienceScore = audienceScore,
+                                    mediaType = mediaType,
+                                    hasAnilist = hasAnilist,
+                                    hasMal = hasMal,
+                                    hasTmdb = hasTmdb,
+                                    hasVndb = hasVndb,
+                                    hasBangumi = hasBangumi,
+                                    format = heroSettings.ratingFormat,
+                                    compact = true
+                                )
                             }
                             if (progressLabel.isNotBlank()) {
                                 Text(
@@ -1618,33 +1825,54 @@ private fun ChimanewComboHeroCard(
                                     fontSize = 11.sp,
                                     color = TextSecondary,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                             }
                             if (showUnread) RemainingCountBadge(count = remainingCount)
                         }
                     }
                     3 -> {
+                        // Minimal Inline: No eyebrow line above title; single crisp inline spec & ratings band below title
                         if (heroSettings.showRatings) {
-                            HeroRatingStrip(userRating, communityScore, heroSettings.ratingFormat)
+                            HeroRatingStrip(
+                                userRating = userRating,
+                                communityScore = communityScore,
+                                imdbScore = imdbScore,
+                                rtScore = rtScore,
+                                metacriticScore = metacriticScore,
+                                traktScore = traktScore,
+                                audienceScore = audienceScore,
+                                mediaType = mediaType,
+                                hasAnilist = hasAnilist,
+                                hasMal = hasMal,
+                                hasTmdb = hasTmdb,
+                                hasVndb = hasVndb,
+                                hasBangumi = hasBangumi,
+                                format = heroSettings.ratingFormat,
+                                compact = true
+                            )
                         }
-                        if (progressLabel.isNotBlank() || showUnread) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                if (progressLabel.isNotBlank()) {
-                                    Text(
-                                        text = progressLabel,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = TextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                if (showUnread) RemainingCountBadge(count = remainingCount)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = categoryBadge.substringBefore(" \u00B7 "),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentGold
+                            )
+                            if (progressLabel.isNotBlank()) {
+                                Text(
+                                    text = "\u00B7 $progressLabel",
+                                    fontSize = 11.sp,
+                                    color = TextPrimary.copy(alpha = 0.85f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
+                            if (showUnread) RemainingCountBadge(count = remainingCount)
                         }
                     }
                 }
@@ -1655,72 +1883,311 @@ private fun ChimanewComboHeroCard(
 
 @Composable
 private fun RemainingCountBadge(count: Int) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(AccentGold.copy(alpha = 0.18f))
-            .padding(horizontal = 6.dp, vertical = 1.5.dp)
-    ) {
-        Text(
-            text = "+$count",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = AccentGold
+    Text(
+        text = "+$count left",
+        fontSize = 10.5.sp,
+        fontWeight = FontWeight.Bold,
+        color = AccentGold,
+        style = TextStyle(
+            shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 4f)
         )
-    }
+    )
 }
 
+private data class HeroRatingSourceEntry(
+    val sourceLabel: String,
+    val valueText: String,
+    val pctValue: Int,
+    val scale10Value: Float,
+    val color: Color,
+    val iconRes: Int? = null
+)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HeroRatingStrip(
     userRating: Float?,
     communityScore: Float?,
+    imdbScore: Float? = null,
+    rtScore: Int? = null,
+    metacriticScore: Int? = null,
+    traktScore: Int? = null,
+    audienceScore: Int? = null,
+    mediaType: MediaType = MediaType.ALL,
+    hasAnilist: Boolean = false,
+    hasMal: Boolean = false,
+    hasTmdb: Boolean = false,
+    hasVndb: Boolean = false,
+    hasBangumi: Boolean = false,
     format: Int,
     compact: Boolean = false
 ) {
-    val u = userRating?.takeIf { it > 0f }
-    val c = communityScore?.takeIf { it > 0f }
-    if (u == null && c == null) return
-
-    fun formatSingle(score: Float, sourceLabel: String?): String = when (format) {
-        1 -> "${(score * 10f).roundToInt()}%"
-        2 -> if (sourceLabel != null) "\u2605 ${formatSmartRating(score.toDouble())} \u00B7 $sourceLabel" else "\u2605 ${formatSmartRating(score.toDouble())}"
-        else -> "\u2605 ${formatSmartRating(score.toDouble())}"
-    }
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val entries = remember(
+        userRating, communityScore, imdbScore, rtScore, metacriticScore, traktScore, audienceScore,
+        mediaType, hasAnilist, hasMal, hasTmdb, hasVndb, hasBangumi
     ) {
-        if (format == 3) {
-            if (u != null) {
-                HeroRatingPill(text = "\u2605 You ${formatSmartRating(u.toDouble())}")
+        buildList {
+            imdbScore?.takeIf { it > 0f }?.let { score ->
+                val norm10 = if (score > 10f) score / 10f else score
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "IMDb",
+                        valueText = formatSmartRating(norm10.toDouble()),
+                        pctValue = (norm10 * 10f).roundToInt(),
+                        scale10Value = norm10,
+                        color = Color(0xFFF5C518),
+                        iconRes = R.drawable.rating_imdb
+                    )
+                )
             }
-            if (c != null && (!compact || u == null)) {
-                HeroRatingPill(text = "\u2605 ${formatSmartRating(c.toDouble())} Score")
+            communityScore?.takeIf { it > 0f }?.let { score ->
+                val isTenScale = score <= 10.05f
+                val norm10 = if (isTenScale) score else score / 10f
+                val pct = if (isTenScale) (score * 10f).roundToInt() else score.roundToInt()
+                when {
+                    mediaType == MediaType.SHOW || mediaType == MediaType.MOVIE || (mediaType == MediaType.ANIME && hasTmdb && !hasAnilist) -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "TMDB",
+                                valueText = "$pct",
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFF01B4E4),
+                                iconRes = R.drawable.rating_tmdb
+                            )
+                        )
+                    }
+                    mediaType in listOf(MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL) && (hasAnilist || !hasMal) -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "AniList",
+                                valueText = "$pct%",
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFF02A9FF),
+                                iconRes = R.drawable.brand_anilist
+                            )
+                        )
+                    }
+                    mediaType in listOf(MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL) && hasMal -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "MAL",
+                                valueText = formatSmartRating(norm10.toDouble()),
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFF5B8BFF),
+                                iconRes = R.drawable.rating_mal
+                            )
+                        )
+                    }
+                    mediaType == MediaType.VISUAL_NOVEL || hasVndb -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "VNDB",
+                                valueText = formatSmartRating(norm10.toDouble()),
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFF6BA4E8),
+                                iconRes = R.drawable.brand_vndb
+                            )
+                        )
+                    }
+                    hasBangumi -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "Bangumi",
+                                valueText = formatSmartRating(norm10.toDouble()),
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFFF09199),
+                                iconRes = R.drawable.brand_bangumi
+                            )
+                        )
+                    }
+                    else -> {
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "Score",
+                                valueText = formatSmartRating(norm10.toDouble()),
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = AccentGold,
+                                iconRes = null
+                            )
+                        )
+                    }
+                }
             }
-        } else {
-            val primaryScore = u ?: c!!
-            val label = if (u != null) "Yours" else "Score"
-            HeroRatingPill(text = formatSingle(primaryScore, label))
+            traktScore?.takeIf { it > 0 }?.let { t ->
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "Trakt",
+                        valueText = "$t%",
+                        pctValue = t,
+                        scale10Value = t / 10f,
+                        color = Color(0xFFED1C24),
+                        iconRes = R.drawable.rating_trakt
+                    )
+                )
+            }
+            audienceScore?.takeIf { it > 0 }?.let { aud ->
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "Audience",
+                        valueText = "$aud%",
+                        pctValue = aud,
+                        scale10Value = aud / 10f,
+                        color = Color(0xFFFA320A),
+                        iconRes = when {
+                            aud >= 75 -> R.drawable.rating_audience_verified_hot
+                            aud >= 60 -> R.drawable.rating_audience_score
+                            else -> R.drawable.rating_audience_stale
+                        }
+                    )
+                )
+            }
+            rtScore?.takeIf { it > 0 && audienceScore == null }?.let { rt ->
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "RT",
+                        valueText = "$rt%",
+                        pctValue = rt,
+                        scale10Value = rt / 10f,
+                        color = Color(0xFFFA320A),
+                        iconRes = when {
+                            rt >= 75 -> R.drawable.rating_rotten_tomatoes_certified
+                            rt >= 60 -> R.drawable.rating_rotten_tomatoes
+                            else -> R.drawable.rating_rotten_tomatoes_rotten
+                        }
+                    )
+                )
+            }
+            metacriticScore?.takeIf { it > 0 }?.let { mc ->
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "Metacritic",
+                        valueText = "$mc",
+                        pctValue = mc,
+                        scale10Value = mc / 10f,
+                        color = if (mc >= 61) Color(0xFF66CC33) else if (mc >= 40) Color(0xFFFFCC33) else Color(0xFFFF4D4D),
+                        iconRes = R.drawable.rating_metacritic
+                    )
+                )
+            }
+            userRating?.takeIf { it > 0f }?.let { u ->
+                add(
+                    HeroRatingSourceEntry(
+                        sourceLabel = "You",
+                        valueText = formatSmartRating(u.toDouble()),
+                        pctValue = (u * 10f).roundToInt(),
+                        scale10Value = u,
+                        color = AccentGold,
+                        iconRes = null
+                    )
+                )
+            }
         }
     }
-}
+    if (entries.isEmpty()) return
 
-@Composable
-private fun HeroRatingPill(text: String) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(Color.Black.copy(alpha = 0.52f))
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-    ) {
-        Text(
-            text = text,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = AccentGold,
-            maxLines = 1
-        )
+    val primary = entries.lastOrNull { it.sourceLabel == "You" } ?: entries.first()
+    val textShadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 5f)
+
+    when (format) {
+        1 -> {
+            // Unboxed Percentage
+            Text(
+                text = "${primary.pctValue}%",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = AccentGold,
+                maxLines = 1,
+                style = TextStyle(shadow = textShadow)
+            )
+        }
+        2 -> {
+            // Unboxed Star + Source
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                primary.iconRes?.let { res ->
+                    Image(
+                        painter = painterResource(id = res),
+                        contentDescription = primary.sourceLabel,
+                        modifier = Modifier.size(width = if (res == R.drawable.rating_imdb) 24.dp else 14.dp, height = 14.dp)
+                    )
+                } ?: Text(
+                    text = "\u2605",
+                    fontSize = 12.sp,
+                    color = AccentGold,
+                    style = TextStyle(shadow = textShadow)
+                )
+                Text(
+                    text = if (primary.iconRes != null) primary.valueText else "${formatSmartRating(primary.scale10Value.toDouble())} \u00B7 ${primary.sourceLabel}",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = primary.color,
+                    maxLines = 1,
+                    style = TextStyle(shadow = textShadow)
+                )
+            }
+        }
+        3 -> {
+            // Unboxed Multi-Source Strip (1:1 Nuvio inline style)
+            val shown = if (compact) entries.take(3) else entries.take(5)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                shown.forEach { entry ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (entry.iconRes != null) {
+                            Image(
+                                painter = painterResource(id = entry.iconRes),
+                                contentDescription = entry.sourceLabel,
+                                modifier = Modifier.size(
+                                    width = if (entry.iconRes == R.drawable.rating_imdb) 24.dp else 13.dp,
+                                    height = 13.dp
+                                )
+                            )
+                            Text(
+                                text = entry.valueText,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                style = TextStyle(shadow = textShadow)
+                            )
+                        } else {
+                            Text(
+                                text = if (entry.sourceLabel == "You") "\u2605 ${entry.valueText} You" else "\u2605 ${entry.valueText}",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = entry.color,
+                                maxLines = 1,
+                                style = TextStyle(shadow = textShadow)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        else -> {
+            // 0 = Unboxed Golden Star
+            Text(
+                text = "\u2605 ${formatSmartRating(primary.scale10Value.toDouble())}",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = AccentGold,
+                maxLines = 1,
+                style = TextStyle(shadow = textShadow)
+            )
+        }
     }
 }
 
@@ -2227,6 +2694,18 @@ private fun UpNextCalendarCard(
     }
     val subLabel = remember(release) { formatUpNextSubLabel(release) }
 
+    var useFallbackCover by remember(release.coverUrl) { mutableStateOf(false) }
+    var coverFailed by remember(release.coverUrl, release.fallbackCoverUrl) { mutableStateOf(false) }
+    val activeCoverUrl = remember(release.coverUrl, release.fallbackCoverUrl, useFallbackCover) {
+        val primary = release.coverUrl.trim()
+        val secondary = release.fallbackCoverUrl?.trim().orEmpty()
+        when {
+            !useFallbackCover && primary.isNotBlank() -> primary
+            secondary.isNotBlank() -> secondary
+            else -> ""
+        }
+    }
+
     Row(
         modifier = Modifier
             .width(220.dp)
@@ -2243,16 +2722,54 @@ private fun UpNextCalendarCard(
         horizontalArrangement = Arrangement.spacedBy(11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
-            model = remember(release.coverUrl) { ArtworkModelResolver.toCoilModel(release.coverUrl) },
-            contentDescription = release.title,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
                 .width(46.dp)
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color.White.copy(alpha = 0.06f))
-        )
+                .background(Color.White.copy(alpha = 0.06f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (activeCoverUrl.isNotBlank() && !coverFailed) {
+                AsyncImage(
+                    model = remember(activeCoverUrl) { ArtworkModelResolver.toCoilModel(activeCoverUrl) },
+                    contentDescription = release.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        if (!useFallbackCover && !release.fallbackCoverUrl.isNullOrBlank()) {
+                            useFallbackCover = true
+                        } else {
+                            coverFailed = true
+                        }
+                    }
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(4.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = release.mediaType.displayName.uppercase(),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = release.title,
+                        fontSize = 8.5.sp,
+                        lineHeight = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -2295,6 +2812,18 @@ private fun UpNextCompactRow(
     }
     val subLabel = remember(release) { formatUpNextSubLabel(release) }
 
+    var useFallbackCover by remember(release.coverUrl) { mutableStateOf(false) }
+    var coverFailed by remember(release.coverUrl, release.fallbackCoverUrl) { mutableStateOf(false) }
+    val activeCoverUrl = remember(release.coverUrl, release.fallbackCoverUrl, useFallbackCover) {
+        val primary = release.coverUrl.trim()
+        val secondary = release.fallbackCoverUrl?.trim().orEmpty()
+        when {
+            !useFallbackCover && primary.isNotBlank() -> primary
+            secondary.isNotBlank() -> secondary
+            else -> ""
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2303,16 +2832,38 @@ private fun UpNextCompactRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
-            model = remember(release.coverUrl) { ArtworkModelResolver.toCoilModel(release.coverUrl) },
-            contentDescription = release.title,
-            contentScale = ContentScale.Crop,
+        Box(
             modifier = Modifier
                 .width(34.dp)
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(5.dp))
-                .background(Color.White.copy(alpha = 0.06f))
-        )
+                .background(Color.White.copy(alpha = 0.06f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (activeCoverUrl.isNotBlank() && !coverFailed) {
+                AsyncImage(
+                    model = remember(activeCoverUrl) { ArtworkModelResolver.toCoilModel(activeCoverUrl) },
+                    contentDescription = release.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        if (!useFallbackCover && !release.fallbackCoverUrl.isNullOrBlank()) {
+                            useFallbackCover = true
+                        } else {
+                            coverFailed = true
+                        }
+                    }
+                )
+            } else {
+                Text(
+                    text = release.mediaType.displayName.uppercase(),
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentGold,
+                    maxLines = 1
+                )
+            }
+        }
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(1.dp)

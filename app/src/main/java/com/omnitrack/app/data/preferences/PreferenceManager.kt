@@ -1,9 +1,11 @@
 package com.omnitrack.app.data.preferences
 
 import android.content.Context
+import androidx.compose.runtime.Immutable
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -269,6 +271,11 @@ enum class HomeRowKey(val displayName: String, val description: String) {
     RECENT("Recently Updated", "Latest additions and progress updates"),
     PLAN("Plan to Track", "Your queued backlog across all media"),
     FAVORITES("Favorites & Top Rated", "Your highest-rated and favorite titles"),
+    IN_PROGRESS("In Progress", "Everything you are actively watching, reading, or playing"),
+    COMPLETED("Completed", "Finished titles in your collection"),
+    ON_HOLD("On Hold", "Paused entries waiting to be resumed"),
+    DROPPED("Dropped", "Titles you decided to stop tracking"),
+    CUSTOM_CATEGORIES("Custom Categories", "Horizontal shelves for your visible custom categories"),
     TRENDING("Trending Now", "Live trending anime, shows, movies & books"),
     DISCOVER_ANIME("Trending Anime", "Live trending anime from AniList"),
     DISCOVER_MANGA("Trending Manga", "Live trending manga & manhwa"),
@@ -346,8 +353,9 @@ data class HomeHeroSettings(
     val showHero: Boolean = true,
     val heroSource: HomeHeroSource = HomeHeroSource.CONTINUE,
     val heroSources: Set<String> = setOf("CONTINUE", "FAVORITES", "TRENDING"),
-    val heroCategoryMode: String = "ALL", // "ALL", "FOLLOW_HOME", "CUSTOM"
+    val heroCategoryMode: String = "ALL", // "ALL", "FOLLOW_HOME", "CUSTOM", "CUSTOM_CATEGORIES"
     val heroCategories: Set<String> = emptySet(),
+    val heroCustomCategoryIds: Set<Long> = emptySet(),
     val slideCount: Int = 10, // 5, 8, 12, 15, 20, 0 = Unlimited
     val slideOrder: String = "RECENT", // "RECENT", "SHUFFLE", "TOP_RATED", "INTERLEAVED"
     val autoRotate: Boolean = true,
@@ -393,6 +401,109 @@ data class PresentationSettings(
         HeroBannerBlurLevel.resolveBlurDp(mediaType, universalBannerBlur, categoryBannerBlurOverrides)
 }
 
+enum class LibraryDisplayMode(val displayName: String) {
+    COMPACT_GRID("Compact Grid"),
+    COMFORTABLE_GRID("Comfortable Grid"),
+    COVER_ONLY_GRID("Cover-Only Grid"),
+    LIST("List");
+
+    companion object {
+        fun fromName(name: String?): LibraryDisplayMode = when (name?.uppercase()) {
+            "COMFORTABLE_GRID" -> COMFORTABLE_GRID
+            "COVER_ONLY_GRID" -> COVER_ONLY_GRID
+            "LIST" -> LIST
+            else -> COMPACT_GRID
+        }
+    }
+}
+
+enum class LibraryGroupMode(val displayName: String, val subtitle: String) {
+    BY_MEDIA_TYPE("By Media Type", "Tabs for All, Anime, Manga, TV, Books..."),
+    BY_CATEGORY("By Custom Category", "Tabs for your visible custom categories"),
+    BY_STATUS("By Tracking Status", "Tabs for In Progress, Completed, Planned, Hold, Dropped"),
+    BY_TRACKER("By Tracker / Source", "Tabs for AniList, MAL, TMDb, Trakt, Steam, VNDB, Local"),
+    UNGROUPED("Ungrouped", "Single unified grid without tabs");
+
+    companion object {
+        fun fromName(name: String?): LibraryGroupMode = when (name?.uppercase()) {
+            "BY_CATEGORY" -> BY_CATEGORY
+            "BY_STATUS" -> BY_STATUS
+            "BY_TRACKER" -> BY_TRACKER
+            "UNGROUPED" -> UNGROUPED
+            else -> BY_MEDIA_TYPE
+        }
+    }
+}
+
+enum class LibrarySortOption(val displayName: String) {
+    RECENT("Last Updated"),
+    ALPHA("Alphabetical"),
+    RATING("Highest Rated"),
+    TOTAL("Total Count"),
+    REMAINING("Remaining Left"),
+    PROGRESS("Progress %"),
+    RANDOM("Random");
+
+    companion object {
+        fun fromName(name: String?): LibrarySortOption = when (name?.uppercase()) {
+            "ALPHA", "TITLE" -> ALPHA
+            "RATING" -> RATING
+            "TOTAL" -> TOTAL
+            "REMAINING" -> REMAINING
+            "PROGRESS" -> PROGRESS
+            "RANDOM" -> RANDOM
+            else -> RECENT
+        }
+    }
+}
+
+enum class TriStateFilter {
+    OFF,
+    INCLUDE,
+    EXCLUDE;
+
+    fun next(): TriStateFilter = when (this) {
+        OFF -> INCLUDE
+        INCLUDE -> EXCLUDE
+        EXCLUDE -> OFF
+    }
+
+    companion object {
+        fun fromName(name: String?): TriStateFilter = when (name?.uppercase()) {
+            "INCLUDE" -> INCLUDE
+            "EXCLUDE" -> EXCLUDE
+            else -> OFF
+        }
+    }
+}
+
+@Immutable
+data class ChimanewLibrarySettings(
+    val displayMode: LibraryDisplayMode = LibraryDisplayMode.COMPACT_GRID,
+    val portraitColumns: Int = 4, // 0 = Auto, 2..6
+    val landscapeColumns: Int = 6, // 4..8
+    val groupMode: LibraryGroupMode = LibraryGroupMode.BY_MEDIA_TYPE,
+    val sortOption: LibrarySortOption = LibrarySortOption.RECENT,
+    val sortAscending: Boolean = false,
+    val filterStarted: TriStateFilter = TriStateFilter.OFF,
+    val filterCompleted: TriStateFilter = TriStateFilter.OFF,
+    val filterUnread: TriStateFilter = TriStateFilter.OFF,
+    val filterRated: TriStateFilter = TriStateFilter.OFF,
+    val filterFavorite: TriStateFilter = TriStateFilter.OFF,
+    val filterMediaTypes: Set<String> = emptySet(),
+    val filterTrackers: Set<String> = emptySet(),
+    val filterIncludeCategoryIds: Set<Long> = emptySet(),
+    val filterExcludeCategoryIds: Set<Long> = emptySet(),
+    val showRemainingBadge: Boolean = true,
+    val showTypeBadge: Boolean = false,
+    val showScoreBadge: Boolean = false,
+    val showQuickContinue: Boolean = false,
+    val showCategoryTabs: Boolean = true,
+    val showTabItemCounts: Boolean = true,
+    val showHiddenCategories: Boolean = false,
+    val defaultCategoryId: Long? = null
+)
+
 class PreferenceManager(private val context: Context) {
 
     private object PreferencesKeys {
@@ -420,6 +531,7 @@ class PreferenceManager(private val context: Context) {
         val HOME_HERO_SOURCES = stringSetPreferencesKey("home_hero_sources")
         val HOME_HERO_CATEGORY_MODE = stringPreferencesKey("home_hero_category_mode")
         val HOME_HERO_CATEGORIES = stringSetPreferencesKey("home_hero_categories")
+        val HOME_HERO_CUSTOM_CATEGORY_IDS = stringSetPreferencesKey("home_hero_custom_category_ids")
         val HOME_HERO_SLIDE_COUNT = intPreferencesKey("home_hero_slide_count")
         val HOME_HERO_SLIDE_ORDER = stringPreferencesKey("home_hero_slide_order")
         val HOME_HERO_ROTATE_SECONDS = intPreferencesKey("home_hero_rotate_seconds")
@@ -443,6 +555,32 @@ class PreferenceManager(private val context: Context) {
         val HOME_DEFAULT_CATEGORY = stringPreferencesKey("home_default_category")
         val LIBRARY_VIEW_MODE = stringPreferencesKey("library_view_mode")
         val LIBRARY_SORT_MODE = stringPreferencesKey("library_sort_mode")
+
+        // Chimanew Library & Categories System
+        val CHIMANEW_LIB_DISPLAY_MODE = stringPreferencesKey("chimanew_lib_display_mode")
+        val CHIMANEW_LIB_PORTRAIT_COLS = intPreferencesKey("chimanew_lib_portrait_cols")
+        val CHIMANEW_LIB_LANDSCAPE_COLS = intPreferencesKey("chimanew_lib_landscape_cols")
+        val CHIMANEW_LIB_GROUP_MODE = stringPreferencesKey("chimanew_lib_group_mode")
+        val CHIMANEW_LIB_SORT_OPTION = stringPreferencesKey("chimanew_lib_sort_option")
+        val CHIMANEW_LIB_SORT_ASC = booleanPreferencesKey("chimanew_lib_sort_asc")
+        val CHIMANEW_LIB_FILTER_STARTED = stringPreferencesKey("chimanew_lib_filter_started")
+        val CHIMANEW_LIB_FILTER_COMPLETED = stringPreferencesKey("chimanew_lib_filter_completed")
+        val CHIMANEW_LIB_FILTER_UNREAD = stringPreferencesKey("chimanew_lib_filter_unread")
+        val CHIMANEW_LIB_FILTER_RATED = stringPreferencesKey("chimanew_lib_filter_rated")
+        val CHIMANEW_LIB_FILTER_FAVORITE = stringPreferencesKey("chimanew_lib_filter_favorite")
+        val CHIMANEW_LIB_FILTER_MEDIA_TYPES = stringSetPreferencesKey("chimanew_lib_filter_media_types")
+        val CHIMANEW_LIB_FILTER_TRACKERS = stringSetPreferencesKey("chimanew_lib_filter_trackers")
+        val CHIMANEW_LIB_FILTER_CAT_INC = stringSetPreferencesKey("chimanew_lib_filter_cat_inc")
+        val CHIMANEW_LIB_FILTER_CAT_EXC = stringSetPreferencesKey("chimanew_lib_filter_cat_exc")
+        val CHIMANEW_LIB_SHOW_REMAINING_BADGE = booleanPreferencesKey("chimanew_lib_show_remaining_badge")
+        val CHIMANEW_LIB_SHOW_TYPE_BADGE = booleanPreferencesKey("chimanew_lib_show_type_badge")
+        val CHIMANEW_LIB_SHOW_SCORE_BADGE = booleanPreferencesKey("chimanew_lib_show_score_badge")
+        val CHIMANEW_LIB_SHOW_QUICK_CONTINUE = booleanPreferencesKey("chimanew_lib_show_quick_continue")
+        val CHIMANEW_LIB_SHOW_CATEGORY_TABS = booleanPreferencesKey("chimanew_lib_show_category_tabs")
+        val CHIMANEW_LIB_SHOW_TAB_COUNTS = booleanPreferencesKey("chimanew_lib_show_tab_counts")
+        val CHIMANEW_LIB_SHOW_HIDDEN_CATS = booleanPreferencesKey("chimanew_lib_show_hidden_cats")
+        val CHIMANEW_LIB_DEFAULT_CATEGORY_ID = longPreferencesKey("chimanew_lib_default_category_id")
+        val CHIMANEW_CATEGORY_ASSIGNMENTS = stringPreferencesKey("chimanew_category_assignments")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
@@ -1170,6 +1308,9 @@ class PreferenceManager(private val context: Context) {
                 heroSources = prefs[PreferencesKeys.HOME_HERO_SOURCES] ?: setOf("CONTINUE", "FAVORITES", "TRENDING"),
                 heroCategoryMode = prefs[PreferencesKeys.HOME_HERO_CATEGORY_MODE] ?: "ALL",
                 heroCategories = prefs[PreferencesKeys.HOME_HERO_CATEGORIES] ?: emptySet(),
+                heroCustomCategoryIds = (prefs[PreferencesKeys.HOME_HERO_CUSTOM_CATEGORY_IDS] ?: emptySet())
+                    .mapNotNull { it.toLongOrNull() }
+                    .toSet(),
                 slideCount = (prefs[PreferencesKeys.HOME_HERO_SLIDE_COUNT] ?: 10).let {
                     if (it in listOf(0, 5, 8, 10, 12, 15, 20)) it else 10
                 },
@@ -1216,6 +1357,12 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun setHomeHeroCategories(categories: Set<String>) {
         context.dataStore.edit { it[PreferencesKeys.HOME_HERO_CATEGORIES] = categories }
+    }
+
+    suspend fun setHomeHeroCustomCategoryIds(ids: Set<Long>) {
+        context.dataStore.edit {
+            it[PreferencesKeys.HOME_HERO_CUSTOM_CATEGORY_IDS] = ids.map { id -> id.toString() }.toSet()
+        }
     }
 
     suspend fun setHomeHeroSlideCount(count: Int) {
@@ -1310,6 +1457,7 @@ class PreferenceManager(private val context: Context) {
             prefs[PreferencesKeys.HOME_HERO_SOURCES] = setOf("CONTINUE", "FAVORITES", "TRENDING")
             prefs[PreferencesKeys.HOME_HERO_CATEGORY_MODE] = "ALL"
             prefs[PreferencesKeys.HOME_HERO_CATEGORIES] = emptySet()
+            prefs[PreferencesKeys.HOME_HERO_CUSTOM_CATEGORY_IDS] = emptySet()
             prefs[PreferencesKeys.HOME_HERO_SLIDE_COUNT] = 10
             prefs[PreferencesKeys.HOME_HERO_SLIDE_ORDER] = "RECENT"
             prefs[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = 6
@@ -1351,6 +1499,217 @@ class PreferenceManager(private val context: Context) {
     suspend fun setLibrarySortMode(mode: String) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.LIBRARY_SORT_MODE] = mode
+        }
+    }
+
+    private fun parseCategoryAssignments(raw: String?): Map<Long, Set<Long>> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return try {
+            val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<Map<String, List<Long>>>(raw)
+            decoded.mapNotNull { (k, v) ->
+                val mid = k.toLongOrNull() ?: return@mapNotNull null
+                val set = v.toSet()
+                if (set.isEmpty()) null else mid to set
+            }.toMap()
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun encodeCategoryAssignments(map: Map<Long, Set<Long>>): String {
+        val serializable = map.entries
+            .filter { it.value.isNotEmpty() }
+            .associate { it.key.toString() to it.value.sorted() }
+        return Json.encodeToString(serializable)
+    }
+
+    val chimanewLibrarySettings: Flow<ChimanewLibrarySettings> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val rawDefCat = prefs[PreferencesKeys.CHIMANEW_LIB_DEFAULT_CATEGORY_ID]
+            ChimanewLibrarySettings(
+                displayMode = LibraryDisplayMode.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_DISPLAY_MODE]),
+                portraitColumns = (prefs[PreferencesKeys.CHIMANEW_LIB_PORTRAIT_COLS] ?: 4).let {
+                    if (it == 0 || it in 2..6) it else 4
+                },
+                landscapeColumns = (prefs[PreferencesKeys.CHIMANEW_LIB_LANDSCAPE_COLS] ?: 6).coerceIn(4, 8),
+                groupMode = LibraryGroupMode.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_GROUP_MODE]),
+                sortOption = LibrarySortOption.fromName(
+                    prefs[PreferencesKeys.CHIMANEW_LIB_SORT_OPTION] ?: prefs[PreferencesKeys.LIBRARY_SORT_MODE]
+                ),
+                sortAscending = prefs[PreferencesKeys.CHIMANEW_LIB_SORT_ASC] ?: false,
+                filterStarted = TriStateFilter.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_STARTED]),
+                filterCompleted = TriStateFilter.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_COMPLETED]),
+                filterUnread = TriStateFilter.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_UNREAD]),
+                filterRated = TriStateFilter.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_RATED]),
+                filterFavorite = TriStateFilter.fromName(prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_FAVORITE]),
+                filterMediaTypes = prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_MEDIA_TYPES] ?: emptySet(),
+                filterTrackers = prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_TRACKERS] ?: emptySet(),
+                filterIncludeCategoryIds = (prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_INC] ?: emptySet())
+                    .mapNotNull { it.toLongOrNull() }.toSet(),
+                filterExcludeCategoryIds = (prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_EXC] ?: emptySet())
+                    .mapNotNull { it.toLongOrNull() }.toSet(),
+                showRemainingBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_REMAINING_BADGE] ?: true,
+                showTypeBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TYPE_BADGE] ?: false,
+                showScoreBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_SCORE_BADGE] ?: false,
+                showQuickContinue = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] ?: false,
+                showCategoryTabs = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] ?: true,
+                showTabItemCounts = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] ?: true,
+                showHiddenCategories = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] ?: false,
+                defaultCategoryId = rawDefCat?.takeIf { it > 0L }
+            )
+        }
+        .distinctUntilChanged()
+
+    val categoryAssignments: Flow<Map<Long, Set<Long>>> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> parseCategoryAssignments(prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS]) }
+        .distinctUntilChanged()
+
+    suspend fun setChimanewDisplayMode(mode: LibraryDisplayMode) {
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_DISPLAY_MODE] = mode.name }
+    }
+
+    suspend fun setChimanewPortraitColumns(cols: Int) {
+        val safe = if (cols == 0) 0 else cols.coerceIn(2, 6)
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_PORTRAIT_COLS] = safe }
+    }
+
+    suspend fun setChimanewLandscapeColumns(cols: Int) {
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_LANDSCAPE_COLS] = cols.coerceIn(4, 8) }
+    }
+
+    suspend fun setChimanewGroupMode(mode: LibraryGroupMode) {
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_GROUP_MODE] = mode.name }
+    }
+
+    suspend fun setChimanewSort(option: LibrarySortOption, ascending: Boolean) {
+        context.dataStore.edit {
+            it[PreferencesKeys.CHIMANEW_LIB_SORT_OPTION] = option.name
+            it[PreferencesKeys.CHIMANEW_LIB_SORT_ASC] = ascending
+        }
+    }
+
+    suspend fun setChimanewTriStateFilter(key: String, state: TriStateFilter) {
+        context.dataStore.edit { prefs ->
+            val prefKey = when (key.uppercase()) {
+                "STARTED" -> PreferencesKeys.CHIMANEW_LIB_FILTER_STARTED
+                "COMPLETED" -> PreferencesKeys.CHIMANEW_LIB_FILTER_COMPLETED
+                "UNREAD" -> PreferencesKeys.CHIMANEW_LIB_FILTER_UNREAD
+                "RATED" -> PreferencesKeys.CHIMANEW_LIB_FILTER_RATED
+                "FAVORITE" -> PreferencesKeys.CHIMANEW_LIB_FILTER_FAVORITE
+                else -> return@edit
+            }
+            prefs[prefKey] = state.name
+        }
+    }
+
+    suspend fun setChimanewFilterMediaTypes(types: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_FILTER_MEDIA_TYPES] = types }
+    }
+
+    suspend fun setChimanewFilterTrackers(trackers: Set<String>) {
+        context.dataStore.edit { it[PreferencesKeys.CHIMANEW_LIB_FILTER_TRACKERS] = trackers }
+    }
+
+    suspend fun setChimanewFilterCategorySets(includeIds: Set<Long>, excludeIds: Set<Long>) {
+        context.dataStore.edit {
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_INC] = includeIds.map { id -> id.toString() }.toSet()
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_EXC] = excludeIds.map { id -> id.toString() }.toSet()
+        }
+    }
+
+    suspend fun setChimanewOverlayToggle(key: String, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            when (key.uppercase()) {
+                "REMAINING" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_REMAINING_BADGE] = enabled
+                "TYPE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TYPE_BADGE] = enabled
+                "SCORE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_SCORE_BADGE] = enabled
+                "CONTINUE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] = enabled
+                "TABS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] = enabled
+                "COUNTS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] = enabled
+                "HIDDEN" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] = enabled
+            }
+        }
+    }
+
+    suspend fun setDefaultLibraryCategoryId(categoryId: Long?) {
+        context.dataStore.edit { prefs ->
+            if (categoryId == null || categoryId <= 0L) {
+                prefs.remove(PreferencesKeys.CHIMANEW_LIB_DEFAULT_CATEGORY_ID)
+            } else {
+                prefs[PreferencesKeys.CHIMANEW_LIB_DEFAULT_CATEGORY_ID] = categoryId
+            }
+        }
+    }
+
+    suspend fun resetChimanewLibraryFilters() {
+        context.dataStore.edit {
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_STARTED] = TriStateFilter.OFF.name
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_COMPLETED] = TriStateFilter.OFF.name
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_UNREAD] = TriStateFilter.OFF.name
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_RATED] = TriStateFilter.OFF.name
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_FAVORITE] = TriStateFilter.OFF.name
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_MEDIA_TYPES] = emptySet()
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_TRACKERS] = emptySet()
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_INC] = emptySet()
+            it[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_EXC] = emptySet()
+        }
+    }
+
+    suspend fun setMediaCategories(mediaId: Long, categoryIds: Set<Long>) {
+        if (mediaId <= 0L) return
+        context.dataStore.edit { prefs ->
+            val current = parseCategoryAssignments(prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS]).toMutableMap()
+            if (categoryIds.isEmpty()) current.remove(mediaId) else current[mediaId] = categoryIds
+            prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS] = encodeCategoryAssignments(current)
+        }
+    }
+
+    suspend fun setCategoriesForMediaBatch(mediaIds: Collection<Long>, categoryIds: Set<Long>) {
+        if (mediaIds.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val current = parseCategoryAssignments(prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS]).toMutableMap()
+            for (mediaId in mediaIds) {
+                if (mediaId <= 0L) continue
+                if (categoryIds.isEmpty()) current.remove(mediaId) else current[mediaId] = categoryIds
+            }
+            prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS] = encodeCategoryAssignments(current)
+        }
+    }
+
+    suspend fun assignCategoriesToMediaBatch(
+        mediaIds: Collection<Long>,
+        addIds: Set<Long>,
+        removeIds: Set<Long>
+    ) {
+        if (mediaIds.isEmpty() || (addIds.isEmpty() && removeIds.isEmpty())) return
+        context.dataStore.edit { prefs ->
+            val current = parseCategoryAssignments(prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS]).toMutableMap()
+            for (mediaId in mediaIds) {
+                if (mediaId <= 0L) continue
+                val next = ((current[mediaId].orEmpty() - removeIds) + addIds)
+                if (next.isEmpty()) current.remove(mediaId) else current[mediaId] = next
+            }
+            prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS] = encodeCategoryAssignments(current)
+        }
+    }
+
+    suspend fun removeCategoryFromAllMedia(categoryId: Long) {
+        context.dataStore.edit { prefs ->
+            val current = parseCategoryAssignments(prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS])
+                .mapValues { (_, cats) -> cats - categoryId }
+                .filterValues { it.isNotEmpty() }
+            prefs[PreferencesKeys.CHIMANEW_CATEGORY_ASSIGNMENTS] = encodeCategoryAssignments(current)
+            val inc = (prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_INC] ?: emptySet()) - categoryId.toString()
+            val exc = (prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_EXC] ?: emptySet()) - categoryId.toString()
+            val heroCats = (prefs[PreferencesKeys.HOME_HERO_CUSTOM_CATEGORY_IDS] ?: emptySet()) - categoryId.toString()
+            prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_INC] = inc
+            prefs[PreferencesKeys.CHIMANEW_LIB_FILTER_CAT_EXC] = exc
+            prefs[PreferencesKeys.HOME_HERO_CUSTOM_CATEGORY_IDS] = heroCats
+            if (prefs[PreferencesKeys.CHIMANEW_LIB_DEFAULT_CATEGORY_ID] == categoryId) {
+                prefs.remove(PreferencesKeys.CHIMANEW_LIB_DEFAULT_CATEGORY_ID)
+            }
         }
     }
 

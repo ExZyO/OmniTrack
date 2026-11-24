@@ -18,6 +18,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,6 +59,7 @@ import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
+import com.omnitrack.app.data.preferences.LibraryDisplayMode
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -117,7 +119,20 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     isCustomEntry = isCustomEntry,
     bannerFocalX = bannerFocalX,
     bannerFocalY = bannerFocalY,
-    bannerZoom = bannerZoom
+    bannerZoom = bannerZoom,
+    imdbScore = imdbScore,
+    rtScore = rtScore,
+    metacriticScore = metacriticScore,
+    traktScore = traktScore,
+    audienceScore = audienceScore,
+    traktId = traktId,
+    simklId = simklId,
+    vndbId = vndbId,
+    hardcoverId = hardcoverId,
+    bangumiId = bangumiId,
+    comickId = comickId,
+    studioOrNetwork = studioOrNetwork,
+    isFavorite = isFavorite
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }
@@ -142,7 +157,12 @@ fun MediaCard(
     badgeText: String? = null,
     badgeColor: Color = AccentGold,
     showQuickProgressButton: Boolean = false,
-    showLandscapeClearlogo: Boolean = true
+    showLandscapeClearlogo: Boolean = true,
+    displayMode: LibraryDisplayMode = LibraryDisplayMode.COMFORTABLE_GRID,
+    showRemainingBadge: Boolean = false,
+    showTypeBadge: Boolean = false,
+    showScoreBadge: Boolean = false,
+    isDenseGrid: Boolean = false
 ) {
     val scope = rememberCoroutineScope()
     val bounceScale = remember { Animatable(1f) }
@@ -338,7 +358,7 @@ fun MediaCard(
                 }
             }
 
-            // Optional Top-Start Badge (e.g. Discover source provider)
+            // Optional Top-Start Badge (e.g. Discover source provider or Chimanew overlay tags)
             val currentBadgeText = if (isAddedToLibrary && isDiscoverAdd) "IN LIBRARY" else badgeText
             val currentBadgeColor = if (isAddedToLibrary && isDiscoverAdd) AccentJade else badgeColor
             if (currentBadgeText != null) {
@@ -358,29 +378,137 @@ fun MediaCard(
                         color = currentBadgeColor
                     )
                 }
+            } else if (!isSelectionMode && (showRemainingBadge || showTypeBadge)) {
+                val tot = item.totalProgress?.toInt() ?: 0
+                val cur = item.currentProgress.toInt()
+                val remaining = if (showRemainingBadge && item.mediaType != MediaType.GAME && item.mediaType != MediaType.VISUAL_NOVEL && tot > cur) {
+                    (tot - cur).coerceAtLeast(0)
+                } else 0
+                if (remaining > 0 || showTypeBadge) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (remaining > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(AmoledBlack.copy(alpha = 0.80f))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            ) {
+                                Text(
+                                    text = "+$remaining",
+                                    color = AccentGold,
+                                    fontSize = if (isDenseGrid) 8.5.sp else 9.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        if (showTypeBadge) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(AmoledBlack.copy(alpha = 0.78f))
+                                    .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                            ) {
+                                Text(
+                                    text = item.mediaType.displayName.take(5).uppercase(),
+                                    color = Color.White.copy(alpha = 0.88f),
+                                    fontSize = if (isDenseGrid) 8.sp else 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
 
             // Progress text overlay - positioned neatly at Top-End away from bottom logo
             val progressText = formatProgress(item)
-            if (progressText.isNotEmpty()) {
+            if (progressText.isNotEmpty() && !(isDenseGrid && displayMode == LibraryDisplayMode.COVER_ONLY_GRID && showScoreBadge)) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(AmoledBlack.copy(alpha = 0.82f))
-                        .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.5.dp)
+                        .padding(if (isDenseGrid) 5.dp else 6.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(AmoledBlack.copy(alpha = 0.80f))
+                        .padding(horizontal = if (isDenseGrid) 4.dp else 6.dp, vertical = 2.dp)
                 ) {
                     Text(
                         text = progressText,
                         color = Color(0xFFE2E8F0),
-                        fontSize = 10.sp,
+                        fontSize = if (isDenseGrid) 8.5.sp else 10.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.3.sp
+                        letterSpacing = 0.2.sp
                     )
                 }
+            }
+
+            if (showScoreBadge) {
+                val dispScore = item.userRating?.takeIf { it > 0f } ?: item.communityScore?.takeIf { it > 0f }
+                if (dispScore != null) {
+                    val norm = if (dispScore > 10f) dispScore / 10f else dispScore
+                    val formatted = String.format(java.util.Locale.US, "%.1f", norm)
+                    val scoreAlign = if (displayMode == LibraryDisplayMode.COMPACT_GRID) Alignment.BottomEnd else Alignment.BottomStart
+                    Box(
+                        modifier = Modifier
+                            .align(scoreAlign)
+                            .padding(
+                                start = 5.dp,
+                                end = 5.dp,
+                                bottom = if (showQuickProgressButton && scoreAlign == Alignment.BottomEnd) 36.dp else 6.dp
+                            )
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(AmoledBlack.copy(alpha = 0.82f))
+                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+                    ) {
+                        Text(
+                            text = "\u2605 $formatted",
+                            color = AccentGold,
+                            fontSize = if (isDenseGrid) 8.5.sp else 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // Chimanew Compact Grid bottom dark scrim + overlaid title
+            if (displayMode == LibraryDisplayMode.COMPACT_GRID && !hideLabels && !hasClearart) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    AmoledBlack.copy(alpha = 0.65f),
+                                    AmoledBlack.copy(alpha = 0.94f)
+                                )
+                            )
+                        )
+                )
+                Text(
+                    text = item.title,
+                    color = TextPrimary,
+                    fontSize = if (isDenseGrid) 11.sp else 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = if (isDenseGrid) 13.5.sp else 15.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(
+                            start = 6.dp,
+                            end = if (showQuickProgressButton) 34.dp else 6.dp,
+                            bottom = 7.dp
+                        )
+                )
             }
 
             // Tactile +1 / Add to Library Quick Action floating pill
@@ -486,16 +614,16 @@ fun MediaCard(
             }
         }
 
-        // Title text directly on dark background (hidden if hideLabels enabled)
-        if (!hideLabels) {
+        // Title text directly on dark background (only shown in Comfortable Grid when not hidden)
+        if (!hideLabels && displayMode == LibraryDisplayMode.COMFORTABLE_GRID) {
             Text(
                 text = item.title,
                 color = TextPrimary,
-                fontSize = 12.5.sp,
+                fontSize = if (isDenseGrid) 11.5.sp else 12.5.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 16.sp,
+                lineHeight = if (isDenseGrid) 14.5.sp else 16.sp,
                 modifier = Modifier.padding(horizontal = 2.dp)
             )
             if (item.mediaType == MediaType.VISUAL_NOVEL) {

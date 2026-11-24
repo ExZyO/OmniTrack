@@ -56,7 +56,8 @@ data class CalendarReleaseItem(
     val chapterLabel: String? = null,
     val isDateOnly: Boolean = false,
     val formatLabel: String = "ANIME",
-    val localMediaId: Long? = null
+    val localMediaId: Long? = null,
+    val fallbackCoverUrl: String? = null
 )
 
 /**
@@ -384,7 +385,7 @@ class ReleaseCalendarRepository(
                     if (!resp.isSuccessful) return@withMangaDexPacing emptyList()
                     val data = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
                         ?.get("data") as? JsonArray ?: return@withMangaDexPacing emptyList()
-                    data.mapNotNull { el ->
+                    val rawChapters = data.mapNotNull { el ->
                         val ch = el as? JsonObject ?: return@mapNotNull null
                         val chId = (ch["id"] as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
                         val attr = ch["attributes"] as? JsonObject ?: return@mapNotNull null
@@ -427,6 +428,48 @@ class ReleaseCalendarRepository(
                             formatLabel = "MangaDex"
                         )
                     }.distinctBy { "${it.mangadexId ?: it.title.lowercase()}_${it.chapterLabel}" }
+
+                    // MangaDex chapter?includes[]=cover_art does not populate manga cover_art relationships;
+                    // batch-fetch the manga covers directly for any chapter items missing coverUrl.
+                    val missingIds = rawChapters.filter { it.coverUrl.isBlank() && !it.mangadexId.isNullOrBlank() }
+                        .mapNotNull { it.mangadexId }
+                        .distinct()
+                    if (missingIds.isEmpty()) return@withMangaDexPacing rawChapters
+
+                    val coverMap = HashMap<String, String>()
+                    missingIds.chunked(40).forEach { chunk ->
+                        val idsQuery = chunk.joinToString("&") { "ids[]=$it" }
+                        val mangaReq = Request.Builder()
+                            .url("https://api.mangadex.org/manga?limit=100&$idsQuery&includes[]=cover_art")
+                            .header("User-Agent", "OmniTrack/1.0")
+                            .get()
+                            .build()
+                        runCatching {
+                            client.newCall(mangaReq).execute().use { mResp ->
+                                if (mResp.isSuccessful) {
+                                    val mArr = (json.parseToJsonElement(mResp.body?.string().orEmpty()) as? JsonObject)
+                                        ?.get("data") as? JsonArray ?: return@use
+                                    mArr.forEach { mEl ->
+                                        val mObj = mEl as? JsonObject ?: return@forEach
+                                        val mId = (mObj["id"] as? JsonPrimitive)?.contentOrNull ?: return@forEach
+                                        val mRels = mObj["relationships"] as? JsonArray ?: return@forEach
+                                        val fileName = (mRels.firstOrNull {
+                                            ((it as? JsonObject)?.get("type") as? JsonPrimitive)?.contentOrNull == "cover_art"
+                                        } as? JsonObject)?.get("attributes")?.let { it as? JsonObject }?.get("fileName")?.let {
+                                            (it as? JsonPrimitive)?.contentOrNull
+                                        }
+                                        if (!fileName.isNullOrBlank()) {
+                                            coverMap[mId] = "https://uploads.mangadex.org/covers/$mId/$fileName.512.jpg"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    rawChapters.map { item ->
+                        val resolved = item.mangadexId?.let { coverMap[it] }
+                        if (item.coverUrl.isBlank() && !resolved.isNullOrBlank()) item.copy(coverUrl = resolved) else item
+                    }
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
@@ -516,7 +559,8 @@ class ReleaseCalendarRepository(
                             val o = el as? JsonObject ?: return@mapIndexedNotNull null
                             val title = (o["title"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
                                 ?: return@mapIndexedNotNull null
-                            val img = (o["imageUrl"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                            val rawImg = (o["imageUrl"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+                            val img = if (rawImg.contains("nophoto", ignoreCase = true)) "" else rawImg
                             val day = today.plusDays((idx % 10).toLong())
                             CalendarReleaseItem(
                                 id = "gr_${key.removePrefix("Book:")}",
@@ -569,12 +613,16 @@ class ReleaseCalendarRepository(
                             val o = el as? JsonObject ?: return@forEachIndexed
                             val appId = (o["id"] as? JsonPrimitive)?.longOrNull ?: return@forEachIndexed
                             val name = (o["name"] as? JsonPrimitive)?.contentOrNull ?: return@forEachIndexed
+                            val fallbackCapsule = (o["large_capsule_image"] as? JsonPrimitive)?.contentOrNull
+                                ?: (o["header_image"] as? JsonPrimitive)?.contentOrNull
+                                ?: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/header.jpg"
                             val day = if (futureOffset) today.plusDays(((idx % 6) + 1).toLong()) else today
                             out.add(
                                 CalendarReleaseItem(
                                     id = "steam_${cat}_$appId",
                                     title = name,
                                     coverUrl = LosslessCoverMapper.toLosslessUrl("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/$appId/library_600x900_2x.jpg"),
+                                    fallbackCoverUrl = fallbackCapsule,
                                     mediaType = MediaType.GAME,
                                     episodeNumber = null,
                                     airingAtEpochSec = day.atTime(10, 0).atZone(zone).toEpochSecond(),

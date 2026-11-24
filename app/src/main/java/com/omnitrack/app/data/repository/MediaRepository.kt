@@ -357,6 +357,8 @@ class MediaRepository(
 
     fun getVisibleCategories(): Flow<List<CategoryEntity>> = categoryDao.getVisibleCategories().distinctUntilChanged()
 
+    fun getAllCategories(): Flow<List<CategoryEntity>> = categoryDao.getAllCategories().distinctUntilChanged()
+
     suspend fun insertMedia(item: MediaItemEntity): Long = mediaDao.insertMedia(item)
 
     suspend fun insertAllMedia(items: List<MediaItemEntity>) = mediaDao.insertAll(items)
@@ -386,6 +388,10 @@ class MediaRepository(
     suspend fun insertCategory(category: CategoryEntity): Long = categoryDao.insertCategory(category)
 
     suspend fun insertAllCategories(categories: List<CategoryEntity>) = categoryDao.insertAll(categories)
+
+    suspend fun updateCategory(category: CategoryEntity) = categoryDao.updateCategory(category)
+
+    suspend fun deleteCategory(category: CategoryEntity) = categoryDao.deleteCategory(category)
 
     fun getPendingSyncTasks(): Flow<List<SyncQueueEntity>> = syncQueueDao?.getPendingTasks() ?: emptyFlow()
 

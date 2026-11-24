@@ -153,7 +153,8 @@ fun SeasonEpisodesSection(
                     }
                     isEpisodeMultiSelect = false
                     selectedEpisodeNumbers = emptySet()
-                }
+                },
+                isInline = true
             )
         }
 

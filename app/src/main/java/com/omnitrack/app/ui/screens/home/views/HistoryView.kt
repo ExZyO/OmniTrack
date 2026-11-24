@@ -52,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -129,6 +130,7 @@ fun HistoryView(
     onBatchDeleteItems: (Collection<Long>) -> Unit = {},
     watchedTimestamps90d: List<Long> = emptyList(),
     onOpenHeatmap: () -> Unit = {},
+    onMultiSelectChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -147,6 +149,10 @@ fun HistoryView(
     var isMultiSelectMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isMultiSelectMode) {
+        onMultiSelectChanged(isMultiSelectMode)
+    }
 
     val activeHistoryMedia = remember(allMedia) {
         allMedia.filter { it.lastUpdated > 0L }
@@ -234,57 +240,6 @@ fun HistoryView(
     Column(
         modifier = Modifier.fillMaxSize()
     ) {
-        // Frameless Editorial Header + Streak / Multi-Select / Heatmap links
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "History",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary,
-                    letterSpacing = (-0.5).sp
-                )
-                Text(
-                    text = "${streakAndCount.first}d streak \u00B7 ${streakAndCount.second} logged today \u00B7 ${activeHistoryMedia.size} tracked",
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                IconButton(
-                    onClick = {
-                        isMultiSelectMode = !isMultiSelectMode
-                        if (!isMultiSelectMode) selectedIds = emptySet()
-                    },
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Checklist,
-                        contentDescription = "Select Multiple",
-                        tint = if (isMultiSelectMode) AccentGold else TextSecondary,
-                        modifier = Modifier.size(21.dp)
-                    )
-                }
-                IconButton(
-                    onClick = onOpenHeatmap,
-                    modifier = Modifier.size(38.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Map,
-                        contentDescription = "Activity Heatmap",
-                        tint = AccentGold,
-                        modifier = Modifier.size(21.dp)
-                    )
-                }
-            }
-        }
-
         if (isMultiSelectMode) {
             MultiSelectTopBar(
                 selectedCount = selectedIds.size,
@@ -300,6 +255,56 @@ fun HistoryView(
                     selectedIds = emptySet()
                 }
             )
+        } else {
+            // Frameless Editorial Header + Streak / Multi-Select / Heatmap links
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "History",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary,
+                        letterSpacing = (-0.5).sp
+                    )
+                    Text(
+                        text = "${streakAndCount.first}d streak \u00B7 ${streakAndCount.second} logged today \u00B7 ${activeHistoryMedia.size} tracked",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(
+                        onClick = {
+                            isMultiSelectMode = true
+                        },
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Checklist,
+                            contentDescription = "Select Multiple",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onOpenHeatmap,
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Map,
+                            contentDescription = "Activity Heatmap",
+                            tint = AccentGold,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // Clean Flat Inline Search (Option A)
@@ -509,7 +514,8 @@ fun HistoryView(
                             },
                             onLongClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                actionTarget = item
+                                isMultiSelectMode = true
+                                selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
                             }
                         )
                         if (index < bucketItems.lastIndex) {
@@ -562,10 +568,16 @@ fun HistoryView(
                     showBatchDeleteConfirm = true
                 }
             },
+            onOpenDetails = {
+                val singleId = selectedIds.firstOrNull()
+                if (singleId != null && selectedIds.size == 1) {
+                    isMultiSelectMode = false
+                    selectedIds = emptySet()
+                    onItemClick(singleId)
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 14.dp)
-                .padding(bottom = 96.dp)
         )
     }
     }

@@ -4,10 +4,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,17 +24,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -54,8 +57,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -64,26 +70,35 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.cache.CoverCache
+import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
-import com.omnitrack.app.ui.theme.DarkSurface
-import com.omnitrack.app.ui.theme.DarkSurfaceCard
-import com.omnitrack.app.ui.theme.DarkSurfaceElevated
-import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
+import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * Option A Frameless AMOLED Manual Entry / Custom Editor Sheet:
+ * - Wrapped FlowRow displaying all 10 media categories simultaneously
+ * - Smart Dual Creator fields tailored per media vertical (Mangaka, Original Author, Director, Studio, Publisher, Fandom)
+ * - Custom Library Categories multi-select chips with inline "+ New" quick creation
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CustomEntryEditorSheet(
     existingItem: MediaItemEntity? = null,
     initialTitle: String = "",
     initialMediaType: MediaType = MediaType.NOVEL,
+    availableCategories: List<CategoryEntity> = emptyList(),
+    initialCategoryIds: Set<Long> = emptySet(),
+    onCreateCategory: ((String, (Long) -> Unit) -> Unit)? = null,
+    onSaveWithCategories: ((MediaItemEntity, Set<Long>) -> Unit)? = null,
     onSave: (MediaItemEntity) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -124,10 +139,13 @@ fun CustomEntryEditorSheet(
     var nativeTitle by remember(existingItem?.id) {
         mutableStateOf(existingItem?.nativeTitle.orEmpty())
     }
-    var creator by remember(existingItem?.id) {
+    var primaryCreator by remember(existingItem?.id) {
+        mutableStateOf(existingItem?.bookAuthor.orEmpty())
+    }
+    var secondaryCreator by remember(existingItem?.id) {
         mutableStateOf(
-            existingItem?.bookAuthor?.takeIf { it.isNotBlank() }
-                ?: existingItem?.comicPublisher?.takeIf { it.isNotBlank() }
+            existingItem?.comicPublisher?.takeIf { it.isNotBlank() }
+                ?: existingItem?.fanficPrimaryFandom?.takeIf { it.isNotBlank() }
                 ?: existingItem?.studioOrNetwork.orEmpty()
         )
     }
@@ -168,6 +186,12 @@ fun CustomEntryEditorSheet(
     var categoryNames by remember(existingItem?.id) {
         mutableStateOf(existingItem?.categoryNames.orEmpty())
     }
+    var selectedCustomCatIds by remember(existingItem?.id, initialCategoryIds) {
+        mutableStateOf(initialCategoryIds)
+    }
+    var showNewCatInline by remember { mutableStateOf(false) }
+    var newCatNameDraft by remember { mutableStateOf("") }
+
     var synopsis by remember(existingItem?.id) {
         mutableStateOf(existingItem?.synopsis.orEmpty())
     }
@@ -209,17 +233,26 @@ fun CustomEntryEditorSheet(
         }
     }
 
-    val creatorFieldLabel = when (selectedType) {
-        MediaType.BOOK, MediaType.NOVEL -> "Author"
-        MediaType.COMIC -> "Publisher / Writer"
-        MediaType.GAME, MediaType.VISUAL_NOVEL -> "Developer / Studio"
-        else -> "Studio / Network / Director"
+    val (primaryCreatorLabel, secondaryCreatorLabel) = when (selectedType) {
+        MediaType.MANGA -> "Mangaka / Story Author" to "Artist / Publisher"
+        MediaType.ANIME -> "Original Author / Mangaka" to "Animation Studio"
+        MediaType.SHOW -> "Creator / Showrunner" to "Network / Studio"
+        MediaType.MOVIE -> "Director / Writer" to "Studio / Distributor"
+        MediaType.BOOK -> "Author" to "Publisher / Narrator"
+        MediaType.NOVEL -> "Author / Web Novel Writer" to "Publisher / Platform"
+        MediaType.FANFICTION -> "Author" to "Primary Fandom"
+        MediaType.COMIC -> "Writer / Artist" to "Publisher"
+        MediaType.GAME -> "Developer / Director" to "Publisher"
+        MediaType.VISUAL_NOVEL -> "Scenario Writer / Dev" to "Publisher"
+        else -> "Creator / Author" to "Studio / Publisher"
     }
     val formatPlaceholder = when (selectedType) {
         MediaType.NOVEL -> "e.g. WEB_NOVEL, LIGHT_NOVEL"
         MediaType.BOOK -> "e.g. HARDCOVER, EBOOK, AUDIOBOOK"
         MediaType.COMIC -> "e.g. Issue, TPB, Graphic Novel"
         MediaType.GAME -> "e.g. PC, PS5, Switch"
+        MediaType.MANGA -> "e.g. Manga, Manhwa, Manhua"
+        MediaType.FANFICTION -> "e.g. AO3, FFN, SpaceBattles"
         else -> "e.g. TV, OVA, Film"
     }
 
@@ -234,7 +267,7 @@ fun CustomEntryEditorSheet(
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = AccentGold,
-        unfocusedBorderColor = GlassBorder,
+        unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
         focusedTextColor = TextPrimary,
         unfocusedTextColor = TextPrimary,
         focusedLabelColor = AccentGold,
@@ -245,17 +278,30 @@ fun CustomEntryEditorSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = DarkSurface,
-        contentColor = TextPrimary
+        containerColor = AmoledBlack,
+        contentColor = TextPrimary,
+        dragHandle = null
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.92f)
+                .background(AmoledBlack)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 16.dp)
+                .padding(top = 12.dp, bottom = 14.dp)
         ) {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .width(38.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.22f))
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -263,14 +309,14 @@ fun CustomEntryEditorSheet(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (existingItem == null) "Create Custom Entry" else "Edit Entry Details",
+                        text = if (existingItem == null) "Create Manual Entry" else "Edit Entry Details",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = TextPrimary
                     )
                     Text(
-                        text = if (existingItem == null) "Add anything manually — never overwritten by scrapers"
-                        else "Customize metadata, covers, progress & manual protection",
+                        text = if (existingItem == null) "All categories supported \u00B7 custom creators & metadata"
+                        else "Customize metadata, covers, categories & manual lock",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
@@ -280,52 +326,54 @@ fun CustomEntryEditorSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Category Selection
+                // Wrapped Category FlowRow (All 10 verticals visible at once!)
                 Text(
-                    text = "CATEGORY",
-                    fontSize = 11.sp,
+                    text = "MEDIA CATEGORY",
+                    fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextSecondary,
                     letterSpacing = 0.9.sp
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     selectableTypes.forEach { type ->
                         val selected = selectedType == type
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (selected) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (selected) AccentGold else GlassBorder, RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                 .clickable { selectedType = type }
-                                .padding(horizontal = 12.dp, vertical = 7.dp)
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = type.displayName,
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) AmoledBlack else TextPrimary
+                                color = if (selected) AccentGold else TextSecondary
                             )
                         }
                     }
                 }
 
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
                 // Cover + Banner Live Artwork Strip
                 Text(
                     text = "ARTWORK",
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextSecondary,
                     letterSpacing = 0.9.sp
@@ -337,11 +385,10 @@ fun CustomEntryEditorSheet(
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(72.dp)
+                            .width(70.dp)
                             .aspectRatio(2f / 3f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkSurfaceCard)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
                             .clickable {
                                 coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
@@ -361,37 +408,41 @@ fun CustomEntryEditorSheet(
 
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(
-                                onClick = {
-                                    coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = DarkSurfaceElevated,
-                                    contentColor = AccentGold
-                                ),
-                                modifier = Modifier.weight(1f)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .clickable {
+                                        coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
-                                Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Cover File", fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(Icons.Default.Folder, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("Cover File", fontSize = 11.5.sp, color = TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
-                            FilledTonalButton(
-                                onClick = {
-                                    bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = DarkSurfaceElevated,
-                                    contentColor = AccentGold
-                                ),
-                                modifier = Modifier.weight(1f)
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .clickable {
+                                        bannerPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
                             ) {
-                                Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
+                                Icon(Icons.Default.Image, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(5.dp))
                                 Text(
                                     text = if (previewBannerModel != null) "Change Banner" else "Banner File",
                                     fontSize = 11.5.sp,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -436,14 +487,44 @@ fun CustomEntryEditorSheet(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // Smart Dual Creator Fields (e.g. Mangaka + Artist/Publisher, Original Author + Studio, Director + Studio)
+                Text(
+                    text = "CREATORS & STUDIO",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.9.sp
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedTextField(
-                        value = creator,
-                        onValueChange = { creator = it },
-                        label = { Text(creatorFieldLabel) },
+                        value = primaryCreator,
+                        onValueChange = { primaryCreator = it },
+                        label = { Text(primaryCreatorLabel) },
+                        singleLine = true,
+                        colors = fieldColors,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = secondaryCreator,
+                        onValueChange = { secondaryCreator = it },
+                        label = { Text(secondaryCreatorLabel) },
+                        singleLine = true,
+                        colors = fieldColors,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = formatSubtype,
+                        onValueChange = { formatSubtype = it },
+                        label = { Text("Format ($formatPlaceholder)") },
                         singleLine = true,
                         colors = fieldColors,
                         modifier = Modifier.weight(1.4f)
@@ -455,31 +536,24 @@ fun CustomEntryEditorSheet(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         colors = fieldColors,
-                        modifier = Modifier.weight(0.8f)
+                        modifier = Modifier.weight(0.75f)
                     )
                 }
 
-                OutlinedTextField(
-                    value = formatSubtype,
-                    onValueChange = { formatSubtype = it },
-                    label = { Text("Format / Platform ($formatPlaceholder)") },
-                    singleLine = true,
-                    colors = fieldColors,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 // Tracking Status
                 Text(
                     text = "TRACKING STATUS",
-                    fontSize = 11.sp,
+                    fontSize = 10.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextSecondary,
                     letterSpacing = 0.9.sp
                 )
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     listOf(
                         TrackingStatus.IN_PROGRESS,
@@ -491,17 +565,16 @@ fun CustomEntryEditorSheet(
                         val selected = selectedStatus == st
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (selected) AccentGold else DarkSurfaceElevated)
-                                .border(1.dp, if (selected) AccentGold else GlassBorder, RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                 .clickable { selectedStatus = st }
-                                .padding(horizontal = 11.dp, vertical = 6.dp)
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = st.displayName,
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) AmoledBlack else TextPrimary
+                                color = if (selected) AccentGold else TextSecondary
                             )
                         }
                     }
@@ -541,6 +614,106 @@ fun CustomEntryEditorSheet(
                     )
                 }
 
+                // Custom Library Categories Multi-Select Section
+                if (availableCategories.isNotEmpty() || onCreateCategory != null) {
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                    Text(
+                        text = "LIBRARY CATEGORIES",
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        letterSpacing = 0.9.sp
+                    )
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        availableCategories.forEach { cat ->
+                            val picked = cat.id in selectedCustomCatIds
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (picked) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                    .clickable {
+                                        selectedCustomCatIds = if (picked) selectedCustomCatIds - cat.id else selectedCustomCatIds + cat.id
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (picked) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
+                                }
+                                Text(
+                                    text = cat.name,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (picked) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (picked) AccentGold else TextSecondary
+                                )
+                            }
+                        }
+                        if (onCreateCategory != null) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .clickable { showNewCatInline = !showNewCatInline }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(13.dp))
+                                Text("New", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentGold)
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = showNewCatInline && onCreateCategory != null) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                BasicTextField(
+                                    value = newCatNameDraft,
+                                    onValueChange = { newCatNameDraft = it },
+                                    singleLine = true,
+                                    textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
+                                    cursorBrush = SolidColor(AccentGold),
+                                    decorationBox = { inner ->
+                                        if (newCatNameDraft.isEmpty()) Text("New category name...", color = TextMuted, fontSize = 13.5.sp)
+                                        inner()
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(vertical = 6.dp)
+                                )
+                                Text(
+                                    text = "Add",
+                                    color = if (newCatNameDraft.trim().isNotEmpty()) AccentGold else TextMuted,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .clickable(enabled = newCatNameDraft.trim().isNotEmpty()) {
+                                            val name = newCatNameDraft.trim()
+                                            onCreateCategory?.invoke(name) { createdId ->
+                                                if (createdId > 0L) {
+                                                    selectedCustomCatIds = selectedCustomCatIds + createdId
+                                                }
+                                            }
+                                            newCatNameDraft = ""
+                                            showNewCatInline = false
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                            HorizontalDivider(color = AccentGold.copy(alpha = 0.45f), thickness = 0.7.dp)
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = categoryNames,
                     onValueChange = { categoryNames = it },
@@ -564,11 +737,8 @@ fun CustomEntryEditorSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkSurfaceElevated)
-                            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
                             .clickable { manualProtected = !manualProtected }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -589,10 +759,10 @@ fun CustomEntryEditorSheet(
                             checked = manualProtected,
                             onCheckedChange = { manualProtected = it },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = AmoledBlack,
+                                checkedThumbColor = OnAccentColor,
                                 checkedTrackColor = AccentGold,
                                 uncheckedThumbColor = TextSecondary,
-                                uncheckedTrackColor = DarkSurface
+                                uncheckedTrackColor = Color.White.copy(alpha = 0.12f)
                             )
                         )
                     }
@@ -607,7 +777,8 @@ fun CustomEntryEditorSheet(
                     val curProg = currentProgressStr.trim().toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
                     val totProg = totalProgressStr.trim().toDoubleOrNull()?.takeIf { it > 0.0 }
                     val score = userRatingStr.trim().toFloatOrNull()?.coerceIn(0f, 10f)?.takeIf { it > 0f }
-                    val creatorTrim = creator.trim().takeIf { it.isNotBlank() }
+                    val primaryTrim = primaryCreator.trim().takeIf { it.isNotBlank() }
+                    val secondaryTrim = secondaryCreator.trim().takeIf { it.isNotBlank() }
                     val fmtTrim = formatSubtype.trim().takeIf { it.isNotBlank() }
                     val base = existingItem ?: MediaItemEntity(
                         title = title.trim(),
@@ -633,29 +804,34 @@ fun CustomEntryEditorSheet(
                         userRating = score,
                         releaseYear = releaseYear.trim().takeIf { it.isNotBlank() },
                         categoryNames = categoryNames.trim(),
-                        bookAuthor = if (selectedType == MediaType.BOOK || selectedType == MediaType.NOVEL) creatorTrim else base.bookAuthor,
-                        comicPublisher = if (selectedType == MediaType.COMIC) creatorTrim else base.comicPublisher,
-                        studioOrNetwork = if (selectedType !in setOf(MediaType.BOOK, MediaType.NOVEL, MediaType.COMIC)) creatorTrim else base.studioOrNetwork,
+                        bookAuthor = primaryTrim,
+                        comicPublisher = if (selectedType == MediaType.COMIC) secondaryTrim else base.comicPublisher,
+                        fanficPrimaryFandom = if (selectedType == MediaType.FANFICTION) secondaryTrim else base.fanficPrimaryFandom,
+                        studioOrNetwork = if (selectedType != MediaType.COMIC && selectedType != MediaType.FANFICTION) secondaryTrim else base.studioOrNetwork,
                         bookFormat = if (selectedType == MediaType.BOOK) fmtTrim else base.bookFormat,
                         comicFormat = if (selectedType == MediaType.COMIC) fmtTrim else base.comicFormat,
                         platform = if (selectedType != MediaType.BOOK && selectedType != MediaType.COMIC) fmtTrim else base.platform,
                         isCustomEntry = manualProtected,
                         lastUpdated = System.currentTimeMillis()
                     )
-                    onSave(updated)
+                    if (onSaveWithCategories != null) {
+                        onSaveWithCategories(updated, selectedCustomCatIds)
+                    } else {
+                        onSave(updated)
+                    }
                 },
                 enabled = canSave,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(10.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AccentGold,
-                    contentColor = AmoledBlack
+                    contentColor = OnAccentColor
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
             ) {
                 Text(
-                    text = if (existingItem == null) "Save Custom Entry" else "Save Changes",
+                    text = if (existingItem == null) "Save Manual Entry" else "Save Changes",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold
                 )

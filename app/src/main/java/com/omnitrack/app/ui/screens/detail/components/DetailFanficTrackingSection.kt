@@ -880,7 +880,8 @@ fun DetailFanficTrackingSection(
                             targets.forEach { ch -> onToggleChapterRead(ch) }
                             isChapterMultiSelect = false
                             selectedChapterIds = emptySet()
-                        }
+                        },
+                        isInline = true
                     )
                 }
 

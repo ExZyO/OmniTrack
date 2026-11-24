@@ -176,7 +176,11 @@ class EnrichmentRepository(
 
         if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME) {
             if (item.anilistId != null && item.anilistId > 0) {
-                effectiveTmdbId = fetchAniZipTmdbId(item.anilistId)
+                val azMap = fetchAniZipMapping(item.anilistId)
+                if (azMap?.tmdbId != null) {
+                    effectiveTmdbId = azMap.tmdbId
+                    isMovie = azMap.isMovie
+                }
             }
             if (effectiveTmdbId == null && item.title.isNotBlank()) {
                 val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
@@ -185,6 +189,9 @@ class EnrichmentRepository(
                     isMovie = animeTmdb.second
                 }
             }
+        } else if (item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0) {
+            val azMap = fetchAniZipMapping(item.anilistId)
+            if (azMap != null && azMap.isMovie) isMovie = true
         }
 
         var clearart: String? = null
@@ -229,7 +236,12 @@ class EnrichmentRepository(
         // Auto-resolve TMDb ID for Anime if missing via AniZip or TMDb search
         if (effectiveTmdbId == null && item.mediaType == MediaType.ANIME) {
             if (item.anilistId != null && item.anilistId > 0) {
-                effectiveTmdbId = fetchAniZipTmdbId(item.anilistId)
+                val azMap = fetchAniZipMapping(item.anilistId)
+                if (azMap?.tmdbId != null) {
+                    effectiveTmdbId = azMap.tmdbId
+                    isMovie = azMap.isMovie
+                    isShow = !azMap.isMovie
+                }
             }
             if (effectiveTmdbId == null && item.title.isNotBlank()) {
                 val animeTmdb = searchTmdbForAnime(item.title, effectiveTmdbKey, item.nativeTitle)
@@ -238,6 +250,12 @@ class EnrichmentRepository(
                     isMovie = animeTmdb.second
                     isShow = !animeTmdb.second
                 }
+            }
+        } else if (item.mediaType == MediaType.ANIME && item.anilistId != null && item.anilistId > 0) {
+            val azMap = fetchAniZipMapping(item.anilistId)
+            if (azMap != null && azMap.isMovie) {
+                isMovie = true
+                isShow = false
             }
         }
 
@@ -517,33 +535,41 @@ class EnrichmentRepository(
                 )
 
                 for (searchQ in searchTitles) {
-                    // 1. Search TV (most anime are series)
+                    // 1. Search TV & Movie — prefer animated (genre 16) matches so anime movies never bind to unrelated live-action TV
                     val tvUrl = "https://api.themoviedb.org/3/search/tv?api_key=$apiKey&query=${URLEncoder.encode(searchQ, "UTF-8")}"
                     val tvReq = Request.Builder().url(tvUrl).get().build()
-                    val tvId = client.newCall(tvReq).execute().use { resp ->
+                    val bestAnimatedTvId = client.newCall(tvReq).execute().use { resp ->
                         if (!resp.isSuccessful) null
                         else {
                             val body = resp.body?.string() ?: return@use null
-                            val root = json.parseToJsonElement(body).jsonObject
-                            val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
-                            first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                            val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray ?: return@use null
+                            val candidates = results.mapNotNull { it as? JsonObject }
+                            val animated = candidates.firstOrNull { cand ->
+                                val gIds = cand["genre_ids"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }.orEmpty()
+                                16 in gIds
+                            }
+                            animated?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
                         }
                     }
-                    if (tvId != null) return@withTmdbPacing Pair(tvId, false) // false = isMovie (is TV)
+                    if (bestAnimatedTvId != null) return@withTmdbPacing Pair(bestAnimatedTvId, false)
 
-                    // 2. Search Movie (for anime movies)
+                    // 2. Search Movie (for anime movies) — prefer animated movie matches
                     val movieUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=${URLEncoder.encode(searchQ, "UTF-8")}"
                     val movieReq = Request.Builder().url(movieUrl).get().build()
-                    val movieId = client.newCall(movieReq).execute().use { resp ->
+                    val bestAnimatedMovieId = client.newCall(movieReq).execute().use { resp ->
                         if (!resp.isSuccessful) null
                         else {
                             val body = resp.body?.string() ?: return@use null
-                            val root = json.parseToJsonElement(body).jsonObject
-                            val first = root["results"]?.jsonArray?.firstOrNull()?.jsonObject
-                            first?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
+                            val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray ?: return@use null
+                            val candidates = results.mapNotNull { it as? JsonObject }
+                            val animated = candidates.firstOrNull { cand ->
+                                val gIds = cand["genre_ids"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull?.toIntOrNull() }.orEmpty()
+                                16 in gIds
+                            } ?: candidates.firstOrNull()
+                            animated?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
                         }
                     }
-                    if (movieId != null) return@withTmdbPacing Pair(movieId, true)
+                    if (bestAnimatedMovieId != null) return@withTmdbPacing Pair(bestAnimatedMovieId, true)
                 }
                 null
             } catch (_: Exception) {
@@ -1286,6 +1312,11 @@ class EnrichmentRepository(
         imdbId: String? = null,
         anilistId: Long? = null
     ): List<com.omnitrack.app.data.model.MediaSeason> {
+        if (anilistId != null && anilistId > 0) {
+            val azMap = fetchAniZipMapping(anilistId)
+            if (azMap?.isMovie == true) return emptyList()
+            if (!isTmdbTvCompatibleWithAnime(tmdbId, apiKey, showTitle)) return emptyList()
+        }
         val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
         val tmdbSeasons = rawSeasons.mapNotNull { meta ->
             if (meta.seasonNumber == 0 && meta.episodeCount <= 0) return@mapNotNull null
@@ -1441,6 +1472,40 @@ class EnrichmentRepository(
             .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
     }
 
+    private val tmdbTvAnimeCompatCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    private suspend fun isTmdbTvCompatibleWithAnime(tmdbId: Long, apiKey: String, animeTitle: String?): Boolean {
+        val key = "$tmdbId:${animeTitle?.lowercase()?.trim().orEmpty()}"
+        tmdbTvAnimeCompatCache[key]?.let { return it }
+        val result = NetworkPacer.withTmdbPacing {
+            try {
+                val url = "https://api.themoviedb.org/3/tv/$tmdbId?api_key=$apiKey"
+                val req = Request.Builder().url(url).get().build()
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withTmdbPacing false
+                    val body = resp.body?.string() ?: return@withTmdbPacing false
+                    val root = json.parseToJsonElement(body).jsonObject
+                    val genreIds = root["genres"]?.jsonArray?.mapNotNull {
+                        it.jsonObject["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                    }.orEmpty()
+                    if (16 in genreIds) return@withTmdbPacing true
+                    val tvName = root["name"].cleanString().orEmpty().lowercase()
+                    val tvOrig = root["original_name"].cleanString().orEmpty().lowercase()
+                    val normQuery = animeTitle?.lowercase()?.replace(Regex("[^a-z0-9 ]"), " ")?.trim().orEmpty()
+                    val normTokens = normQuery.split(Regex("\\s+")).filter { it.length >= 3 }
+                    val titleMatches = normTokens.isNotEmpty() && normTokens.all { tok ->
+                        tvName.contains(tok) || tvOrig.contains(tok)
+                    }
+                    titleMatches && genreIds.isEmpty()
+                }
+            } catch (_: Exception) {
+                true
+            }
+        }
+        tmdbTvAnimeCompatCache[key] = result
+        return result
+    }
+
     suspend fun fetchTvSeasonEpisodes(
         tmdbId: Long,
         seasonNumber: Int,
@@ -1449,6 +1514,11 @@ class EnrichmentRepository(
         showTitle: String? = null,
         anilistId: Long? = null
     ): List<com.omnitrack.app.data.model.MediaEpisode> {
+        if (anilistId != null && anilistId > 0) {
+            val azMap = fetchAniZipMapping(anilistId)
+            if (azMap?.isMovie == true) return emptyList()
+            if (!isTmdbTvCompatibleWithAnime(tmdbId, apiKey, showTitle)) return emptyList()
+        }
         val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
 
         // Sub-Series Detection (e.g. "BLEACH: Thousand-Year Blood War" cours 1..4 inside TMDb Season 2)
@@ -5528,6 +5598,38 @@ class EnrichmentRepository(
                 AppLogger.d("EnrichmentRepository", "searchAniListForAnime failed for $title: ${e.message}")
                 null
             }
+        }
+    }
+
+    data class AniZipMappingInfo(
+        val tmdbId: Long?,
+        val isMovie: Boolean,
+        val imdbId: String?,
+        val tvdbId: Long?,
+        val type: String?,
+        val episodeCount: Int
+    )
+
+    suspend fun fetchAniZipMapping(anilistId: Long): AniZipMappingInfo? = withContext(Dispatchers.IO) {
+        try {
+            val root = fetchAniZipRoot(anilistId) ?: return@withContext null
+            val mappings = root["mappings"]?.jsonObject ?: return@withContext null
+            val type = mappings["type"].cleanString()
+            val episodeCount = mappings["episodeCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                ?: (root["episodeCount"]?.jsonPrimitive?.contentOrNull?.toIntOrNull())
+                ?: (root["episodes"]?.jsonObject?.size ?: 0)
+            AniZipMappingInfo(
+                tmdbId = mappings["themoviedb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+                isMovie = type.equals("MOVIE", ignoreCase = true),
+                imdbId = mappings["imdb_id"].cleanString(),
+                tvdbId = mappings["thetvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                    ?: mappings["tvdb_id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+                type = type,
+                episodeCount = episodeCount
+            )
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
         }
     }
 

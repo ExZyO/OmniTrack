@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.db.dto.MediaCardSummary
+import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
@@ -104,6 +105,10 @@ class HomeViewModel(
 
     val watchedTimestamps90d: StateFlow<List<Long>> = repository
         .getWatchedTimestampsSince(System.currentTimeMillis() - 90L * 24L * 60L * 60L * 1000L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allCategories: StateFlow<List<CategoryEntity>> = repository
+        .getAllCategories()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     var discoverLastDebounceQuery: String? = null
     var discoverLastExecutedQuery: String? = null
@@ -476,7 +481,16 @@ class HomeViewModel(
     fun addMediaFromSearch(searchResult: SearchResultItem, status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK) {
         viewModelScope.launch {
             val entity = searchResult.toMediaItemEntity(status)
-            repository.insertMedia(entity)
+            val newId = repository.insertMedia(entity)
+            if (newId > 0L) {
+                runCatching {
+                    val pref = com.omnitrack.app.OmniTrackApplication.instance.preferenceManager
+                    val defCat = pref.chimanewLibrarySettings.firstOrNull()?.defaultCategoryId
+                    if (defCat != null && defCat > 0L) {
+                        pref.setMediaCategories(newId, setOf(defCat))
+                    }
+                }
+            }
             if (coverCache != null && diskCache != null) {
                 coverCache.promoteFromDiskCache(entity.coverUrl, diskCache)
             }
@@ -857,7 +871,52 @@ class HomeViewModel(
         }
     }
 
-    fun createCustomMediaEntry(entity: MediaItemEntity, onCreated: (Long) -> Unit = {}) {
+    fun createCategory(name: String, onCreated: (Long) -> Unit = {}) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            val nextOrder = (allCategories.value.maxOfOrNull { it.orderIndex } ?: -1) + 1
+            val insertedId = repository.insertCategory(
+                CategoryEntity(name = trimmed, orderIndex = nextOrder, isVisible = true)
+            )
+            onCreated(insertedId)
+        }
+    }
+
+    fun renameCategory(category: CategoryEntity, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            repository.updateCategory(category.copy(name = trimmed))
+        }
+    }
+
+    fun toggleCategoryVisibility(category: CategoryEntity) {
+        viewModelScope.launch {
+            repository.updateCategory(category.copy(isVisible = !category.isVisible))
+        }
+    }
+
+    fun reorderCategories(ordered: List<CategoryEntity>) {
+        viewModelScope.launch {
+            val updated = ordered.mapIndexed { idx, cat -> cat.copy(orderIndex = idx) }
+            repository.insertAllCategories(updated)
+        }
+    }
+
+    fun deleteCategory(category: CategoryEntity, prefManager: PreferenceManager) {
+        viewModelScope.launch {
+            repository.deleteCategory(category)
+            prefManager.removeCategoryFromAllMedia(category.id)
+        }
+    }
+
+    fun createCustomMediaEntry(
+        entity: MediaItemEntity,
+        categoryIds: Set<Long> = emptySet(),
+        prefManager: PreferenceManager? = null,
+        onCreated: (Long) -> Unit = {}
+    ) {
         viewModelScope.launch {
             val now = System.currentTimeMillis()
             val prepared = entity.copy(
@@ -865,6 +924,17 @@ class HomeViewModel(
                 lastUpdated = now
             )
             val insertedId = repository.insertMedia(prepared)
+            val pref = prefManager ?: runCatching { com.omnitrack.app.OmniTrackApplication.instance.preferenceManager }.getOrNull()
+            if (insertedId > 0L && pref != null) {
+                val targetCats = if (categoryIds.isNotEmpty()) {
+                    categoryIds
+                } else {
+                    pref.chimanewLibrarySettings.firstOrNull()?.defaultCategoryId?.let { setOf(it) } ?: emptySet()
+                }
+                if (targetCats.isNotEmpty()) {
+                    pref.setMediaCategories(insertedId, targetCats)
+                }
+            }
             if (coverCache != null && diskCache != null && prepared.coverUrl.startsWith("http")) {
                 coverCache.promoteFromDiskCache(prepared.coverUrl, diskCache)
             }

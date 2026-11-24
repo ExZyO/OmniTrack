@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
@@ -98,6 +99,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
+import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.ComicDetailMeta
 import com.omnitrack.app.data.model.ComicFormat
@@ -247,13 +249,17 @@ private sealed class DetailNavStep {
 fun DetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
+    onSearchInDiscover: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val prefManager = remember(context) {
-        (context.applicationContext as com.omnitrack.app.OmniTrackApplication).preferenceManager
+    val app = remember(context) {
+        context.applicationContext as com.omnitrack.app.OmniTrackApplication
     }
+    val prefManager = app.preferenceManager
+    val allCategories by app.repository.getAllCategories().collectAsState(initial = emptyList())
+    val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
     val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
@@ -817,6 +823,8 @@ fun DetailScreen(
                                 bookDetailMeta = uiState.bookDetailMeta,
                                 comicDetailMeta = uiState.comicDetailMeta,
                                 onCoverClick = { showArtworkPicker = true },
+                                onToggleTitle = { viewModel.togglePreferredTitle() },
+                                onSearchInDiscover = onSearchInDiscover,
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = { showProgressEditSheet = true },
                                 onEditStatus = { showStatusPickerSheet = true },
@@ -838,6 +846,7 @@ fun DetailScreen(
                                 bookDetailMeta = uiState.bookDetailMeta,
                                 comicDetailMeta = uiState.comicDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
+                                onSearchInDiscover = onSearchInDiscover,
                                 onOptionsClick = { showOptionsMenu = true },
                                 onEditProgress = {
                                     if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
@@ -865,6 +874,7 @@ fun DetailScreen(
                                 bookDetailMeta = uiState.bookDetailMeta,
                                 comicDetailMeta = uiState.comicDetailMeta,
                                 onToggleTitle = { viewModel.togglePreferredTitle() },
+                                onSearchInDiscover = onSearchInDiscover,
                                 onCoverClick = { showArtworkPicker = true },
                                 onCoverLoaded = { url ->
                                     if (coverCache != null) {
@@ -1763,6 +1773,10 @@ fun DetailScreen(
                     presentationSettings = presentationSettings,
                     isCustomEntry = item.isCustomEntry,
                     onDismiss = { showOptionsMenu = false },
+                    onToggleTitleLanguage = {
+                        showOptionsMenu = false
+                        viewModel.togglePreferredTitle()
+                    },
                     onEditDetails = {
                         showOptionsMenu = false
                         showEditEntrySheet = true
@@ -1797,6 +1811,27 @@ fun DetailScreen(
             if (showEditEntrySheet) {
                 CustomEntryEditorSheet(
                     existingItem = item,
+                    availableCategories = allCategories,
+                    initialCategoryIds = categoryAssignments[item.id].orEmpty(),
+                    onCreateCategory = { name, onCreated ->
+                        val trimmed = name.trim()
+                        if (trimmed.isNotEmpty()) {
+                            coroutineScope.launch {
+                                val nextOrder = (allCategories.maxOfOrNull { it.orderIndex } ?: -1) + 1
+                                val id = app.repository.insertCategory(
+                                    CategoryEntity(name = trimmed, orderIndex = nextOrder, isVisible = true)
+                                )
+                                if (id > 0L) onCreated(id)
+                            }
+                        }
+                    },
+                    onSaveWithCategories = { updated, selectedCatIds ->
+                        showEditEntrySheet = false
+                        viewModel.updateCustomEntryDetails(updated)
+                        coroutineScope.launch {
+                            prefManager.setMediaCategories(item.id, selectedCatIds)
+                        }
+                    },
                     onSave = { updated ->
                         showEditEntrySheet = false
                         viewModel.updateCustomEntryDetails(updated)
@@ -2821,6 +2856,7 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailHeroHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
@@ -2836,6 +2872,7 @@ private fun DetailHeroHeaderSection(
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
+    onSearchInDiscover: (String) -> Unit = {},
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
@@ -2870,8 +2907,7 @@ private fun DetailHeroHeaderSection(
                         .graphicsLayer {
                             val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                             val fy = item.bannerFocalY.coerceIn(-1f, 1f)
-                            val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
-                            val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                            val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
                             scaleX = effZoom
                             scaleY = effZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
@@ -2897,8 +2933,7 @@ private fun DetailHeroHeaderSection(
                         .graphicsLayer {
                             val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                             val fy = item.bannerFocalY.coerceIn(-1f, 1f)
-                            val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
-                            val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                            val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
                             scaleX = effZoom
                             scaleY = effZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
@@ -2943,7 +2978,10 @@ private fun DetailHeroHeaderSection(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = onToggleTitle != null) { onToggleTitle?.invoke() },
+                        .combinedClickable(
+                            onClick = { onSearchInDiscover(item.title) },
+                            onLongClick = { onToggleTitle?.invoke() }
+                        ),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     if (hasClearart) {
@@ -2980,6 +3018,16 @@ private fun DetailHeroHeaderSection(
                         text = item.nativeTitle,
                         color = Color.White.copy(alpha = 0.85f),
                         fontSize = 12.5.sp
+                    )
+                }
+                if (!item.bookAuthor.isNullOrBlank() && item.mediaType !in setOf(MediaType.BOOK, MediaType.FANFICTION)) {
+                    Text(
+                        text = "by ${item.bookAuthor}",
+                        color = AccentGold.copy(alpha = 0.92f),
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Row(
@@ -3071,6 +3119,7 @@ private fun DetailHeroHeaderSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailBookEditorialHeroSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
@@ -3078,6 +3127,8 @@ private fun DetailBookEditorialHeroSection(
     bookDetailMeta: BookDetailMeta,
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onCoverClick: () -> Unit,
+    onToggleTitle: (() -> Unit)? = null,
+    onSearchInDiscover: (String) -> Unit = {},
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
@@ -3168,7 +3219,13 @@ private fun DetailBookEditorialHeroSection(
                     fontSize = 23.sp,
                     fontWeight = FontWeight.Black,
                     lineHeight = 28.sp,
-                    maxLines = 3
+                    maxLines = 3,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = { onSearchInDiscover(item.title) },
+                            onLongClick = { onToggleTitle?.invoke() }
+                        )
                 )
                 val creditSub = when (item.mediaType) {
                     MediaType.COMIC -> comicDetailMeta.publisher ?: item.comicPublisher ?: item.bookAuthor
@@ -3241,6 +3298,7 @@ private fun DetailBookEditorialHeroSection(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DetailClassicHeaderSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
@@ -3256,6 +3314,7 @@ private fun DetailClassicHeaderSection(
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     onToggleTitle: (() -> Unit)? = null,
+    onSearchInDiscover: (String) -> Unit = {},
     onCoverClick: () -> Unit,
     onCoverLoaded: (String) -> Unit,
     onOptionsClick: () -> Unit,
@@ -3291,8 +3350,7 @@ private fun DetailClassicHeaderSection(
                     .graphicsLayer {
                         val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                         val fy = item.bannerFocalY.coerceIn(-1f, 1f)
-                        val hasPan = kotlin.math.abs(fx) > 0.005f || kotlin.math.abs(fy) > 0.005f
-                        val effZoom = if (item.bannerZoom <= 1.01f && hasPan) 1.24f else item.bannerZoom.coerceIn(1f, 2.5f)
+                        val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
                         scaleX = effZoom
                         scaleY = effZoom
                         translationX = -fx * size.width * (effZoom - 1f) * 0.5f
@@ -3383,7 +3441,10 @@ private fun DetailClassicHeaderSection(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = onToggleTitle != null) { onToggleTitle?.invoke() },
+                            .combinedClickable(
+                                onClick = { onSearchInDiscover(item.title) },
+                                onLongClick = { onToggleTitle?.invoke() }
+                            ),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         if (hasClearart) {
@@ -3422,6 +3483,16 @@ private fun DetailClassicHeaderSection(
                             text = item.nativeTitle,
                             color = Color.White.copy(alpha = 0.85f),
                             fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    if (!item.bookAuthor.isNullOrBlank() && item.mediaType !in setOf(MediaType.BOOK, MediaType.FANFICTION)) {
+                        Text(
+                            text = "by ${item.bookAuthor}",
+                            color = AccentGold.copy(alpha = 0.92f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -3822,6 +3893,7 @@ private fun DetailOptionsMenuBottomSheet(
     presentationSettings: PresentationSettings,
     isCustomEntry: Boolean = false,
     onDismiss: () -> Unit,
+    onToggleTitleLanguage: () -> Unit = {},
     onEditDetails: () -> Unit = {},
     onMatchAndEnrich: () -> Unit = {},
     onChangeArtwork: () -> Unit,
@@ -3981,6 +4053,37 @@ private fun DetailOptionsMenuBottomSheet(
                         } else {
                             "Current: Classic Poster (Tap for Hero Layout)"
                         },
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // Switch Title Language
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onToggleTitleLanguage() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Translate,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Switch Title Language",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Cycle between English, Romaji, and native title",
                         color = TextMuted,
                         fontSize = 12.sp
                     )

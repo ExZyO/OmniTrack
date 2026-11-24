@@ -60,5 +60,18 @@ data class MediaCardSummary(
     val isCustomEntry: Boolean = false,
     val bannerFocalX: Float = 0f,
     val bannerFocalY: Float = 0f,
-    val bannerZoom: Float = 1f
+    val bannerZoom: Float = 1f,
+    val imdbScore: Float? = null,
+    val rtScore: Int? = null,
+    val metacriticScore: Int? = null,
+    val traktScore: Int? = null,
+    val audienceScore: Int? = null,
+    val traktId: Long? = null,
+    val simklId: Long? = null,
+    val vndbId: String? = null,
+    val hardcoverId: String? = null,
+    val bangumiId: Long? = null,
+    val comickId: String? = null,
+    val studioOrNetwork: String? = null,
+    val isFavorite: Boolean = false
 )

@@ -5,12 +5,17 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.net.Uri
 import android.os.SystemClock
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -24,18 +29,25 @@ import com.omnitrack.app.ui.screens.detail.DetailScreen
 import com.omnitrack.app.ui.screens.detail.DetailViewModel
 import com.omnitrack.app.ui.screens.home.HomeScreen
 import com.omnitrack.app.ui.screens.home.HomeViewModel
+import com.omnitrack.app.ui.screens.home.views.DiscoverView
 import com.omnitrack.app.ui.screens.settings.ArtworkPriorityScreen
 import com.omnitrack.app.ui.screens.settings.DetailsPageLayoutScreen
+import com.omnitrack.app.ui.screens.settings.ManageCategoriesScreen
 import com.omnitrack.app.ui.screens.settings.VisualPresentationScreen
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 
 object Routes {
     const val HOME = "home"
     const val DETAIL = "detail/{mediaId}"
+    const val DISCOVER_SEARCH = "discover_search?query={query}"
     const val ARTWORK_PRIORITY = "settings/artwork_priority"
     const val VISUAL_PRESENTATION = "settings/visual_presentation"
     const val DETAILS_PAGE_LAYOUT = "settings/details_page_layout"
+    const val MANAGE_CATEGORIES = "settings/manage_categories"
 
     fun detail(mediaId: Long) = "detail/$mediaId"
+    fun discoverSearch(query: String) = "discover_search?query=${Uri.encode(query)}"
 }
 
 @Composable
@@ -96,6 +108,9 @@ fun OmniTrackNavigation(
                 },
                 onNavigateToDetailsPageLayout = {
                     navigateDebounced(Routes.DETAILS_PAGE_LAYOUT)
+                },
+                onNavigateToManageCategories = {
+                    navigateDebounced(Routes.MANAGE_CATEGORIES)
                 }
             )
         }
@@ -137,6 +152,88 @@ fun OmniTrackNavigation(
 
             DetailScreen(
                 viewModel = detailViewModel,
+                onBack = { navController.popBackStack() },
+                onSearchInDiscover = { titleQuery ->
+                    if (titleQuery.isNotBlank()) {
+                        navigateDebounced(Routes.discoverSearch(titleQuery))
+                    }
+                }
+            )
+        }
+
+        composable(
+            route = Routes.DISCOVER_SEARCH,
+            arguments = listOf(
+                navArgument("query") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                }
+            ),
+            enterTransition = {
+                fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            },
+            popExitTransition = {
+                fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+        ) { backStackEntry ->
+            val rawQuery = backStackEntry.arguments?.getString("query").orEmpty()
+            val decodedQuery = remember(rawQuery) { Uri.decode(rawQuery) }
+            val context = LocalContext.current
+            val app = context.applicationContext as OmniTrackApplication
+            val prefManager = remember(context) { app.preferenceManager }
+            val scope = rememberCoroutineScope()
+            val allMedia by repository.getAllMediaSummaries().collectAsState(initial = emptyList())
+
+            DiscoverView(
+                allMedia = allMedia,
+                initialSearchQuery = decodedQuery,
+                onBack = { navController.popBackStack() },
+                onItemClick = { id -> navigateDebounced(Routes.detail(id)) },
+                onAddMedia = { searchItem ->
+                    scope.launch {
+                        val entity = searchItem.toMediaItemEntity()
+                        val newId = repository.insertMedia(entity)
+                        val defCat = prefManager.chimanewLibrarySettings.firstOrNull()?.defaultCategoryId
+                        if (newId > 0L && defCat != null && defCat > 0L) {
+                            prefManager.setMediaCategories(newId, setOf(defCat))
+                        }
+                    }
+                },
+                modifier = Modifier.statusBarsPadding(),
+                homeViewModel = null
+            )
+        }
+
+        composable(
+            route = Routes.MANAGE_CATEGORIES,
+            enterTransition = {
+                fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Start,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            },
+            popExitTransition = {
+                fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.End,
+                    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+                )
+            }
+        ) {
+            val context = LocalContext.current
+            val app = context.applicationContext as OmniTrackApplication
+            ManageCategoriesScreen(
+                repository = repository,
+                preferenceManager = app.preferenceManager,
                 onBack = { navController.popBackStack() }
             )
         }
