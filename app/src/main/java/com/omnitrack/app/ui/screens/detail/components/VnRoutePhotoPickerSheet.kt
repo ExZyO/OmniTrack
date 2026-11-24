@@ -276,7 +276,7 @@ fun VnRoutePhotoPickerSheet(
                     add(VnRoutePhotoChoice(it, "VN Cover", "Current"))
                 }
             }
-            vnMeta?.characters?.forEach { ch ->
+            vnMeta?.characterProfiles?.values?.forEach { ch ->
                 val img = ch.imageUrl?.takeIf { it.isNotBlank() } ?: return@forEach
                 add(VnRoutePhotoChoice(img, ch.name.ifBlank { "Character" }, "Characters"))
             }

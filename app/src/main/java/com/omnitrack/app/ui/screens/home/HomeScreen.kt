@@ -144,6 +144,7 @@ import com.omnitrack.app.ui.screens.home.views.DiscoverView
 import com.omnitrack.app.ui.screens.home.views.HistoryView
 import com.omnitrack.app.ui.screens.home.views.HomeCustomizerSheet
 import com.omnitrack.app.ui.screens.home.views.HomeDashboardView
+import com.omnitrack.app.ui.screens.home.views.LibraryCategorySubFilters
 import com.omnitrack.app.ui.screens.home.views.ReleaseCalendarSheet
 import com.omnitrack.app.ui.screens.home.views.SettingsView
 import com.omnitrack.app.ui.screens.home.views.formatConciseProgress

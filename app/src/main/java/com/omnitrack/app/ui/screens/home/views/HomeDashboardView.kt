@@ -859,7 +859,7 @@ fun HomeDashboardView(
             }
 
             // Customizable Ordered Home Shelves (respects globally hidden categories)
-            val visibleTypesSet = remember(visibleFilterTabs) { visibleFilterTabs.toSet() }
+            val visibleTypesSet = visibleFilterTabs.toSet()
             homeRows.filter { row ->
                 if (!row.isEnabled) return@filter false
                 when (row.key) {
