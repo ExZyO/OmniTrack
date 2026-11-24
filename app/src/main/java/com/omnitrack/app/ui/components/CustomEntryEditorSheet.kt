@@ -6,12 +6,15 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -49,6 +52,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,8 +76,11 @@ import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.cache.CoverCache
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.ui.screens.detail.components.VN_ROUTE_TYPES
+import com.omnitrack.app.ui.screens.detail.components.formatRouteTypeLabel
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.OnAccentColor
@@ -82,12 +89,27 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
+
+@Immutable
+data class CustomVnRouteDraft(
+    val existingId: Long = 0L,
+    val routeName: String,
+    val routeType: String = "HEROINE",
+    val playtimeHours: Double? = null,
+    val isCompleted: Boolean = false,
+    val isSpoiler: Boolean = false,
+    val userRating: Float? = null,
+    val userNote: String? = null,
+    val isBookmarked: Boolean = false
+)
 
 /**
  * Option A Frameless AMOLED Manual Entry / Custom Editor Sheet:
  * - Wrapped FlowRow displaying all 10 media categories simultaneously
  * - Smart Dual Creator fields tailored per media vertical (Mangaka, Original Author, Director, Studio, Publisher, Fandom)
  * - Custom Library Categories multi-select chips with inline "+ New" quick creation
+ * - Optional Visual Novel Routes & Endings builder (hours strictly optional)
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -97,7 +119,9 @@ fun CustomEntryEditorSheet(
     initialMediaType: MediaType = MediaType.NOVEL,
     availableCategories: List<CategoryEntity> = emptyList(),
     initialCategoryIds: Set<Long> = emptySet(),
+    initialVnRoutes: List<VnRouteEntity> = emptyList(),
     onCreateCategory: ((String, (Long) -> Unit) -> Unit)? = null,
+    onSaveFull: ((MediaItemEntity, Set<Long>, List<CustomVnRouteDraft>) -> Unit)? = null,
     onSaveWithCategories: ((MediaItemEntity, Set<Long>) -> Unit)? = null,
     onSave: (MediaItemEntity) -> Unit,
     onDismiss: () -> Unit
@@ -210,6 +234,30 @@ fun CustomEntryEditorSheet(
     var manualProtected by remember(existingItem?.id) {
         mutableStateOf(existingItem?.isCustomEntry ?: true)
     }
+
+    var vnRouteDrafts by remember(existingItem?.id, initialVnRoutes) {
+        mutableStateOf(
+            initialVnRoutes.map { r ->
+                CustomVnRouteDraft(
+                    existingId = r.id,
+                    routeName = r.routeName,
+                    routeType = r.routeType,
+                    playtimeHours = r.playtimeHours,
+                    isCompleted = r.isCompleted,
+                    isSpoiler = r.isSpoiler,
+                    userRating = r.userRating,
+                    userNote = r.userNote,
+                    isBookmarked = r.isBookmarked
+                )
+            }
+        )
+    }
+    var showAddRouteComposer by remember { mutableStateOf(false) }
+    var draftRouteName by remember { mutableStateOf("") }
+    var draftRouteType by remember { mutableStateOf("HEROINE") }
+    var draftRouteHours by remember { mutableStateOf("") }
+    var draftRouteCompleted by remember { mutableStateOf(false) }
+    var draftRouteSpoiler by remember { mutableStateOf(false) }
 
     val coverPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -614,6 +662,286 @@ fun CustomEntryEditorSheet(
                     )
                 }
 
+                // Visual Novel Routes & Endings (hours strictly optional)
+                if (selectedType == MediaType.VISUAL_NOVEL) {
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "ROUTES & ENDINGS",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 0.9.sp
+                            )
+                            if (vnRouteDrafts.isNotEmpty()) {
+                                Text(
+                                    text = "(${vnRouteDrafts.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = AccentGold
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (showAddRouteComposer) "Close" else "+ Add Route",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccentGold,
+                            modifier = Modifier
+                                .clickable { showAddRouteComposer = !showAddRouteComposer }
+                                .padding(vertical = 2.dp)
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showAddRouteComposer) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = draftRouteName,
+                                onValueChange = { draftRouteName = it },
+                                label = { Text("Route / Ending Name") },
+                                singleLine = true,
+                                colors = fieldColors,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                VN_ROUTE_TYPES.forEach { (key, label) ->
+                                    val selected = draftRouteType == key
+                                    Column(
+                                        modifier = Modifier
+                                            .width(IntrinsicSize.Max)
+                                            .clickable { draftRouteType = key },
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (selected) AccentGold else TextSecondary
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(2.dp)
+                                                .background(if (selected) AccentGold else Color.Transparent)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = draftRouteHours,
+                                    onValueChange = { next ->
+                                        if (next.length <= 6 && next.all { it.isDigit() || it == '.' }) {
+                                            draftRouteHours = next
+                                        }
+                                    },
+                                    label = { Text("Hours (optional)") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    colors = fieldColors,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier
+                                        .clickable { draftRouteCompleted = !draftRouteCompleted }
+                                        .padding(vertical = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(if (draftRouteCompleted) AccentGold else Color.Transparent)
+                                            .border(
+                                                1.2.dp,
+                                                if (draftRouteCompleted) AccentGold else TextSecondary,
+                                                CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (draftRouteCompleted) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = OnAccentColor, modifier = Modifier.size(11.dp))
+                                        }
+                                    }
+                                    Text("Done", fontSize = 12.sp, color = if (draftRouteCompleted) AccentGold else TextSecondary, fontWeight = FontWeight.SemiBold)
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    modifier = Modifier
+                                        .clickable { draftRouteSpoiler = !draftRouteSpoiler }
+                                        .padding(vertical = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(if (draftRouteSpoiler) AccentGold else Color.Transparent)
+                                            .border(
+                                                1.2.dp,
+                                                if (draftRouteSpoiler) AccentGold else TextSecondary,
+                                                CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (draftRouteSpoiler) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = OnAccentColor, modifier = Modifier.size(11.dp))
+                                        }
+                                    }
+                                    Text("Spoiler", fontSize = 12.sp, color = if (draftRouteSpoiler) AccentGold else TextSecondary, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+
+                            val canAddRoute = draftRouteName.trim().isNotBlank()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val cleanName = draftRouteName.trim()
+                                        if (cleanName.isNotEmpty()) {
+                                            vnRouteDrafts = vnRouteDrafts + CustomVnRouteDraft(
+                                                routeName = cleanName,
+                                                routeType = draftRouteType,
+                                                playtimeHours = draftRouteHours.trim().toDoubleOrNull()?.takeIf { it > 0.0 },
+                                                isCompleted = draftRouteCompleted,
+                                                isSpoiler = draftRouteSpoiler
+                                            )
+                                            draftRouteName = ""
+                                            draftRouteHours = ""
+                                            draftRouteCompleted = false
+                                            draftRouteSpoiler = false
+                                        }
+                                    },
+                                    enabled = canAddRoute,
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentGold,
+                                        contentColor = OnAccentColor
+                                    ),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add Route", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    if (vnRouteDrafts.isEmpty() && !showAddRouteComposer) {
+                        Text(
+                            text = "No routes added \u00B7 Tap + Add Route (hours optional)",
+                            fontSize = 12.sp,
+                            color = TextMuted,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showAddRouteComposer = true }
+                                .padding(vertical = 4.dp)
+                        )
+                    } else if (vnRouteDrafts.isNotEmpty()) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            vnRouteDrafts.forEachIndexed { idx, draft ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(if (draft.isCompleted) AccentGold else Color.Transparent)
+                                            .border(
+                                                1.3.dp,
+                                                if (draft.isCompleted) AccentGold else Color.White.copy(alpha = 0.5f),
+                                                CircleShape
+                                            )
+                                            .clickable {
+                                                vnRouteDrafts = vnRouteDrafts.mapIndexed { i, itemDraft ->
+                                                    if (i == idx) itemDraft.copy(isCompleted = !itemDraft.isCompleted) else itemDraft
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (draft.isCompleted) {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = OnAccentColor, modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = draft.routeName,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = TextPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        val metaParts = buildList {
+                                            add(formatRouteTypeLabel(draft.routeType))
+                                            draft.playtimeHours?.takeIf { it > 0.0 }?.let { h ->
+                                                add(if (h % 1.0 == 0.0) "${h.toInt()}h" else String.format(Locale.US, "%.1fh", h))
+                                            }
+                                            if (draft.isSpoiler) add("Spoiler")
+                                        }
+                                        Text(
+                                            text = metaParts.joinToString(" \u00B7 "),
+                                            fontSize = 11.sp,
+                                            color = TextSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove route",
+                                        tint = TextMuted,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable {
+                                                vnRouteDrafts = vnRouteDrafts.filterIndexed { i, _ -> i != idx }
+                                            }
+                                    )
+                                }
+                                if (idx < vnRouteDrafts.lastIndex) {
+                                    HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.6.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Custom Library Categories Multi-Select Section
                 if (availableCategories.isNotEmpty() || onCreateCategory != null) {
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
@@ -800,6 +1128,7 @@ fun CustomEntryEditorSheet(
                         mediaType = selectedType,
                         status = selectedStatus,
                         currentProgress = curProg,
+                        playtimeHours = if (selectedType == MediaType.VISUAL_NOVEL || selectedType == MediaType.GAME) curProg else base.playtimeHours,
                         totalProgress = totProg,
                         userRating = score,
                         releaseYear = releaseYear.trim().takeIf { it.isNotBlank() },
@@ -814,10 +1143,26 @@ fun CustomEntryEditorSheet(
                         isCustomEntry = manualProtected,
                         lastUpdated = System.currentTimeMillis()
                     )
-                    if (onSaveWithCategories != null) {
-                        onSaveWithCategories(updated, selectedCustomCatIds)
+                    val finalRoutes = if (selectedType == MediaType.VISUAL_NOVEL) {
+                        val pendingName = draftRouteName.trim()
+                        if (showAddRouteComposer && pendingName.isNotEmpty()) {
+                            vnRouteDrafts + CustomVnRouteDraft(
+                                routeName = pendingName,
+                                routeType = draftRouteType,
+                                playtimeHours = draftRouteHours.trim().toDoubleOrNull()?.takeIf { it > 0.0 },
+                                isCompleted = draftRouteCompleted,
+                                isSpoiler = draftRouteSpoiler
+                            )
+                        } else {
+                            vnRouteDrafts
+                        }
                     } else {
-                        onSave(updated)
+                        emptyList()
+                    }
+                    when {
+                        onSaveFull != null -> onSaveFull(updated, selectedCustomCatIds, finalRoutes)
+                        onSaveWithCategories != null -> onSaveWithCategories(updated, selectedCustomCatIds)
+                        else -> onSave(updated)
                     }
                 },
                 enabled = canSave,

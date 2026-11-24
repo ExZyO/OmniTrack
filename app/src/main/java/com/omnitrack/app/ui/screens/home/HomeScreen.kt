@@ -72,6 +72,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -102,6 +103,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.request.crossfade
+import coil3.size.Precision
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
@@ -119,6 +124,7 @@ import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.DiagnosticsSheet
 import com.omnitrack.app.ui.components.LibraryFastScroller
+import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.MultiSelectBottomActionDock
 import com.omnitrack.app.ui.components.MultiSelectCategoriesSheet
@@ -147,6 +153,7 @@ import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -210,11 +217,12 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsState()
     val allCategories by viewModel.allCategories.collectAsState()
     val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
+    val perfSettings = LocalPerformanceSettings.current
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
-    val tabGridStates = remember { mutableMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
-    val tabListStates = remember { mutableMapOf<String, LazyListState>() }
+    val tabGridStates = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
+    val tabListStates = remember { androidx.compose.runtime.mutableStateMapOf<String, LazyListState>() }
 
     var currentNavDestination by rememberSaveable { mutableStateOf(NavDestination.HOME) }
     var showDiagnostics by remember { mutableStateOf(false) }
@@ -237,17 +245,6 @@ fun HomeScreen(
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var pendingLibraryTabKey by remember { mutableStateOf<String?>(null) }
 
-    val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
-    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
-    val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
-    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
-    val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
-    val calendarReleases by viewModel.calendarReleases.collectAsState()
-    val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
-    val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
-    val trendingItems by viewModel.trendingItems.collectAsState()
-    val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
-    val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
     val undoEvent by viewModel.undoEvent.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -426,6 +423,26 @@ fun HomeScreen(
         }
     }
 
+    val enableLiveNavBlur = perfSettings.liveNavBarBlur && !perfSettings.performanceModeEnabled
+    val isActiveLibraryScrolling by remember(
+        perfSettings.autoPauseBlurOnScroll,
+        enableLiveNavBlur,
+        currentNavDestination,
+        pagerState,
+        dynamicTabs
+    ) {
+        derivedStateOf {
+            if (!enableLiveNavBlur || !perfSettings.autoPauseBlurOnScroll || currentNavDestination != NavDestination.LIBRARY) {
+                false
+            } else {
+                val activeKey = dynamicTabs.getOrNull(pagerState.currentPage)?.key
+                val gridScrolling = activeKey != null && tabGridStates[activeKey]?.isScrollInProgress == true
+                val listScrolling = activeKey != null && tabListStates[activeKey]?.isScrollInProgress == true
+                gridScrolling || listScrolling || pagerState.isScrollInProgress
+            }
+        }
+    }
+
     androidx.compose.runtime.CompositionLocalProvider(
         com.omnitrack.app.ui.components.LocalCustomPosterPattern provides customPosterPattern
     ) {
@@ -443,35 +460,21 @@ fun HomeScreen(
             label = "navDestinationSwitch",
             modifier = Modifier
                 .fillMaxSize()
-                .hazeSource(hazeState)
+                .then(if (enableLiveNavBlur) Modifier.hazeSource(hazeState) else Modifier)
         ) { destination ->
             when (destination) {
                 NavDestination.HOME -> {
-                    HomeDashboardView(
+                    HomeTabContent(
+                        viewModel = viewModel,
+                        prefManager = prefManager,
                         allMedia = uiState.allMediaSummaries,
-                        trendingItems = trendingItems,
-                        calendarReleases = calendarReleases,
-                        watchedTimestamps90d = watchedTimestamps90d,
-                        homeRows = homeRows,
-                        heroSettings = heroSettings,
-                        continueTrackingStyle = continueTrackingStyle,
-                        categoryDiscoverShelves = categoryDiscoverShelves,
+                        allCategories = allCategories,
+                        categoryAssignments = categoryAssignments,
                         hasUpdateAvailable = availableUpdate != null,
+                        posterStyle = posterStyle,
+                        fanfictionEnabled = fanfictionEnabled,
+                        fanficNsfwMode = fanficNsfwMode,
                         onItemClick = onItemClick,
-                        onPreviewSearchItem = { searchItem ->
-                            EphemeralPreviewHolder.previewItem = searchItem.toMediaItemEntity()
-                            onItemClick(-1L)
-                        },
-                        onQuickProgress = { viewModel.incrementProgress(it) },
-                        onMarkCompleted = { viewModel.markCompleted(it) },
-                        onSetStatus = { summary, status -> viewModel.setMediaStatus(summary, status) },
-                        onAddSearchItem = { viewModel.addMediaFromSearch(it) },
-                        onRequestDiscoverShelf = { rowKey ->
-                            viewModel.loadHomeDiscoverShelf(rowKey, tmdbKey)
-                        },
-                        onLoadMoreDiscoverShelf = { rowKey ->
-                            viewModel.loadMoreHomeDiscoverShelf(rowKey, tmdbKey)
-                        },
                         onOpenCalendar = {
                             viewModel.loadReleaseCalendar()
                             showReleaseCalendarSheet = true
@@ -495,18 +498,6 @@ fun HomeScreen(
                             viewModel.selectMediaType(type)
                             currentNavDestination = NavDestination.LIBRARY
                         },
-                        onNavigateToDiscover = { currentNavDestination = NavDestination.DISCOVER },
-                        onNavigateToHistory = { currentNavDestination = NavDestination.HISTORY },
-                        posterStyle = posterStyle,
-                        isRefreshing = isLoadingTrending || isLoadingCalendar,
-                        onRefresh = {
-                            viewModel.loadHomeTrending(force = true)
-                            viewModel.loadReleaseCalendar(force = true)
-                        },
-                        fanfictionEnabled = fanfictionEnabled,
-                        fanficNsfwMode = fanficNsfwMode,
-                        customCategories = allCategories,
-                        categoryAssignments = categoryAssignments,
                         onNavigateToCustomCategory = { catId ->
                             coroutineScope.launch {
                                 prefManager.setChimanewGroupMode(LibraryGroupMode.BY_CATEGORY)
@@ -514,15 +505,8 @@ fun HomeScreen(
                             pendingLibraryTabKey = "CAT_$catId"
                             currentNavDestination = NavDestination.LIBRARY
                         },
-                        heroMultiRatingsCache = heroMultiRatingsCache,
-                        onPrefetchLocalHeroRatings = { heroItem ->
-                            val cached = heroMultiRatingsCache[heroRatingsCacheKey(heroItem.id, heroItem.mediaType, heroItem.title)]
-                            viewModel.prefetchLocalHeroRatings(heroItem, cached, prefManager)
-                        },
-                        onPrefetchSearchHeroRatings = { searchItem ->
-                            val cached = heroMultiRatingsCache[heroRatingsCacheKey(null, searchItem.mediaType, searchItem.title)]
-                            viewModel.prefetchSearchHeroRatings(searchItem, cached, prefManager)
-                        }
+                        onNavigateToDiscover = { currentNavDestination = NavDestination.DISCOVER },
+                        onNavigateToHistory = { currentNavDestination = NavDestination.HISTORY }
                     )
                 }
 
@@ -845,7 +829,8 @@ fun HomeScreen(
                                     searchQuery = searchQuery,
                                     libSettings = libSettings,
                                     categoryAssignments = categoryAssignments,
-                                    fanficNsfwMode = fanficNsfwMode
+                                    fanficNsfwMode = fanficNsfwMode,
+                                    sort = false
                                 ).size
                             }
                         }
@@ -1024,6 +1009,10 @@ fun HomeScreen(
                                 key = { idx -> dynamicTabs.getOrNull(idx)?.key ?: "page_$idx" },
                                 modifier = Modifier.fillMaxSize()
                             ) { pageIndex ->
+                                if (!perfSettings.prefetchAdjacentTabs && pageIndex !in ((pagerState.currentPage - 1)..(pagerState.currentPage + 1))) {
+                                    Box(modifier = Modifier.fillMaxSize())
+                                    return@HorizontalPager
+                                }
                                 val pageTab = dynamicTabs.getOrNull(pageIndex) ?: LibraryGroupTab("ALL", "All")
                                 val pageGridState = remember(pageTab.key) {
                                     tabGridStates.getOrPut(pageTab.key) { androidx.compose.foundation.lazy.grid.LazyGridState() }
@@ -1087,14 +1076,18 @@ fun HomeScreen(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .graphicsLayer {
-                                            val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                                            val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
-                                            val kinematicAlpha = (1f - (kotlin.math.abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
-                                            scaleX = kinematicScale
-                                            scaleY = kinematicScale
-                                            alpha = kinematicAlpha
-                                        }
+                                        .then(
+                                            if (!perfSettings.disableCardAnimations) {
+                                                Modifier.graphicsLayer {
+                                                    val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                                    val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
+                                                    val kinematicAlpha = (1f - (kotlin.math.abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
+                                                    scaleX = kinematicScale
+                                                    scaleY = kinematicScale
+                                                    alpha = kinematicAlpha
+                                                }
+                                            } else Modifier
+                                        )
                                 ) {
                                     if (displayedItems.isEmpty()) {
                                         Box(
@@ -1139,11 +1132,15 @@ fun HomeScreen(
                                                 contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 128.dp else 112.dp),
                                                 modifier = Modifier.fillMaxSize()
                                             ) {
-                                                items(displayedItems, key = { "lib_list_${it.id}" }) { item ->
+                                                items(
+                                                    items = displayedItems,
+                                                    key = { "lib_list_${it.id}" },
+                                                    contentType = { "library_list_row" }
+                                                ) { item ->
                                                     val isItemSelected = item.id in selectedLibraryIds
                                                     LibraryListRow(
                                                         item = item,
-                                                        showQuickProgressButton = (posterStyle.showQuickProgressOnCards || libSettings.showQuickContinue) && !isLibraryMultiSelect,
+                                                        showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
                                                         isSelectionMode = isLibraryMultiSelect,
                                                         isSelected = isItemSelected,
                                                         onClick = {
@@ -1199,7 +1196,8 @@ fun HomeScreen(
                                             ) {
                                                 itemsIndexed(
                                                     items = displayedItems,
-                                                    key = { _, item -> item.id }
+                                                    key = { _, item -> item.id },
+                                                    contentType = { _, _ -> "library_grid_card" }
                                                 ) { _, item ->
                                                     val isItemSelected = item.id in selectedLibraryIds
                                                     MediaCard(
@@ -1213,7 +1211,7 @@ fun HomeScreen(
                                                         cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
                                                         cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
                                                         cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
-                                                        showQuickProgressButton = (posterStyle.showQuickProgressOnCards || libSettings.showQuickContinue) && !isLibraryMultiSelect,
+                                                        showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
                                                         showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
                                                         displayMode = libSettings.displayMode,
                                                         showRemainingBadge = libSettings.showRemainingBadge,
@@ -1277,6 +1275,7 @@ fun HomeScreen(
                 }
 
                 NavDestination.HISTORY -> {
+                    val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
                     HistoryView(
                         allMedia = uiState.allMediaSummaries,
                         onItemClick = onItemClick,
@@ -1356,7 +1355,8 @@ fun HomeScreen(
                     currentNavDestination = destination
                 },
                 scrollState = navScrollState,
-                hazeState = hazeState,
+                hazeState = if (enableLiveNavBlur) hazeState else null,
+                pauseLiveBlur = isActiveLibraryScrolling,
                 onActiveTabReSelected = { destination ->
                     if (destination == NavDestination.LIBRARY) {
                         val activeKey = dynamicTabs.getOrNull(pagerState.currentPage)?.key
@@ -1465,6 +1465,8 @@ fun HomeScreen(
         }
 
         if (showReleaseCalendarSheet) {
+            val calendarReleases by viewModel.calendarReleases.collectAsState()
+            val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
             ReleaseCalendarSheet(
                 releases = calendarReleases,
                 isLoading = isLoadingCalendar,
@@ -1520,6 +1522,7 @@ fun HomeScreen(
         }
 
         if (showActivityHeatmapSheet) {
+            val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
             ActivityHeatmapSheet(
                 watchedTimestamps90d = watchedTimestamps90d,
                 allMedia = uiState.allMediaSummaries,
@@ -1606,6 +1609,17 @@ fun HomeScreen(
                 initialCategoryIds = libSettings.defaultCategoryId?.let { setOf(it) } ?: emptySet(),
                 onCreateCategory = { name, onCreated ->
                     viewModel.createCategory(name, onCreated)
+                },
+                onSaveFull = { entity, catIds, vnRoutes ->
+                    showCustomEntrySheet = false
+                    viewModel.createCustomMediaEntry(
+                        entity = entity,
+                        categoryIds = catIds,
+                        prefManager = prefManager,
+                        vnRoutes = vnRoutes
+                    ) { newId ->
+                        if (newId > 0L) onItemClick(newId)
+                    }
                 },
                 onSaveWithCategories = { entity, catIds ->
                     showCustomEntrySheet = false
@@ -1848,6 +1862,96 @@ private fun itemMatchesTrackerKey(
     else -> true
 }
 
+@Composable
+private fun HomeTabContent(
+    viewModel: HomeViewModel,
+    prefManager: PreferenceManager,
+    allMedia: List<com.omnitrack.app.data.db.dto.MediaCardSummary>,
+    allCategories: List<com.omnitrack.app.data.db.entity.CategoryEntity>,
+    categoryAssignments: Map<Long, Set<Long>>,
+    hasUpdateAvailable: Boolean,
+    posterStyle: PosterCardStyle,
+    fanfictionEnabled: Boolean,
+    fanficNsfwMode: com.omnitrack.app.data.model.VnNsfwFilterMode,
+    onItemClick: (Long) -> Unit,
+    onOpenCalendar: () -> Unit,
+    onOpenCustomizer: () -> Unit,
+    onOpenHeatmap: () -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenUpdate: () -> Unit,
+    onNavigateToLibraryCategory: (MediaType) -> Unit,
+    onNavigateToCustomCategory: (Long) -> Unit,
+    onNavigateToDiscover: () -> Unit,
+    onNavigateToHistory: () -> Unit
+) {
+    val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
+    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
+    val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
+    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
+    val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
+    val calendarReleases by viewModel.calendarReleases.collectAsState()
+    val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
+    val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
+    val trendingItems by viewModel.trendingItems.collectAsState()
+    val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
+    val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
+
+    HomeDashboardView(
+        allMedia = allMedia,
+        trendingItems = trendingItems,
+        calendarReleases = calendarReleases,
+        watchedTimestamps90d = watchedTimestamps90d,
+        homeRows = homeRows,
+        heroSettings = heroSettings,
+        continueTrackingStyle = continueTrackingStyle,
+        categoryDiscoverShelves = categoryDiscoverShelves,
+        hasUpdateAvailable = hasUpdateAvailable,
+        onItemClick = onItemClick,
+        onPreviewSearchItem = { searchItem ->
+            EphemeralPreviewHolder.previewItem = searchItem.toMediaItemEntity()
+            onItemClick(-1L)
+        },
+        onQuickProgress = { viewModel.incrementProgress(it) },
+        onMarkCompleted = { viewModel.markCompleted(it) },
+        onSetStatus = { summary, status -> viewModel.setMediaStatus(summary, status) },
+        onAddSearchItem = { viewModel.addMediaFromSearch(it) },
+        onRequestDiscoverShelf = { rowKey ->
+            viewModel.loadHomeDiscoverShelf(rowKey, tmdbKey)
+        },
+        onLoadMoreDiscoverShelf = { rowKey ->
+            viewModel.loadMoreHomeDiscoverShelf(rowKey, tmdbKey)
+        },
+        onOpenCalendar = onOpenCalendar,
+        onOpenCustomizer = onOpenCustomizer,
+        onOpenHeatmap = onOpenHeatmap,
+        onOpenSearch = onOpenSearch,
+        onOpenUpdate = onOpenUpdate,
+        onNavigateToLibraryCategory = onNavigateToLibraryCategory,
+        onNavigateToDiscover = onNavigateToDiscover,
+        onNavigateToHistory = onNavigateToHistory,
+        posterStyle = posterStyle,
+        isRefreshing = isLoadingTrending || isLoadingCalendar,
+        onRefresh = {
+            viewModel.loadHomeTrending(force = true)
+            viewModel.loadReleaseCalendar(force = true)
+        },
+        fanfictionEnabled = fanfictionEnabled,
+        fanficNsfwMode = fanficNsfwMode,
+        customCategories = allCategories,
+        categoryAssignments = categoryAssignments,
+        onNavigateToCustomCategory = onNavigateToCustomCategory,
+        heroMultiRatingsCache = heroMultiRatingsCache,
+        onPrefetchLocalHeroRatings = { heroItem ->
+            val cached = heroMultiRatingsCache[heroRatingsCacheKey(heroItem.id, heroItem.mediaType, heroItem.title)]
+            viewModel.prefetchLocalHeroRatings(heroItem, cached, prefManager)
+        },
+        onPrefetchSearchHeroRatings = { searchItem ->
+            val cached = heroMultiRatingsCache[heroRatingsCacheKey(null, searchItem.mediaType, searchItem.title)]
+            viewModel.prefetchSearchHeroRatings(searchItem, cached, prefManager)
+        }
+    )
+}
+
 private fun computeLibraryTabItems(
     allSummaries: List<com.omnitrack.app.data.db.dto.MediaCardSummary>,
     tab: LibraryGroupTab,
@@ -1871,7 +1975,8 @@ private fun computeLibraryTabItems(
     selectedFanficStatus: String = "ALL",
     selectedFanficMinWords: Int = 0,
     fanficCrossoverOnly: Boolean = false,
-    fanficTagFilter: String = ""
+    fanficTagFilter: String = "",
+    sort: Boolean = true
 ): List<com.omnitrack.app.data.db.dto.MediaCardSummary> {
     val pageMediaType = tab.mediaTypeFilter
     val filtered = allSummaries.filter { item ->
@@ -1983,6 +2088,8 @@ private fun computeLibraryTabItems(
         true
     }
 
+    if (!sort) return filtered
+
     val asc = libSettings.sortAscending
     return when (libSettings.sortOption) {
         LibrarySortOption.ALPHA -> {
@@ -2032,9 +2139,25 @@ private fun LibraryListRow(
     onLongClick: (() -> Unit)? = null,
     onQuickProgress: () -> Unit
 ) {
-    val coverModel = remember(item.customCoverPath, item.coverUrl) {
+    val perf = LocalPerformanceSettings.current
+    val context = LocalContext.current
+    val coverModel = remember(item.customCoverPath, item.coverUrl, perf.downsampleGridCovers) {
         item.customCoverPath?.let { if (it.startsWith("http")) it else File(it) }
-            ?: LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+            ?: if (perf.downsampleGridCovers) LosslessCoverMapper.toGridThumbnailUrl(item.coverUrl)
+            else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+    }
+    val rowImageRequest = remember(coverModel, perf.downsampleGridCovers, perf.hardwareBitmaps, perf.disableCardAnimations) {
+        ImageRequest.Builder(context)
+            .data(coverModel)
+            .apply {
+                if (perf.downsampleGridCovers) {
+                    size(180, 265)
+                    precision(Precision.INEXACT)
+                }
+            }
+            .allowHardware(perf.hardwareBitmaps)
+            .crossfade(!perf.disableCardAnimations)
+            .build()
     }
     val progressLabel = remember(item) { formatConciseProgress(item) }
     val rating = item.userRating ?: item.communityScore
@@ -2089,7 +2212,7 @@ private fun LibraryListRow(
                 )
             } else {
                 AsyncImage(
-                    model = coverModel,
+                    model = rowImageRequest,
                     contentDescription = item.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -2141,17 +2264,16 @@ private fun LibraryListRow(
         if (showQuickProgressButton) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(32.dp)
                     .clip(CircleShape)
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, CircleShape)
+                    .background(AccentGold)
                     .clickable(onClick = onQuickProgress),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (item.mediaType == MediaType.MOVIE) Icons.Default.Check else Icons.Default.Add,
                     contentDescription = "Quick Log",
-                    tint = AccentGold,
+                    tint = OnAccentColor,
                     modifier = Modifier.size(18.dp)
                 )
             }

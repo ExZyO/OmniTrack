@@ -65,11 +65,13 @@ import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.HeroBannerBlurLevel
+import com.omnitrack.app.data.preferences.PerformanceSettings
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.AmbientAuraWireframe
 import com.omnitrack.app.ui.components.BannerSizingWireframe
 import com.omnitrack.app.ui.components.DetailsLayoutWireframe
 import com.omnitrack.app.ui.components.DiscoverLayoutWireframe
+import com.omnitrack.app.ui.components.PerformanceSettingsContent
 import com.omnitrack.app.ui.components.VisualOptionTile
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -580,6 +582,18 @@ fun VisualPresentationScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+            // Section 7: Performance Mode & Advanced Optimizations
+            PresentationSectionTitle("PERFORMANCE & SMOOTHNESS")
+            val perfSettings by prefManager.performanceSettings.collectAsState(initial = PerformanceSettings())
+            PerformanceSettingsContent(
+                preferenceManager = prefManager,
+                settings = perfSettings,
+                initiallyExpanded = false
+            )
 
             Spacer(modifier = Modifier.height(24.dp))
         }

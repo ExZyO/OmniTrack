@@ -26,5 +26,6 @@ data class VnRouteEntity(
     val userNote: String? = null,
     val isBookmarked: Boolean = false,
     val isSpoiler: Boolean = false,
+    val playtimeHours: Double? = null,
     val sortOrder: Int = 0
 )

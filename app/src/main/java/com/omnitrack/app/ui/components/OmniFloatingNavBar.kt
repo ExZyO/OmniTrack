@@ -178,6 +178,7 @@ fun OmniFloatingNavBar(
     modifier: Modifier = Modifier,
     hazeState: HazeState? = null,
     glowEnabled: Boolean = false,
+    pauseLiveBlur: Boolean = false,
     onActiveTabReSelected: ((NavDestination) -> Unit)? = null
 ) {
     val density = LocalDensity.current.density
@@ -315,7 +316,12 @@ fun OmniFloatingNavBar(
                                     drawJellyGlow(motion.frame, AccentGold.copy(alpha = glowStrength))
                                 }
                         ) {
-                            GlassBarSurface(hazeState, Modifier.matchParentSize(), glowStrength)
+                            GlassBarSurface(
+                                hazeState = hazeState,
+                                modifier = Modifier.matchParentSize(),
+                                glowStrength = glowStrength,
+                                pauseLiveBlur = pauseLiveBlur
+                            )
                         }
 
                         // 2. Inactive Tab Row (clipped outside the active pill)

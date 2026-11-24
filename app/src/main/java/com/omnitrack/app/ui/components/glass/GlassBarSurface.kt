@@ -30,16 +30,18 @@ private val GlassSurfaceColor = Color(0xFF12110E)
 fun GlassBarSurface(
     hazeState: HazeState?,
     modifier: Modifier = Modifier,
-    glowStrength: Float = 1f
+    glowStrength: Float = 1f,
+    pauseLiveBlur: Boolean = false
 ) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && hazeState != null && glowStrength > 0f) {
-        RefractedGlassBar(hazeState, modifier, glowStrength)
+    val activeHaze = if (pauseLiveBlur) null else hazeState
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && activeHaze != null && glowStrength > 0f) {
+        RefractedGlassBar(activeHaze, modifier, glowStrength)
     } else {
         Box(
             modifier
-                .then(if (hazeState != null) Modifier.barBackdrop(hazeState) else Modifier)
+                .then(if (activeHaze != null) Modifier.barBackdrop(activeHaze) else Modifier)
                 .drawWithCache {
-                    val fill = GlassSurfaceColor.copy(alpha = if (hazeState != null) 0.55f else 0.82f)
+                    val fill = GlassSurfaceColor.copy(alpha = if (activeHaze != null) 0.55f else 0.86f)
                     val edge = Brush.verticalGradient(
                         listOf(Color.White.copy(alpha = 0.28f), Color.White.copy(alpha = 0.04f))
                     )

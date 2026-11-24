@@ -33,10 +33,10 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -108,6 +108,7 @@ fun BoxScope.LibraryFastScroller(
 
     val scrollFraction by remember(gridState, listState, items.size, columnsCount) {
         derivedStateOf {
+            if (!isVisible || isDragging) return@derivedStateOf 0f
             val total = items.size
             if (total <= 1) return@derivedStateOf 0f
             if (gridState != null) {
@@ -126,15 +127,8 @@ fun BoxScope.LibraryFastScroller(
         }
     }
 
-    val activeFraction = if (isDragging) dragFraction else scrollFraction
-    val activeIndex = if (isDragging) {
-        dragIndex.coerceIn(0, items.lastIndex)
-    } else {
-        (gridState?.firstVisibleItemIndex ?: listState?.firstVisibleItemIndex ?: 0).coerceIn(0, items.lastIndex)
-    }
-
-    val activeItem = items.getOrNull(activeIndex)
-    val bubbleLabel = remember(activeItem, sortMode) {
+    val bubbleLabel = remember(isDragging, dragIndex, items, sortMode) {
+        val activeItem = if (isDragging) items.getOrNull(dragIndex.coerceIn(0, items.lastIndex)) else null
         if (activeItem == null) {
             ""
         } else when (sortMode) {
@@ -162,15 +156,18 @@ fun BoxScope.LibraryFastScroller(
     val thumbHeightPx = with(density) { thumbHeightDp.toPx() }
     val latestBubbleLabel by rememberUpdatedState(bubbleLabel)
 
-    val usablePx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
-    val thumbTopPx = (activeFraction * usablePx).roundToInt()
+    fun currentThumbTopPx(): Int {
+        val activeFraction = if (isDragging) dragFraction else scrollFraction
+        val usablePx = (trackHeightPx - thumbHeightPx).coerceAtLeast(1f)
+        return (activeFraction * usablePx).roundToInt()
+    }
 
     Box(
         modifier = modifier
             .align(Alignment.CenterEnd)
             .fillMaxHeight()
             .padding(top = 8.dp, bottom = 114.dp)
-            .alpha(containerAlpha)
+            .graphicsLayer { alpha = containerAlpha }
     ) {
         // Floating adaptive Obsidian & Gold preview bubble while dragging
         AnimatedVisibility(
@@ -181,7 +178,7 @@ fun BoxScope.LibraryFastScroller(
                 .align(Alignment.TopEnd)
                 .padding(end = 36.dp)
                 .offset {
-                    val centered = (thumbTopPx + (thumbHeightPx / 2f) - 20f).roundToInt().coerceAtLeast(0)
+                    val centered = (currentThumbTopPx() + (thumbHeightPx / 2f) - 20f).roundToInt().coerceAtLeast(0)
                     IntOffset(0, centered)
                 }
         ) {
@@ -249,7 +246,7 @@ fun BoxScope.LibraryFastScroller(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(end = 5.dp)
-                    .offset { IntOffset(0, thumbTopPx) }
+                    .offset { IntOffset(0, currentThumbTopPx()) }
                     .width(thumbWidth)
                     .height(thumbHeightDp)
                     .shadow(6.dp, RoundedCornerShape(999.dp), ambientColor = AccentGold, spotColor = AccentGold)

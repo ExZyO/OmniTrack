@@ -2,10 +2,12 @@ package com.omnitrack.app.ui.components
 
 import androidx.compose.foundation.border
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.dp
@@ -15,6 +17,7 @@ import androidx.compose.ui.unit.dp
  * Simulates physical glass thickness and depth across pure AMOLED canvases using:
  * 1. 1dp specular top-to-bottom vertical gradient edge light (brighter at top, falling off smoothly).
  * 2. Soft curved glass top-sheen reflection highlight over the upper 22% of the card clipped to shape.
+ * Uses drawWithCache so Path and Brush objects are allocated only when size/shape/strength changes.
  */
 fun Modifier.glassCardDepth(
     shape: Shape,
@@ -46,24 +49,26 @@ fun Modifier.glassCardDepth(
     }
 
     return if (sheen > 0f) {
-        withEdge.drawWithContent {
-            drawContent()
+        withEdge.drawWithCache {
             val sheenHeight = size.height * 0.22f
-            if (sheenHeight > 0f) {
-                val outline = shape.createOutline(size, layoutDirection, this)
-                val shapePath = outline.toPath()
-                clipPath(shapePath) {
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = sheen * 0.35f),
-                                Color.Transparent,
-                            ),
-                            startY = 0f,
-                            endY = sheenHeight,
-                        ),
-                        size = Size(size.width, sheenHeight),
-                    )
+            if (sheenHeight <= 0f) {
+                onDrawWithContent { drawContent() }
+            } else {
+                val shapePath = shape.createOutline(size, layoutDirection, this).toPath()
+                val sheenSize = Size(size.width, sheenHeight)
+                val sheenBrush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = sheen * 0.35f),
+                        Color.Transparent,
+                    ),
+                    startY = 0f,
+                    endY = sheenHeight,
+                )
+                onDrawWithContent {
+                    drawContent()
+                    clipPath(shapePath) {
+                        drawRect(brush = sheenBrush, size = sheenSize)
+                    }
                 }
             }
         }
@@ -72,9 +77,9 @@ fun Modifier.glassCardDepth(
     }
 }
 
-private fun androidx.compose.ui.graphics.Outline.toPath(): androidx.compose.ui.graphics.Path = when (this) {
-    is androidx.compose.ui.graphics.Outline.Rectangle -> androidx.compose.ui.graphics.Path().apply { addRect(rect) }
-    is androidx.compose.ui.graphics.Outline.Rounded -> androidx.compose.ui.graphics.Path().apply { addRoundRect(roundRect) }
-    is androidx.compose.ui.graphics.Outline.Generic -> path
+private fun Outline.toPath(): Path = when (this) {
+    is Outline.Rectangle -> Path().apply { addRect(rect) }
+    is Outline.Rounded -> Path().apply { addRoundRect(roundRect) }
+    is Outline.Generic -> path
 }
 

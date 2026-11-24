@@ -5642,7 +5642,12 @@ class DetailViewModel(
         }
     }
 
-    fun addCustomVnRoute(routeName: String, routeType: String = "CUSTOM") {
+    fun addCustomVnRoute(
+        routeName: String,
+        routeType: String = "CUSTOM",
+        playtimeHours: Double? = null,
+        isSpoiler: Boolean = false
+    ) {
         val clean = routeName.trim()
         if (clean.isBlank()) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -5655,9 +5660,70 @@ class DetailViewModel(
                     mediaId = mediaId,
                     routeName = clean,
                     routeType = routeType,
+                    playtimeHours = playtimeHours?.takeIf { it > 0.0 },
+                    isSpoiler = isSpoiler,
                     sortOrder = nextOrder
                 )
             )
+        }
+    }
+
+    fun syncCustomVnRoutes(
+        mediaId: Long,
+        drafts: List<com.omnitrack.app.ui.components.CustomVnRouteDraft>
+    ) {
+        if (mediaId <= 0L) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.getVnRoutesOnce(mediaId)
+            val existingById = existing.associateBy { it.id }
+            val keptIds = drafts.mapNotNull { it.existingId.takeIf { id -> id > 0L } }.toSet()
+            val now = System.currentTimeMillis()
+
+            existing.forEach { route ->
+                if (route.id !in keptIds) {
+                    repository.deleteVnRouteById(route.id)
+                }
+            }
+
+            val toInsert = mutableListOf<VnRouteEntity>()
+            drafts.forEachIndexed { idx, draft ->
+                val clean = draft.routeName.trim()
+                if (clean.isBlank()) return@forEachIndexed
+                val prev = existingById[draft.existingId]
+                if (prev != null) {
+                    val updated = prev.copy(
+                        routeName = clean,
+                        routeType = draft.routeType,
+                        playtimeHours = draft.playtimeHours?.takeIf { it > 0.0 },
+                        isCompleted = draft.isCompleted,
+                        completedAtMs = if (draft.isCompleted) (prev.completedAtMs ?: now) else null,
+                        isSpoiler = draft.isSpoiler,
+                        sortOrder = idx
+                    )
+                    if (updated != prev) {
+                        repository.updateVnRoute(updated)
+                    }
+                } else {
+                    toInsert.add(
+                        VnRouteEntity(
+                            mediaId = mediaId,
+                            routeName = clean,
+                            routeType = draft.routeType,
+                            playtimeHours = draft.playtimeHours?.takeIf { it > 0.0 },
+                            isCompleted = draft.isCompleted,
+                            completedAtMs = if (draft.isCompleted) now else null,
+                            isSpoiler = draft.isSpoiler,
+                            userRating = draft.userRating,
+                            userNote = draft.userNote,
+                            isBookmarked = draft.isBookmarked,
+                            sortOrder = idx
+                        )
+                    )
+                }
+            }
+            if (toInsert.isNotEmpty()) {
+                repository.insertVnRoutes(toInsert)
+            }
         }
     }
 

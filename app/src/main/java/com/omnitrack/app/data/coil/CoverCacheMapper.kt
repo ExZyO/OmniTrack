@@ -12,11 +12,6 @@ import com.omnitrack.app.data.cache.CoverCache
 class CoverCacheMapper(private val coverCache: CoverCache) : Mapper<String, Any> {
     override fun map(data: String, options: Options): Any? {
         if (!data.startsWith("http://") && !data.startsWith("https://")) return null
-        val cachedFile = coverCache.getCoverFile(data)
-        return if (cachedFile != null && cachedFile.exists() && cachedFile.length() > 0) {
-            cachedFile
-        } else {
-            null
-        }
+        return coverCache.getCachedCoverFileFast(data)
     }
 }

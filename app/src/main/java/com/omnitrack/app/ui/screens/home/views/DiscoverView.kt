@@ -980,7 +980,8 @@ fun DiscoverView(
                                 visibleResults,
                                 key = {
                                     "${it.sourceProvider}_${it.mediaType}_${it.platform ?: ""}_${it.title}_${it.anilistId ?: it.bangumiId ?: it.malId ?: it.tmdbId ?: it.igdbId ?: it.steamAppId ?: it.vndbId ?: it.openLibraryId ?: it.hardcoverId ?: it.comicVineId ?: it.metronId ?: 0L}"
-                                }
+                                },
+                                contentType = { "discover_grid_card" }
                             ) { item ->
                                 val itemNovelSub = if (item.mediaType == MediaType.NOVEL) {
                                     com.omnitrack.app.ui.screens.home.inferNovelSubtype(
@@ -1061,6 +1062,7 @@ fun DiscoverView(
                                     cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
                                     badgeText = cardBadgeText,
                                     badgeColor = AccentGold,
+                                    isDiscoverCard = true,
                                     showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
                                     onCardClick = {
                                         if (existingInLibrary != null) {

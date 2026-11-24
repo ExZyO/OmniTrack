@@ -1,5 +1,6 @@
 package com.omnitrack.app.ui.screens.home
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -48,6 +49,7 @@ data class ProgressUndoEvent(
     val createdAtMs: Long = System.currentTimeMillis()
 )
 
+@Immutable
 data class HomeUiState(
     val mediaSummaries: List<MediaCardSummary> = emptyList(),
     val allMediaSummaries: List<MediaCardSummary> = emptyList(),
@@ -57,6 +59,7 @@ data class HomeUiState(
     val isSeeded: Boolean = false
 )
 
+@Immutable
 data class DiscoverShelfState(
     val items: List<SearchResultItem> = emptyList(),
     val page: Int = 1,
@@ -153,9 +156,10 @@ class HomeViewModel(
     }
 
     private fun initializeLibraryMaintenance() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val items = repository.getAllMediaSummaries().first()
+                _isLoading.value = false
                 if (items.isNotEmpty()) {
                     // Smart sync canonical ID updates without requiring data wipe
                     val allItems = repository.getAllMedia().first()
@@ -184,29 +188,25 @@ class HomeViewModel(
                         (it.mediaType == MediaType.SHOW || it.mediaType == MediaType.MOVIE) &&
                             (it.bannerUrl.isNullOrBlank() || it.bannerUrl == it.coverUrl)
                     }
-                    if (needsWideBanner.isNotEmpty()) {
-                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            for (showOrMovie in needsWideBanner) {
-                                runCatching {
-                                    val matches = homeSearchRepository.searchAll(
-                                        query = showOrMovie.title,
-                                        filter = showOrMovie.mediaType,
-                                        tmdbApiKey = PreferenceManager.cachedTmdbApiKey
+                    for (showOrMovie in needsWideBanner) {
+                        runCatching {
+                            val matches = homeSearchRepository.searchAll(
+                                query = showOrMovie.title,
+                                filter = showOrMovie.mediaType,
+                                tmdbApiKey = PreferenceManager.cachedTmdbApiKey
+                            )
+                            val best = matches.firstOrNull { m ->
+                                !m.bannerUrl.isNullOrBlank() && m.bannerUrl != m.coverUrl &&
+                                    ((showOrMovie.tmdbId != null && m.tmdbId == showOrMovie.tmdbId) ||
+                                        m.title.equals(showOrMovie.title, ignoreCase = true))
+                            } ?: matches.firstOrNull { !it.bannerUrl.isNullOrBlank() && it.bannerUrl != it.coverUrl }
+                            if (best != null && !best.bannerUrl.isNullOrBlank()) {
+                                repository.updateMedia(
+                                    showOrMovie.copy(
+                                        bannerUrl = best.bannerUrl,
+                                        tmdbId = showOrMovie.tmdbId ?: best.tmdbId
                                     )
-                                    val best = matches.firstOrNull { m ->
-                                        !m.bannerUrl.isNullOrBlank() && m.bannerUrl != m.coverUrl &&
-                                            ((showOrMovie.tmdbId != null && m.tmdbId == showOrMovie.tmdbId) ||
-                                                m.title.equals(showOrMovie.title, ignoreCase = true))
-                                    } ?: matches.firstOrNull { !it.bannerUrl.isNullOrBlank() && it.bannerUrl != it.coverUrl }
-                                    if (best != null && !best.bannerUrl.isNullOrBlank()) {
-                                        repository.updateMedia(
-                                            showOrMovie.copy(
-                                                bannerUrl = best.bannerUrl,
-                                                tmdbId = showOrMovie.tmdbId ?: best.tmdbId
-                                            )
-                                        )
-                                    }
-                                }
+                                )
                             }
                         }
                     }
@@ -920,6 +920,7 @@ class HomeViewModel(
         entity: MediaItemEntity,
         categoryIds: Set<Long> = emptySet(),
         prefManager: PreferenceManager? = null,
+        vnRoutes: List<com.omnitrack.app.ui.components.CustomVnRouteDraft> = emptyList(),
         onCreated: (Long) -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -938,6 +939,28 @@ class HomeViewModel(
                 }
                 if (targetCats.isNotEmpty()) {
                     pref.setMediaCategories(insertedId, targetCats)
+                }
+            }
+            if (insertedId > 0L && prepared.mediaType == MediaType.VISUAL_NOVEL && vnRoutes.isNotEmpty()) {
+                val routeEntities = vnRoutes.mapIndexedNotNull { idx, draft ->
+                    val clean = draft.routeName.trim()
+                    if (clean.isBlank()) null
+                    else com.omnitrack.app.data.db.entity.VnRouteEntity(
+                        mediaId = insertedId,
+                        routeName = clean,
+                        routeType = draft.routeType,
+                        isCompleted = draft.isCompleted,
+                        completedAtMs = if (draft.isCompleted) now else null,
+                        isSpoiler = draft.isSpoiler,
+                        playtimeHours = draft.playtimeHours?.takeIf { it > 0.0 },
+                        userRating = draft.userRating,
+                        userNote = draft.userNote,
+                        isBookmarked = draft.isBookmarked,
+                        sortOrder = idx
+                    )
+                }
+                if (routeEntities.isNotEmpty()) {
+                    repository.insertVnRoutes(routeEntities)
                 }
             }
             if (coverCache != null && diskCache != null && prepared.coverUrl.startsWith("http")) {

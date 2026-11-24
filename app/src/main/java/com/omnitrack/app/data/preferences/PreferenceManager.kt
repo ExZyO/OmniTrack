@@ -49,6 +49,7 @@ val DEFAULT_GEMINI_MODELS = listOf(
     GeminiModelOption("gemini-2.0-flash-lite", "Gemini 2.0 Flash-Lite", "High Quota")
 )
 
+@Immutable
 data class PosterCardStyle(
     val widthDp: Int = 126,
     val cornerRadiusDp: Int = 12,
@@ -559,6 +560,18 @@ data class ChimanewLibrarySettings(
     val defaultCategoryId: Long? = null
 )
 
+@Immutable
+data class PerformanceSettings(
+    val performanceModeEnabled: Boolean = false,
+    val liveNavBarBlur: Boolean = true,
+    val autoPauseBlurOnScroll: Boolean = true,
+    val downsampleGridCovers: Boolean = true,
+    val disableCardDepthEffects: Boolean = false,
+    val disableCardAnimations: Boolean = false,
+    val prefetchAdjacentTabs: Boolean = false,
+    val hardwareBitmaps: Boolean = true
+)
+
 class PreferenceManager(private val context: Context) {
 
     private object PreferencesKeys {
@@ -687,6 +700,16 @@ class PreferenceManager(private val context: Context) {
         val FANFIC_NSFW_FILTER_MODE = stringPreferencesKey("fanfic_nsfw_filter_mode")
         val UNIVERSAL_HERO_BANNER_BLUR = stringPreferencesKey("universal_hero_banner_blur")
         val CATEGORY_HERO_BANNER_BLUR_OVERRIDES = stringPreferencesKey("category_hero_banner_blur_overrides")
+
+        // Performance & Smoothness
+        val PERF_MODE_ENABLED = booleanPreferencesKey("perf_mode_enabled")
+        val PERF_LIVE_NAV_BLUR = booleanPreferencesKey("perf_live_nav_blur")
+        val PERF_AUTO_PAUSE_BLUR_SCROLL = booleanPreferencesKey("perf_auto_pause_blur_scroll")
+        val PERF_DOWNSAMPLE_GRID_COVERS = booleanPreferencesKey("perf_downsample_grid_covers")
+        val PERF_DISABLE_CARD_DEPTH = booleanPreferencesKey("perf_disable_card_depth")
+        val PERF_DISABLE_CARD_ANIMS = booleanPreferencesKey("perf_disable_card_anims")
+        val PERF_PREFETCH_ADJACENT_TABS = booleanPreferencesKey("perf_prefetch_adjacent_tabs")
+        val PERF_HARDWARE_BITMAPS = booleanPreferencesKey("perf_hardware_bitmaps")
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
@@ -1092,7 +1115,9 @@ class PreferenceManager(private val context: Context) {
                     cardDepthEpisodesEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_EPISODES] ?: true,
                     cardDepthCastEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_CAST] ?: true,
                     cardDepthTrailersEnabled = prefs[PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS] ?: true,
-                    showQuickProgressOnCards = prefs[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] ?: false
+                    showQuickProgressOnCards = prefs[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS]
+                        ?: prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE]
+                        ?: false
                 )
             } catch (_: Exception) {
                 PosterCardStyle()
@@ -1101,7 +1126,10 @@ class PreferenceManager(private val context: Context) {
         .distinctUntilChanged()
 
     suspend fun updatePosterShowQuickProgress(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] = enabled }
+        context.dataStore.edit {
+            it[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] = enabled
+            it[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] = enabled
+        }
     }
 
     suspend fun updatePosterWidthDp(width: Int) {
@@ -1170,6 +1198,7 @@ class PreferenceManager(private val context: Context) {
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_CAST)
             it.remove(PreferencesKeys.POSTER_CARD_DEPTH_TRAILERS)
             it.remove(PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS)
+            it.remove(PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE)
         }
     }
 
@@ -1609,7 +1638,9 @@ class PreferenceManager(private val context: Context) {
                 showRemainingBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_REMAINING_BADGE] ?: true,
                 showTypeBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TYPE_BADGE] ?: false,
                 showScoreBadge = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_SCORE_BADGE] ?: false,
-                showQuickContinue = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] ?: false,
+                showQuickContinue = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE]
+                    ?: prefs[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS]
+                    ?: false,
                 showCategoryTabs = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] ?: true,
                 showTabItemCounts = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] ?: true,
                 showHiddenCategories = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] ?: false,
@@ -1682,7 +1713,10 @@ class PreferenceManager(private val context: Context) {
                 "REMAINING" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_REMAINING_BADGE] = enabled
                 "TYPE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TYPE_BADGE] = enabled
                 "SCORE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_SCORE_BADGE] = enabled
-                "CONTINUE" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] = enabled
+                "CONTINUE" -> {
+                    prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_QUICK_CONTINUE] = enabled
+                    prefs[PreferencesKeys.POSTER_SHOW_QUICK_PROGRESS] = enabled
+                }
                 "TABS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] = enabled
                 "COUNTS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] = enabled
                 "HIDDEN" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] = enabled
@@ -1880,6 +1914,67 @@ class PreferenceManager(private val context: Context) {
                 current
             }
             prefs[PreferencesKeys.HERO_MULTI_RATINGS_CACHE] = heroRatingsJson.encodeToString(trimmed)
+        }
+    }
+
+    val performanceSettings: Flow<PerformanceSettings> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            PerformanceSettings(
+                performanceModeEnabled = prefs[PreferencesKeys.PERF_MODE_ENABLED] ?: false,
+                liveNavBarBlur = prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] ?: true,
+                autoPauseBlurOnScroll = prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] ?: true,
+                downsampleGridCovers = prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] ?: true,
+                disableCardDepthEffects = prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] ?: false,
+                disableCardAnimations = prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] ?: false,
+                prefetchAdjacentTabs = prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] ?: false,
+                hardwareBitmaps = prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] ?: true
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun setPerformanceModeEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.PERF_MODE_ENABLED] = enabled
+            if (enabled) {
+                prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = false
+                prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = true
+                prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = true
+                prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = true
+                prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = false
+            } else {
+                prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = true
+                prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = true
+                prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = false
+                prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = false
+            }
+        }
+    }
+
+    suspend fun setPerformanceOption(key: String, enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            when (key.uppercase()) {
+                "LIVE_BLUR" -> prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] = enabled
+                "PAUSE_BLUR_SCROLL" -> prefs[PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL] = enabled
+                "DOWNSAMPLE_COVERS" -> prefs[PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS] = enabled
+                "DISABLE_CARD_DEPTH" -> prefs[PreferencesKeys.PERF_DISABLE_CARD_DEPTH] = enabled
+                "DISABLE_ANIMS" -> prefs[PreferencesKeys.PERF_DISABLE_CARD_ANIMS] = enabled
+                "PREFETCH_TABS" -> prefs[PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS] = enabled
+                "HARDWARE_BITMAPS" -> prefs[PreferencesKeys.PERF_HARDWARE_BITMAPS] = enabled
+            }
+        }
+    }
+
+    suspend fun resetPerformanceSettings() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(PreferencesKeys.PERF_MODE_ENABLED)
+            prefs.remove(PreferencesKeys.PERF_LIVE_NAV_BLUR)
+            prefs.remove(PreferencesKeys.PERF_AUTO_PAUSE_BLUR_SCROLL)
+            prefs.remove(PreferencesKeys.PERF_DOWNSAMPLE_GRID_COVERS)
+            prefs.remove(PreferencesKeys.PERF_DISABLE_CARD_DEPTH)
+            prefs.remove(PreferencesKeys.PERF_DISABLE_CARD_ANIMS)
+            prefs.remove(PreferencesKeys.PERF_PREFETCH_ADJACENT_TABS)
+            prefs.remove(PreferencesKeys.PERF_HARDWARE_BITMAPS)
         }
     }
 

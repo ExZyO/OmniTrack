@@ -45,7 +45,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -55,6 +54,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.request.crossfade
+import coil3.size.Precision
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.MediaItemEntity
@@ -64,6 +67,7 @@ import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
@@ -163,17 +167,17 @@ fun MediaCard(
     showRemainingBadge: Boolean = false,
     showTypeBadge: Boolean = false,
     showScoreBadge: Boolean = false,
-    isDenseGrid: Boolean = false
+    isDenseGrid: Boolean = false,
+    isDiscoverCard: Boolean = false
 ) {
+    val perf = LocalPerformanceSettings.current
     val scope = rememberCoroutineScope()
-    val bounceScale = remember { Animatable(1f) }
-    var showPlusOne by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val coverCache = remember { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
+    val coverCache = remember(context) { (context.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.coverCache }
     val inheritedPattern = LocalCustomPosterPattern.current
 
-    val customPosterUrl = remember(item, inheritedPattern, isLandscape) {
+    val customPosterUrl = remember(item.id, item.tmdbId, item.imdbId, item.anilistId, item.malId, inheritedPattern, isLandscape) {
         if (inheritedPattern.isNotBlank()) {
             com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForSummary(item, inheritedPattern, isLandscape)
         } else null
@@ -182,40 +186,84 @@ fun MediaCard(
 
     // In landscape mode, prioritize bannerUrl (16:9 backdrop) over portrait cover
     // CONTRACT: Manual customBannerPath / customCoverPath strictly takes top priority
-    val activeModel = remember(isLandscape, item.customBannerPath, item.bannerUrl, item.artworkRole, item.customCoverPath, item.coverUrl, customPosterUrl, customPosterFailed) {
+    val downsampleCovers = perf.downsampleGridCovers
+    val activeModel = remember(
+        isLandscape,
+        item.customBannerPath,
+        item.bannerUrl,
+        item.artworkRole,
+        item.customCoverPath,
+        item.coverUrl,
+        customPosterUrl,
+        customPosterFailed,
+        downsampleCovers
+    ) {
         if (isLandscape) {
             item.customBannerPath?.takeIf { it != "NONE" && it.isNotBlank() }?.let {
                 com.omnitrack.app.data.artwork.ArtworkModelResolver.toCoilModel(it)
             }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
-                else (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let { LosslessCoverMapper.toLosslessUrl(it) }
+                else (item.bannerUrl?.takeIf { it.isNotBlank() } ?: item.coverUrl).let {
+                    if (downsampleCovers) LosslessCoverMapper.toGridThumbnailUrl(it) else LosslessCoverMapper.toLosslessUrl(it)
+                }
         } else {
             item.customCoverPath?.takeIf { it.isNotBlank() }?.let {
                 com.omnitrack.app.data.artwork.ArtworkModelResolver.toCoilModel(it)
             }
                 ?: if (!customPosterFailed && customPosterUrl != null) customPosterUrl
-                else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+                else {
+                    if (downsampleCovers) LosslessCoverMapper.toGridThumbnailUrl(item.coverUrl)
+                    else LosslessCoverMapper.toLosslessUrl(item.coverUrl)
+                }
         }
     }
 
-    val isInitiallyInLibrary = badgeText == "IN LIBRARY" || (item.id != 0L && badgeText != null)
-    var isAddedToLibrary by remember(item.id, badgeText) { mutableStateOf(isInitiallyInLibrary) }
-    val isDiscoverAdd = !isInitiallyInLibrary
+    val isInitiallyInLibrary = badgeText == "IN LIBRARY" || (!isDiscoverCard && item.id > 0L)
+    var isAddedToLibrary by remember(item.id, badgeText, isDiscoverCard) { mutableStateOf(isInitiallyInLibrary) }
+    val isDiscoverAdd = isDiscoverCard && !isInitiallyInLibrary
+    val showActionButton = isDiscoverAdd || showQuickProgressButton
+    val showDiscoverCheck = isDiscoverAdd && isAddedToLibrary
 
-    val pillBg by androidx.compose.animation.animateColorAsState(
-        targetValue = if (isAddedToLibrary && isDiscoverAdd) Color(0xFF1B3D2F) else AmoledBlack.copy(alpha = 0.75f),
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 250),
-        label = "pillBgColor"
-    )
+    val bounceScale = if (showActionButton && !perf.disableCardAnimations) {
+        remember { Animatable(1f) }
+    } else null
+    var showPlusOne by remember { mutableStateOf(false) }
+
+    val pillBg = if (showDiscoverCheck) AccentGold.copy(alpha = 0.22f) else AccentGold
 
     val shape = RoundedCornerShape(cornerRadiusDp.dp)
 
+    val cardRequest = remember(activeModel, isLandscape, isDenseGrid, downsampleCovers, perf.hardwareBitmaps, perf.disableCardAnimations) {
+        if (activeModel == null) null
+        else ImageRequest.Builder(context)
+            .data(activeModel)
+            .apply {
+                if (downsampleCovers) {
+                    val (wPx, hPx) = when {
+                        isLandscape -> 640 to 360
+                        isDenseGrid -> 300 to 440
+                        else -> 440 to 650
+                    }
+                    size(wPx, hPx)
+                    precision(Precision.INEXACT)
+                }
+            }
+            .allowHardware(perf.hardwareBitmaps)
+            .crossfade(!perf.disableCardAnimations)
+            .build()
+    }
+
     Column(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = bounceScale.value
-                scaleY = bounceScale.value
-            }
+            .then(
+                if (bounceScale != null) {
+                    Modifier.graphicsLayer {
+                        val s = bounceScale.value
+                        scaleX = s
+                        scaleY = s
+                    }
+                } else Modifier
+            )
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -224,12 +272,11 @@ fun MediaCard(
             ),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Full-bleed Poster Container with dynamic shadow and Specular Glass Card Depth
+        // Poster Container without expensive offscreen elevation shadow over AMOLED #000000
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (isLandscape) 16f / 9f else 0.68f)
-                .shadow(10.dp, shape)
                 .clip(shape)
                 .background(DarkSurfaceCard)
                 .then(
@@ -240,7 +287,7 @@ fun MediaCard(
                     edgeStrength = cardDepthEdgeStrength,
                     sheenStrength = cardDepthSheenStrength,
                     edgeCoverage = cardDepthEdgeCoverage,
-                    enabled = cardDepthEnabled
+                    enabled = cardDepthEnabled && !perf.disableCardDepthEffects
                 )
         ) {
             var fanficArtFailed by remember(activeModel) { mutableStateOf(false) }
@@ -268,7 +315,7 @@ fun MediaCard(
                 )
             } else {
                 AsyncImage(
-                    model = activeModel,
+                    model = cardRequest ?: activeModel,
                     contentDescription = item.title,
                     modifier = Modifier
                         .fillMaxSize()
@@ -282,7 +329,9 @@ fun MediaCard(
                         }
                     },
                     onSuccess = {
-                        if (activeModel is String && coverCache != null) {
+                        if (activeModel is String && activeModel.startsWith("http") &&
+                            coverCache != null && !coverCache.hasCachedCoverFast(activeModel)
+                        ) {
                             val diskCache = coil3.SingletonImageLoader.get(context).diskCache
                             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                 coverCache.promoteFromDiskCache(activeModel, diskCache)
@@ -513,7 +562,7 @@ fun MediaCard(
             }
 
             // Tactile +1 / Add to Library Quick Action floating pill
-            if (isDiscoverAdd || showQuickProgressButton) {
+            if (showActionButton) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -527,74 +576,87 @@ fun MediaCard(
                             onClick = {
                                 if (isDiscoverAdd) {
                                     isAddedToLibrary = true
-                                } else {
+                                } else if (!perf.disableCardAnimations) {
                                     showPlusOne = true
                                 }
-                                scope.launch {
-                                    bounceScale.animateTo(
-                                        targetValue = 0.92f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessLow
+                                if (bounceScale != null) {
+                                    scope.launch {
+                                        bounceScale.animateTo(
+                                            targetValue = 0.92f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
                                         )
-                                    )
-                                    bounceScale.animateTo(
-                                        targetValue = 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessLow
+                                        bounceScale.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
                                         )
-                                    )
+                                    }
                                 }
                                 onQuickProgress()
                             }
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    AnimatedContent(
-                        targetState = isAddedToLibrary,
-                        transitionSpec = {
-                            (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith
-                                (scaleOut(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeOut())
-                        },
-                        label = "addOrCheckAnimation"
-                    ) { added ->
-                        if (added) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "In Library",
-                                tint = Color(0xFF00E054),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = if (isDiscoverAdd) "Add to Library" else "+1 Progress",
-                                tint = AccentJade,
-                                modifier = Modifier.size(16.dp)
-                            )
+                    if (isDiscoverAdd) {
+                        AnimatedContent(
+                            targetState = showDiscoverCheck,
+                            transitionSpec = {
+                                (scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn()) togetherWith
+                                    (scaleOut(spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeOut())
+                            },
+                            label = "addOrCheckAnimation"
+                        ) { added ->
+                            if (added) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "In Library",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add to Library",
+                                    tint = OnAccentColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "+1 Progress",
+                            tint = OnAccentColor,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
 
             // Animated "+1" particle feedback
-            androidx.compose.animation.AnimatedVisibility(
-                visible = showPlusOne,
-                enter = fadeIn() + scaleIn(initialScale = 0.6f),
-                exit = fadeOut() + scaleOut(targetScale = 1.3f),
-                modifier = Modifier.align(Alignment.Center)
-            ) {
-                Text(
-                    text = "+1",
-                    color = AccentJade,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Black
-                )
-                LaunchedEffect(showPlusOne) {
-                    if (showPlusOne) {
-                        kotlinx.coroutines.delay(450)
-                        showPlusOne = false
+            if (showActionButton && !perf.disableCardAnimations) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showPlusOne,
+                    enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                    exit = fadeOut() + scaleOut(targetScale = 1.3f),
+                    modifier = Modifier.align(Alignment.Center)
+                ) {
+                    Text(
+                        text = "+1",
+                        color = AccentGold,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    LaunchedEffect(showPlusOne) {
+                        if (showPlusOne) {
+                            kotlinx.coroutines.delay(450)
+                            showPlusOne = false
+                        }
                     }
                 }
             }

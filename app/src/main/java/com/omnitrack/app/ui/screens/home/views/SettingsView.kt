@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.ViewModule
@@ -58,10 +59,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.BuildConfig
 import com.omnitrack.app.data.db.dto.MediaCardSummary
+import com.omnitrack.app.data.preferences.PerformanceSettings
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.data.sync.TrackerTokens
 import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
+import com.omnitrack.app.ui.components.PerformanceSettingsSheet
 import com.omnitrack.app.ui.components.PosterCustomizationSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.screens.detail.components.EpisodeLayoutSheet
@@ -98,6 +101,7 @@ fun SettingsView(
     val prefManager = app.preferenceManager
     val tokenManager = app.trackerTokenManager
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    val perfSettings by prefManager.performanceSettings.collectAsState(initial = PerformanceSettings())
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
     val fanficConnectedSites by tokenManager.fanficConnectedSites.collectAsState(initial = emptySet())
 
@@ -123,6 +127,7 @@ fun SettingsView(
     var showTrackerAccountsSheet by remember { mutableStateOf(false) }
     var showPosterCustomizationSheet by remember { mutableStateOf(false) }
     var showEpisodeLayoutSheet by remember { mutableStateOf(false) }
+    var showPerformanceSheet by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
 
     val accountRows = listOf(
@@ -212,6 +217,14 @@ fun SettingsView(
 
     val systemRows = listOf(
         SettingRowEntry(
+            icon = Icons.Default.Speed,
+            title = "Performance & Smoothness",
+            keywords = "performance mode lag fps blur gpu animation cache memory optimization smooth",
+            trailingText = if (perfSettings.performanceModeEnabled) "Perf Mode" else "Balanced",
+            accentIcon = perfSettings.performanceModeEnabled,
+            onClick = { showPerformanceSheet = true }
+        ),
+        SettingRowEntry(
             icon = Icons.Default.SystemUpdate,
             title = "Check for Updates",
             keywords = "update version release github apk actions build",
@@ -229,7 +242,7 @@ fun SettingsView(
             icon = Icons.Default.Info,
             title = "About OmniTrack",
             keywords = "about schema version database library count",
-            trailingText = "v21",
+            trailingText = "v22",
             onClick = { showAboutDialog = true }
         )
     )
@@ -379,6 +392,14 @@ fun SettingsView(
         )
     }
 
+    if (showPerformanceSheet) {
+        PerformanceSettingsSheet(
+            preferenceManager = prefManager,
+            settings = perfSettings,
+            onDismiss = { showPerformanceSheet = false }
+        )
+    }
+
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
@@ -402,7 +423,7 @@ fun SettingsView(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Room Database Schema v20",
+                        text = "Room Database Schema v22",
                         fontSize = 13.sp,
                         color = AccentGold,
                         fontWeight = FontWeight.SemiBold

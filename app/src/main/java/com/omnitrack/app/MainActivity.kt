@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -15,9 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.omnitrack.app.data.model.extractFirstFanficUrl
+import com.omnitrack.app.data.preferences.PerformanceSettings
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.util.AppLogger
+import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.navigation.OmniTrackNavigation
 import com.omnitrack.app.ui.theme.OmniThemeSettings
 import com.omnitrack.app.ui.theme.OmniThemeState
@@ -69,16 +72,19 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeSettings by app.preferenceManager.themeSettings.collectAsState(initial = OmniThemeSettings())
+            val perfSettings by app.preferenceManager.performanceSettings.collectAsState(initial = PerformanceSettings())
             LaunchedEffect(themeSettings) {
                 OmniThemeState.apply(themeSettings)
             }
             OmniTrackTheme {
-                val navController = rememberNavController()
+                CompositionLocalProvider(LocalPerformanceSettings provides perfSettings) {
+                    val navController = rememberNavController()
 
-                OmniTrackNavigation(
-                    navController = navController,
-                    repository = app.repository
-                )
+                    OmniTrackNavigation(
+                        navController = navController,
+                        repository = app.repository
+                    )
+                }
             }
         }
     }

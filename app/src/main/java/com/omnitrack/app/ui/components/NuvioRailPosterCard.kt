@@ -21,16 +21,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.request.crossfade
+import coil3.size.Precision
 import com.omnitrack.app.data.artwork.ArtworkModelResolver
+import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
@@ -64,6 +70,9 @@ fun NuvioRailPosterCard(
     fanficIsCrossover: Boolean = false
 ) {
     val resolvedHeight = if (cardHeight == Dp.Unspecified) cardWidth * 1.5f else cardHeight
+    val perf = LocalPerformanceSettings.current
+    val context = LocalContext.current
+    val density = LocalDensity.current
 
     Column(
         modifier = modifier
@@ -75,12 +84,34 @@ fun NuvioRailPosterCard(
             modifier = Modifier
                 .width(cardWidth)
                 .height(resolvedHeight)
-                .shadow(10.dp, RoundedCornerShape(cornerRadius))
                 .clip(RoundedCornerShape(cornerRadius))
                 .background(DarkSurfaceElevated)
                 .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(cornerRadius))
         ) {
-            val imageModel = remember(coverUrl) { ArtworkModelResolver.toCoilModel(coverUrl) }
+            val imageModel = remember(coverUrl, perf.downsampleGridCovers) {
+                val normalized = if (perf.downsampleGridCovers && coverUrl != null && coverUrl.startsWith("http")) {
+                    LosslessCoverMapper.toGridThumbnailUrl(coverUrl)
+                } else {
+                    coverUrl
+                }
+                ArtworkModelResolver.toCoilModel(normalized)
+            }
+            val railRequest = remember(imageModel, cardWidth, resolvedHeight, perf.downsampleGridCovers, perf.hardwareBitmaps, perf.disableCardAnimations) {
+                if (imageModel == null) null
+                else ImageRequest.Builder(context)
+                    .data(imageModel)
+                    .apply {
+                        if (perf.downsampleGridCovers) {
+                            val wPx = with(density) { cardWidth.roundToPx() }.coerceIn(180, 600)
+                            val hPx = with(density) { resolvedHeight.roundToPx() }.coerceIn(220, 800)
+                            size(wPx, hPx)
+                            precision(Precision.INEXACT)
+                        }
+                    }
+                    .allowHardware(perf.hardwareBitmaps)
+                    .crossfade(!perf.disableCardAnimations)
+                    .build()
+            }
             var unblurredByTap by remember(coverUrl, title) { androidx.compose.runtime.mutableStateOf(false) }
             val isBlurred = isFanfic && !unblurredByTap &&
                 shouldBlurFanficCover(fanficRating, hasActualImageCover = imageModel != null)
@@ -98,7 +129,7 @@ fun NuvioRailPosterCard(
                 )
             } else if (imageModel != null) {
                 AsyncImage(
-                    model = imageModel,
+                    model = railRequest ?: imageModel,
                     contentDescription = title,
                     modifier = Modifier
                         .fillMaxSize()

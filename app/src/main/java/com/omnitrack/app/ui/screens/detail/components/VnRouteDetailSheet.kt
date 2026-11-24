@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
@@ -49,6 +50,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,20 +60,10 @@ import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ArtworkBackdrop
 import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.ui.theme.AccentGold
-import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.OnAccentColor
 import java.util.Locale
 import kotlin.math.roundToInt
-
-private val ROUTE_TYPES = listOf(
-    "COMMON" to "Common",
-    "HEROINE" to "Heroine",
-    "TRUE" to "True End",
-    "NORMAL" to "Normal",
-    "BAD" to "Bad End",
-    "EXTRA" to "Extra",
-    "CUSTOM" to "Custom"
-)
 
 @Composable
 fun VnRouteDetailSheet(
@@ -92,6 +84,13 @@ fun VnRouteDetailSheet(
     var isBookmarked by remember(route.id) { mutableStateOf(route.isBookmarked) }
     var isSpoiler by remember(route.id) { mutableStateOf(route.isSpoiler) }
     var note by remember(route.id) { mutableStateOf(route.userNote ?: "") }
+    var hoursText by remember(route.id) {
+        mutableStateOf(
+            route.playtimeHours?.takeIf { it > 0.0 }?.let { h ->
+                if (h % 1.0 == 0.0) h.toInt().toString() else String.format(Locale.US, "%.1f", h)
+            }.orEmpty()
+        )
+    }
     var sliderValue by remember(route.id) {
         mutableFloatStateOf(route.userRating?.coerceIn(1.0f, 10.0f) ?: 0.9f)
     }
@@ -327,7 +326,7 @@ fun VnRouteDetailSheet(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    ROUTE_TYPES.forEach { (key, label) ->
+                    VN_ROUTE_TYPES.forEach { (key, label) ->
                         val selected = editedType.equals(key, ignoreCase = true)
                         Column(
                             modifier = Modifier
@@ -337,7 +336,7 @@ fun VnRouteDetailSheet(
                         ) {
                             Text(
                                 text = label,
-                                color = if (selected) Color.White else Color.White.copy(alpha = 0.50f),
+                                color = if (selected) AccentGold else Color.White.copy(alpha = 0.50f),
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                             )
@@ -346,7 +345,7 @@ fun VnRouteDetailSheet(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(2.dp)
-                                    .background(if (selected) Color.White else Color.Transparent)
+                                    .background(if (selected) AccentGold else Color.Transparent)
                             )
                         }
                     }
@@ -371,11 +370,73 @@ fun VnRouteDetailSheet(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.White.copy(alpha = 0.35f),
+                        focusedBorderColor = AccentGold,
                         unfocusedBorderColor = Color.White.copy(alpha = 0.14f)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Optional Route Hours (leave blank to hide hours beside this route)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = hoursText,
+                        onValueChange = { next ->
+                            if (next.length <= 6 && next.all { it.isDigit() || it == '.' }) {
+                                hoursText = next
+                            }
+                        },
+                        label = { Text("Route Hours (optional)", color = Color.White.copy(alpha = 0.65f)) },
+                        placeholder = { Text("Leave blank to hide", color = Color.White.copy(alpha = 0.38f)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = AccentGold,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.14f)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "+0.5h",
+                        color = AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable {
+                                val next = (hoursText.trim().toDoubleOrNull() ?: 0.0) + 0.5
+                                hoursText = String.format(Locale.US, "%.1f", next)
+                            }
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                    Text(
+                        text = "+1h",
+                        color = AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable {
+                                val next = (hoursText.trim().toDoubleOrNull() ?: 0.0) + 1.0
+                                hoursText = String.format(Locale.US, "%.1f", next)
+                            }
+                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                    if (hoursText.isNotEmpty()) {
+                        Text(
+                            text = "Clear",
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clickable { hoursText = "" }
+                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                        )
+                    }
+                }
 
                 OutlinedTextField(
                     value = note,
@@ -386,7 +447,7 @@ fun VnRouteDetailSheet(
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.White.copy(alpha = 0.35f),
+                        focusedBorderColor = AccentGold,
                         unfocusedBorderColor = Color.White.copy(alpha = 0.14f)
                     ),
                     modifier = Modifier.fillMaxWidth()
@@ -421,14 +482,15 @@ fun VnRouteDetailSheet(
                                     userRating = currentRating,
                                     userNote = note.trim().takeIf { it.isNotBlank() },
                                     isBookmarked = isBookmarked,
-                                    isSpoiler = isSpoiler
+                                    isSpoiler = isSpoiler,
+                                    playtimeHours = hoursText.trim().toDoubleOrNull()?.takeIf { it > 0.0 }
                                 )
                             )
                             onDismiss()
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGold,
-                            contentColor = Color.Black
+                            contentColor = OnAccentColor
                         ),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.4f)
@@ -465,8 +527,8 @@ private fun RouteSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = AccentJade,
+                checkedThumbColor = OnAccentColor,
+                checkedTrackColor = AccentGold,
                 uncheckedThumbColor = Color.White.copy(alpha = 0.78f),
                 uncheckedTrackColor = Color.White.copy(alpha = 0.16f)
             )

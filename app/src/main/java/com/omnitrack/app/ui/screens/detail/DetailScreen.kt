@@ -998,7 +998,9 @@ fun DetailScreen(
                                             onStepPlaytime = { viewModel.stepVnPlaytime(it) },
                                             onSetExactPlaytime = { viewModel.setVnPlaytimeExact(it) },
                                             onToggleRouteCompleted = { viewModel.toggleVnRouteCompleted(it) },
-                                            onAddCustomRoute = { viewModel.addCustomVnRoute(it) },
+                                            onAddCustomRoute = { name, type, hours, spoiler ->
+                                                viewModel.addCustomVnRoute(name, type, hours, spoiler)
+                                            },
                                             onOpenRouteDetail = { route ->
                                                 pushSheet(DetailSheetTarget.VnRoute(route.id))
                                             }
@@ -1813,6 +1815,7 @@ fun DetailScreen(
                     existingItem = item,
                     availableCategories = allCategories,
                     initialCategoryIds = categoryAssignments[item.id].orEmpty(),
+                    initialVnRoutes = uiState.vnRoutes,
                     onCreateCategory = { name, onCreated ->
                         val trimmed = name.trim()
                         if (trimmed.isNotEmpty()) {
@@ -1823,6 +1826,16 @@ fun DetailScreen(
                                 )
                                 if (id > 0L) onCreated(id)
                             }
+                        }
+                    },
+                    onSaveFull = { updated, selectedCatIds, vnDrafts ->
+                        showEditEntrySheet = false
+                        viewModel.updateCustomEntryDetails(updated)
+                        if (updated.mediaType == MediaType.VISUAL_NOVEL && item.id > 0L) {
+                            viewModel.syncCustomVnRoutes(item.id, vnDrafts)
+                        }
+                        coroutineScope.launch {
+                            prefManager.setMediaCategories(item.id, selectedCatIds)
                         }
                     },
                     onSaveWithCategories = { updated, selectedCatIds ->

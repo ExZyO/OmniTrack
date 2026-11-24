@@ -1,12 +1,14 @@
 package com.omnitrack.app.data.cache
 
 import android.content.Context
+import android.util.LruCache
 import coil3.disk.DiskCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Dedicated two-tiered cover cache engine inspired by reference manga/media trackers.
@@ -23,12 +25,57 @@ class CoverCache(private val context: Context) {
     val cacheDir: File = getStorageDir(COVERS_DIR)
     val customCoverDir: File = getStorageDir(CUSTOM_COVERS_DIR)
 
+    private val hashCache = LruCache<String, String>(2048)
+    private val knownCoverHashes = ConcurrentHashMap.newKeySet<String>()
+    @Volatile
+    private var indexInitialized: Boolean = false
+
+    init {
+        kotlin.concurrent.thread(name = "CoverCacheIndexInit", isDaemon = true) {
+            try {
+                cacheDir.list()?.forEach { name ->
+                    knownCoverHashes.add(name)
+                }
+            } catch (_: Exception) {
+            } finally {
+                indexInitialized = true
+            }
+        }
+    }
+
     /**
      * Returns the permanent cover cache file for a given thumbnail URL.
      */
     fun getCoverFile(thumbnailUrl: String?): File? {
         if (thumbnailUrl.isNullOrBlank()) return null
         return File(cacheDir, hashKey(thumbnailUrl))
+    }
+
+    /**
+     * O(1) RAM check without disk stat() syscalls once background index initialization completes.
+     */
+    fun hasCachedCoverFast(thumbnailUrl: String?): Boolean {
+        if (thumbnailUrl.isNullOrBlank()) return false
+        val key = hashKey(thumbnailUrl)
+        if (indexInitialized) return key in knownCoverHashes
+        val file = File(cacheDir, key)
+        val exists = file.exists() && file.length() > 0
+        if (exists) knownCoverHashes.add(key)
+        return exists
+    }
+
+    fun getCachedCoverFileFast(thumbnailUrl: String?): File? {
+        if (thumbnailUrl.isNullOrBlank()) return null
+        val key = hashKey(thumbnailUrl)
+        if (indexInitialized && key !in knownCoverHashes) return null
+        val file = File(cacheDir, key)
+        return if (file.exists() && file.length() > 0) {
+            knownCoverHashes.add(key)
+            file
+        } else {
+            knownCoverHashes.remove(key)
+            null
+        }
     }
 
     /**
@@ -157,7 +204,11 @@ class CoverCache(private val context: Context) {
     fun promoteFromDiskCache(thumbnailUrl: String, diskCache: DiskCache?): File? {
         if (diskCache == null || thumbnailUrl.isBlank()) return null
         val targetFile = getCoverFile(thumbnailUrl) ?: return null
-        if (targetFile.exists() && targetFile.length() > 0) return targetFile
+        if (indexInitialized && targetFile.name in knownCoverHashes) return targetFile
+        if (targetFile.exists() && targetFile.length() > 0) {
+            knownCoverHashes.add(targetFile.name)
+            return targetFile
+        }
         val snapshot = diskCache.openSnapshot(thumbnailUrl) ?: return null
         return try {
             snapshot.use { snap ->
@@ -169,11 +220,13 @@ class CoverCache(private val context: Context) {
                             input.copyTo(output)
                         }
                     }
+                    knownCoverHashes.add(targetFile.name)
                     targetFile
                 } else null
             }
         } catch (_: Exception) {
             targetFile.delete()
+            knownCoverHashes.remove(targetFile.name)
             null
         }
     }
@@ -183,7 +236,11 @@ class CoverCache(private val context: Context) {
      */
     fun promoteFromDiskCache(thumbnailUrl: String, snapshotFile: File): File? {
         val targetFile = getCoverFile(thumbnailUrl) ?: return null
-        if (targetFile.exists() && targetFile.length() > 0) return targetFile
+        if (indexInitialized && targetFile.name in knownCoverHashes) return targetFile
+        if (targetFile.exists() && targetFile.length() > 0) {
+            knownCoverHashes.add(targetFile.name)
+            return targetFile
+        }
         return try {
             targetFile.parentFile?.mkdirs()
             snapshotFile.inputStream().use { input ->
@@ -191,9 +248,11 @@ class CoverCache(private val context: Context) {
                     input.copyTo(output)
                 }
             }
+            knownCoverHashes.add(targetFile.name)
             targetFile
         } catch (_: Exception) {
             targetFile.delete()
+            knownCoverHashes.remove(targetFile.name)
             null
         }
     }
@@ -208,9 +267,11 @@ class CoverCache(private val context: Context) {
             file.outputStream().use { out ->
                 inputStream.copyTo(out)
             }
+            knownCoverHashes.add(file.name)
             file
         } catch (_: Exception) {
             file.delete()
+            knownCoverHashes.remove(file.name)
             null
         }
     }
@@ -219,7 +280,9 @@ class CoverCache(private val context: Context) {
      * Deletes a cached cover from disk.
      */
     fun deleteCover(thumbnailUrl: String?): Boolean {
-        return getCoverFile(thumbnailUrl)?.let { if (it.exists()) it.delete() else false } ?: false
+        val file = getCoverFile(thumbnailUrl) ?: return false
+        knownCoverHashes.remove(file.name)
+        return if (file.exists()) file.delete() else false
     }
 
     /**
@@ -257,7 +320,7 @@ class CoverCache(private val context: Context) {
         // Clean covers/
         cacheDir.listFiles()?.forEach { file ->
             if (file.isFile && file.name !in activeHashes) {
-                file.delete()
+                if (file.delete()) knownCoverHashes.remove(file.name)
             }
         }
         // Clean covers/custom/
@@ -293,8 +356,11 @@ class CoverCache(private val context: Context) {
     }
 
     private fun hashKey(key: String): String {
+        hashCache.get(key)?.let { return it }
         val md = MessageDigest.getInstance("MD5")
         val bytes = md.digest(key.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
+        val hex = bytes.joinToString("") { "%02x".format(it) }
+        hashCache.put(key, hex)
+        return hex
     }
 }
