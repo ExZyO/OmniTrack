@@ -139,7 +139,8 @@ data class FanficParsedWork(
     fun toMediaItemEntity(
         status: TrackingStatus = TrackingStatus.PLAN_TO_TRACK,
         existing: MediaItemEntity? = null,
-        targetMediaType: MediaType = MediaType.FANFICTION
+        targetMediaType: MediaType = MediaType.FANFICTION,
+        forceTargetMediaType: Boolean = false
     ): MediaItemEntity {
         val mainChapCount = chapters.count { it.category == FanficThreadmarkCategory.MAIN }
             .takeIf { it > 0 } ?: totalChapters
@@ -149,16 +150,21 @@ data class FanficParsedWork(
         val year = (updatedDate ?: publishedDate)?.let {
             Regex("""\b(19|20)\d{2}\b""").find(it)?.value
         } ?: existing?.releaseYear
-        val resolvedType = existing?.mediaType ?: targetMediaType
+        val resolvedType = if (forceTargetMediaType) targetMediaType else (existing?.mediaType ?: targetMediaType)
         val resolvedPlatform = if (resolvedType == MediaType.NOVEL) "WEB_NOVEL" else site.displayName
 
         return if (existing != null) {
             existing.copy(
+                mediaType = resolvedType,
                 title = title.ifBlank { existing.title },
                 synopsis = summary ?: existing.synopsis,
                 coverUrl = existing.coverUrl.ifBlank { coverUrl.orEmpty() },
                 bookAuthor = author.takeIf { it.isNotBlank() } ?: existing.bookAuthor,
-                platform = existing.platform?.takeIf { resolvedType == MediaType.NOVEL && it.isNotBlank() } ?: resolvedPlatform,
+                platform = if (resolvedType == MediaType.NOVEL) {
+                    existing.platform?.takeIf { it.isNotBlank() } ?: resolvedPlatform
+                } else {
+                    site.displayName
+                },
                 totalProgress = mainChapCount?.toDouble() ?: existing.totalProgress,
                 airStatus = workStatus.label,
                 releaseYear = year,
@@ -1336,11 +1342,7 @@ object FanficSiteEngine {
                 (el as? JsonObject)?.let { parseWattpadStoryJson(it) }
             }
             parsedWorks.map { work ->
-                val resolvedType = targetMediaType ?: if (isLikelyWattpadFanfic(work.freeformTags, work.summary, work.title)) {
-                    MediaType.FANFICTION
-                } else {
-                    MediaType.NOVEL
-                }
+                val resolvedType = targetMediaType ?: MediaType.FANFICTION
                 work.toSearchResultItem(targetMediaType = resolvedType)
             }
         } catch (e: Exception) {
@@ -1365,13 +1367,13 @@ object FanficSiteEngine {
             query = "fantasy romance",
             page = page,
             cookie = cookie,
-            targetMediaType = MediaType.NOVEL
+            targetMediaType = MediaType.FANFICTION
         )
         "wattpad_scifi_novels" -> searchWattpad(
             query = "sci-fi adventure",
             page = page,
             cookie = cookie,
-            targetMediaType = MediaType.NOVEL
+            targetMediaType = MediaType.FANFICTION
         )
         else -> searchWattpad(
             query = "popular",

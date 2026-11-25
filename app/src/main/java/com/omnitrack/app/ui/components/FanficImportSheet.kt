@@ -84,7 +84,6 @@ import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.model.extractFirstFanficUrl
 import com.omnitrack.app.data.model.formatWordCount
-import com.omnitrack.app.data.model.isLikelyWattpadFanfic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -134,12 +133,8 @@ fun FanficImportSheet(
     var bulkImportStatus by remember { mutableStateOf<String?>(null) }
     var isBulkImporting by remember { mutableStateOf(false) }
 
-    fun defaultCategoryForWork(work: FanficParsedWork): MediaType {
-        return if (work.site == FanficSite.WATTPAD && !isLikelyWattpadFanfic(work.freeformTags, work.summary, work.title)) {
-            MediaType.NOVEL
-        } else {
-            MediaType.FANFICTION
-        }
+    fun defaultCategoryForWork(@Suppress("UNUSED_PARAMETER") work: FanficParsedWork): MediaType {
+        return MediaType.FANFICTION
     }
 
     LaunchedEffect(Unit) {
@@ -527,35 +522,6 @@ fun FanficImportSheet(
                                     )
                                 }
 
-                                if (work.site == FanficSite.WATTPAD) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "Save as:",
-                                            color = TextSecondary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        listOf(
-                                            MediaType.FANFICTION to "Fanfiction",
-                                            MediaType.NOVEL to "Web Novel"
-                                        ).forEach { (mt, label) ->
-                                            FilterChip(
-                                                selected = targetMediaType == mt,
-                                                onClick = { targetMediaType = mt },
-                                                label = { Text(label, fontSize = 12.sp) },
-                                                colors = FilterChipDefaults.filterChipColors(
-                                                    selectedContainerColor = AccentGold.copy(alpha = 0.22f),
-                                                    selectedLabelColor = AccentGold
-                                                )
-                                            )
-                                        }
-                                    }
-                                }
-
                                 // Status picker chips
                                 Row(
                                     modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -584,13 +550,17 @@ fun FanficImportSheet(
                                     onClick = {
                                         scope.launch {
                                             isSaving = true
-                                            val chosenType = if (work.site == FanficSite.WATTPAD) targetMediaType else MediaType.FANFICTION
-                                            val (saved, created) = app.repository.saveOrUpdateFanficWork(work, selectedStatus, chosenType)
+                                            val chosenType = targetMediaType
+                                            val (saved, created) = app.repository.saveOrUpdateFanficWork(
+                                                work = work,
+                                                initialStatus = selectedStatus,
+                                                targetMediaType = chosenType,
+                                                forceTargetMediaType = true
+                                            )
                                             isSaving = false
-                                            val destLabel = if (saved.mediaType == MediaType.NOVEL) "Web Novels" else "Fanfiction"
                                             Toast.makeText(
                                                 context,
-                                                if (created) "Added \"${saved.title}\" to $destLabel" else "Updated existing story \"${saved.title}\"",
+                                                if (created) "Added \"${saved.title}\" to Fanfiction" else "Updated existing story \"${saved.title}\"",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                             onImported(saved)
@@ -779,7 +749,12 @@ fun FanficImportSheet(
                                                     var added = 0
                                                     var updated = 0
                                                     works.forEach { w ->
-                                                        val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.PLAN_TO_TRACK)
+                                                        val (_, created) = app.repository.saveOrUpdateFanficWork(
+                                                            work = w,
+                                                            initialStatus = TrackingStatus.PLAN_TO_TRACK,
+                                                            targetMediaType = MediaType.FANFICTION,
+                                                            forceTargetMediaType = true
+                                                        )
                                                         if (created) added++ else updated++
                                                     }
                                                     bulkImportStatus = "AO3 $mode: imported $added new, updated $updated existing works."
@@ -854,18 +829,19 @@ fun FanficImportSheet(
                                             res.onSuccess { works ->
                                                 var added = 0
                                                 var updated = 0
-                                                var novelCount = 0
-                                                var fanficCount = 0
                                                 works.forEachIndexed { idx, w ->
-                                                    val destType = defaultCategoryForWork(w)
-                                                    if (destType == MediaType.NOVEL) novelCount++ else fanficCount++
-                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.PLAN_TO_TRACK, destType)
+                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(
+                                                        work = w,
+                                                        initialStatus = TrackingStatus.PLAN_TO_TRACK,
+                                                        targetMediaType = MediaType.FANFICTION,
+                                                        forceTargetMediaType = true
+                                                    )
                                                     if (created) added++ else updated++
                                                     if ((idx + 1) % 10 == 0 || idx == 0 || idx + 1 == works.size) {
                                                         bulkImportStatus = "Saving Wattpad Reading Lists (${idx + 1}/${works.size})..."
                                                     }
                                                 }
-                                                val summary = "Wattpad Reading Lists: ${works.size} fetched ($added new, $updated updated — $novelCount Web Novels, $fanficCount Fanfiction)."
+                                                val summary = "Wattpad Reading Lists: ${works.size} fetched ($added new, $updated updated -> Fanfiction)."
                                                 bulkImportStatus = summary
                                                 com.omnitrack.app.util.AppLogger.i("FanficImport", summary)
                                             }.onFailure { err ->
@@ -904,18 +880,19 @@ fun FanficImportSheet(
                                             res.onSuccess { works ->
                                                 var added = 0
                                                 var updated = 0
-                                                var novelCount = 0
-                                                var fanficCount = 0
                                                 works.forEachIndexed { idx, w ->
-                                                    val destType = defaultCategoryForWork(w)
-                                                    if (destType == MediaType.NOVEL) novelCount++ else fanficCount++
-                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.IN_PROGRESS, destType)
+                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(
+                                                        work = w,
+                                                        initialStatus = TrackingStatus.IN_PROGRESS,
+                                                        targetMediaType = MediaType.FANFICTION,
+                                                        forceTargetMediaType = true
+                                                    )
                                                     if (created) added++ else updated++
                                                     if ((idx + 1) % 10 == 0 || idx == 0 || idx + 1 == works.size) {
                                                         bulkImportStatus = "Saving Wattpad Private Library (${idx + 1}/${works.size})..."
                                                     }
                                                 }
-                                                val summary = "Wattpad Private Library: ${works.size} fetched ($added new, $updated updated — $novelCount Web Novels, $fanficCount Fanfiction)."
+                                                val summary = "Wattpad Private Library: ${works.size} fetched ($added new, $updated updated -> Fanfiction)."
                                                 bulkImportStatus = summary
                                                 com.omnitrack.app.util.AppLogger.i("FanficImport", summary)
                                             }.onFailure { err ->
@@ -970,7 +947,12 @@ fun FanficImportSheet(
                                                             bulkImportStatus = "Importing ${forum.shortBadge} (${idx + 1}/${links.take(30).size}): ${pair.second}"
                                                             when (val fetched = FanficSiteEngine.fetchFromUrl(pair.first) { app.trackerTokenManager.getFanficCookie(it) }) {
                                                                 is FanficFetchResult.Success -> {
-                                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(fetched.work, TrackingStatus.IN_PROGRESS)
+                                                                    val (_, created) = app.repository.saveOrUpdateFanficWork(
+                                                                        work = fetched.work,
+                                                                        initialStatus = TrackingStatus.IN_PROGRESS,
+                                                                        targetMediaType = MediaType.FANFICTION,
+                                                                        forceTargetMediaType = true
+                                                                    )
                                                                     if (created) added++ else updated++
                                                                 }
                                                                 else -> skipped++

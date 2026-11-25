@@ -250,7 +250,7 @@ class OmniSearchRepository(
                         com.omnitrack.app.data.fanfic.FanficSiteEngine.searchWattpad(
                             query = trimmed,
                             cookie = wpCookie,
-                            targetMediaType = MediaType.NOVEL
+                            targetMediaType = MediaType.FANFICTION
                         )
                     })
                 }
