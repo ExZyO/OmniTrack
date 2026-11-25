@@ -38,6 +38,8 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed as lazyRowItemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -105,15 +107,12 @@ import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.GeminiModelSelectorSection
-import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
-import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
 import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
-import com.omnitrack.app.ui.components.heroBackgroundOverscan
 import com.omnitrack.app.ui.components.heroPageForItem
+import com.omnitrack.app.ui.components.heroPageOffset
 import com.omnitrack.app.ui.components.heroVisibleLayers
-import com.omnitrack.app.ui.components.homeHeroPagerGesture
 import com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder
 import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
@@ -1221,7 +1220,7 @@ fun DiscoverView(
                     }
                     selectedFilter == MediaType.NOVEL && selectedNovelSubFilter != "ALL" -> byType.filter {
                         com.omnitrack.app.ui.screens.home.inferNovelSubtype(
-                            it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title
+                            it.platform, it.originCountry, it.anilistId, it.malId, it.totalProgress, it.title, it.fanficSourceSite
                         ) == selectedNovelSubFilter
                     }
                     selectedFilter == MediaType.VISUAL_NOVEL -> byType.filter {
@@ -1267,6 +1266,7 @@ fun DiscoverView(
                                     DiscoverHeroCarousel(
                                         items = heroPool,
                                         allMedia = allMedia,
+                                        categoryKey = "${selectedFilter.name}_${selectedMangaSubFilter}_${selectedNovelSubFilter}",
                                         dimBanner = discoverSettings.dimHeroBanner,
                                         resolveBlurDp = { type -> discoverSettings.resolveBannerBlurDp(type) },
                                         onItemClick = onItemClick,
@@ -1624,10 +1624,9 @@ private fun DiscoverSpotlightBanner(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
             .height(224.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.06f))
+            .background(Color(0xFF0E0E12))
             .clickable(onClick = onDetails)
     ) {
         if (bannerModel != null) {
@@ -1659,6 +1658,16 @@ private fun DiscoverSpotlightBanner(
                     .fillMaxSize()
                     .blur(fallbackBlur.dp)
                     .alpha(if (dimBanner) 0.45f else 0.84f)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(AccentGold.copy(alpha = 0.22f), Color(0xFF0E0E12))
+                        )
+                    )
             )
         }
         if (dimBanner) {
@@ -1792,6 +1801,7 @@ private fun DiscoverSpotlightBanner(
 private fun DiscoverHeroCarousel(
     items: List<SearchResultItem>,
     allMedia: List<MediaCardSummary>,
+    categoryKey: String = "",
     dimBanner: Boolean,
     resolveBlurDp: (MediaType?) -> Int = { 0 },
     onItemClick: (Long) -> Unit,
@@ -1800,13 +1810,13 @@ private fun DiscoverHeroCarousel(
     if (items.isEmpty()) return
     val isLooping = items.size > 1
     val virtualCount = if (isLooping) 100_000 else items.size
-    val startIndex = remember(items.size) {
+    val startIndex = remember(categoryKey, items.size) {
         if (isLooping) 50_000 - (50_000 % items.size) else 0
     }
-    val pagerState = androidx.compose.runtime.key(isLooping, items.size) {
+    val pagerState = androidx.compose.runtime.key(categoryKey, isLooping, items.size) {
         rememberPagerState(initialPage = startIndex, pageCount = { virtualCount })
     }
-    LaunchedEffect(isLooping, items.size) {
+    LaunchedEffect(categoryKey, isLooping, items.size) {
         if (isLooping && pagerState.currentPage < 1000) {
             runCatching { pagerState.scrollToPage(startIndex) }
         }
@@ -1814,282 +1824,65 @@ private fun DiscoverHeroCarousel(
     val perf = com.omnitrack.app.ui.components.LocalPerformanceSettings.current
     val animateHero = !perf.disableCardAnimations
     val scope = rememberCoroutineScope()
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val currentActualIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage.coerceIn(0, items.lastIndex)
-    var isDraggingHero by remember { mutableStateOf(false) }
-    var lastHeroDragEndMs by remember { mutableLongStateOf(0L) }
+    val currentActualIdx = if (isLooping) {
+        ((pagerState.currentPage % items.size) + items.size) % items.size
+    } else {
+        pagerState.currentPage.coerceIn(0, items.lastIndex)
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .height(224.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.06f))
-                .homeHeroPagerGesture(
-                    pagerState = pagerState,
-                    itemCount = items.size,
-                    coroutineScope = scope,
-                    onDragStateChanged = { dragging ->
-                        isDraggingHero = dragging
-                        if (!dragging) {
-                            lastHeroDragEndMs = System.currentTimeMillis()
-                        }
-                    }
-                )
-        ) {
-            val heroWidthPx = with(density) { maxWidth.toPx() }
-            val visibleLayers = if (animateHero) {
-                heroVisibleLayers(pagerState, items.size)
-            } else {
-                listOf(HeroPageLayer(currentActualIdx, 1f, 0f))
-            }
-            val activeItem = visibleLayers.lastOrNull()?.itemIndex?.let(items::getOrNull) ?: items[currentActualIdx]
-            val activeMatch = findLibraryMatch(allMedia, activeItem)
-
-            // Invisible state-driver pager (zero sliding card seam)
-            HorizontalPager(
+        HorizontalPager(
+            state = pagerState,
+            userScrollEnabled = isLooping,
+            beyondViewportPageCount = 1,
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            pageSpacing = 12.dp,
+            flingBehavior = PagerDefaults.flingBehavior(
                 state = pagerState,
-                userScrollEnabled = false,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = 0.01f }
-            ) {
-                Box(modifier = Modifier.fillMaxSize())
+                pagerSnapDistance = PagerSnapDistance.atMost(1)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) { page ->
+            val idx = if (isLooping) {
+                ((page % items.size) + items.size) % items.size
+            } else {
+                page.coerceIn(0, items.lastIndex)
             }
-
+            val item = items[idx]
+            val match = findLibraryMatch(allMedia, item)
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        if (isDraggingHero || System.currentTimeMillis() - lastHeroDragEndMs <= 280L) {
-                            return@clickable
-                        }
-                        if (activeMatch != null) onItemClick(activeMatch.id) else {
-                            EphemeralPreviewHolder.previewItem = activeItem.toMediaItemEntity()
-                            onItemClick(-1L)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        if (animateHero) {
+                            val absOffset = kotlin.math.abs(heroPageOffset(pagerState, page)).coerceIn(0f, 1f)
+                            val scale = 1f - 0.04f * absOffset
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = 1f - 0.18f * absOffset
                         }
                     }
             ) {
-                // 1. Stacked Backdrops (seamless in-place crossfade + horizontal parallax)
-                visibleLayers.forEach { layer ->
-                    val item = items[layer.itemIndex]
-                    val match = findLibraryMatch(allMedia, item)
-                    androidx.compose.runtime.key("${item.mediaType}_${item.title}_${layer.itemIndex}") {
-                        val bannerDisabled = match != null && ArtworkModelResolver.isBannerDisabled(match)
-                        val coverModel = remember(match?.customCoverPath, match?.coverUrl, item.coverUrl) {
-                            ArtworkModelResolver.toCoilModel(match?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
+                DiscoverSpotlightBanner(
+                    item = item,
+                    libraryMatch = match,
+                    dimBanner = dimBanner,
+                    bannerBlurDp = resolveBlurDp(item.mediaType),
+                    onDetails = {
+                        if (match != null) onItemClick(match.id) else {
+                            EphemeralPreviewHolder.previewItem = item.toMediaItemEntity()
+                            onItemClick(-1L)
                         }
-                        val bannerModel = remember(
-                            match?.customBannerPath, match?.bannerUrl, match?.artworkRole,
-                            item.bannerUrl, item.coverUrl, bannerDisabled
-                        ) {
-                            if (bannerDisabled) null
-                            else ArtworkModelResolver.toCoilModel(
-                                match?.let { ArtworkModelResolver.preferredBanner(it) }
-                                    ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }
-                            )
-                        }
-                        val focalX = match?.bannerFocalX ?: 0f
-                        val focalY = match?.bannerFocalY ?: 0f
-                        val zoom = (match?.bannerZoom ?: 1f).coerceIn(1f, 2.5f)
-                        val bannerBlurDp = resolveBlurDp(item.mediaType)
-                        val overscan = if (animateHero) heroBackgroundOverscan(layer.offset) else 1f
-
-                        if (bannerModel != null) {
-                            AsyncImage(
-                                model = bannerModel,
-                                contentDescription = item.title,
-                                contentScale = ContentScale.Crop,
-                                alignment = BiasAlignment(focalX.coerceIn(-1f, 1f), focalY.coerceIn(-1f, 1f)),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        val fx = focalX.coerceIn(-1f, 1f)
-                                        val fy = focalY.coerceIn(-1f, 1f)
-                                        val totalZoom = zoom * overscan
-                                        scaleX = totalZoom
-                                        scaleY = totalZoom
-                                        translationX = -fx * size.width * (zoom - 1f) * 0.5f -
-                                            (if (animateHero) layer.offset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f)
-                                        translationY = -fy * size.height * (zoom - 1f) * 0.5f
-                                        alpha = layer.visibility
-                                    }
-                                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
-                            )
-                        } else if (!bannerDisabled && coverModel != null) {
-                            val fallbackBlur = maxOf(bannerBlurDp, if (dimBanner) 18 else 10)
-                            AsyncImage(
-                                model = coverModel,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        scaleX = overscan
-                                        scaleY = overscan
-                                        translationX = if (animateHero) -layer.offset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f
-                                        alpha = (if (dimBanner) 0.45f else 0.84f) * layer.visibility
-                                    }
-                                    .blur(fallbackBlur.dp)
-                            )
-                        }
-                    }
-                }
-
-                // 2. Stationary Vignettes (zero seam between slides)
-                if (dimBanner) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.0f to Color.Transparent,
-                                    0.42f to AmoledBlack.copy(alpha = 0.35f),
-                                    0.78f to AmoledBlack.copy(alpha = 0.82f),
-                                    1.0f to AmoledBlack.copy(alpha = 0.96f)
-                                )
-                            )
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.horizontalGradient(
-                                    0.0f to AmoledBlack.copy(alpha = 0.62f),
-                                    0.48f to AmoledBlack.copy(alpha = 0.18f),
-                                    1.0f to Color.Transparent
-                                )
-                            )
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.60f to Color.Transparent,
-                                    0.86f to AmoledBlack.copy(alpha = 0.46f),
-                                    1.0f to AmoledBlack.copy(alpha = 0.76f)
-                                )
-                            )
-                    )
-                }
-
-                // 3. Stacked Foreground Content (seamless crossfade + 18% parallax)
-                visibleLayers.forEach { layer ->
-                    val item = items[layer.itemIndex]
-                    val match = findLibraryMatch(allMedia, item)
-                    androidx.compose.runtime.key("fg_${item.mediaType}_${item.title}_${layer.itemIndex}") {
-                        val coverModel = remember(match?.customCoverPath, match?.coverUrl, item.coverUrl) {
-                            ArtworkModelResolver.toCoilModel(match?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
-                        }
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .fillMaxWidth()
-                                .padding(14.dp)
-                                .graphicsLayer {
-                                    alpha = layer.visibility
-                                    translationX = if (animateHero) -layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX else 0f
-                                },
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(72.dp)
-                                    .aspectRatio(2f / 3f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            ) {
-                                if (coverModel != null) {
-                                    AsyncImage(
-                                        model = coverModel,
-                                        contentDescription = item.title,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else if (item.mediaType == MediaType.FANFICTION) {
-                                    FanficTypographicCover(
-                                        title = item.title,
-                                        author = match?.bookAuthor ?: item.bookAuthor,
-                                        primaryFandom = match?.fanficPrimaryFandom ?: item.fanficPrimaryFandom,
-                                        sourceSite = match?.fanficSourceSite ?: item.fanficSourceSite,
-                                        ratingCode = match?.fanficRating ?: item.fanficRating,
-                                        wordCount = match?.fanficWordCount ?: item.fanficWordCount,
-                                        isCrossover = match?.fanficIsCrossover ?: item.fanficIsCrossover,
-                                        compact = true,
-                                        isBlurred = false
-                                    )
-                                }
-                            }
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "TRENDING SPOTLIGHT \u00B7 ${item.mediaType.displayName.uppercase()}",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AccentGold,
-                                    letterSpacing = 0.9.sp
-                                )
-                                Text(
-                                    text = item.title,
-                                    fontSize = 16.5.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = TextPrimary,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                val meta = listOfNotNull(
-                                    item.releaseYear,
-                                    item.communityScore?.takeIf { it > 0f }?.let { "\u2605 ${formatSmartRating(it.toDouble())}" },
-                                    item.sourceProvider
-                                ).joinToString(" \u00B7 ")
-                                if (meta.isNotBlank()) {
-                                    Text(
-                                        text = meta,
-                                        fontSize = 11.5.sp,
-                                        color = TextSecondary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = if (match != null) "In Library" else "+ Library",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentGold,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(AccentGold.copy(alpha = 0.18f))
-                                            .clickable {
-                                                if (match != null) onItemClick(match.id) else onAddMedia(item)
-                                            }
-                                            .padding(horizontal = 11.dp, vertical = 6.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                    },
+                    onAdd = { onAddMedia(item) }
+                )
             }
         }
         if (items.size > 1) {
             val visibleForDots = if (animateHero) {
-                com.omnitrack.app.ui.components.heroVisibleLayers(pagerState, items.size)
+                heroVisibleLayers(pagerState, items.size)
             } else {
-                listOf(com.omnitrack.app.ui.components.HeroPageLayer(currentActualIdx, 1f, 0f))
+                listOf(HeroPageLayer(currentActualIdx, 1f, 0f))
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -2104,7 +1897,7 @@ private fun DiscoverHeroCarousel(
                                 scope.launch {
                                     runCatching {
                                         pagerState.animateScrollToPage(
-                                            com.omnitrack.app.ui.components.heroPageForItem(
+                                            heroPageForItem(
                                                 pagerState.currentPage, idx, items.size
                                             )
                                         )

@@ -623,6 +623,19 @@ fun HomeDashboardView(
                             }
                         }
 
+                        LaunchedEffect(pagerState) {
+                            snapshotFlow {
+                                Triple(isDraggingHero, pagerState.isScrollInProgress, pagerState.currentPageOffsetFraction)
+                            }.collect { (dragging, scrolling, offset) ->
+                                if (!dragging && !scrolling && kotlin.math.abs(offset) > 0.002f) {
+                                    delay(120L)
+                                    if (!isDraggingHero && !pagerState.isScrollInProgress && kotlin.math.abs(pagerState.currentPageOffsetFraction) > 0.002f) {
+                                        runCatching { pagerState.animateScrollToPage(pagerState.currentPage) }
+                                    }
+                                }
+                            }
+                        }
+
                         LaunchedEffect(pagerState, activeHeroSlides.size, activeHeroSettings.autoRotate, activeHeroSettings.autoRotateSeconds, lastHeroDragEndMs) {
                             val sec = activeHeroSettings.autoRotateSeconds
                             if (!isLooping || !activeHeroSettings.autoRotate || sec <= 0) return@LaunchedEffect

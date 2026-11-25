@@ -57,6 +57,11 @@ private val HeroStretchBounceSpring = spring<Float>(
     stiffness = 110f
 )
 
+private val HeroSwipeSettleSpring = spring<Float>(
+    dampingRatio = Spring.DampingRatioNoBouncy,
+    stiffness = Spring.StiffnessMedium
+)
+
 @Immutable
 data class HeroPageLayer(
     val itemIndex: Int,
@@ -127,9 +132,13 @@ fun Modifier.homeHeroPagerGesture(
             val velocityTracker = VelocityTracker().apply {
                 addPosition(down.uptimeMillis, down.position)
             }
-            val startPage = pagerState.currentPage
+            val maxPage = (pagerState.pageCount - 1).coerceAtLeast(0)
+            val anchorPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+                .roundToInt()
+                .coerceIn(0, maxPage)
             var totalDx = 0f
             var totalDy = 0f
+            var appliedDragPx = 0f
             var dragging = false
             var snapped = false
 
@@ -144,7 +153,8 @@ fun Modifier.homeHeroPagerGesture(
                             change.consume()
                             snapped = true
                             val targetPage = resolveHeroTargetPage(
-                                startPage = startPage,
+                                anchorPage = anchorPage,
+                                currentContinuousPage = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                                 pageCount = pagerState.pageCount,
                                 totalDx = totalDx,
                                 velocityX = velocityTracker.calculateVelocity().x,
@@ -152,7 +162,12 @@ fun Modifier.homeHeroPagerGesture(
                             )
                             settleJob?.cancel()
                             settleJob = coroutineScope.launch {
-                                runCatching { pagerState.animateScrollToPage(targetPage) }
+                                runCatching {
+                                    pagerState.animateScrollToPage(
+                                        page = targetPage,
+                                        animationSpec = HeroSwipeSettleSpring
+                                    )
+                                }
                             }
                         }
                         break
@@ -174,7 +189,11 @@ fun Modifier.homeHeroPagerGesture(
                                 settleJob?.cancel()
                                 dragging = true
                                 onDragStateChanged(true)
-                                pagerState.dispatchRawDelta(-totalDx)
+                                val clampedInit = (-totalDx).coerceIn(-widthPx, widthPx)
+                                appliedDragPx = clampedInit
+                                if (clampedInit != 0f) {
+                                    pagerState.dispatchRawDelta(clampedInit)
+                                }
                                 change.consume()
                                 continue
                             }
@@ -182,13 +201,19 @@ fun Modifier.homeHeroPagerGesture(
                         }
                     }
 
-                    pagerState.dispatchRawDelta(-delta.x)
+                    val nextApplied = (appliedDragPx - delta.x).coerceIn(-widthPx, widthPx)
+                    val clampedStep = nextApplied - appliedDragPx
+                    appliedDragPx = nextApplied
+                    if (clampedStep != 0f) {
+                        pagerState.dispatchRawDelta(clampedStep)
+                    }
                     change.consume()
                 }
             } finally {
                 if (dragging && !snapped) {
                     val targetPage = resolveHeroTargetPage(
-                        startPage = startPage,
+                        anchorPage = anchorPage,
+                        currentContinuousPage = pagerState.currentPage + pagerState.currentPageOffsetFraction,
                         pageCount = pagerState.pageCount,
                         totalDx = totalDx,
                         velocityX = runCatching { velocityTracker.calculateVelocity().x }.getOrDefault(0f),
@@ -196,7 +221,12 @@ fun Modifier.homeHeroPagerGesture(
                     )
                     settleJob?.cancel()
                     settleJob = coroutineScope.launch {
-                        runCatching { pagerState.animateScrollToPage(targetPage) }
+                        runCatching {
+                            pagerState.animateScrollToPage(
+                                page = targetPage,
+                                animationSpec = HeroSwipeSettleSpring
+                            )
+                        }
                     }
                 }
                 if (dragging) {
@@ -208,21 +238,25 @@ fun Modifier.homeHeroPagerGesture(
 }
 
 private fun resolveHeroTargetPage(
-    startPage: Int,
+    anchorPage: Int,
+    currentContinuousPage: Float,
     pageCount: Int,
     totalDx: Float,
     velocityX: Float,
     widthPx: Float
 ): Int {
-    val thresholdPassed = abs(totalDx) > widthPx * HERO_SWIPE_THRESHOLD_FRACTION ||
-        abs(velocityX) > HERO_SWIPE_VELOCITY_THRESHOLD
-    if (!thresholdPassed) return startPage
-
-    val currentPage = startPage.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+    val maxPage = (pageCount - 1).coerceAtLeast(0)
+    val clampedAnchor = anchorPage.coerceIn(0, maxPage)
     return when {
-        totalDx > 0f -> (currentPage - 1).coerceAtLeast(0)
-        totalDx < 0f -> (currentPage + 1).coerceAtMost((pageCount - 1).coerceAtLeast(0))
-        else -> currentPage
+        abs(velocityX) > HERO_SWIPE_VELOCITY_THRESHOLD -> {
+            if (velocityX > 0f) (clampedAnchor - 1).coerceAtLeast(0)
+            else (clampedAnchor + 1).coerceAtMost(maxPage)
+        }
+        abs(totalDx) > widthPx * HERO_SWIPE_THRESHOLD_FRACTION -> {
+            if (totalDx > 0f) (clampedAnchor - 1).coerceAtLeast(0)
+            else (clampedAnchor + 1).coerceAtMost(maxPage)
+        }
+        else -> currentContinuousPage.roundToInt().coerceIn(0, maxPage)
     }
 }
 
