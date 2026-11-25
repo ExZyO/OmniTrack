@@ -157,13 +157,23 @@ class ReleaseCalendarRepository(
         return when (item.mediaType) {
             MediaType.MANGA, MediaType.ANIME, MediaType.NOVEL -> NetworkPacer.withAniListPacing {
                 val alType = if (item.mediaType == MediaType.ANIME) "ANIME" else "MANGA"
-                val gql = """
-                    query (${'$'}search: String, ${'$'}type: MediaType) {
-                        Media(search: ${'$'}search, type: ${'$'}type) {
-                            coverImage { extraLarge large }
+                val gql = if (item.mediaType == MediaType.NOVEL) {
+                    """
+                        query (${'$'}search: String, ${'$'}type: MediaType) {
+                            Media(search: ${'$'}search, type: ${'$'}type, format: NOVEL) {
+                                coverImage { extraLarge large }
+                            }
                         }
-                    }
-                """.trimIndent()
+                    """.trimIndent()
+                } else {
+                    """
+                        query (${'$'}search: String, ${'$'}type: MediaType) {
+                            Media(search: ${'$'}search, type: ${'$'}type) {
+                                coverImage { extraLarge large }
+                            }
+                        }
+                    """.trimIndent()
+                }
                 val payload = buildJsonObject {
                     put("query", gql)
                     putJsonObject("variables") {
@@ -602,7 +612,7 @@ class ReleaseCalendarRepository(
                                 id
                                 idMal
                                 title { english romaji native }
-                                coverImage { large }
+                                coverImage { extraLarge large }
                             }
                         }
                     }
@@ -626,7 +636,10 @@ class ReleaseCalendarRepository(
                         val title = listOf("english", "romaji", "native").firstNotNullOfOrNull { k ->
                             (titleObj?.get(k) as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
                         } ?: return@mapIndexedNotNull null
-                        val cover = ((m["coverImage"] as? JsonObject)?.get("large") as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        val coverObj = m["coverImage"] as? JsonObject
+                        val cover = listOf("extraLarge", "large").firstNotNullOfOrNull { k ->
+                            (coverObj?.get(k) as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+                        }.orEmpty()
                         val day = today.plusDays((idx % 7).toLong())
                         CalendarReleaseItem(
                             id = "al_novel_$alId",

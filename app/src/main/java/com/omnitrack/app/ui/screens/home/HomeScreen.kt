@@ -108,12 +108,17 @@ import coil3.request.allowHardware
 import coil3.request.crossfade
 import coil3.size.Precision
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
+import com.omnitrack.app.data.enrichment.CalendarReleaseItem
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
+import com.omnitrack.app.data.preferences.CachedMultiRatings
 import com.omnitrack.app.data.preferences.ChimanewLibrarySettings
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
 import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeLayoutDefaults
+import com.omnitrack.app.data.preferences.HomeRowItem
+import com.omnitrack.app.data.preferences.HomeRowKey
+import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.data.preferences.LibraryDisplayMode
 import com.omnitrack.app.data.preferences.LibraryGroupMode
 import com.omnitrack.app.data.preferences.LibrarySortOption
@@ -226,6 +231,18 @@ fun HomeScreen(
     val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
     val perfSettings = LocalPerformanceSettings.current
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
+    val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
+    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
+    val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
+    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
+    val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
+    val calendarReleases by viewModel.calendarReleases.collectAsState()
+    val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
+    val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
+    val trendingItems by viewModel.trendingItems.collectAsState()
+    val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
+    val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
+    val homeListState = rememberLazyListState()
     val navScrollState = rememberOmniNavBarScrollState()
     val hazeState = remember { HazeState() }
     val tabGridStates = remember { androidx.compose.runtime.mutableStateMapOf<String, androidx.compose.foundation.lazy.grid.LazyGridState>() }
@@ -477,6 +494,18 @@ fun HomeScreen(
                         allMedia = uiState.allMediaSummaries,
                         allCategories = allCategories,
                         categoryAssignments = categoryAssignments,
+                        homeRows = homeRows,
+                        heroSettings = heroSettings,
+                        continueTrackingStyle = continueTrackingStyle,
+                        tmdbKey = tmdbKey,
+                        heroMultiRatingsCache = heroMultiRatingsCache,
+                        calendarReleases = calendarReleases,
+                        isLoadingCalendar = isLoadingCalendar,
+                        isLoadingTrending = isLoadingTrending,
+                        trendingItems = trendingItems,
+                        categoryDiscoverShelves = categoryDiscoverShelves,
+                        watchedTimestamps90d = watchedTimestamps90d,
+                        homeListState = homeListState,
                         hasUpdateAvailable = availableUpdate != null,
                         posterStyle = posterStyle,
                         fanfictionEnabled = fanfictionEnabled,
@@ -1439,8 +1468,6 @@ fun HomeScreen(
         }
 
         if (showReleaseCalendarSheet) {
-            val calendarReleases by viewModel.calendarReleases.collectAsState()
-            val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
             ReleaseCalendarSheet(
                 releases = calendarReleases,
                 isLoading = isLoadingCalendar,
@@ -1496,7 +1523,6 @@ fun HomeScreen(
         }
 
         if (showActivityHeatmapSheet) {
-            val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
             ActivityHeatmapSheet(
                 watchedTimestamps90d = watchedTimestamps90d,
                 allMedia = uiState.allMediaSummaries,
@@ -1903,6 +1929,18 @@ private fun HomeTabContent(
     allMedia: List<com.omnitrack.app.data.db.dto.MediaCardSummary>,
     allCategories: List<com.omnitrack.app.data.db.entity.CategoryEntity>,
     categoryAssignments: Map<Long, Set<Long>>,
+    homeRows: List<HomeRowItem>,
+    heroSettings: HomeHeroSettings,
+    continueTrackingStyle: ContinueTrackingStyle,
+    tmdbKey: String,
+    heroMultiRatingsCache: Map<String, CachedMultiRatings>,
+    calendarReleases: List<CalendarReleaseItem>,
+    isLoadingCalendar: Boolean,
+    isLoadingTrending: Boolean,
+    trendingItems: List<SearchResultItem>,
+    categoryDiscoverShelves: Map<HomeRowKey, List<SearchResultItem>>,
+    watchedTimestamps90d: List<Long>,
+    homeListState: LazyListState,
     hasUpdateAvailable: Boolean,
     posterStyle: PosterCardStyle,
     fanfictionEnabled: Boolean,
@@ -1919,18 +1957,6 @@ private fun HomeTabContent(
     onNavigateToDiscover: () -> Unit,
     onNavigateToHistory: () -> Unit
 ) {
-    val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
-    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
-    val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
-    val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
-    val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
-    val calendarReleases by viewModel.calendarReleases.collectAsState()
-    val isLoadingCalendar by viewModel.isLoadingCalendar.collectAsState()
-    val isLoadingTrending by viewModel.isLoadingTrending.collectAsState()
-    val trendingItems by viewModel.trendingItems.collectAsState()
-    val categoryDiscoverShelves by viewModel.categoryDiscoverShelves.collectAsState()
-    val watchedTimestamps90d by viewModel.watchedTimestamps90d.collectAsState()
-
     HomeDashboardView(
         allMedia = allMedia,
         trendingItems = trendingItems,
@@ -1964,6 +1990,7 @@ private fun HomeTabContent(
         onNavigateToLibraryCategory = onNavigateToLibraryCategory,
         onNavigateToDiscover = onNavigateToDiscover,
         onNavigateToHistory = onNavigateToHistory,
+        homeListState = homeListState,
         posterStyle = posterStyle,
         isRefreshing = isLoadingTrending || isLoadingCalendar,
         onRefresh = {

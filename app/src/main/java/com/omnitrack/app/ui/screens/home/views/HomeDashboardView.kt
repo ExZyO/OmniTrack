@@ -27,12 +27,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -195,6 +197,7 @@ fun HomeDashboardView(
     onNavigateToDiscover: () -> Unit,
     onNavigateToHistory: () -> Unit,
     modifier: Modifier = Modifier,
+    homeListState: LazyListState = rememberLazyListState(),
     posterStyle: PosterCardStyle = PosterCardStyle(),
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
@@ -211,7 +214,6 @@ fun HomeDashboardView(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val perf = LocalPerformanceSettings.current
-    val homeListState = rememberLazyListState()
     var heroRefreshNonce by remember { mutableIntStateOf(0) }
     var localRefreshing by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
@@ -506,6 +508,13 @@ fun HomeDashboardView(
         )
     }
 
+    val heroSlidesState = rememberUpdatedState(heroSlides)
+    val heroSettingsState = rememberUpdatedState(heroSettings)
+    val allMediaState = rememberUpdatedState(allMedia)
+    val heroRatingsCacheState = rememberUpdatedState(heroMultiRatingsCache)
+    val isRefreshingState = rememberUpdatedState(isRefreshing)
+    val upNextReleasesState = rememberUpdatedState(upNextReleases)
+
     PullToRefreshBox(
         isRefreshing = isRefreshing || localRefreshing,
         state = pullState,
@@ -542,9 +551,15 @@ fun HomeDashboardView(
         ) {
             if (heroSettings.showHero) {
                 item(key = "home_hero_carousel") {
-                    if (heroSlides.isNotEmpty()) {
+                    val activeHeroSlides = heroSlidesState.value
+                    val activeHeroSettings = heroSettingsState.value
+                    val activeAllMedia = allMediaState.value
+                    val activeHeroRatingsCache = heroRatingsCacheState.value
+                    val activeIsRefreshing = isRefreshingState.value
+
+                    if (activeHeroSlides.isNotEmpty()) {
                         val animateHero = !perf.disableCardAnimations
-                        val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
+                        val heroHeightDp = when (activeHeroSettings.heroHeightPreset.uppercase()) {
                             "COMPACT" -> 336.dp
                             "TALL" -> 472.dp
                             else -> 404.dp
@@ -559,7 +574,7 @@ fun HomeDashboardView(
                         val pullStretchPx: () -> Float = {
                             if (
                                 !animateHero ||
-                                isRefreshing ||
+                                activeIsRefreshing ||
                                 localRefreshing ||
                                 homeListState.firstVisibleItemIndex > 0 ||
                                 homeListState.firstVisibleItemScrollOffset > 0
@@ -570,16 +585,16 @@ fun HomeDashboardView(
                                     .coerceIn(0f, 72f * density.density)
                             }
                         }
-                        val isLooping = heroSlides.size > 1
-                        val virtualCount = if (isLooping) 100_000 else heroSlides.size
-                        val startIndex = remember(heroSlides.size) {
+                        val isLooping = activeHeroSlides.size > 1
+                        val virtualCount = if (isLooping) 100_000 else activeHeroSlides.size
+                        val startIndex = remember(activeHeroSlides.size) {
                             if (isLooping) {
                                 val mid = 50_000
-                                mid - (mid % heroSlides.size)
+                                mid - (mid % activeHeroSlides.size)
                             } else 0
                         }
-                        val heroKeys = remember(heroSlides) { heroSlides.map { it.slideKey() } }
-                        val pagerState = androidx.compose.runtime.key(isLooping, heroSlides.size) {
+                        val heroKeys = remember(activeHeroSlides) { activeHeroSlides.map { it.slideKey() } }
+                        val pagerState = androidx.compose.runtime.key(isLooping, activeHeroSlides.size) {
                             rememberPagerState(
                                 initialPage = startIndex,
                                 pageCount = { virtualCount }
@@ -588,29 +603,29 @@ fun HomeDashboardView(
                         var isDraggingHero by remember { mutableStateOf(false) }
                         var lastHeroDragEndMs by remember { mutableLongStateOf(0L) }
 
-                        LaunchedEffect(isLooping, heroSlides.size) {
+                        LaunchedEffect(isLooping, activeHeroSlides.size) {
                             if (isLooping && pagerState.currentPage < 1000) {
                                 runCatching { pagerState.scrollToPage(startIndex) }
                             }
                         }
 
                         LaunchedEffect(heroRefreshNonce) {
-                            if (heroRefreshNonce > 0 && heroSlides.isNotEmpty()) {
+                            if (heroRefreshNonce > 0 && activeHeroSlides.isNotEmpty()) {
                                 runCatching { pagerState.scrollToPage(startIndex) }
                             }
                         }
 
                         LaunchedEffect(heroKeys) {
-                            if (heroSlides.isNotEmpty() && !isDraggingHero && !pagerState.isScrollInProgress) {
-                                val curMod = if (isLooping) pagerState.currentPage % heroSlides.size else 0
+                            if (activeHeroSlides.isNotEmpty() && !isDraggingHero && !pagerState.isScrollInProgress) {
+                                val curMod = if (isLooping) pagerState.currentPage % activeHeroSlides.size else 0
                                 val target = if (isLooping) startIndex + curMod else 0
                                 runCatching { pagerState.scrollToPage(target) }
                             }
                         }
 
-                        LaunchedEffect(pagerState, heroSlides.size, heroSettings.autoRotate, heroSettings.autoRotateSeconds, lastHeroDragEndMs) {
-                            val sec = heroSettings.autoRotateSeconds
-                            if (!isLooping || !heroSettings.autoRotate || sec <= 0) return@LaunchedEffect
+                        LaunchedEffect(pagerState, activeHeroSlides.size, activeHeroSettings.autoRotate, activeHeroSettings.autoRotateSeconds, lastHeroDragEndMs) {
+                            val sec = activeHeroSettings.autoRotateSeconds
+                            if (!isLooping || !activeHeroSettings.autoRotate || sec <= 0) return@LaunchedEffect
                             while (isActive) {
                                 delay(sec * 1000L)
                                 if (!isDraggingHero && !pagerState.isScrollInProgress) {
@@ -620,24 +635,24 @@ fun HomeDashboardView(
                         }
 
                         val currentActualIndex = if (isLooping) {
-                            pagerState.currentPage % heroSlides.size
+                            pagerState.currentPage % activeHeroSlides.size
                         } else {
-                            pagerState.currentPage.coerceIn(0, heroSlides.lastIndex)
+                            pagerState.currentPage.coerceIn(0, activeHeroSlides.lastIndex)
                         }
 
-                        LaunchedEffect(currentActualIndex, heroSlides, heroSettings.showRatings) {
-                            if (!heroSettings.showRatings || heroSlides.isEmpty()) return@LaunchedEffect
-                            val targetIndices = if (heroSlides.size > 1) {
-                                listOf(currentActualIndex, (currentActualIndex + 1) % heroSlides.size)
+                        LaunchedEffect(currentActualIndex, activeHeroSlides, activeHeroSettings.showRatings) {
+                            if (!activeHeroSettings.showRatings || activeHeroSlides.isEmpty()) return@LaunchedEffect
+                            val targetIndices = if (activeHeroSlides.size > 1) {
+                                listOf(currentActualIndex, (currentActualIndex + 1) % activeHeroSlides.size)
                             } else {
                                 listOf(currentActualIndex)
                             }
                             targetIndices.forEach { targetIdx ->
-                                when (val targetSlide = heroSlides.getOrNull(targetIdx)) {
+                                when (val targetSlide = activeHeroSlides.getOrNull(targetIdx)) {
                                     is HomeHeroSlide.LocalSlide -> onPrefetchLocalHeroRatings(targetSlide.item)
                                     is HomeHeroSlide.TrendingSlide -> {
                                         val match = ArtworkModelResolver.findLibraryMatch(
-                                            library = allMedia,
+                                            library = activeAllMedia,
                                             mediaType = targetSlide.item.mediaType,
                                             anilistId = targetSlide.item.anilistId,
                                             malId = targetSlide.item.malId,
@@ -663,7 +678,7 @@ fun HomeDashboardView(
                                 .fillMaxWidth()
                                 .homeHeroPagerGesture(
                                     pagerState = pagerState,
-                                    itemCount = heroSlides.size,
+                                    itemCount = activeHeroSlides.size,
                                     coroutineScope = scope,
                                     onDragStateChanged = { dragging ->
                                         isDraggingHero = dragging
@@ -675,17 +690,17 @@ fun HomeDashboardView(
                         ) {
                             val heroWidthPx = with(density) { maxWidth.toPx() }
                             val visibleLayers = if (animateHero) {
-                                heroVisibleLayers(pagerState, heroSlides.size)
+                                heroVisibleLayers(pagerState, activeHeroSlides.size)
                             } else {
                                 listOf(HeroPageLayer(currentActualIndex, 1f, 0f))
                             }
                             val activeSlideIndex = visibleLayers.lastOrNull()?.itemIndex ?: currentActualIndex
-                            val activeSlide = heroSlides.getOrNull(activeSlideIndex)
-                            val activeLibMatch = remember(activeSlide, allMedia) {
+                            val activeSlide = activeHeroSlides.getOrNull(activeSlideIndex)
+                            val activeLibMatch = remember(activeSlide, activeAllMedia) {
                                 when (activeSlide) {
                                     is HomeHeroSlide.LocalSlide -> activeSlide.item
                                     is HomeHeroSlide.TrendingSlide -> ArtworkModelResolver.findLibraryMatch(
-                                        library = allMedia,
+                                        library = activeAllMedia,
                                         mediaType = activeSlide.item.mediaType,
                                         anilistId = activeSlide.item.anilistId,
                                         malId = activeSlide.item.malId,
@@ -744,17 +759,17 @@ fun HomeDashboardView(
                                         .then(if (animateHero) Modifier.heroStretchZoom(pullStretchPx) else Modifier)
                                 ) {
                                     visibleLayers.forEach { layer ->
-                                        val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
+                                        val slide = activeHeroSlides.getOrNull(layer.itemIndex) ?: return@forEach
                                         androidx.compose.runtime.key("${layer.itemIndex}_${slide.slideKey()}") {
                                             val resolved = rememberResolvedHomeHeroSlide(
                                                 slide = slide,
-                                                allMedia = allMedia,
-                                                heroMultiRatingsCache = heroMultiRatingsCache,
-                                                heroSettings = heroSettings
+                                                allMedia = activeAllMedia,
+                                                heroMultiRatingsCache = activeHeroRatingsCache,
+                                                heroSettings = activeHeroSettings
                                             )
                                             ChimanewHeroBackdropLayer(
                                                 data = resolved,
-                                                heroSettings = heroSettings,
+                                                heroSettings = activeHeroSettings,
                                                 visibility = layer.visibility,
                                                 pageOffset = layer.offset,
                                                 heroWidthPx = heroWidthPx,
@@ -800,13 +815,13 @@ fun HomeDashboardView(
                                     contentAlignment = Alignment.BottomStart
                                 ) {
                                     visibleLayers.forEach { layer ->
-                                        val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
+                                        val slide = activeHeroSlides.getOrNull(layer.itemIndex) ?: return@forEach
                                         androidx.compose.runtime.key("${layer.itemIndex}_${slide.slideKey()}") {
                                             val resolved = rememberResolvedHomeHeroSlide(
                                                 slide = slide,
-                                                allMedia = allMedia,
-                                                heroMultiRatingsCache = heroMultiRatingsCache,
-                                                heroSettings = heroSettings
+                                                allMedia = activeAllMedia,
+                                                heroMultiRatingsCache = activeHeroRatingsCache,
+                                                heroSettings = activeHeroSettings
                                             )
                                             Box(
                                                 modifier = Modifier
@@ -820,7 +835,7 @@ fun HomeDashboardView(
                                             ) {
                                                 ChimanewHeroForegroundRow(
                                                     data = resolved,
-                                                    heroSettings = heroSettings
+                                                    heroSettings = activeHeroSettings
                                                 )
                                             }
                                         }
@@ -828,7 +843,7 @@ fun HomeDashboardView(
                                 }
 
                                 // 5. Interactive Indicator Pills
-                                if (isLooping && heroSettings.slideCount > 0 && heroSlides.size <= 15) {
+                                if (isLooping && activeHeroSettings.slideCount > 0 && activeHeroSlides.size <= 15) {
                                     Row(
                                         modifier = Modifier
                                             .align(Alignment.BottomCenter)
@@ -839,7 +854,7 @@ fun HomeDashboardView(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        repeat(heroSlides.size) { index ->
+                                        repeat(activeHeroSlides.size) { index ->
                                             val activeFraction = visibleLayers
                                                 .firstOrNull { it.itemIndex == index }
                                                 ?.visibility ?: 0f
@@ -849,7 +864,7 @@ fun HomeDashboardView(
                                                         scope.launch {
                                                             runCatching {
                                                                 pagerState.animateScrollToPage(
-                                                                    heroPageForItem(pagerState.currentPage, index, heroSlides.size)
+                                                                    heroPageForItem(pagerState.currentPage, index, activeHeroSlides.size)
                                                                 )
                                                             }
                                                         }
@@ -936,6 +951,8 @@ fun HomeDashboardView(
                     HomeRowKey.UP_NEXT -> {
                         if (upNextReleases.isNotEmpty()) {
                             item(key = "row_up_next_${heroSettings.homeDashboardStyle}") {
+                                val activeUpNext = upNextReleasesState.value
+                                val activeHeroSettings = heroSettingsState.value
                                 val openRelease: (CalendarReleaseItem) -> Unit = { release ->
                                     if (release.localMediaId != null) {
                                         onItemClick(release.localMediaId)
@@ -945,7 +962,7 @@ fun HomeDashboardView(
                                             MediaType.SHOW -> "TVMaze"
                                             MediaType.MOVIE -> "TMDb"
                                             MediaType.MANGA -> "MangaDex"
-                                            MediaType.NOVEL -> "RanobeDB"
+                                            MediaType.NOVEL -> if (release.anilistId != null) "AniList" else "RanobeDB"
                                             MediaType.BOOK -> "Hardcover"
                                             MediaType.GAME -> "Steam"
                                             MediaType.VISUAL_NOVEL -> "VNDB"
@@ -982,9 +999,9 @@ fun HomeDashboardView(
                                         actionLabel = "Calendar",
                                         onActionClick = onOpenCalendar
                                     )
-                                    if (heroSettings.homeDashboardStyle.equals("COMPACT", ignoreCase = true)) {
+                                    if (activeHeroSettings.homeDashboardStyle.equals("COMPACT", ignoreCase = true)) {
                                         // Option C — Dense Timeline vertical hairline guide
-                                        val compactSlice = remember(upNextReleases) { upNextReleases.take(5) }
+                                        val compactSlice = remember(activeUpNext) { activeUpNext.take(5) }
                                         Column(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -1009,7 +1026,7 @@ fun HomeDashboardView(
                                             contentPadding = PaddingValues(horizontal = 20.dp),
                                             horizontalArrangement = Arrangement.spacedBy(14.dp)
                                         ) {
-                                            items(upNextReleases, key = { "up_${it.id}" }) { release ->
+                                            items(activeUpNext, key = { "up_${it.id}" }) { release ->
                                                 UpNextCalendarCard(
                                                     release = release,
                                                     onClick = { openRelease(release) }

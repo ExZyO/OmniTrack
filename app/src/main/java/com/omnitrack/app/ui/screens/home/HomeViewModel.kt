@@ -230,23 +230,24 @@ class HomeViewModel(
         uiState
     ) { raw, state ->
         val library = state.allMediaSummaries
-        val byAnilist = library.filter { it.anilistId != null }.associateBy { it.anilistId }
-        val byMal = library.filter { it.malId != null }.associateBy { it.malId }
-        val byTmdb = library.filter { it.tmdbId != null }.associateBy { it.tmdbId }
-        val byImdb = library.filter { !it.imdbId.isNullOrBlank() }.associateBy { it.imdbId }
-        val bySteam = library.filter { it.steamAppId != null }.associateBy { it.steamAppId }
-        val byMetron = library.filter { it.metronId != null }.associateBy { it.metronId }
-        val byTypedTitle = library.associateBy { "${it.mediaType.name}_${it.title.trim().lowercase()}" }
-        val byTitle = library.associateBy { it.title.trim().lowercase() }
+        val byAnilist = library.filter { it.anilistId != null }.associateBy { it.mediaType to it.anilistId!! }
+        val byMal = library.filter { it.malId != null }.associateBy { it.mediaType to it.malId!! }
+        val byTmdb = library.filter { it.tmdbId != null }.associateBy { it.mediaType to it.tmdbId!! }
+        val byImdb = library.filter { !it.imdbId.isNullOrBlank() }.associateBy { it.mediaType to it.imdbId!!.trim().lowercase() }
+        val bySteam = library.filter { it.steamAppId != null }.associateBy { it.mediaType to it.steamAppId!! }
+        val byMetron = library.filter { it.metronId != null }.associateBy { it.mediaType to it.metronId!! }
+        val byTypedTitle = library.associateBy { it.mediaType to it.title.trim().lowercase() }
+        val byTypedNativeTitle = library.filter { !it.nativeTitle.isNullOrBlank() }.associateBy { it.mediaType to it.nativeTitle!!.trim().lowercase() }
         raw.map { rel ->
-            val matched = (rel.anilistId?.let { byAnilist[it] })
-                ?: (rel.malId?.let { byMal[it] })
-                ?: (rel.tmdbId?.let { byTmdb[it] })
-                ?: (rel.imdbId?.let { byImdb[it] })
-                ?: (rel.steamAppId?.let { bySteam[it] })
-                ?: (rel.metronId?.let { byMetron[it] })
-                ?: byTypedTitle["${rel.mediaType.name}_${rel.title.trim().lowercase()}"]
-                ?: byTitle[rel.title.trim().lowercase()]
+            val titleKey = rel.title.trim().lowercase()
+            val matched = (rel.anilistId?.let { byAnilist[rel.mediaType to it] })
+                ?: (rel.malId?.let { byMal[rel.mediaType to it] })
+                ?: (rel.tmdbId?.let { byTmdb[rel.mediaType to it] })
+                ?: (rel.imdbId?.trim()?.takeIf { it.isNotBlank() }?.lowercase()?.let { byImdb[rel.mediaType to it] })
+                ?: (rel.steamAppId?.let { bySteam[rel.mediaType to it] })
+                ?: (rel.metronId?.let { byMetron[rel.mediaType to it] })
+                ?: byTypedTitle[rel.mediaType to titleKey]
+                ?: byTypedNativeTitle[rel.mediaType to titleKey]
             if (matched != null) {
                 rel.copy(
                     localMediaId = matched.id,
