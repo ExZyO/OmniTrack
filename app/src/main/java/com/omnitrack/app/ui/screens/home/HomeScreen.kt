@@ -180,6 +180,7 @@ private data class LibraryGroupTab(
     val key: String,
     val label: String,
     val mediaTypeFilter: MediaType? = null,
+    val novelSubtypeFilter: String? = null,
     val categoryId: Long? = null,
     val isUncategorized: Boolean = false,
     val statusFilter: TrackingStatus? = null,
@@ -340,8 +341,25 @@ fun HomeScreen(
         categoryAssignments
     ) {
         when (libSettings.groupMode) {
-            LibraryGroupMode.BY_MEDIA_TYPE -> visibleFilterTabs.map {
-                LibraryGroupTab(key = "MT_${it.name}", label = it.displayName, mediaTypeFilter = it)
+            LibraryGroupMode.BY_MEDIA_TYPE -> visibleFilterTabs.flatMap { type ->
+                if (type == MediaType.NOVEL) {
+                    listOf(
+                        LibraryGroupTab(
+                            key = "MT_NOVEL_LN",
+                            label = "Light Novels",
+                            mediaTypeFilter = MediaType.NOVEL,
+                            novelSubtypeFilter = "LIGHT_NOVEL"
+                        ),
+                        LibraryGroupTab(
+                            key = "MT_NOVEL_WN",
+                            label = "Web Novels",
+                            mediaTypeFilter = MediaType.NOVEL,
+                            novelSubtypeFilter = "WEB_NOVEL"
+                        )
+                    )
+                } else {
+                    listOf(LibraryGroupTab(key = "MT_${type.name}", label = type.displayName, mediaTypeFilter = type))
+                }
             }
             LibraryGroupMode.BY_CATEGORY -> buildList {
                 add(LibraryGroupTab(key = "CAT_ALL", label = "All"))
@@ -396,7 +414,10 @@ fun HomeScreen(
     }
     LaunchedEffect(pendingLibraryTabKey, dynamicTabs) {
         val targetKey = pendingLibraryTabKey ?: return@LaunchedEffect
-        val targetIdx = dynamicTabs.indexOfFirst { it.key == targetKey }
+        var targetIdx = dynamicTabs.indexOfFirst { it.key == targetKey }
+        if (targetIdx < 0 && targetKey == "MT_NOVEL") {
+            targetIdx = dynamicTabs.indexOfFirst { it.key == "MT_NOVEL_LN" || it.key == "MT_NOVEL_WN" }
+        }
         if (targetIdx >= 0) {
             runCatching { pagerState.scrollToPage(targetIdx) }
             pendingLibraryTabKey = null
@@ -602,8 +623,10 @@ fun HomeScreen(
                         )
                     }
                     val activeMediaTabType = activeTab?.mediaTypeFilter
+                    val activeNovelTabSplit = activeTab?.novelSubtypeFilter != null
                     val activeSubFilterPills = remember(
                         activeMediaTabType,
+                        activeNovelTabSplit,
                         selectedMangaSubtype,
                         selectedNovelSubtype,
                         selectedVnOriginSubtype,
@@ -627,7 +650,9 @@ fun HomeScreen(
                                     if (selectedMangaSubtype != "ALL") add(selectedMangaSubtype.lowercase().replaceFirstChar { it.uppercase() } to { selectedMangaSubtype = "ALL" })
                                 }
                                 MediaType.NOVEL -> {
-                                    if (selectedNovelSubtype != "ALL") add((if (selectedNovelSubtype == "LIGHT_NOVEL") "Light Novel" else "Web Novel") to { selectedNovelSubtype = "ALL" })
+                                    if (!activeNovelTabSplit && selectedNovelSubtype != "ALL") {
+                                        add((if (selectedNovelSubtype == "LIGHT_NOVEL") "Light Novel" else "Web Novel") to { selectedNovelSubtype = "ALL" })
+                                    }
                                 }
                                 MediaType.VISUAL_NOVEL -> {
                                     if (selectedVnOriginSubtype != "ALL") add(selectedVnOriginSubtype to { selectedVnOriginSubtype = "ALL" })
@@ -1531,7 +1556,8 @@ fun HomeScreen(
         }
 
         if (showLibraryFilterSheet) {
-            val activeSheetMediaTab = dynamicTabs.getOrNull(pagerState.currentPage)?.mediaTypeFilter
+            val activeSheetTab = dynamicTabs.getOrNull(pagerState.currentPage)
+            val activeSheetMediaTab = activeSheetTab?.mediaTypeFilter
             ChimanewLibrarySheet(
                 settings = libSettings,
                 selectedStatus = uiState.selectedStatus,
@@ -1540,6 +1566,7 @@ fun HomeScreen(
                 visibleMediaTypes = visibleMediaTypes,
                 subFilters = LibraryCategorySubFilters(
                     activeMediaTabType = activeSheetMediaTab,
+                    isNovelTabSplit = activeSheetTab?.novelSubtypeFilter != null,
                     mangaSubtype = selectedMangaSubtype,
                     onMangaSubtype = { selectedMangaSubtype = it },
                     novelSubtype = selectedNovelSubtype,
@@ -2048,7 +2075,13 @@ private fun computeLibraryTabItems(
         }
         // Group tab predicate
         val tabMatches = when {
-            tab.mediaTypeFilter != null -> tab.mediaTypeFilter == MediaType.ALL || item.mediaType == tab.mediaTypeFilter
+            tab.mediaTypeFilter != null -> {
+                val typeMatch = tab.mediaTypeFilter == MediaType.ALL || item.mediaType == tab.mediaTypeFilter
+                val novelSplitMatch = tab.novelSubtypeFilter == null ||
+                    (item.mediaType == MediaType.NOVEL &&
+                        inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title, item.fanficSourceSite) == tab.novelSubtypeFilter)
+                typeMatch && novelSplitMatch
+            }
             tab.categoryId != null -> tab.categoryId in categoryAssignments[item.id].orEmpty()
             tab.isUncategorized -> categoryAssignments[item.id].isNullOrEmpty()
             tab.statusFilter != null -> tab.statusFilter == TrackingStatus.ALL || item.status == tab.statusFilter
@@ -2060,7 +2093,7 @@ private fun computeLibraryTabItems(
         // Media-specific subtype bars (when viewing a MediaType tab)
         if (pageMediaType != null) {
             val subtypeOk = (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
-                (pageMediaType != MediaType.NOVEL || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title) == selectedNovelSubtype) &&
+                (pageMediaType != MediaType.NOVEL || tab.novelSubtypeFilter != null || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title, item.fanficSourceSite) == selectedNovelSubtype) &&
                 (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnOriginSubtype == "ALL" || com.omnitrack.app.data.model.inferVnOriginGroup(item.originCountry, item.nativeTitle) == selectedVnOriginSubtype) &&
                 (pageMediaType != MediaType.VISUAL_NOVEL || selectedVnLengthSubtype == "ALL" || com.omnitrack.app.data.model.inferVnLengthGroup(item.runtimeMinutes) == selectedVnLengthSubtype) &&
                 (pageMediaType != MediaType.GAME || selectedGamePlatform == "ALL" || selectedGamePlatform in com.omnitrack.app.data.model.normalizeGamePlatformGroup(item.platforms, item.platform)) &&
@@ -2371,11 +2404,24 @@ internal fun inferNovelSubtype(
     anilistId: Long?,
     malId: Long?,
     totalProgress: Double?,
-    title: String
+    title: String,
+    fanficSourceSite: String? = null
 ): String {
+    if (!fanficSourceSite.isNullOrBlank()) return "WEB_NOVEL"
+
     val normPlatform = platform?.trim()?.uppercase()
-    if (normPlatform == "LIGHT_NOVEL") return "LIGHT_NOVEL"
-    if (normPlatform == "WEB_NOVEL") return "WEB_NOVEL"
+    if (normPlatform == "LIGHT_NOVEL" || normPlatform == "LIGHT NOVEL" || normPlatform == "LN") {
+        return "LIGHT_NOVEL"
+    }
+    if (
+        normPlatform == "WEB_NOVEL" ||
+        normPlatform == "WEB NOVEL" ||
+        normPlatform == "WN" ||
+        normPlatform in setOf("WATTPAD", "AO3", "FFN", "SB", "SV", "QQ", "ROYALROAD", "ROYAL ROAD", "SYOSETU", "KAKUYOMU", "SCRIBBLEHUB", "WEBNOVEL", "NOVELUPDATES") ||
+        (normPlatform != null && ("WATTPAD" in normPlatform || "WEB NOVEL" in normPlatform))
+    ) {
+        return "WEB_NOVEL"
+    }
 
     val lowerTitle = title.lowercase()
     if ("(light novel)" in lowerTitle || "[light novel]" in lowerTitle || "(ln)" in lowerTitle) {

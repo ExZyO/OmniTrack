@@ -77,6 +77,7 @@ import kotlin.math.roundToInt
  */
 data class LibraryCategorySubFilters(
     val activeMediaTabType: MediaType? = null,
+    val isNovelTabSplit: Boolean = false,
     val mangaSubtype: String = "ALL",
     val onMangaSubtype: (String) -> Unit = {},
     val novelSubtype: String = "ALL",
@@ -239,7 +240,11 @@ fun ChimanewLibrarySheet(
                     0 -> {
                         // Contextual per-category sub-filters right at top when inside a specific media tab
                         val activeCat = subFilters.activeMediaTabType
-                        if (activeCat != null && activeCat != MediaType.ALL && activeCat !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)) {
+                        if (activeCat != null &&
+                            activeCat != MediaType.ALL &&
+                            activeCat !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE) &&
+                            !(activeCat == MediaType.NOVEL && subFilters.isNovelTabSplit)
+                        ) {
                             CategorySubFiltersBlock(activeCat = activeCat, subFilters = subFilters)
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
                         }
@@ -592,6 +597,40 @@ fun ChimanewLibrarySheet(
                         LibSwitchRow("Show Hidden Categories", "Include eye-disabled custom categories as tabs", settings.showHiddenCategories) {
                             onToggleOverlay("HIDDEN", it)
                         }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onDismiss()
+                                    onOpenManageCategories()
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Hide / Reorder Media Tabs",
+                                    color = AccentGold,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Show, hide, or reorder Library categories & custom folders",
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
 
                     3 -> {
@@ -651,7 +690,7 @@ fun ChimanewLibrarySheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Manage Custom Categories",
+                                text = "Manage & Reorder Categories",
                                 color = AccentGold,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
@@ -804,14 +843,16 @@ private fun CategorySubFiltersBlock(
                 }
             }
             MediaType.NOVEL -> {
-                SheetSectionLabel("NOVEL SUBTYPE")
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (k, lbl) ->
-                        LibChoiceChip(label = lbl, selected = subFilters.novelSubtype == k, onClick = { subFilters.onNovelSubtype(k) })
+                if (!subFilters.isNovelTabSplit) {
+                    SheetSectionLabel("NOVEL SUBTYPE")
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("ALL" to "All", "LIGHT_NOVEL" to "Light Novel", "WEB_NOVEL" to "Web Novel").forEach { (k, lbl) ->
+                            LibChoiceChip(label = lbl, selected = subFilters.novelSubtype == k, onClick = { subFilters.onNovelSubtype(k) })
+                        }
                     }
                 }
             }

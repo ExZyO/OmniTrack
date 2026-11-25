@@ -616,16 +616,26 @@ fun TrackerAccountsSheet(
                         }
                     },
                     onImportLibrary = {
-                        when (activeService) {
-                            TrackerServiceId.ANILIST -> syncEngine.importAniListLibrary {}
-                            TrackerServiceId.MAL -> syncEngine.importMalLibrary {}
-                            TrackerServiceId.TRAKT -> syncEngine.importTraktLibrary {}
-                            TrackerServiceId.SIMKL -> syncEngine.importSimklLibrary {}
-                            TrackerServiceId.BANGUMI -> syncEngine.importBangumiLibrary {}
-                            TrackerServiceId.VNDB -> syncEngine.importVndbLibrary {}
-                            TrackerServiceId.HARDCOVER -> syncEngine.importHardcoverLibraryDetailed {}
-                            TrackerServiceId.STEAM -> syncEngine.importSteamLibraryDetailed {}
-                            TrackerServiceId.COMICK, TrackerServiceId.TMDB -> null
+                        com.omnitrack.app.util.AppLogger.i("TrackerSync", "ImportLibrary start: ${activeService.name}")
+                        try {
+                            val res = when (activeService) {
+                                TrackerServiceId.ANILIST -> syncEngine.importAniListLibrary {}
+                                TrackerServiceId.MAL -> syncEngine.importMalLibrary {}
+                                TrackerServiceId.TRAKT -> syncEngine.importTraktLibrary {}
+                                TrackerServiceId.SIMKL -> syncEngine.importSimklLibrary {}
+                                TrackerServiceId.BANGUMI -> syncEngine.importBangumiLibrary {}
+                                TrackerServiceId.VNDB -> syncEngine.importVndbLibrary {}
+                                TrackerServiceId.HARDCOVER -> syncEngine.importHardcoverLibraryDetailed {}
+                                TrackerServiceId.STEAM -> syncEngine.importSteamLibraryDetailed {}
+                                TrackerServiceId.COMICK, TrackerServiceId.TMDB -> null
+                            }
+                            com.omnitrack.app.util.AppLogger.i("TrackerSync", "ImportLibrary finish: ${activeService.name} result=$res")
+                            res
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            com.omnitrack.app.util.AppLogger.e("TrackerSync", "ImportLibrary error: ${activeService.name}: ${e.message}", e)
+                            throw e
                         }
                     },
                     onSyncNow = {
@@ -638,6 +648,7 @@ fun TrackerAccountsSheet(
                             verifiedNames = verifiedNames + (activeService to verify)
                             if (verify is VerificationState.Failed) {
                                 val errMsg = "${activeService.title}: ${verify.message}"
+                                com.omnitrack.app.util.AppLogger.w("TrackerSync", "Verify failed for ${activeService.name}: ${verify.message}")
                                 Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
                                 errMsg
                             } else {
@@ -649,6 +660,7 @@ fun TrackerAccountsSheet(
                                     summary.pushed > 0 -> "${activeService.title}${handle?.let { " ($it)" }.orEmpty()} · pushed ${summary.pushed} queued change(s)"
                                     else -> "${activeService.title} verified${handle?.let { " ($it)" }.orEmpty()} · 0 queued pushes"
                                 }
+                                com.omnitrack.app.util.AppLogger.i("TrackerSync", "SyncNow ${activeService.name}: $msg")
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                                 msg
                             }
@@ -656,6 +668,7 @@ fun TrackerAccountsSheet(
                             throw e
                         } catch (e: Exception) {
                             val err = "Sync error: ${e.message}"
+                            com.omnitrack.app.util.AppLogger.e("TrackerSync", "SyncNow ${activeService.name} error: ${e.message}", e)
                             Toast.makeText(context, err, Toast.LENGTH_LONG).show()
                             err
                         }

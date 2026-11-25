@@ -112,6 +112,9 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             manifestPlaceholders["appName"] = "OmniTrack (Debug)"
         }
     }

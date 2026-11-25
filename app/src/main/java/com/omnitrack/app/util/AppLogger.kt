@@ -3,6 +3,7 @@ package com.omnitrack.app.util
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.omnitrack.app.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,7 +59,7 @@ object AppLogger {
     fun init(context: Context) {
         val appCtx = context.applicationContext
         prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val enabled = prefs?.getBoolean(KEY_LOGGING_ENABLED, false) ?: false
+        val enabled = prefs?.getBoolean(KEY_LOGGING_ENABLED, BuildConfig.DEBUG) ?: BuildConfig.DEBUG
         _isLoggingEnabled.value = enabled
         val liveLogcat = prefs?.getBoolean(KEY_LIVE_LOGCAT_ENABLED, false) ?: false
         _isLiveLogcatEnabled.value = liveLogcat
@@ -115,7 +116,7 @@ object AppLogger {
     }
 
     private fun log(level: LogLevel, tag: String, message: String, tr: Throwable?) {
-        if (!_isLoggingEnabled.value && tag != "FATAL_CRASH") return
+        if (!BuildConfig.DEBUG && !_isLoggingEnabled.value && tag != "FATAL_CRASH") return
 
         val safeMessage = sanitize(message)
 

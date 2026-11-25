@@ -266,7 +266,7 @@ object FanficSiteEngine {
     private suspend fun <T> withWattpadDelay(block: suspend () -> T): T =
         wattpadMutex.withLock {
             val now = System.currentTimeMillis()
-            val wait = (lastWattpadReqMs + 550L) - now
+            val wait = (lastWattpadReqMs + 350L) - now
             if (wait > 0L) delay(wait)
             val result = block()
             lastWattpadReqMs = System.currentTimeMillis()
@@ -1142,7 +1142,7 @@ object FanficSiteEngine {
         "id,title,description,cover,url,user(name,username),numParts,completed,mature,language(name),tags,readCount,voteCount,commentCount,modifyDate,createDate,isPaywalled,parts(id,title,url,wordCount,modifyDate,isPaywalled)"
 
     private const val WATTPAD_LIST_STORY_FIELDS =
-        "stories(id,title,description,cover,url,user(name,username),numParts,completed,mature,language(name),tags,readCount,voteCount,commentCount,modifyDate,createDate,isPaywalled)"
+        "total,nextUrl,stories(id,title,description,cover,url,user(name,username),numParts,completed,mature,language(name),tags,readCount,voteCount,commentCount,modifyDate,createDate,isPaywalled)"
 
     private fun wattpadJsonHeaders(): Map<String, String> = mapOf(
         "Accept" to "application/json",
@@ -1381,74 +1381,268 @@ object FanficSiteEngine {
         )
     }
 
+    private data class WattpadPagedFetchResult(
+        val works: List<FanficParsedWork>,
+        val hadSuccessResponse: Boolean
+    )
+
+    private fun appendWattpadQueryParam(url: String, key: String, encodedValue: String): String {
+        val sep = if ('?' in url) '&' else '?'
+        return "$url$sep$key=$encodedValue"
+    }
+
+    private fun normalizeWattpadNextUrl(rawNext: String, encodedFields: String): String {
+        val abs = if (rawNext.startsWith("/")) "https://www.wattpad.com$rawNext" else rawNext
+        return if ("fields=" in abs) abs else appendWattpadQueryParam(abs, "fields", encodedFields)
+    }
+
+    private suspend fun fetchWattpadPagedStories(
+        baseUrlWithoutOffset: String,
+        cookie: String?,
+        label: String,
+        pageSize: Int = 100,
+        maxPages: Int = 40,
+        failOnAuthError: Boolean = false,
+        onProgress: (suspend (fetched: Int, total: Int?) -> Unit)? = null
+    ): WattpadPagedFetchResult {
+        val encodedFields = URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")
+        val collected = mutableListOf<FanficParsedWork>()
+        val seenIds = HashSet<String>()
+        val seenUrls = HashSet<String>()
+        var offset = 0
+        var nextUrl: String? = null
+        var reportedTotal: Int? = null
+        var hadSuccessResponse = false
+
+        for (page in 1..maxPages) {
+            val requestUrl = nextUrl ?: run {
+                var u = appendWattpadQueryParam(baseUrlWithoutOffset, "limit", pageSize.toString())
+                u = appendWattpadQueryParam(u, "offset", offset.toString())
+                if ("fields=" !in u) {
+                    u = appendWattpadQueryParam(u, "fields", encodedFields)
+                }
+                u
+            }
+            if (!seenUrls.add(requestUrl)) break
+
+            var attempt = 0
+            var code: Int
+            var body: String
+            while (true) {
+                val res = withWattpadDelay {
+                    executeGet(url = requestUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+                }
+                code = res.first
+                body = res.third
+                if (code == 429 && attempt < 2) {
+                    attempt++
+                    AppLogger.w("FanficSiteEngine", "$label page $page HTTP 429, backing off (attempt $attempt)")
+                    delay(1500L * attempt)
+                    continue
+                }
+                break
+            }
+
+            if (failOnAuthError && (code == 401 || code == 403)) {
+                throw IllegalStateException("Wattpad session expired — sign in again in WebView")
+            }
+            if (code !in 200..299 || !body.trimStart().startsWith("{")) {
+                AppLogger.w("FanficSiteEngine", "$label page $page stopped (HTTP $code)")
+                break
+            }
+
+            hadSuccessResponse = true
+            val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: break
+            val pageTotal = root["total"]?.jsonPrimitive?.intOrNull
+            if (pageTotal != null && pageTotal > 0) {
+                reportedTotal = pageTotal
+            }
+            val rawNext = root["nextUrl"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+            val arr = root["stories"] as? JsonArray ?: break
+
+            var addedThisPage = 0
+            for (el in arr) {
+                val obj = el as? JsonObject ?: continue
+                val parsed = parseWattpadStoryJson(obj) ?: continue
+                val dedupKey = parsed.workId ?: parsed.canonicalUrl
+                if (seenIds.add(dedupKey)) {
+                    collected.add(parsed)
+                    addedThisPage++
+                }
+            }
+
+            AppLogger.i(
+                "FanficSiteEngine",
+                "$label page $page: batch=${arr.size}, new=$addedThisPage, unique=${collected.size}, total=$reportedTotal, hasNext=${rawNext != null}"
+            )
+            onProgress?.invoke(collected.size, reportedTotal)
+
+            if (arr.isEmpty() || addedThisPage == 0) break
+            if (reportedTotal != null && collected.size >= reportedTotal) break
+
+            offset += arr.size
+            if (rawNext != null) {
+                nextUrl = normalizeWattpadNextUrl(rawNext, encodedFields)
+            } else if ((reportedTotal != null && offset < reportedTotal) || arr.size >= pageSize) {
+                nextUrl = null
+            } else {
+                break
+            }
+        }
+
+        return WattpadPagedFetchResult(works = collected, hadSuccessResponse = hadSuccessResponse)
+    }
+
     suspend fun fetchWattpadUserReadingLists(
         username: String,
-        cookie: String? = null
+        cookie: String? = null,
+        onProgress: (suspend (String) -> Unit)? = null
     ): Result<List<FanficParsedWork>> = withContext(Dispatchers.IO) {
         runCatching {
             val cleanUser = username.trim().removePrefix("@")
             require(cleanUser.isNotBlank()) { "Enter a Wattpad username" }
             val encUser = URLEncoder.encode(cleanUser, "UTF-8")
-            val listsUrl = "https://www.wattpad.com/api/v3/users/$encUser/lists?limit=20&fields=lists(id,name,numStories)"
-            val (code, _, body) = withWattpadDelay {
-                executeGet(url = listsUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
-            }
-            if (code !in 200..299 || !body.trimStart().startsWith("{")) {
-                throw IllegalStateException("Could not load Wattpad reading lists for @$cleanUser (HTTP $code)")
-            }
-            val root = json.parseToJsonElement(body).jsonObject
-            val lists = (root["lists"] as? JsonArray).orEmpty()
-            val collected = mutableListOf<FanficParsedWork>()
-            for (el in lists.take(10)) {
-                val listObj = el as? JsonObject ?: continue
-                val listId = listObj["id"]?.jsonPrimitive?.contentOrNull?.trim() ?: continue
-                val storiesUrl = "https://www.wattpad.com/api/v3/lists/$listId/stories?limit=30&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}"
-                val (sCode, _, sBody) = withWattpadDelay {
-                    executeGet(url = storiesUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
+            val encodedListFields = URLEncoder.encode("total,nextUrl,lists(id,name,numStories)", "UTF-8")
+
+            val allLists = mutableListOf<Triple<String, String, Int?>>()
+            val seenListIds = HashSet<String>()
+            val seenListUrls = HashSet<String>()
+            var listOffset = 0
+            var listNextUrl: String? = null
+            var listTotal: Int? = null
+            var fetchedFirstPage = false
+
+            for (listPage in 1..20) {
+                val listsUrl = listNextUrl
+                    ?: "https://www.wattpad.com/api/v3/users/$encUser/lists?limit=100&offset=$listOffset&fields=$encodedListFields"
+                if (!seenListUrls.add(listsUrl)) break
+
+                val (code, _, body) = withWattpadDelay {
+                    executeGet(url = listsUrl, cookie = cookie, extraHeaders = wattpadJsonHeaders())
                 }
-                if (sCode in 200..299 && sBody.trimStart().startsWith("{")) {
-                    val sRoot = runCatching { json.parseToJsonElement(sBody).jsonObject }.getOrNull()
-                    val arr = sRoot?.get("stories") as? JsonArray ?: continue
-                    arr.forEach { st ->
-                        (st as? JsonObject)?.let { parseWattpadStoryJson(it) }?.let { collected.add(it) }
+                if (code !in 200..299 || !body.trimStart().startsWith("{")) {
+                    if (!fetchedFirstPage) {
+                        throw IllegalStateException("Could not load Wattpad reading lists for @$cleanUser (HTTP $code)")
                     }
+                    break
+                }
+                fetchedFirstPage = true
+                val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: break
+                val pageTotal = root["total"]?.jsonPrimitive?.intOrNull
+                if (pageTotal != null && pageTotal > 0) listTotal = pageTotal
+                val rawNext = root["nextUrl"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() }
+                val arr = (root["lists"] as? JsonArray).orEmpty()
+
+                var addedLists = 0
+                for (el in arr) {
+                    val obj = el as? JsonObject ?: continue
+                    val listId = obj["id"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotBlank() } ?: continue
+                    if (!seenListIds.add(listId)) continue
+                    val listName = obj["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank { "Reading List" }
+                    val numStories = obj["numStories"]?.jsonPrimitive?.intOrNull
+                    allLists.add(Triple(listId, listName, numStories))
+                    addedLists++
+                }
+                AppLogger.i("FanficSiteEngine", "WattpadReadingLists(@$cleanUser) lists page $listPage: batch=${arr.size}, totalLists=$listTotal, collected=${allLists.size}")
+                if (arr.isEmpty() || addedLists == 0) break
+                if (listTotal != null && allLists.size >= listTotal) break
+                listOffset += arr.size
+                listNextUrl = when {
+                    rawNext != null -> normalizeWattpadNextUrl(rawNext, encodedListFields)
+                    (listTotal != null && listOffset < listTotal) || arr.size >= 100 -> null
+                    else -> break
+                }
+                if (listNextUrl == null && listTotal == null && arr.size < 100) break
+            }
+
+            val collected = LinkedHashMap<String, FanficParsedWork>()
+            allLists.forEachIndexed { idx, (listId, listName, numStories) ->
+                if (numStories == 0) return@forEachIndexed
+                onProgress?.invoke("Fetching Reading List ${idx + 1}/${allLists.size}: $listName...")
+                val res = fetchWattpadPagedStories(
+                    baseUrlWithoutOffset = "https://www.wattpad.com/api/v3/lists/$listId/stories",
+                    cookie = cookie,
+                    label = "WattpadList[$listId]",
+                    onProgress = { fetched, total ->
+                        val suffix = if (total != null && total > 0) "/$total" else ""
+                        onProgress?.invoke("Reading List ${idx + 1}/${allLists.size} ($listName): $fetched$suffix stories...")
+                    }
+                )
+                res.works.forEach { w ->
+                    collected.putIfAbsent(w.workId ?: w.canonicalUrl, w)
                 }
             }
-            collected.distinctBy { it.workId ?: it.canonicalUrl }
+            val result = collected.values.toList()
+            AppLogger.i("FanficSiteEngine", "Wattpad reading lists complete for @$cleanUser: ${allLists.size} lists, ${result.size} unique stories")
+            result
         }
     }
 
     suspend fun fetchWattpadPrivateLibrary(
         username: String?,
-        cookie: String
+        cookie: String,
+        onProgress: (suspend (String) -> Unit)? = null
     ): Result<List<FanficParsedWork>> = withContext(Dispatchers.IO) {
         runCatching {
             require(cookie.isNotBlank()) { "Sign in to Wattpad in WebView first" }
             val cleanUser = username?.trim()?.removePrefix("@").orEmpty()
-            val candidateUrls = buildList {
+            val candidateBaseUrls = buildList {
                 if (cleanUser.isNotBlank()) {
                     val enc = URLEncoder.encode(cleanUser, "UTF-8")
-                    add("https://www.wattpad.com/api/v3/users/$enc/library?limit=50&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}")
+                    add("https://www.wattpad.com/api/v3/users/$enc/library")
                 }
-                add("https://www.wattpad.com/api/v3/library?limit=50&fields=${URLEncoder.encode(WATTPAD_LIST_STORY_FIELDS, "UTF-8")}")
+                add("https://www.wattpad.com/api/v3/library")
             }
-            for (url in candidateUrls) {
-                val (code, _, body) = withWattpadDelay {
-                    executeGet(url = url, cookie = cookie, extraHeaders = wattpadJsonHeaders())
-                }
-                if (code == 401 || code == 403) {
-                    throw IllegalStateException("Wattpad session expired — sign in again in WebView")
-                }
-                if (code in 200..299 && body.trimStart().startsWith("{")) {
-                    val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: continue
-                    val arr = root["stories"] as? JsonArray ?: continue
-                    val parsed = arr.mapNotNull { (it as? JsonObject)?.let { o -> parseWattpadStoryJson(o) } }
-                    if (parsed.isNotEmpty() || url == candidateUrls.last()) {
-                        return@runCatching parsed.distinctBy { it.workId ?: it.canonicalUrl }
+
+            var anySuccessResponse = false
+            for (baseUrl in candidateBaseUrls) {
+                val primaryRes = fetchWattpadPagedStories(
+                    baseUrlWithoutOffset = baseUrl,
+                    cookie = cookie,
+                    label = "WattpadLibrary",
+                    failOnAuthError = true,
+                    onProgress = { fetched, total ->
+                        val totalSuffix = if (total != null && total > 0) "/$total" else ""
+                        onProgress?.invoke("Fetching Wattpad Private Library ($fetched$totalSuffix stories)...")
                     }
+                )
+                if (primaryRes.hadSuccessResponse) {
+                    anySuccessResponse = true
+                }
+                if (primaryRes.works.isNotEmpty() || (primaryRes.hadSuccessResponse && baseUrl == candidateBaseUrls.last())) {
+                    val merged = LinkedHashMap<String, FanficParsedWork>()
+                    primaryRes.works.forEach { w -> merged[w.workId ?: w.canonicalUrl] = w }
+
+                    val archiveUrl = "$baseUrl?filter=archive"
+                    val archiveRes = runCatching {
+                        fetchWattpadPagedStories(
+                            baseUrlWithoutOffset = archiveUrl,
+                            cookie = cookie,
+                            label = "WattpadLibraryArchive",
+                            failOnAuthError = false,
+                            onProgress = { fetched, total ->
+                                val totalSuffix = if (total != null && total > 0) "/$total" else ""
+                                onProgress?.invoke("Checking Wattpad Archive (${merged.size} + $fetched$totalSuffix stories)...")
+                            }
+                        )
+                    }.getOrNull()
+                    archiveRes?.works?.forEach { w ->
+                        merged.putIfAbsent(w.workId ?: w.canonicalUrl, w)
+                    }
+
+                    val finalWorks = merged.values.toList()
+                    AppLogger.i(
+                        "FanficSiteEngine",
+                        "Wattpad private library complete: ${finalWorks.size} unique stories (active=${primaryRes.works.size}, archivePass=${archiveRes?.works?.size ?: 0})"
+                    )
+                    return@runCatching finalWorks
                 }
             }
-            throw IllegalStateException("Enter your Wattpad username and refresh your WebView session to import Private Library")
+            if (anySuccessResponse) {
+                emptyList()
+            } else {
+                throw IllegalStateException("Enter your Wattpad username and refresh your WebView session to import Private Library")
+            }
         }
     }
 

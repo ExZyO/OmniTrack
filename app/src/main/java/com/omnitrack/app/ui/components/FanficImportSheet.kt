@@ -842,18 +842,36 @@ fun FanficImportSheet(
                                             bulkImportStatus = "Fetching public Wattpad reading lists for @$cleanU..."
                                             app.trackerTokenManager.saveWattpadUsername(cleanU)
                                             val cookie = app.trackerTokenManager.getFanficCookie(FanficSite.WATTPAD)
-                                            val res = FanficSiteEngine.fetchWattpadUserReadingLists(cleanU, cookie)
+                                            val res = FanficSiteEngine.fetchWattpadUserReadingLists(
+                                                username = cleanU,
+                                                cookie = cookie,
+                                                onProgress = { status ->
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                                                        bulkImportStatus = status
+                                                    }
+                                                }
+                                            )
                                             res.onSuccess { works ->
                                                 var added = 0
                                                 var updated = 0
-                                                works.forEach { w ->
+                                                var novelCount = 0
+                                                var fanficCount = 0
+                                                works.forEachIndexed { idx, w ->
                                                     val destType = defaultCategoryForWork(w)
+                                                    if (destType == MediaType.NOVEL) novelCount++ else fanficCount++
                                                     val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.PLAN_TO_TRACK, destType)
                                                     if (created) added++ else updated++
+                                                    if ((idx + 1) % 10 == 0 || idx == 0 || idx + 1 == works.size) {
+                                                        bulkImportStatus = "Saving Wattpad Reading Lists (${idx + 1}/${works.size})..."
+                                                    }
                                                 }
-                                                bulkImportStatus = "Wattpad Reading Lists: imported $added new, updated $updated existing stories."
+                                                val summary = "Wattpad Reading Lists: ${works.size} fetched ($added new, $updated updated — $novelCount Web Novels, $fanficCount Fanfiction)."
+                                                bulkImportStatus = summary
+                                                com.omnitrack.app.util.AppLogger.i("FanficImport", summary)
                                             }.onFailure { err ->
-                                                bulkImportStatus = err.message ?: "Failed to fetch Wattpad reading lists"
+                                                val errMsg = err.message ?: "Failed to fetch Wattpad reading lists"
+                                                bulkImportStatus = errMsg
+                                                com.omnitrack.app.util.AppLogger.w("FanficImport", errMsg)
                                             }
                                             isBulkImporting = false
                                         }
@@ -874,18 +892,36 @@ fun FanficImportSheet(
                                             if (cleanU.isNotBlank()) app.trackerTokenManager.saveWattpadUsername(cleanU)
                                             bulkImportStatus = "Fetching Wattpad Private Library..."
                                             val cookie = app.trackerTokenManager.getFanficCookie(FanficSite.WATTPAD).orEmpty()
-                                            val res = FanficSiteEngine.fetchWattpadPrivateLibrary(cleanU, cookie)
+                                            val res = FanficSiteEngine.fetchWattpadPrivateLibrary(
+                                                username = cleanU,
+                                                cookie = cookie,
+                                                onProgress = { status ->
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                                                        bulkImportStatus = status
+                                                    }
+                                                }
+                                            )
                                             res.onSuccess { works ->
                                                 var added = 0
                                                 var updated = 0
-                                                works.forEach { w ->
+                                                var novelCount = 0
+                                                var fanficCount = 0
+                                                works.forEachIndexed { idx, w ->
                                                     val destType = defaultCategoryForWork(w)
+                                                    if (destType == MediaType.NOVEL) novelCount++ else fanficCount++
                                                     val (_, created) = app.repository.saveOrUpdateFanficWork(w, TrackingStatus.IN_PROGRESS, destType)
                                                     if (created) added++ else updated++
+                                                    if ((idx + 1) % 10 == 0 || idx == 0 || idx + 1 == works.size) {
+                                                        bulkImportStatus = "Saving Wattpad Private Library (${idx + 1}/${works.size})..."
+                                                    }
                                                 }
-                                                bulkImportStatus = "Wattpad Private Library: imported $added new, updated $updated existing stories."
+                                                val summary = "Wattpad Private Library: ${works.size} fetched ($added new, $updated updated — $novelCount Web Novels, $fanficCount Fanfiction)."
+                                                bulkImportStatus = summary
+                                                com.omnitrack.app.util.AppLogger.i("FanficImport", summary)
                                             }.onFailure { err ->
-                                                bulkImportStatus = err.message ?: "Failed to fetch Wattpad Private Library"
+                                                val errMsg = err.message ?: "Failed to fetch Wattpad Private Library"
+                                                bulkImportStatus = errMsg
+                                                com.omnitrack.app.util.AppLogger.w("FanficImport", errMsg)
                                             }
                                             isBulkImporting = false
                                         }
