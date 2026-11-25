@@ -2,6 +2,7 @@ package com.omnitrack.app.ui.screens.home.views
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,6 +70,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -120,12 +122,12 @@ import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
-import com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE
 import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
 import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
 import com.omnitrack.app.ui.components.glassCardDepth
+import com.omnitrack.app.ui.components.heroBackgroundOverscan
 import com.omnitrack.app.ui.components.heroPageForItem
 import com.omnitrack.app.ui.components.heroScrollBackdropAlpha
 import com.omnitrack.app.ui.components.heroScrollBackdropScale
@@ -542,13 +544,31 @@ fun HomeDashboardView(
                 item(key = "home_hero_carousel") {
                     if (heroSlides.isNotEmpty()) {
                         val animateHero = !perf.disableCardAnimations
+                        val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
+                            "COMPACT" -> 336.dp
+                            "TALL" -> 472.dp
+                            else -> 404.dp
+                        }
+                        val density = LocalDensity.current
+                        val heroHeightPx = with(density) { heroHeightDp.toPx() }
                         val heroScrollPx: () -> Float = {
                             if (!animateHero) 0f
-                            else if (homeListState.firstVisibleItemIndex > 0) 1400f
+                            else if (homeListState.firstVisibleItemIndex > 0) heroHeightPx.coerceAtLeast(1400f)
                             else homeListState.firstVisibleItemScrollOffset.toFloat()
                         }
-                        val pullStretchFraction: () -> Float = {
-                            if (!animateHero) 0f else pullState.distanceFraction.coerceIn(0f, 1.5f)
+                        val pullStretchPx: () -> Float = {
+                            if (
+                                !animateHero ||
+                                isRefreshing ||
+                                localRefreshing ||
+                                homeListState.firstVisibleItemIndex > 0 ||
+                                homeListState.firstVisibleItemScrollOffset > 0
+                            ) {
+                                0f
+                            } else {
+                                (pullState.distanceFraction.coerceIn(0f, 1.2f) * 56f * density.density)
+                                    .coerceIn(0f, 72f * density.density)
+                            }
                         }
                         val isLooping = heroSlides.size > 1
                         val virtualCount = if (isLooping) 100_000 else heroSlides.size
@@ -565,6 +585,8 @@ fun HomeDashboardView(
                                 pageCount = { virtualCount }
                             )
                         }
+                        var isDraggingHero by remember { mutableStateOf(false) }
+                        var lastHeroDragEndMs by remember { mutableLongStateOf(0L) }
 
                         LaunchedEffect(isLooping, heroSlides.size) {
                             if (isLooping && pagerState.currentPage < 1000) {
@@ -579,19 +601,19 @@ fun HomeDashboardView(
                         }
 
                         LaunchedEffect(heroKeys) {
-                            if (heroSlides.isNotEmpty() && !pagerState.isScrollInProgress) {
+                            if (heroSlides.isNotEmpty() && !isDraggingHero && !pagerState.isScrollInProgress) {
                                 val curMod = if (isLooping) pagerState.currentPage % heroSlides.size else 0
                                 val target = if (isLooping) startIndex + curMod else 0
                                 runCatching { pagerState.scrollToPage(target) }
                             }
                         }
 
-                        LaunchedEffect(pagerState, heroSlides.size, heroSettings.autoRotate, heroSettings.autoRotateSeconds) {
+                        LaunchedEffect(pagerState, heroSlides.size, heroSettings.autoRotate, heroSettings.autoRotateSeconds, lastHeroDragEndMs) {
                             val sec = heroSettings.autoRotateSeconds
                             if (!isLooping || !heroSettings.autoRotate || sec <= 0) return@LaunchedEffect
                             while (isActive) {
                                 delay(sec * 1000L)
-                                if (!pagerState.isScrollInProgress) {
+                                if (!isDraggingHero && !pagerState.isScrollInProgress) {
                                     runCatching { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
                                 }
                             }
@@ -636,25 +658,19 @@ fun HomeDashboardView(
                             }
                         }
 
-                        val heroHeightDp = when (heroSettings.heroHeightPreset.uppercase()) {
-                            "COMPACT" -> 336.dp
-                            "TALL" -> 472.dp
-                            else -> 404.dp
-                        }
-                        val density = LocalDensity.current
-                        val heroHeightPx = with(density) { heroHeightDp.toPx() }
-                        val pullStretchPx: () -> Float = {
-                            if (!animateHero) 0f
-                            else (pullStretchFraction() * 96f * density.density).coerceIn(0f, 150f * density.density)
-                        }
-
                         BoxWithConstraints(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .homeHeroPagerGesture(
                                     pagerState = pagerState,
                                     itemCount = heroSlides.size,
-                                    coroutineScope = scope
+                                    coroutineScope = scope,
+                                    onDragStateChanged = { dragging ->
+                                        isDraggingHero = dragging
+                                        if (!dragging) {
+                                            lastHeroDragEndMs = System.currentTimeMillis()
+                                        }
+                                    }
                                 )
                         ) {
                             val heroWidthPx = with(density) { maxWidth.toPx() }
@@ -694,7 +710,14 @@ fun HomeDashboardView(
                                         else Modifier.height(heroHeightDp)
                                     )
                                     .clipToBounds()
-                                    .clickable(enabled = activeSlide != null) {
+                                    .clickable(
+                                        enabled = activeSlide != null,
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        if (isDraggingHero || System.currentTimeMillis() - lastHeroDragEndMs <= 280L) {
+                                            return@clickable
+                                        }
                                         if (activeLibMatch != null) {
                                             onItemClick(activeLibMatch.id)
                                         } else if (activeSlide is HomeHeroSlide.TrendingSlide) {
@@ -713,7 +736,7 @@ fun HomeDashboardView(
                                     Box(modifier = Modifier.fillMaxSize())
                                 }
 
-                                // 1. Stacked Backdrops (seamless in-place crossfade + 5.5% horizontal parallax + vertical scroll motion + pull stretch)
+                                // 1. Stacked Backdrops (seamless in-place crossfade + horizontal parallax + vertical scroll motion + pull stretch)
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -722,7 +745,7 @@ fun HomeDashboardView(
                                 ) {
                                     visibleLayers.forEach { layer ->
                                         val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
-                                        androidx.compose.runtime.key(slide.slideKey()) {
+                                        androidx.compose.runtime.key("${layer.itemIndex}_${slide.slideKey()}") {
                                             val resolved = rememberResolvedHomeHeroSlide(
                                                 slide = slide,
                                                 allMedia = allMedia,
@@ -778,7 +801,7 @@ fun HomeDashboardView(
                                 ) {
                                     visibleLayers.forEach { layer ->
                                         val slide = heroSlides.getOrNull(layer.itemIndex) ?: return@forEach
-                                        androidx.compose.runtime.key(slide.slideKey()) {
+                                        androidx.compose.runtime.key("${layer.itemIndex}_${slide.slideKey()}") {
                                             val resolved = rememberResolvedHomeHeroSlide(
                                                 slide = slide,
                                                 allMedia = allMedia,
@@ -1798,7 +1821,7 @@ private fun ChimanewHeroBackdropLayer(
     animateHero: Boolean,
     scrollOffsetPx: () -> Float
 ) {
-    val overscanScale = if (animateHero) HERO_BACKGROUND_SCALE else 1f
+    val overscanScale = if (animateHero) heroBackgroundOverscan(pageOffset) else 1f
     if (data.authenticBannerModel != null) {
         val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
         AsyncImage(

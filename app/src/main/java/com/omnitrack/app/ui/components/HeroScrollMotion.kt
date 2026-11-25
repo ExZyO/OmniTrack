@@ -38,11 +38,14 @@ private const val HERO_STRETCH_DRAG_RESISTANCE = 0.55f
 private const val HERO_STRETCH_RELEASE_ABSORB = 0.35f
 private const val HERO_STRETCH_FRAME_TO_VELOCITY = 60f
 
-const val HERO_BACKGROUND_PARALLAX = 0.055f
-const val HERO_BACKGROUND_SCALE = 1.14f
+const val HERO_BACKGROUND_PARALLAX = 0.045f
+const val HERO_BACKGROUND_SCALE = 1.0f
 const val HERO_CONTENT_PARALLAX = 0.18f
 private const val HERO_SWIPE_THRESHOLD_FRACTION = 0.16f
 private const val HERO_SWIPE_VELOCITY_THRESHOLD = 300f
+
+fun heroBackgroundOverscan(pageOffset: Float): Float =
+    1f + abs(pageOffset).coerceIn(0f, 1f) * 0.10f
 
 private val HeroStretchReleaseSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -111,11 +114,13 @@ fun heroPageForItem(currentPage: Int, itemIndex: Int, itemCount: Int): Int {
 fun Modifier.homeHeroPagerGesture(
     pagerState: PagerState,
     itemCount: Int,
-    coroutineScope: CoroutineScope
+    coroutineScope: CoroutineScope,
+    onDragStateChanged: (Boolean) -> Unit = {}
 ): Modifier {
     if (itemCount <= 1) return this
 
     return pointerInput(pagerState, itemCount) {
+        var settleJob: Job? = null
         awaitEachGesture {
             val down = awaitFirstDown(pass = PointerEventPass.Initial)
             val widthPx = size.width.toFloat().takeIf { it > 0f } ?: return@awaitEachGesture
@@ -126,48 +131,77 @@ fun Modifier.homeHeroPagerGesture(
             var totalDx = 0f
             var totalDy = 0f
             var dragging = false
+            var snapped = false
 
-            while (true) {
-                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
-                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                velocityTracker.addPosition(change.uptimeMillis, change.position)
+            try {
+                while (true) {
+                    val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
 
-                if (!change.pressed) {
-                    if (dragging) {
-                        change.consume()
-                        val targetPage = resolveHeroTargetPage(
-                            startPage = startPage,
-                            pageCount = pagerState.pageCount,
-                            totalDx = totalDx,
-                            velocityX = velocityTracker.calculateVelocity().x,
-                            widthPx = widthPx
-                        )
-                        coroutineScope.launch {
-                            runCatching { pagerState.animateScrollToPage(targetPage) }
+                    if (!change.pressed) {
+                        if (dragging) {
+                            change.consume()
+                            snapped = true
+                            val targetPage = resolveHeroTargetPage(
+                                startPage = startPage,
+                                pageCount = pagerState.pageCount,
+                                totalDx = totalDx,
+                                velocityX = velocityTracker.calculateVelocity().x,
+                                widthPx = widthPx
+                            )
+                            settleJob?.cancel()
+                            settleJob = coroutineScope.launch {
+                                runCatching { pagerState.animateScrollToPage(targetPage) }
+                            }
+                        }
+                        break
+                    }
+
+                    val delta = change.position - change.previousPosition
+                    totalDx += delta.x
+                    totalDy += delta.y
+
+                    if (!dragging) {
+                        val horizontalDrag =
+                            abs(totalDx) > viewConfiguration.touchSlop && abs(totalDx) > abs(totalDy)
+                        val verticalDrag =
+                            abs(totalDy) > viewConfiguration.touchSlop && abs(totalDy) > abs(totalDx)
+
+                        when {
+                            verticalDrag -> break
+                            horizontalDrag -> {
+                                settleJob?.cancel()
+                                dragging = true
+                                onDragStateChanged(true)
+                                pagerState.dispatchRawDelta(-totalDx)
+                                change.consume()
+                                continue
+                            }
+                            else -> continue
                         }
                     }
-                    break
+
+                    pagerState.dispatchRawDelta(-delta.x)
+                    change.consume()
                 }
-
-                val delta = change.position - change.previousPosition
-                totalDx += delta.x
-                totalDy += delta.y
-
-                if (!dragging) {
-                    val horizontalDrag =
-                        abs(totalDx) > viewConfiguration.touchSlop && abs(totalDx) > abs(totalDy)
-                    val verticalDrag =
-                        abs(totalDy) > viewConfiguration.touchSlop && abs(totalDy) > abs(totalDx)
-
-                    when {
-                        verticalDrag -> break
-                        horizontalDrag -> dragging = true
-                        else -> continue
+            } finally {
+                if (dragging && !snapped) {
+                    val targetPage = resolveHeroTargetPage(
+                        startPage = startPage,
+                        pageCount = pagerState.pageCount,
+                        totalDx = totalDx,
+                        velocityX = runCatching { velocityTracker.calculateVelocity().x }.getOrDefault(0f),
+                        widthPx = widthPx
+                    )
+                    settleJob?.cancel()
+                    settleJob = coroutineScope.launch {
+                        runCatching { pagerState.animateScrollToPage(targetPage) }
                     }
                 }
-
-                pagerState.dispatchRawDelta(-delta.x)
-                change.consume()
+                if (dragging) {
+                    onDragStateChanged(false)
+                }
             }
         }
     }

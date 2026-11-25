@@ -86,6 +86,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.content.FileProvider
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private data class LogcatLine(
     val timestamp: String,
@@ -462,9 +467,35 @@ fun DiagnosticsSheet(
             ) {
                 TextButton(
                     onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clipboard.setPrimaryClip(ClipData.newPlainText("OmniTrack Logs", buildExportText()))
-                        Toast.makeText(context, "Copied logs to clipboard", Toast.LENGTH_SHORT).show()
+                        val raw = buildExportText()
+                        if (raw.isBlank()) {
+                            Toast.makeText(context, "No logs to copy", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val bytes = raw.toByteArray(Charsets.UTF_8)
+                            val truncated = bytes.size > 400_000
+                            val safeClipText = if (truncated) {
+                                "[Truncated to newest ~380 KB for Android clipboard limit — use Share for full log file]\n" +
+                                    raw.takeLast(380_000)
+                            } else {
+                                raw
+                            }
+                            runCatching {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("OmniTrack Logs", safeClipText))
+                            }.onSuccess {
+                                Toast.makeText(
+                                    context,
+                                    if (truncated) "Copied newest logs (use Share for full log)" else "Copied logs to clipboard",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }.onFailure { err ->
+                                Toast.makeText(
+                                    context,
+                                    "Logs too large for clipboard (${err.message ?: "use Share instead"})",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -480,15 +511,46 @@ fun DiagnosticsSheet(
                 TextButton(
                     onClick = {
                         val text = buildExportText()
-                        if (text.isNotBlank()) {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, text)
-                                type = "text/plain"
-                            }
-                            context.startActivity(Intent.createChooser(sendIntent, "Share OmniTrack Diagnostics"))
-                        } else {
+                        if (text.isBlank()) {
                             Toast.makeText(context, "No logs to share", Toast.LENGTH_SHORT).show()
+                        } else {
+                            scope.launch {
+                                runCatching {
+                                    val file = withContext(Dispatchers.IO) {
+                                        val logsDir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
+                                        logsDir.listFiles()
+                                            ?.sortedByDescending { it.lastModified() }
+                                            ?.drop(3)
+                                            ?.forEach { runCatching { it.delete() } }
+                                        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                                        File(logsDir, "omnitrack_diagnostics_$stamp.txt").apply {
+                                            writeText(text, Charsets.UTF_8)
+                                        }
+                                    }
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.provider",
+                                        file
+                                    )
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        putExtra(
+                                            Intent.EXTRA_SUBJECT,
+                                            "OmniTrack Diagnostics (v${BuildConfig.VERSION_NAME})"
+                                        )
+                                        clipData = ClipData.newRawUri("OmniTrack Diagnostics", uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(sendIntent, "Share OmniTrack Diagnostics"))
+                                }.onFailure { err ->
+                                    Toast.makeText(
+                                        context,
+                                        "Failed to share logs: ${err.message ?: "unknown error"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
                         }
                     },
                     modifier = Modifier

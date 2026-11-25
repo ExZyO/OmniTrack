@@ -812,32 +812,17 @@ fun DetailScreen(
                 else if (lazyListState.firstVisibleItemIndex > 0) 1400f
                 else lazyListState.firstVisibleItemScrollOffset.toFloat()
             }
+            val supportsFanficPullRefresh = item.mediaType == MediaType.FANFICTION ||
+                (item.mediaType == MediaType.NOVEL && !item.fanficSourceUrl.isNullOrBlank())
             val detailStretchPx: () -> Float = {
-                if (!animateHeroScroll || item.mediaType == MediaType.FANFICTION) 0f else heroStretchState.stretchPx
+                if (!animateHeroScroll || supportsFanficPullRefresh) 0f else heroStretchState.stretchPx
             }
 
-            @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-                isRefreshing = item.mediaType == MediaType.FANFICTION && fanficAuxState.isCheckingUpdates,
-                onRefresh = {
-                    if (item.mediaType == MediaType.FANFICTION) {
-                        viewModel.checkFanficUpdates()
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (item.mediaType != MediaType.FANFICTION && animateHeroScroll) {
-                            Modifier.nestedScroll(heroStretchState.nestedScrollConnection)
-                        } else {
-                            Modifier
-                        }
-                    )
-            ) {
-            LazyColumn(
-                state = lazyListState,
-                modifier = Modifier.fillMaxSize()
-            ) {
+            val detailScrollBody: @Composable () -> Unit = {
+                LazyColumn(
+                    state = lazyListState,
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 item(key = "detail_top_header", contentType = "top_header") {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books, Comics & Fanfiction when no wide banner)
@@ -1683,7 +1668,32 @@ fun DetailScreen(
                 item(key = "bottom_spacer", contentType = "spacer") {
                     Spacer(modifier = Modifier.height(48.dp))
                 }
+                }
             }
+
+            if (supportsFanficPullRefresh) {
+                @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+                androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                    isRefreshing = fanficAuxState.isCheckingUpdates,
+                    onRefresh = { viewModel.checkFanficUpdates() },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    detailScrollBody()
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (animateHeroScroll) {
+                                Modifier.nestedScroll(heroStretchState.nestedScrollConnection)
+                            } else {
+                                Modifier
+                            }
+                        )
+                ) {
+                    detailScrollBody()
+                }
             }
 
             // Top Status Bar Gradient Scrim (so white back arrow never vanishes on bright banners)

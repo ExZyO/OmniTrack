@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -65,6 +66,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -104,11 +106,11 @@ import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.GeminiModelSelectorSection
 import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
-import com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE
 import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
 import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.MediaCard
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.components.heroBackgroundOverscan
 import com.omnitrack.app.ui.components.heroPageForItem
 import com.omnitrack.app.ui.components.heroVisibleLayers
 import com.omnitrack.app.ui.components.homeHeroPagerGesture
@@ -1814,6 +1816,8 @@ private fun DiscoverHeroCarousel(
     val scope = rememberCoroutineScope()
     val density = androidx.compose.ui.platform.LocalDensity.current
     val currentActualIdx = if (isLooping) pagerState.currentPage % items.size else pagerState.currentPage.coerceIn(0, items.lastIndex)
+    var isDraggingHero by remember { mutableStateOf(false) }
+    var lastHeroDragEndMs by remember { mutableLongStateOf(0L) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         BoxWithConstraints(
@@ -1826,7 +1830,13 @@ private fun DiscoverHeroCarousel(
                 .homeHeroPagerGesture(
                     pagerState = pagerState,
                     itemCount = items.size,
-                    coroutineScope = scope
+                    coroutineScope = scope,
+                    onDragStateChanged = { dragging ->
+                        isDraggingHero = dragging
+                        if (!dragging) {
+                            lastHeroDragEndMs = System.currentTimeMillis()
+                        }
+                    }
                 )
         ) {
             val heroWidthPx = with(density) { maxWidth.toPx() }
@@ -1852,14 +1862,20 @@ private fun DiscoverHeroCarousel(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .clickable {
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        if (isDraggingHero || System.currentTimeMillis() - lastHeroDragEndMs <= 280L) {
+                            return@clickable
+                        }
                         if (activeMatch != null) onItemClick(activeMatch.id) else {
                             EphemeralPreviewHolder.previewItem = activeItem.toMediaItemEntity()
                             onItemClick(-1L)
                         }
                     }
             ) {
-                // 1. Stacked Backdrops (seamless in-place crossfade + 5.5% horizontal parallax)
+                // 1. Stacked Backdrops (seamless in-place crossfade + horizontal parallax)
                 visibleLayers.forEach { layer ->
                     val item = items[layer.itemIndex]
                     val match = findLibraryMatch(allMedia, item)
@@ -1882,7 +1898,7 @@ private fun DiscoverHeroCarousel(
                         val focalY = match?.bannerFocalY ?: 0f
                         val zoom = (match?.bannerZoom ?: 1f).coerceIn(1f, 2.5f)
                         val bannerBlurDp = resolveBlurDp(item.mediaType)
-                        val overscan = if (animateHero) com.omnitrack.app.ui.components.HERO_BACKGROUND_SCALE else 1f
+                        val overscan = if (animateHero) heroBackgroundOverscan(layer.offset) else 1f
 
                         if (bannerModel != null) {
                             AsyncImage(
@@ -1899,7 +1915,7 @@ private fun DiscoverHeroCarousel(
                                         scaleX = totalZoom
                                         scaleY = totalZoom
                                         translationX = -fx * size.width * (zoom - 1f) * 0.5f -
-                                            (if (animateHero) layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX else 0f)
+                                            (if (animateHero) layer.offset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f)
                                         translationY = -fy * size.height * (zoom - 1f) * 0.5f
                                         alpha = layer.visibility
                                     }
@@ -1916,7 +1932,7 @@ private fun DiscoverHeroCarousel(
                                     .graphicsLayer {
                                         scaleX = overscan
                                         scaleY = overscan
-                                        translationX = if (animateHero) -layer.offset * heroWidthPx * com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX else 0f
+                                        translationX = if (animateHero) -layer.offset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f
                                         alpha = (if (dimBanner) 0.45f else 0.84f) * layer.visibility
                                     }
                                     .blur(fallbackBlur.dp)
