@@ -2934,8 +2934,12 @@ fun DetailScreen(
         }
 }
         if (showFullScreenCover && item != null) {
+            val fullScreenCoverModel = remember(effectiveCover, item.customCoverPath) {
+                item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
+                    ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
+            }
             FullScreenCoverViewerDialog(
-                coverModel = coverImageModel,
+                coverModel = fullScreenCoverModel,
                 title = item.title,
                 onDismiss = { showFullScreenCover = false },
                 onCustomizeArtwork = {
