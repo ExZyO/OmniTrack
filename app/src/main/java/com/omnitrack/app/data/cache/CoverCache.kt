@@ -336,6 +336,23 @@ class CoverCache(private val context: Context) {
     }
 
     /**
+     * Clears non-custom cached covers from covers/ while strictly preserving covers/custom/.
+     */
+    suspend fun clearNonCustomCache(): Long = withContext(Dispatchers.IO) {
+        var reclaimedBytes = 0L
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.isFile && file != customCoverDir) {
+                val len = file.length()
+                if (file.delete()) {
+                    reclaimedBytes += len
+                    knownCoverHashes.remove(file.name)
+                }
+            }
+        }
+        reclaimedBytes
+    }
+
+    /**
      * Calculates total disk space occupied by permanent covers.
      */
     fun getTotalCacheSizeBytes(): Long {

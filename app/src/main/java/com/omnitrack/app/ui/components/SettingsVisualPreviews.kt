@@ -632,6 +632,30 @@ fun EpisodeLayoutWireframe(
                     )
                 }
             }
+
+            EpisodeLayoutMode.TEXT_ONLY -> {
+                val rowH = (innerH - 8.dp.toPx()) / 3f
+                repeat(3) { idx ->
+                    val y = pad + idx * (rowH + 4.dp.toPx())
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = 0.06f),
+                        topLeft = Offset(pad, y),
+                        size = Size(innerW, rowH),
+                        cornerRadius = CornerRadius(2.5.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = if (idx == 0) accent.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.48f),
+                        topLeft = Offset(pad + 4.dp.toPx(), y + rowH * 0.34f),
+                        size = Size(innerW * 0.58f, 3.dp.toPx()),
+                        cornerRadius = CornerRadius(1.5.dp.toPx())
+                    )
+                    drawCircle(
+                        color = if (idx == 0) accent else Color.White.copy(alpha = 0.25f),
+                        radius = rowH * 0.26f,
+                        center = Offset(w - pad - 6.dp.toPx(), y + rowH * 0.5f)
+                    )
+                }
+            }
         }
     }
 }

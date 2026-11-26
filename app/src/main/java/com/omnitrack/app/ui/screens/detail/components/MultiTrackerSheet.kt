@@ -719,12 +719,26 @@ fun MultiTrackerSheet(
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
                                     )
+                                    com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                        serviceKey = trk.key,
+                                        size = 16.dp,
+                                        cornerRadius = 4.dp,
+                                        innerPadding = 2.dp,
+                                        containerColor = AmoledBlack.copy(alpha = 0.85f),
+                                        borderColor = Color.White.copy(alpha = 0.16f),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(3.dp)
+                                    )
                                 } else {
-                                    Icon(
-                                        imageVector = Icons.Default.LinkOff,
-                                        contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.35f),
-                                        modifier = Modifier.size(16.dp)
+                                    com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                        serviceKey = trk.key,
+                                        size = 30.dp,
+                                        cornerRadius = 8.dp,
+                                        innerPadding = 4.dp,
+                                        containerColor = Color.White.copy(alpha = 0.04f),
+                                        borderColor = Color.White.copy(alpha = 0.10f),
+                                        alpha = 0.78f
                                     )
                                 }
                                 Box(
@@ -840,12 +854,25 @@ fun MultiTrackerSheet(
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
+                                com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                    serviceKey = activeTracker.key,
+                                    size = 20.dp,
+                                    cornerRadius = 5.dp,
+                                    innerPadding = 3.dp,
+                                    containerColor = AmoledBlack.copy(alpha = 0.85f),
+                                    borderColor = Color.White.copy(alpha = 0.16f),
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(4.dp)
+                                )
                             } else {
-                                Icon(
-                                    imageVector = Icons.Default.LinkOff,
-                                    contentDescription = null,
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(22.dp)
+                                com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                    serviceKey = activeTracker.key,
+                                    size = 38.dp,
+                                    cornerRadius = 9.dp,
+                                    innerPadding = 5.dp,
+                                    containerColor = Color.White.copy(alpha = 0.04f),
+                                    borderColor = Color.White.copy(alpha = 0.10f)
                                 )
                             }
                         }

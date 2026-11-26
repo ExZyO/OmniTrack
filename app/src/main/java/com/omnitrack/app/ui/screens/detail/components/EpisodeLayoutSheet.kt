@@ -134,7 +134,8 @@ fun EpisodeLayoutSheet(
                 Triple(EpisodeLayoutMode.HORIZONTAL, "Horizontal Carousel", "16:9 widescreen cards"),
                 Triple(EpisodeLayoutMode.LIST, "Compact List", "Thumbnail & title rows"),
                 Triple(EpisodeLayoutMode.VERTICAL_CARD, "Hero Cards", "Full-width 16:9 stack"),
-                Triple(EpisodeLayoutMode.POSTER_GRID, "Poster Grid", "3-column cover grid")
+                Triple(EpisodeLayoutMode.POSTER_GRID, "Poster Grid", "3-column cover grid"),
+                Triple(EpisodeLayoutMode.TEXT_ONLY, "Text Checklist", "Clean text-only rows (Books style)")
             )
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 modeEntries.chunked(2).forEach { pair ->

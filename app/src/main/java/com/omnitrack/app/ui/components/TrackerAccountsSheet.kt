@@ -822,21 +822,13 @@ private fun TrackerGroupedRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(DarkSurfaceCard)
-                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = code,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isConnected) AccentGold else TextSecondary
-            )
-        }
+        TrackerBrandLogo(
+            serviceKey = code,
+            size = 36.dp,
+            cornerRadius = 10.dp,
+            innerPadding = 5.dp,
+            borderColor = if (isConnected) AccentGold.copy(alpha = 0.40f) else GlassBorder
+        )
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -923,6 +915,13 @@ private fun TrackerAccountDetailView(
             )
         }
         Spacer(modifier = Modifier.width(4.dp))
+        TrackerBrandLogo(
+            serviceKey = service.name.lowercase(),
+            size = 34.dp,
+            cornerRadius = 9.dp,
+            innerPadding = 5.dp
+        )
+        Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = service.title,

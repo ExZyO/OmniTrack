@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.VolumeUp
@@ -61,6 +62,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -165,6 +168,9 @@ import com.omnitrack.app.ui.screens.detail.components.rememberDetailSeriesState
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
 import com.omnitrack.app.ui.screens.detail.components.NetworkProductionCompany
 import com.omnitrack.app.ui.screens.detail.components.NuvioRatingsRow
+import com.omnitrack.app.ui.screens.detail.components.RatingBadgeData
+import com.omnitrack.app.ui.screens.detail.components.collectRatingBadgesForEntry
+import com.omnitrack.app.ui.screens.detail.components.ratingSourceDisplayName
 import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.screens.detail.components.RecommendationsSection
 import com.omnitrack.app.ui.screens.detail.components.ReviewsSection
@@ -228,6 +234,8 @@ import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
+import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
@@ -286,6 +294,7 @@ fun DetailScreen(
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
     val vnSpoilerLevel by prefManager.vnSpoilerLevel.collectAsState(initial = VnSpoilerLevel.MINOR)
     val vnNsfwFilterMode by prefManager.vnNsfwFilterMode.collectAsState(initial = VnNsfwFilterMode.BLUR_TAP)
+    val hiddenRatingSourcesMap by prefManager.hiddenRatingSourcesMap.collectAsState(initial = emptyMap())
     var showVnPlaytimeDialog by remember { mutableStateOf(false) }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -360,6 +369,15 @@ fun DetailScreen(
     var showStatusPickerSheet by remember { mutableStateOf(false) }
     var showScoreRatingSheet by remember { mutableStateOf(false) }
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
+    var pendingHideRatingBadge by remember { mutableStateOf<RatingBadgeData?>(null) }
+    var showManageRatingsSheet by remember { mutableStateOf(false) }
+    val entryRatingKey = remember(
+        item?.id, item?.mediaType, item?.title, item?.tmdbId, item?.anilistId, item?.malId,
+        item?.igdbId, item?.steamAppId, item?.vndbId, item?.hardcoverId, item?.comicVineId
+    ) {
+        item?.let { PreferenceManager.ratingVisibilityKey(it) } ?: ""
+    }
+    val hiddenRatingSources = hiddenRatingSourcesMap[entryRatingKey] ?: emptySet()
     val navHistory = remember { mutableStateListOf<DetailNavStep>() }
 
     // 1:1 Nuvio Parity: Defer heavy off-screen sections (Cast, Trailers, Reviews, Recommendations)
@@ -858,6 +876,8 @@ fun DetailScreen(
                                     gameDetailMeta = uiState.gameDetailMeta,
                                     bookDetailMeta = uiState.bookDetailMeta,
                                     comicDetailMeta = uiState.comicDetailMeta,
+                                    hiddenRatingSources = hiddenRatingSources,
+                                    onLongPressRatingBadge = { pendingHideRatingBadge = it },
                                     showInlineOptionsButton = false,
                                     onCoverClick = { showFullScreenCover = true },
                                     onCoverLongClick = {
@@ -896,6 +916,8 @@ fun DetailScreen(
                                     gameDetailMeta = uiState.gameDetailMeta,
                                     bookDetailMeta = uiState.bookDetailMeta,
                                     comicDetailMeta = uiState.comicDetailMeta,
+                                    hiddenRatingSources = hiddenRatingSources,
+                                    onLongPressRatingBadge = { pendingHideRatingBadge = it },
                                     scrollOffsetPx = detailScrollPx,
                                     stretchPx = detailStretchPx,
                                     animateOnScroll = animateHeroScroll,
@@ -932,6 +954,8 @@ fun DetailScreen(
                                     gameDetailMeta = uiState.gameDetailMeta,
                                     bookDetailMeta = uiState.bookDetailMeta,
                                     comicDetailMeta = uiState.comicDetailMeta,
+                                    hiddenRatingSources = hiddenRatingSources,
+                                    onLongPressRatingBadge = { pendingHideRatingBadge = it },
                                     scrollOffsetPx = detailScrollPx,
                                     stretchPx = detailStretchPx,
                                     animateOnScroll = animateHeroScroll,
@@ -1160,7 +1184,18 @@ fun DetailScreen(
                                                 viewModel.addCustomComicIssue(num, ttl, typ, arc)
                                             },
                                             onDeleteIssue = { viewModel.deleteComicIssue(it) },
-                                            onSeedIssues = { count -> viewModel.seedComicIssuesRange(count) }
+                                            onSeedIssues = { count -> viewModel.seedComicIssuesRange(count) },
+                                            episodeLayoutMode = episodeLayoutMode,
+                                            onCycleLayoutMode = {
+                                                val nextMode = if (episodeLayoutMode == com.omnitrack.app.data.preferences.EpisodeLayoutMode.TEXT_ONLY) {
+                                                    com.omnitrack.app.data.preferences.EpisodeLayoutMode.LIST
+                                                } else {
+                                                    com.omnitrack.app.data.preferences.EpisodeLayoutMode.TEXT_ONLY
+                                                }
+                                                coroutineScope.launch {
+                                                    prefManager.updateEpisodeLayoutMode(nextMode)
+                                                }
+                                            }
                                         )
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
@@ -1940,12 +1975,208 @@ fun DetailScreen(
                         }
                         showOptionsMenu = false
                     },
+                    onManageRatings = {
+                        showOptionsMenu = false
+                        showManageRatingsSheet = true
+                    },
                     onRemoveFromLibrary = {
                         showOptionsMenu = false
                         viewModel.deleteItem()
                         onBack()
                     }
                 )
+            }
+
+            pendingHideRatingBadge?.let { badge ->
+                AlertDialog(
+                    onDismissRequest = { pendingHideRatingBadge = null },
+                    containerColor = DarkSurface,
+                    title = {
+                        Text(
+                            text = "Hide ${badge.displayName} Rating?",
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "Hide ${badge.displayName} from this entry's details and Home showcase banner. You can turn it back on anytime in Options → Manage Ratings.",
+                            color = TextSecondary,
+                            fontSize = 13.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val src = badge.source
+                                pendingHideRatingBadge = null
+                                if (entryRatingKey.isNotBlank()) {
+                                    coroutineScope.launch {
+                                        prefManager.hideRatingSourceForEntry(entryRatingKey, src)
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("Hide Rating", color = AccentGold, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingHideRatingBadge = null }) {
+                            Text("Keep", color = TextSecondary)
+                        }
+                    }
+                )
+            }
+
+            if (showManageRatingsSheet) {
+                val availableBadges = remember(
+                    item, uiState.novelDetailMeta, uiState.vnDetailMeta,
+                    uiState.gameDetailMeta, uiState.bookDetailMeta, uiState.comicDetailMeta
+                ) {
+                    collectRatingBadgesForEntry(
+                        item = item,
+                        anilistScore = uiState.novelDetailMeta.anilistScore,
+                        malScore = uiState.novelDetailMeta.malScore,
+                        kitsuScore = uiState.novelDetailMeta.kitsuScore,
+                        mangaUpdatesScore = uiState.novelDetailMeta.mangaUpdatesScore,
+                        bangumiScore = uiState.novelDetailMeta.bangumiScore,
+                        vnDetailMeta = uiState.vnDetailMeta,
+                        gameDetailMeta = uiState.gameDetailMeta,
+                        bookDetailMeta = uiState.bookDetailMeta,
+                        comicDetailMeta = uiState.comicDetailMeta
+                    )
+                }
+                val badgeBySource = remember(availableBadges) { availableBadges.associateBy { it.source.lowercase() } }
+                val managedSources = remember(availableBadges, hiddenRatingSources) {
+                    (availableBadges.map { it.source.lowercase() } + hiddenRatingSources.map { it.lowercase() }).distinct()
+                }
+                ModalBottomSheet(
+                    onDismissRequest = { showManageRatingsSheet = false },
+                    containerColor = AmoledBlack,
+                    dragHandle = {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 10.dp)
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.2f))
+                        )
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Manage Entry Ratings",
+                                    color = TextPrimary,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Applies to both this Details page and the Home showcase banner",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (hiddenRatingSources.isNotEmpty() && entryRatingKey.isNotBlank()) {
+                                TextButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            prefManager.resetHiddenRatingSourcesForEntry(entryRatingKey)
+                                        }
+                                    }
+                                ) {
+                                    Text("Restore All", color = AccentGold, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        if (managedSources.isEmpty()) {
+                            Text(
+                                text = "No external community ratings are currently linked for this entry.",
+                                color = TextSecondary,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        } else {
+                            managedSources.forEach { srcKey ->
+                                val badge = badgeBySource[srcKey]
+                                val isShown = srcKey !in hiddenRatingSources
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(DarkSurfaceCard)
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        if (badge != null) {
+                                            androidx.compose.foundation.Image(
+                                                painter = androidx.compose.ui.res.painterResource(badge.iconRes),
+                                                contentDescription = badge.displayName,
+                                                modifier = Modifier.size(width = badge.iconWidth, height = badge.iconHeight)
+                                            )
+                                        }
+                                        Column {
+                                            Text(
+                                                text = badge?.displayName ?: ratingSourceDisplayName(srcKey),
+                                                color = TextPrimary,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            badge?.let {
+                                                Text(
+                                                    text = it.valueText,
+                                                    color = it.valueColor,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Switch(
+                                        checked = isShown,
+                                        onCheckedChange = { show ->
+                                            if (entryRatingKey.isNotBlank()) {
+                                                coroutineScope.launch {
+                                                    if (show) {
+                                                        prefManager.unhideRatingSourceForEntry(entryRatingKey, srcKey)
+                                                    } else {
+                                                        prefManager.hideRatingSourceForEntry(entryRatingKey, srcKey)
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = AmoledBlack,
+                                            checkedTrackColor = AccentGold,
+                                            uncheckedThumbColor = TextSecondary,
+                                            uncheckedTrackColor = DarkSurfaceElevated
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                }
             }
 
             if (showEditEntrySheet) {
@@ -2319,18 +2550,6 @@ fun DetailScreen(
                                 onBack()
                             }
                         }
-                    }
-                )
-            }
-
-            if (showFullScreenCover) {
-                FullScreenCoverViewerDialog(
-                    coverModel = coverImageModel,
-                    title = item.title,
-                    onDismiss = { showFullScreenCover = false },
-                    onCustomizeArtwork = {
-                        showFullScreenCover = false
-                        showArtworkPicker = true
                     }
                 )
             }
@@ -2714,6 +2933,17 @@ fun DetailScreen(
             null -> {}
         }
 }
+        if (showFullScreenCover && item != null) {
+            FullScreenCoverViewerDialog(
+                coverModel = coverImageModel,
+                title = item.title,
+                onDismiss = { showFullScreenCover = false },
+                onCustomizeArtwork = {
+                    showFullScreenCover = false
+                    showArtworkPicker = true
+                }
+            )
+        }
 }
 
 private fun hasAuthenticDetailBanner(
@@ -3236,6 +3466,8 @@ private fun DetailHeroHeaderSection(
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    hiddenRatingSources: Set<String> = emptySet(),
+    onLongPressRatingBadge: ((RatingBadgeData) -> Unit)? = null,
     scrollOffsetPx: () -> Float = { 0f },
     stretchPx: () -> Float = { 0f },
     animateOnScroll: Boolean = true,
@@ -3531,6 +3763,8 @@ private fun DetailHeroHeaderSection(
             gameDetailMeta = gameDetailMeta,
             bookDetailMeta = bookDetailMeta,
             comicDetailMeta = comicDetailMeta,
+            hiddenSources = hiddenRatingSources,
+            onLongPressBadge = onLongPressRatingBadge,
             centered = true
         )
         UnboxedStatsRow(
@@ -3553,6 +3787,8 @@ private fun DetailCenteredCoverHeroSection(
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    hiddenRatingSources: Set<String> = emptySet(),
+    onLongPressRatingBadge: ((RatingBadgeData) -> Unit)? = null,
     showInlineOptionsButton: Boolean = false,
     onCoverClick: () -> Unit,
     onCoverLongClick: (() -> Unit)? = null,
@@ -3787,6 +4023,8 @@ private fun DetailCenteredCoverHeroSection(
             gameDetailMeta = gameDetailMeta,
             bookDetailMeta = bookDetailMeta,
             comicDetailMeta = comicDetailMeta,
+            hiddenSources = hiddenRatingSources,
+            onLongPressBadge = onLongPressRatingBadge,
             centered = true
         )
         UnboxedStatsRow(
@@ -3814,6 +4052,8 @@ private fun DetailClassicHeaderSection(
     gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    hiddenRatingSources: Set<String> = emptySet(),
+    onLongPressRatingBadge: ((RatingBadgeData) -> Unit)? = null,
     scrollOffsetPx: () -> Float = { 0f },
     stretchPx: () -> Float = { 0f },
     animateOnScroll: Boolean = true,
@@ -4118,7 +4358,9 @@ private fun DetailClassicHeaderSection(
                 vnDetailMeta = vnDetailMeta,
                 gameDetailMeta = gameDetailMeta,
                 bookDetailMeta = bookDetailMeta,
-                comicDetailMeta = comicDetailMeta
+                comicDetailMeta = comicDetailMeta,
+                hiddenSources = hiddenRatingSources,
+                onLongPressBadge = onLongPressRatingBadge
             )
             UnboxedStatsRow(
                 item = item,
@@ -4438,6 +4680,7 @@ private fun DetailOptionsMenuBottomSheet(
     onMatchAndEnrich: () -> Unit = {},
     onChangeArtwork: () -> Unit,
     onToggleLayout: () -> Unit,
+    onManageRatings: () -> Unit = {},
     onRemoveFromLibrary: () -> Unit
 ) {
     ModalBottomSheet(
@@ -4624,6 +4867,37 @@ private fun DetailOptionsMenuBottomSheet(
                     )
                     Text(
                         text = "Cycle between English, Romaji, and native title",
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // Manage Ratings
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onManageRatings() }
+                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = AccentGold,
+                    modifier = Modifier.size(22.dp)
+                )
+                Column {
+                    Text(
+                        text = "Manage Ratings",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Show or hide individual rating badges on Details & Home banner",
                         color = TextMuted,
                         fontSize = 12.sp
                     )

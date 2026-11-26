@@ -822,7 +822,7 @@ class DetailViewModel(
             markTransitionEnrichReady(gen)
             return
         }
-        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME || item.mediaType == MediaType.BOOK) {
+        if (item.mediaType !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)) {
             markTransitionEnrichReady(gen)
             return
         }
@@ -846,12 +846,14 @@ class DetailViewModel(
             val fanartKey = preferenceManager?.fanartApiKey?.firstOrNull()?.ifBlank { null }
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val mdbKey = preferenceManager?.mdblistApiKey?.firstOrNull()?.ifBlank { null }
+            val omdbKey = preferenceManager?.omdbApiKey?.firstOrNull()?.ifBlank { null }
 
             val enrichment = enrichmentRepository.enrich(
                 item = item,
                 fanartApiKey = fanartKey,
                 tmdbApiKey = tmdbKey,
                 mdblistApiKey = mdbKey,
+                omdbApiKey = omdbKey,
                 onClearartResolved = { earlyLogo, _ ->
                     val currentPref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                     val isAllowedLogo = !earlyLogo.isNullOrBlank() && (!earlyLogo.contains("thetvdb.com") || currentPref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)
@@ -3597,7 +3599,9 @@ class DetailViewModel(
                 if (currentSeason > 1) {
                     reloadCommentsForSeason(currentSeason)
                 } else {
-                    if (_activeDiscussionAniListId.value != resolvedAniListId || _discussionComments.value.isEmpty()) {
+                    if (_activeDiscussionAniListId.value != resolvedAniListId ||
+                        (_discussionComments.value.isEmpty() && !_isCommentsLoading.value)
+                    ) {
                         loadDiscussionComments(resolvedAniListId)
                     }
                 }
@@ -5348,7 +5352,7 @@ class DetailViewModel(
         if (isArtSourceExcluded(candidate, excluded, "TMDB")) return item.bannerUrl
 
         val prefs = preferenceManager ?: runCatching { com.omnitrack.app.OmniTrackApplication.instance.preferenceManager }.getOrNull()
-        val disabledSources = runCatching { prefs?.getDisabledArtSources(item.mediaType)?.firstOrNull() }.getOrNull().orEmpty()
+        val disabledSources = runCatching { prefs?.getBannerDisabledArtSources(item.mediaType)?.firstOrNull() }.getOrNull().orEmpty()
         if ("TMDb" in disabledSources) return item.bannerUrl
 
         val currentBanner = item.bannerUrl?.takeIf { it.isNotBlank() }
@@ -5368,8 +5372,8 @@ class DetailViewModel(
             else -> null
         } ?: return item.bannerUrl
 
-        val priority = runCatching { prefs?.getArtSourcePriority(item.mediaType)?.firstOrNull() }.getOrNull()
-            ?: PreferenceManager.getDefaultSourcesFor(item.mediaType)
+        val priority = runCatching { prefs?.getBannerArtSourcePriority(item.mediaType)?.firstOrNull() }.getOrNull()
+            ?: PreferenceManager.getDefaultBannerSourcesFor(item.mediaType)
         val tmdbRank = priority.indexOf("TMDb")
         val currentRank = priority.indexOf(currentSourceName)
         return if (tmdbRank in 0 until currentRank) candidate else item.bannerUrl

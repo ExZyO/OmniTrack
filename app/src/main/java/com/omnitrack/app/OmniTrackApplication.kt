@@ -77,6 +77,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.fanficNsfwFilterMode.collect { PreferenceManager.cachedFanficNsfwFilterMode = it } }
             launch { preferenceManager.tmdbApiKey.collect { PreferenceManager.cachedTmdbApiKey = it } }
             launch { preferenceManager.mdblistApiKey.collect { PreferenceManager.cachedMdblistApiKey = it } }
+            launch { preferenceManager.omdbApiKey.collect { PreferenceManager.cachedOmdbApiKey = it } }
             launch { preferenceManager.steamGridDbApiKey.collect { PreferenceManager.cachedSteamGridDbApiKey = it } }
             launch { preferenceManager.igdbClientId.collect { PreferenceManager.cachedIgdbClientId = it } }
             launch { preferenceManager.igdbClientSecret.collect { PreferenceManager.cachedIgdbClientSecret = it } }

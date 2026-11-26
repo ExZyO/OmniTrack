@@ -37,6 +37,21 @@ class AppUpdateChecker(
 
     private val githubRepo = "ExZyO/OmniTrack"
 
+    companion object {
+        @Volatile
+        private var lastAutoCheckAtMs: Long = 0L
+        private const val AUTO_CHECK_COOLDOWN_MS = 15L * 60L * 1000L
+    }
+
+    suspend fun checkForUpdateIfDue(context: Context): AppRelease? {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoCheckAtMs < AUTO_CHECK_COOLDOWN_MS) {
+            return null
+        }
+        lastAutoCheckAtMs = now
+        return checkForUpdate(context)
+    }
+
     suspend fun checkForUpdate(context: Context): AppRelease? = withContext(Dispatchers.IO) {
         val currentVer = BuildConfig.VERSION_NAME
         val currentCode = BuildConfig.VERSION_CODE.toLong()

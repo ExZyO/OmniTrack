@@ -70,6 +70,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -124,6 +125,7 @@ import com.omnitrack.app.data.preferences.HomeHeroSource
 import com.omnitrack.app.data.preferences.HomeRowItem
 import com.omnitrack.app.data.preferences.HomeRowKey
 import com.omnitrack.app.data.preferences.PosterCardStyle
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
@@ -146,6 +148,7 @@ import com.omnitrack.app.ui.components.heroStretchHeight
 import com.omnitrack.app.ui.components.heroStretchZoom
 import com.omnitrack.app.ui.components.heroVisibleLayers
 import com.omnitrack.app.ui.components.homeHeroPagerGesture
+import com.omnitrack.app.ui.screens.detail.components.allowedRatingSourcesFor
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -223,6 +226,13 @@ fun HomeDashboardView(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val perf = LocalPerformanceSettings.current
+    val heroContext = LocalContext.current
+    val heroPrefManager = remember(heroContext) {
+        (heroContext.applicationContext as? com.omnitrack.app.OmniTrackApplication)?.preferenceManager
+    }
+    val hiddenRatingSourcesMap by remember(heroPrefManager) {
+        heroPrefManager?.hiddenRatingSourcesMap ?: kotlinx.coroutines.flow.flowOf(emptyMap())
+    }.collectAsState(initial = emptyMap())
     var heroRefreshNonce by remember { mutableIntStateOf(0) }
     var heroSessionSeed by rememberSaveable { mutableLongStateOf(System.nanoTime() xor (System.currentTimeMillis() shl 16)) }
     var lastVisibleHeroKey by remember { mutableStateOf<String?>(null) }
@@ -908,7 +918,8 @@ fun HomeDashboardView(
                                             ) {
                                                 ChimanewHeroForegroundRow(
                                                     data = resolved,
-                                                    heroSettings = activeHeroSettings
+                                                    heroSettings = activeHeroSettings,
+                                                    hiddenSources = hiddenRatingSourcesMap[resolved.ratingKey] ?: emptySet()
                                                 )
                                             }
                                         }
@@ -1753,7 +1764,8 @@ private data class ResolvedHomeHeroSlide(
     val hasIgdb: Boolean = false,
     val hasSteam: Boolean = false,
     val progressLabel: String = "",
-    val remainingCount: Int = 0
+    val remainingCount: Int = 0,
+    val ratingKey: String = ""
 )
 
 @Composable
@@ -1840,7 +1852,8 @@ private fun rememberResolvedHomeHeroSlide(
             hasIgdb = localItem.igdbId != null,
             hasSteam = localItem.steamAppId != null,
             progressLabel = progressLabel,
-            remainingCount = remainingCount
+            remainingCount = remainingCount,
+            ratingKey = PreferenceManager.ratingVisibilityKey(localItem)
         )
     } else {
         val item = (slide as HomeHeroSlide.TrendingSlide).item
@@ -1889,7 +1902,8 @@ private fun rememberResolvedHomeHeroSlide(
             hasIgdb = false,
             hasSteam = item.steamAppId != null,
             progressLabel = progressHint,
-            remainingCount = 0
+            remainingCount = 0,
+            ratingKey = PreferenceManager.ratingVisibilityKeyForSearch(item)
         )
     }
 }
@@ -2014,7 +2028,8 @@ private fun ChimanewHeroBackdropLayer(
 @Composable
 private fun ChimanewHeroForegroundRow(
     data: ResolvedHomeHeroSlide,
-    heroSettings: HomeHeroSettings
+    heroSettings: HomeHeroSettings,
+    hiddenSources: Set<String> = emptySet()
 ) {
     val showUnread = heroSettings.showUnreadBadge && data.remainingCount > 0
     val title = data.title
@@ -2145,6 +2160,7 @@ private fun ChimanewHeroForegroundRow(
                                 hasBangumi = hasBangumi,
                                 hasIgdb = hasIgdb,
                                 hasSteam = hasSteam,
+                                hiddenSources = hiddenSources,
                                 format = heroSettings.ratingFormat
                             )
                         }
@@ -2168,6 +2184,7 @@ private fun ChimanewHeroForegroundRow(
                                 hasBangumi = hasBangumi,
                                 hasIgdb = hasIgdb,
                                 hasSteam = hasSteam,
+                                hiddenSources = hiddenSources,
                                 format = heroSettings.ratingFormat
                             )
                         }
@@ -2213,6 +2230,7 @@ private fun ChimanewHeroForegroundRow(
                                     hasBangumi = hasBangumi,
                                     hasIgdb = hasIgdb,
                                     hasSteam = hasSteam,
+                                    hiddenSources = hiddenSources,
                                     format = heroSettings.ratingFormat,
                                     compact = true
                                 )
@@ -2250,6 +2268,7 @@ private fun ChimanewHeroForegroundRow(
                                 hasBangumi = hasBangumi,
                                 hasIgdb = hasIgdb,
                                 hasSteam = hasSteam,
+                                hiddenSources = hiddenSources,
                                 format = heroSettings.ratingFormat,
                                 compact = true
                             )
@@ -2329,13 +2348,18 @@ private fun HeroRatingStrip(
     hasBangumi: Boolean = false,
     hasIgdb: Boolean = false,
     hasSteam: Boolean = false,
+    hiddenSources: Set<String> = emptySet(),
     format: Int,
     compact: Boolean = false
 ) {
     val entries = remember(
         userRating, communityScore, imdbScore, rtScore, metacriticScore, traktScore, audienceScore,
-        cachedRatings, mediaType, hasAnilist, hasMal, hasTmdb, hasVndb, hasBangumi, hasIgdb, hasSteam
+        cachedRatings, mediaType, hasAnilist, hasMal, hasTmdb, hasVndb, hasBangumi, hasIgdb, hasSteam, hiddenSources
     ) {
+        val allowed = allowedRatingSourcesFor(mediaType)
+        val normHidden = hiddenSources.map { it.trim().lowercase() }.toSet()
+        fun isSourceVisible(key: String): Boolean = key in allowed && key !in normHidden
+
         val effImdb = imdbScore?.takeIf { it > 0f } ?: cachedRatings?.imdbScore?.takeIf { it > 0f }
         val effTrakt = traktScore?.takeIf { it > 0 } ?: cachedRatings?.traktScore?.takeIf { it > 0 }
         val effAudience = audienceScore?.takeIf { it > 0 } ?: cachedRatings?.audienceScore?.takeIf { it > 0 }
@@ -2345,23 +2369,25 @@ private fun HeroRatingStrip(
 
         buildList {
             // 1. IMDb
-            effImdb?.let { score ->
-                val norm10 = if (score > 10f) score / 10f else score
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "IMDb",
-                        valueText = formatSmartRating(norm10.toDouble()),
-                        pctValue = (norm10 * 10f).roundToInt(),
-                        scale10Value = norm10,
-                        color = Color(0xFFF5C518),
-                        iconRes = R.drawable.rating_imdb
+            if (isSourceVisible("imdb")) {
+                effImdb?.let { score ->
+                    val norm10 = if (score > 10f) score / 10f else score
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "IMDb",
+                            valueText = formatSmartRating(norm10.toDouble()),
+                            pctValue = (norm10 * 10f).roundToInt(),
+                            scale10Value = norm10,
+                            color = Color(0xFFF5C518),
+                            iconRes = R.drawable.rating_imdb
+                        )
                     )
-                )
+                }
             }
 
             // 2. TMDB (Shows, Movies, and Anime with TMDb mapping)
-            if (mediaType == MediaType.SHOW || mediaType == MediaType.MOVIE ||
-                (mediaType == MediaType.ANIME && (cachedRatings?.tmdbScore != null || hasTmdb))
+            if (isSourceVisible("tmdb") && (mediaType == MediaType.SHOW || mediaType == MediaType.MOVIE ||
+                (mediaType == MediaType.ANIME && (cachedRatings?.tmdbScore != null || hasTmdb)))
             ) {
                 val effTmdb = cachedRatings?.tmdbScore?.takeIf { it > 0f } ?: communityScore?.takeIf { it > 0f }
                 effTmdb?.let { score ->
@@ -2382,186 +2408,208 @@ private fun HeroRatingStrip(
             }
 
             // 3. Trakt
-            effTrakt?.let { t ->
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "Trakt",
-                        valueText = "$t%",
-                        pctValue = t,
-                        scale10Value = t / 10f,
-                        color = Color(0xFFED1C24),
-                        iconRes = R.drawable.rating_trakt
+            if (isSourceVisible("trakt")) {
+                effTrakt?.let { t ->
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "Trakt",
+                            valueText = "$t%",
+                            pctValue = t,
+                            scale10Value = t / 10f,
+                            color = Color(0xFFED1C24),
+                            iconRes = R.drawable.rating_trakt
+                        )
                     )
-                )
+                }
             }
 
             // 4. Rotten Tomatoes Audience / Critic
-            effAudience?.let { aud ->
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "Audience",
-                        valueText = "$aud%",
-                        pctValue = aud,
-                        scale10Value = aud / 10f,
-                        color = Color(0xFFFA320A),
-                        iconRes = when {
-                            aud >= 75 -> R.drawable.rating_audience_verified_hot
-                            aud >= 60 -> R.drawable.rating_audience_score
-                            else -> R.drawable.rating_audience_stale
-                        }
+            if (isSourceVisible("audience")) {
+                effAudience?.let { aud ->
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "Audience",
+                            valueText = "$aud%",
+                            pctValue = aud,
+                            scale10Value = aud / 10f,
+                            color = Color(0xFFFA320A),
+                            iconRes = when {
+                                aud >= 75 -> R.drawable.rating_audience_verified_hot
+                                aud >= 60 -> R.drawable.rating_audience_score
+                                else -> R.drawable.rating_audience_stale
+                            }
+                        )
                     )
-                )
+                }
             }
-            effRt?.takeIf { effAudience == null }?.let { rt ->
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "RT",
-                        valueText = "$rt%",
-                        pctValue = rt,
-                        scale10Value = rt / 10f,
-                        color = Color(0xFFFA320A),
-                        iconRes = when {
-                            rt >= 75 -> R.drawable.rating_rotten_tomatoes_certified
-                            rt >= 60 -> R.drawable.rating_rotten_tomatoes
-                            else -> R.drawable.rating_rotten_tomatoes_rotten
-                        }
+            if (isSourceVisible("tomatoes")) {
+                effRt?.takeIf { effAudience == null }?.let { rt ->
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "RT",
+                            valueText = "$rt%",
+                            pctValue = rt,
+                            scale10Value = rt / 10f,
+                            color = Color(0xFFFA320A),
+                            iconRes = when {
+                                rt >= 75 -> R.drawable.rating_rotten_tomatoes_certified
+                                rt >= 60 -> R.drawable.rating_rotten_tomatoes
+                                else -> R.drawable.rating_rotten_tomatoes_rotten
+                            }
+                        )
                     )
-                )
+                }
             }
 
             // 5. Video Games: IGDB User & Critics
             if (mediaType == MediaType.GAME) {
-                val effIgdbUser = cachedRatings?.igdbUserScore?.takeIf { it > 0f }
-                    ?: if (hasIgdb || effSteamPct == null) communityScore?.takeIf { it > 0f } else null
-                effIgdbUser?.let { score ->
-                    val norm10 = if (score > 10f) score / 10f else score
-                    add(
-                        HeroRatingSourceEntry(
-                            sourceLabel = "IGDB",
-                            valueText = formatSmartRating(norm10.toDouble()),
-                            pctValue = (norm10 * 10f).roundToInt(),
-                            scale10Value = norm10,
-                            color = Color(0xFFA78BFA),
-                            iconRes = R.drawable.brand_igdb
+                if (isSourceVisible("igdb")) {
+                    val effIgdbUser = cachedRatings?.igdbUserScore?.takeIf { it > 0f }
+                        ?: if (hasIgdb || effSteamPct == null) communityScore?.takeIf { it > 0f } else null
+                    effIgdbUser?.let { score ->
+                        val norm10 = if (score > 10f) score / 10f else score
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "IGDB",
+                                valueText = formatSmartRating(norm10.toDouble()),
+                                pctValue = (norm10 * 10f).roundToInt(),
+                                scale10Value = norm10,
+                                color = Color(0xFFA78BFA),
+                                iconRes = R.drawable.brand_igdb
+                            )
                         )
-                    )
+                    }
                 }
-                cachedRatings?.igdbCriticScore?.takeIf { it > 0 }?.let { critic ->
-                    add(
-                        HeroRatingSourceEntry(
-                            sourceLabel = "Critics",
-                            valueText = "$critic",
-                            pctValue = critic,
-                            scale10Value = critic / 10f,
-                            color = Color(0xFFF5C518),
-                            iconRes = R.drawable.ic_critic_score
+                if (isSourceVisible("igdb_critic")) {
+                    cachedRatings?.igdbCriticScore?.takeIf { it > 0 }?.let { critic ->
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "Critics",
+                                valueText = "$critic",
+                                pctValue = critic,
+                                scale10Value = critic / 10f,
+                                color = Color(0xFFF5C518),
+                                iconRes = R.drawable.ic_critic_score
+                            )
                         )
-                    )
+                    }
                 }
             }
 
             // 6. Metacritic
-            effMetacritic?.let { mc ->
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "Metacritic",
-                        valueText = "$mc",
-                        pctValue = mc,
-                        scale10Value = mc / 10f,
-                        color = if (mc >= 61) Color(0xFF66CC33) else if (mc >= 40) Color(0xFFFFCC33) else Color(0xFFFF4D4D),
-                        iconRes = R.drawable.rating_metacritic
+            if (isSourceVisible("metacritic")) {
+                effMetacritic?.let { mc ->
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "Metacritic",
+                            valueText = "$mc",
+                            pctValue = mc,
+                            scale10Value = mc / 10f,
+                            color = if (mc >= 61) Color(0xFF66CC33) else if (mc >= 40) Color(0xFFFFCC33) else Color(0xFFFF4D4D),
+                            iconRes = R.drawable.rating_metacritic
+                        )
                     )
-                )
+                }
             }
 
-            // 7. Anime / Manga / Novel: AniList, MyAnimeList, Bangumi, Kitsu, MangaUpdates
+            // 7. Anime / Manga / Novel: AniList, MyAnimeList
             if (mediaType in listOf(MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL)) {
-                val effAni = cachedRatings?.anilistScore?.takeIf { it > 0f } ?: if (
-                    hasAnilist ||
-                    (!hasMal && !hasBangumi && cachedRatings?.malScore == null && cachedRatings?.bangumiScore == null)
-                ) communityScore?.takeIf { it > 0f } else null
-                effAni?.let { score ->
+                if (isSourceVisible("anilist")) {
+                    val effAni = cachedRatings?.anilistScore?.takeIf { it > 0f } ?: if (
+                        hasAnilist ||
+                        (!hasMal && !hasBangumi && cachedRatings?.malScore == null && cachedRatings?.bangumiScore == null)
+                    ) communityScore?.takeIf { it > 0f } else null
+                    effAni?.let { score ->
+                        val isTenScale = score <= 10.05f
+                        val norm10 = if (isTenScale) score else score / 10f
+                        val pct = if (isTenScale) (score * 10f).roundToInt() else score.roundToInt()
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "AniList",
+                                valueText = "$pct%",
+                                pctValue = pct,
+                                scale10Value = norm10,
+                                color = Color(0xFF02A9FF),
+                                iconRes = R.drawable.brand_anilist
+                            )
+                        )
+                    }
+                }
+
+                if (isSourceVisible("mal")) {
+                    val effMal = cachedRatings?.malScore?.takeIf { it > 0f }
+                        ?: if (hasMal && cachedRatings?.anilistScore == null && !hasAnilist) communityScore?.takeIf { it > 0f } else null
+                    effMal?.let { score ->
+                        val norm10 = if (score > 10f) score / 10f else score
+                        add(
+                            HeroRatingSourceEntry(
+                                sourceLabel = "MAL",
+                                valueText = formatHeroTwoDecimals(norm10.toDouble(), stripTrailingZeros = true),
+                                pctValue = (norm10 * 10f).roundToInt(),
+                                scale10Value = norm10,
+                                color = Color(0xFF5B8BFF),
+                                iconRes = R.drawable.rating_mal
+                            )
+                        )
+                    }
+                }
+            }
+
+            // 8. Bangumi (Strict allowed category gate)
+            if (isSourceVisible("bangumi")) {
+                val effBgm = cachedRatings?.bangumiScore?.takeIf { it > 0f }
+                    ?: if (hasBangumi && isEmpty()) communityScore?.takeIf { it > 0f } else null
+                effBgm?.let { score ->
+                    val norm10 = if (score > 10f) score / 10f else score
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "Bangumi",
+                            valueText = formatSmartRating(norm10.toDouble()),
+                            pctValue = (norm10 * 10f).roundToInt(),
+                            scale10Value = norm10,
+                            color = Color(0xFFF09199),
+                            iconRes = R.drawable.brand_bangumi
+                        )
+                    )
+                }
+            }
+
+            // 9. Kitsu & MangaUpdates
+            if (isSourceVisible("kitsu")) {
+                cachedRatings?.kitsuScore?.takeIf { it > 0f }?.let { score ->
                     val isTenScale = score <= 10.05f
                     val norm10 = if (isTenScale) score else score / 10f
                     val pct = if (isTenScale) (score * 10f).roundToInt() else score.roundToInt()
                     add(
                         HeroRatingSourceEntry(
-                            sourceLabel = "AniList",
+                            sourceLabel = "Kitsu",
                             valueText = "$pct%",
                             pctValue = pct,
                             scale10Value = norm10,
-                            color = Color(0xFF02A9FF),
-                            iconRes = R.drawable.brand_anilist
+                            color = Color(0xFFF75239),
+                            iconRes = R.drawable.brand_kitsu
                         )
                     )
                 }
-
-                val effMal = cachedRatings?.malScore?.takeIf { it > 0f }
-                    ?: if (hasMal && cachedRatings?.anilistScore == null && !hasAnilist) communityScore?.takeIf { it > 0f } else null
-                effMal?.let { score ->
+            }
+            if (isSourceVisible("mangaupdates")) {
+                cachedRatings?.mangaUpdatesScore?.takeIf { it > 0f }?.let { score ->
                     val norm10 = if (score > 10f) score / 10f else score
                     add(
                         HeroRatingSourceEntry(
-                            sourceLabel = "MAL",
-                            valueText = formatHeroTwoDecimals(norm10.toDouble(), stripTrailingZeros = true),
+                            sourceLabel = "MangaUpdates",
+                            valueText = formatSmartRating(norm10.toDouble()),
                             pctValue = (norm10 * 10f).roundToInt(),
                             scale10Value = norm10,
-                            color = Color(0xFF5B8BFF),
-                            iconRes = R.drawable.rating_mal
+                            color = Color(0xFF64B5F6),
+                            iconRes = R.drawable.brand_mangaupdates
                         )
                     )
                 }
             }
 
-            // 8. Bangumi (Anime, Manga, Novel, VN, Game)
-            val effBgm = cachedRatings?.bangumiScore?.takeIf { it > 0f }
-                ?: if (hasBangumi && isEmpty()) communityScore?.takeIf { it > 0f } else null
-            effBgm?.let { score ->
-                val norm10 = if (score > 10f) score / 10f else score
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "Bangumi",
-                        valueText = formatSmartRating(norm10.toDouble()),
-                        pctValue = (norm10 * 10f).roundToInt(),
-                        scale10Value = norm10,
-                        color = Color(0xFFF09199),
-                        iconRes = R.drawable.brand_bangumi
-                    )
-                )
-            }
-
-            // 9. Kitsu & MangaUpdates
-            cachedRatings?.kitsuScore?.takeIf { it > 0f }?.let { score ->
-                val isTenScale = score <= 10.05f
-                val norm10 = if (isTenScale) score else score / 10f
-                val pct = if (isTenScale) (score * 10f).roundToInt() else score.roundToInt()
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "Kitsu",
-                        valueText = "$pct%",
-                        pctValue = pct,
-                        scale10Value = norm10,
-                        color = Color(0xFFF75239),
-                        iconRes = R.drawable.brand_kitsu
-                    )
-                )
-            }
-            cachedRatings?.mangaUpdatesScore?.takeIf { it > 0f }?.let { score ->
-                val norm10 = if (score > 10f) score / 10f else score
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "MangaUpdates",
-                        valueText = formatSmartRating(norm10.toDouble()),
-                        pctValue = (norm10 * 10f).roundToInt(),
-                        scale10Value = norm10,
-                        color = Color(0xFF64B5F6),
-                        iconRes = R.drawable.brand_mangaupdates
-                    )
-                )
-            }
-
             // 10. Steam % (Games & VNs)
-            if (mediaType == MediaType.GAME || mediaType == MediaType.VISUAL_NOVEL) {
+            if ((mediaType == MediaType.GAME || mediaType == MediaType.VISUAL_NOVEL) && isSourceVisible("steam")) {
                 effSteamPct?.let { pct ->
                     add(
                         HeroRatingSourceEntry(
@@ -2577,7 +2625,7 @@ private fun HeroRatingStrip(
             }
 
             // 11. VNDB (Visual Novels)
-            if (mediaType == MediaType.VISUAL_NOVEL) {
+            if (mediaType == MediaType.VISUAL_NOVEL && isSourceVisible("vndb")) {
                 val effVn = cachedRatings?.vndbScore?.takeIf { it > 0f } ?: communityScore?.takeIf { it > 0f }
                 effVn?.let { score ->
                     val norm10 = if (score > 10f) score / 10f else score
@@ -2596,7 +2644,7 @@ private fun HeroRatingStrip(
 
             // 12. Books & Comics (Hardcover, Open Library, Apple Books on 5-star scale)
             if (mediaType == MediaType.BOOK || mediaType == MediaType.COMIC) {
-                if (mediaType == MediaType.BOOK) {
+                if (mediaType == MediaType.BOOK && isSourceVisible("hardcover")) {
                     cachedRatings?.hardcoverRating?.takeIf { it > 0f }?.let { rawHc ->
                         val hc5 = if (rawHc > 5f) rawHc / 2f else rawHc
                         add(
@@ -2611,42 +2659,46 @@ private fun HeroRatingStrip(
                         )
                     }
                 }
-                val effOl5 = (
-                    cachedRatings?.openLibraryRating?.takeIf { it > 0f }
-                        ?: if (cachedRatings?.hardcoverRating == null && cachedRatings?.appleBooksRating == null) {
-                            communityScore?.takeIf { it > 0f }
-                        } else null
-                    )?.let { if (it > 5f) it / 2f else it }
-                effOl5?.let { ol5 ->
-                    add(
-                        HeroRatingSourceEntry(
-                            sourceLabel = "Open Library",
-                            valueText = "${formatSmartRating(ol5.toDouble())}/5",
-                            pctValue = (ol5 * 20f).roundToInt(),
-                            scale10Value = ol5 * 2f,
-                            color = Color(0xFF38BDF8),
-                            iconRes = R.drawable.brand_openlibrary
-                        )
-                    )
-                }
-                cachedRatings?.appleBooksRating?.takeIf { it > 0f }
-                    ?.let { if (it > 5f) it / 2f else it }
-                    ?.let { ab5 ->
+                if (isSourceVisible("openlibrary")) {
+                    val effOl5 = (
+                        cachedRatings?.openLibraryRating?.takeIf { it > 0f }
+                            ?: if (cachedRatings?.hardcoverRating == null && cachedRatings?.appleBooksRating == null) {
+                                communityScore?.takeIf { it > 0f }
+                            } else null
+                        )?.let { if (it > 5f) it / 2f else it }
+                    effOl5?.let { ol5 ->
                         add(
                             HeroRatingSourceEntry(
-                                sourceLabel = "Apple Books",
-                                valueText = "${formatSmartRating(ab5.toDouble())}/5",
-                                pctValue = (ab5 * 20f).roundToInt(),
-                                scale10Value = ab5 * 2f,
-                                color = Color(0xFFFB923C),
-                                iconRes = R.drawable.brand_apple_books
+                                sourceLabel = "Open Library",
+                                valueText = "${formatSmartRating(ol5.toDouble())}/5",
+                                pctValue = (ol5 * 20f).roundToInt(),
+                                scale10Value = ol5 * 2f,
+                                color = Color(0xFF38BDF8),
+                                iconRes = R.drawable.brand_openlibrary
                             )
                         )
                     }
+                }
+                if (isSourceVisible("applebooks")) {
+                    cachedRatings?.appleBooksRating?.takeIf { it > 0f }
+                        ?.let { if (it > 5f) it / 2f else it }
+                        ?.let { ab5 ->
+                            add(
+                                HeroRatingSourceEntry(
+                                    sourceLabel = "Apple Books",
+                                    valueText = "${formatSmartRating(ab5.toDouble())}/5",
+                                    pctValue = (ab5 * 20f).roundToInt(),
+                                    scale10Value = ab5 * 2f,
+                                    color = Color(0xFFFB923C),
+                                    iconRes = R.drawable.brand_apple_books
+                                )
+                            )
+                        }
+                }
             }
 
-            // Fallback generic Score only if no tracker entry resolved
-            if (isEmpty()) {
+            // Fallback generic Score only if no tracker entry resolved and nothing else is hidden
+            if (isEmpty() && isSourceVisible("score")) {
                 communityScore?.takeIf { it > 0f }?.let { score ->
                     val isTenScale = score <= 10.05f
                     val norm10 = if (isTenScale) score else score / 10f
@@ -2665,17 +2717,19 @@ private fun HeroRatingStrip(
             }
 
             // Optional trailing personal rating ("You")
-            userRating?.takeIf { it > 0f }?.let { u ->
-                add(
-                    HeroRatingSourceEntry(
-                        sourceLabel = "You",
-                        valueText = formatSmartRating(u.toDouble()),
-                        pctValue = (u * 10f).roundToInt(),
-                        scale10Value = u,
-                        color = AccentGold,
-                        iconRes = null
+            if (isSourceVisible("you")) {
+                userRating?.takeIf { it > 0f }?.let { u ->
+                    add(
+                        HeroRatingSourceEntry(
+                            sourceLabel = "You",
+                            valueText = formatSmartRating(u.toDouble()),
+                            pctValue = (u * 10f).roundToInt(),
+                            scale10Value = u,
+                            color = AccentGold,
+                            iconRes = null
+                        )
                     )
-                )
+                }
             }
         }
     }

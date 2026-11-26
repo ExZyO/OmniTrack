@@ -312,7 +312,7 @@ fun HomeScreen(
 
     // Automatic background update check (detects ready releases & active CI builds)
     LaunchedEffect(Unit) {
-        val release = AppUpdateChecker().checkForUpdate(context)
+        val release = AppUpdateChecker().checkForUpdateIfDue(context)
         if (release != null) {
             availableUpdate = release
             if (!release.isBuilding) {

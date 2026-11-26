@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -20,10 +21,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +42,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.network.ApiKeyValidationState
+import com.omnitrack.app.data.network.ApiKeyValidator
 import com.omnitrack.app.data.preferences.DEFAULT_GEMINI_MODELS
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.theme.AccentGold
@@ -63,6 +70,9 @@ import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,6 +95,7 @@ fun ApiKeyConfigSheet(
     val currentIgdbId by preferenceManager.igdbClientId.collectAsState(initial = "")
     val currentIgdbSecret by preferenceManager.igdbClientSecret.collectAsState(initial = "")
     val currentMdblist by preferenceManager.mdblistApiKey.collectAsState(initial = "")
+    val currentOmdb by preferenceManager.omdbApiKey.collectAsState(initial = "")
     val currentComicVine by preferenceManager.comicVineApiKey.collectAsState(initial = "")
     val currentMetronUser by preferenceManager.metronUsername.collectAsState(initial = "")
     val currentMetronPass by preferenceManager.metronPassword.collectAsState(initial = "")
@@ -98,9 +109,75 @@ fun ApiKeyConfigSheet(
     var igdbClientId by remember(currentIgdbId) { mutableStateOf(currentIgdbId) }
     var igdbClientSecret by remember(currentIgdbSecret) { mutableStateOf(currentIgdbSecret) }
     var mdblistKey by remember(currentMdblist) { mutableStateOf(currentMdblist) }
+    var omdbKey by remember(currentOmdb) { mutableStateOf(currentOmdb) }
     var comicVineKey by remember(currentComicVine) { mutableStateOf(currentComicVine) }
     var metronUsername by remember(currentMetronUser) { mutableStateOf(currentMetronUser) }
     var metronPassword by remember(currentMetronPass) { mutableStateOf(currentMetronPass) }
+
+    val validationStates = remember { mutableStateMapOf<String, ApiKeyValidationState>() }
+    var isTestingAll by remember { mutableStateOf(false) }
+
+    fun testSingleKey(id: String, validateBlock: suspend () -> ApiKeyValidationState) {
+        scope.launch {
+            validationStates[id] = ApiKeyValidationState.Testing
+            validationStates[id] = validateBlock()
+        }
+    }
+
+    fun testAllConfiguredKeys() {
+        if (isTestingAll) return
+        scope.launch {
+            isTestingAll = true
+            try {
+                coroutineScope {
+                    val tasks = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+                    if (geminiKey.isNotBlank()) tasks += async {
+                        validationStates["gemini"] = ApiKeyValidationState.Testing
+                        validationStates["gemini"] = ApiKeyValidator.validateGemini(geminiKey)
+                    }
+                    if (openRouterKey.isNotBlank()) tasks += async {
+                        validationStates["openrouter"] = ApiKeyValidationState.Testing
+                        validationStates["openrouter"] = ApiKeyValidator.validateOpenRouter(openRouterKey)
+                    }
+                    if (tmdbKey.isNotBlank()) tasks += async {
+                        validationStates["tmdb"] = ApiKeyValidationState.Testing
+                        validationStates["tmdb"] = ApiKeyValidator.validateTmdb(tmdbKey)
+                    }
+                    if (fanartKey.isNotBlank()) tasks += async {
+                        validationStates["fanart"] = ApiKeyValidationState.Testing
+                        validationStates["fanart"] = ApiKeyValidator.validateFanart(fanartKey)
+                    }
+                    if (steamGridDbKey.isNotBlank()) tasks += async {
+                        validationStates["sgdb"] = ApiKeyValidationState.Testing
+                        validationStates["sgdb"] = ApiKeyValidator.validateSteamGridDb(steamGridDbKey)
+                    }
+                    if (igdbClientId.isNotBlank() || igdbClientSecret.isNotBlank()) tasks += async {
+                        validationStates["igdb"] = ApiKeyValidationState.Testing
+                        validationStates["igdb"] = ApiKeyValidator.validateIgdb(igdbClientId, igdbClientSecret)
+                    }
+                    if (mdblistKey.isNotBlank()) tasks += async {
+                        validationStates["mdblist"] = ApiKeyValidationState.Testing
+                        validationStates["mdblist"] = ApiKeyValidator.validateMdblist(mdblistKey)
+                    }
+                    if (omdbKey.isNotBlank()) tasks += async {
+                        validationStates["omdb"] = ApiKeyValidationState.Testing
+                        validationStates["omdb"] = ApiKeyValidator.validateOmdb(omdbKey)
+                    }
+                    if (comicVineKey.isNotBlank()) tasks += async {
+                        validationStates["comicvine"] = ApiKeyValidationState.Testing
+                        validationStates["comicvine"] = ApiKeyValidator.validateComicVine(comicVineKey)
+                    }
+                    if (metronUsername.isNotBlank() || metronPassword.isNotBlank()) tasks += async {
+                        validationStates["metron"] = ApiKeyValidationState.Testing
+                        validationStates["metron"] = ApiKeyValidator.validateMetron(metronUsername, metronPassword)
+                    }
+                    tasks.awaitAll()
+                }
+            } finally {
+                isTestingAll = false
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -116,6 +193,7 @@ fun ApiKeyConfigSheet(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -125,7 +203,7 @@ fun ApiKeyConfigSheet(
                     tint = AccentGold,
                     modifier = Modifier.size(22.dp)
                 )
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "AI & Artwork Boosters",
                         fontSize = 18.sp,
@@ -133,9 +211,40 @@ fun ApiKeyConfigSheet(
                         color = TextPrimary
                     )
                     Text(
-                        text = "Optional keys for AI search, extra artwork & critic scores — sign-in happens in Tracker Accounts",
-                        fontSize = 12.sp,
+                        text = "Tap Test to verify keys live against their servers — sign-in happens in Tracker Accounts",
+                        fontSize = 11.5.sp,
                         color = TextSecondary
+                    )
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentGold.copy(alpha = 0.16f))
+                        .border(0.8.dp, AccentGold.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                        .clickable(enabled = !isTestingAll) { testAllConfiguredKeys() }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (isTestingAll) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Verified,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                    Text(
+                        text = if (isTestingAll) "Testing" else "Test All",
+                        color = AccentGold,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -204,7 +313,12 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Unlocks AI search queries and smart natural-language discovery.",
                 placeholder = "AIzaSy...",
                 value = geminiKey,
-                onValueChange = { geminiKey = it }
+                onValueChange = {
+                    geminiKey = it
+                    validationStates["gemini"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["gemini"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("gemini") { ApiKeyValidator.validateGemini(geminiKey) } }
             )
 
             GeminiModelSelectorSection(
@@ -234,7 +348,12 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Fallback AI router when you prefer non-Gemini models.",
                 placeholder = "sk-or-v1-...",
                 value = openRouterKey,
-                onValueChange = { openRouterKey = it }
+                onValueChange = {
+                    openRouterKey = it
+                    validationStates["openrouter"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["openrouter"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("openrouter") { ApiKeyValidator.validateOpenRouter(openRouterKey) } }
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -249,11 +368,16 @@ fun ApiKeyConfigSheet(
             )
 
             ApiKeyField(
-                label = "TMDb API Key (v3 auth)",
+                label = "TMDb API Key (v3 auth or v4 Read Token)",
                 unlockNote = "Unlocks Movie/TV metadata, posters, backdrops & screen adaptations.",
-                placeholder = "32-character v3 key (optional if using built-in key)",
+                placeholder = "32-character v3 key or Bearer token",
                 value = tmdbKey,
-                onValueChange = { tmdbKey = it }
+                onValueChange = {
+                    tmdbKey = it
+                    validationStates["tmdb"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["tmdb"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("tmdb") { ApiKeyValidator.validateTmdb(tmdbKey) } }
             )
 
             ApiKeyField(
@@ -261,7 +385,12 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Unlocks clean textless logos, clearart & wide hero banners.",
                 placeholder = "Fanart.tv API key",
                 value = fanartKey,
-                onValueChange = { fanartKey = it }
+                onValueChange = {
+                    fanartKey = it
+                    validationStates["fanart"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["fanart"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("fanart") { ApiKeyValidator.validateFanart(fanartKey) } }
             )
 
             ApiKeyField(
@@ -269,7 +398,12 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Unlocks textless covers, heroes & logos for Games and Visual Novels.",
                 placeholder = "SteamGridDB key",
                 value = steamGridDbKey,
-                onValueChange = { steamGridDbKey = it }
+                onValueChange = {
+                    steamGridDbKey = it
+                    validationStates["sgdb"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["sgdb"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("sgdb") { ApiKeyValidator.validateSteamGridDb(steamGridDbKey) } }
             )
 
             ApiKeyField(
@@ -277,7 +411,10 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Pairs with the secret below to unlock rich game trailers, genres & screenshots.",
                 placeholder = "Twitch Developer App Client ID",
                 value = igdbClientId,
-                onValueChange = { igdbClientId = it }
+                onValueChange = {
+                    igdbClientId = it
+                    validationStates["igdb"] = ApiKeyValidationState.Idle
+                }
             )
 
             ApiKeyField(
@@ -285,15 +422,40 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Required alongside IGDB Client ID to authenticate with Twitch.",
                 placeholder = "Twitch Developer App Client Secret",
                 value = igdbClientSecret,
-                onValueChange = { igdbClientSecret = it }
+                onValueChange = {
+                    igdbClientSecret = it
+                    validationStates["igdb"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["igdb"] ?: ApiKeyValidationState.Idle,
+                testLabel = "Test Pair",
+                showTestWhenAnyNonBlank = igdbClientId.isNotBlank() || igdbClientSecret.isNotBlank(),
+                onTest = { testSingleKey("igdb") { ApiKeyValidator.validateIgdb(igdbClientId, igdbClientSecret) } }
             )
 
             ApiKeyField(
                 label = "MdbList API Key",
-                unlockNote = "Unlocks IMDb, Rotten Tomatoes & Metacritic critic score rows.",
+                unlockNote = "Unlocks IMDb, Rotten Tomatoes, Trakt & Metacritic critic score rows.",
                 placeholder = "MdbList API key",
                 value = mdblistKey,
-                onValueChange = { mdblistKey = it }
+                onValueChange = {
+                    mdblistKey = it
+                    validationStates["mdblist"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["mdblist"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("mdblist") { ApiKeyValidator.validateMdblist(mdblistKey) } }
+            )
+
+            ApiKeyField(
+                label = "OMDb API Key (Free · Optional)",
+                unlockNote = "Free backup for IMDb, Rotten Tomatoes & Metascore. Get one free at omdbapi.com/apikey.aspx",
+                placeholder = "OMDb 8-character key",
+                value = omdbKey,
+                onValueChange = {
+                    omdbKey = it
+                    validationStates["omdb"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["omdb"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("omdb") { ApiKeyValidator.validateOmdb(omdbKey) } }
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -318,7 +480,12 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Unlocks full volume issues, creative teams, characters & variant art.",
                 placeholder = "Comic Vine 40-char API key",
                 value = comicVineKey,
-                onValueChange = { comicVineKey = it }
+                onValueChange = {
+                    comicVineKey = it
+                    validationStates["comicvine"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["comicvine"] ?: ApiKeyValidationState.Idle,
+                onTest = { testSingleKey("comicvine") { ApiKeyValidator.validateComicVine(comicVineKey) } }
             )
 
             ApiKeyField(
@@ -326,7 +493,10 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Free Metron.cloud account username for live Wednesday pull lists.",
                 placeholder = "Metron username",
                 value = metronUsername,
-                onValueChange = { metronUsername = it }
+                onValueChange = {
+                    metronUsername = it
+                    validationStates["metron"] = ApiKeyValidationState.Idle
+                }
             )
 
             ApiKeyField(
@@ -334,7 +504,14 @@ fun ApiKeyConfigSheet(
                 unlockNote = "Pairs with your Metron username via Basic Auth.",
                 placeholder = "Metron password",
                 value = metronPassword,
-                onValueChange = { metronPassword = it }
+                onValueChange = {
+                    metronPassword = it
+                    validationStates["metron"] = ApiKeyValidationState.Idle
+                },
+                validationState = validationStates["metron"] ?: ApiKeyValidationState.Idle,
+                testLabel = "Test Login",
+                showTestWhenAnyNonBlank = metronUsername.isNotBlank() || metronPassword.isNotBlank(),
+                onTest = { testSingleKey("metron") { ApiKeyValidator.validateMetron(metronUsername, metronPassword) } }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -349,6 +526,7 @@ fun ApiKeyConfigSheet(
                         preferenceManager.updateSteamGridDbApiKey(steamGridDbKey.trim())
                         preferenceManager.updateIgdbCredentials(igdbClientId.trim(), igdbClientSecret.trim())
                         preferenceManager.updateMdblistApiKey(mdblistKey.trim())
+                        preferenceManager.updateOmdbApiKey(omdbKey.trim())
                         preferenceManager.updateComicVineApiKey(comicVineKey.trim())
                         preferenceManager.updateMetronCredentials(metronUsername.trim(), metronPassword.trim())
                         onDismiss()
@@ -379,9 +557,21 @@ private fun ApiKeyField(
     unlockNote: String,
     placeholder: String,
     value: String,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    validationState: ApiKeyValidationState = ApiKeyValidationState.Idle,
+    testLabel: String = "Test",
+    showTestWhenAnyNonBlank: Boolean = value.isNotBlank(),
+    onTest: (() -> Unit)? = null
 ) {
-    val isConfigured = value.isNotBlank()
+    val validGreen = Color(0xFF22C55E)
+    val invalidRed = Color(0xFFEF4444)
+    val borderColor = when (validationState) {
+        is ApiKeyValidationState.Valid -> validGreen.copy(alpha = 0.55f)
+        is ApiKeyValidationState.Invalid -> invalidRed.copy(alpha = 0.55f)
+        is ApiKeyValidationState.Testing -> AccentGold.copy(alpha = 0.55f)
+        is ApiKeyValidationState.Idle -> GlassBorder
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -398,13 +588,74 @@ private fun ApiKeyField(
                 color = TextPrimary,
                 modifier = Modifier.weight(1f)
             )
-            if (isConfigured) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Configured",
-                    tint = AccentGold,
-                    modifier = Modifier.size(15.dp)
-                )
+            when (validationState) {
+                is ApiKeyValidationState.Testing -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 1.8.dp,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Text(
+                            text = "Testing...",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AccentGold
+                        )
+                    }
+                }
+                is ApiKeyValidationState.Valid -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Verified",
+                            tint = validGreen,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = validationState.detail,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = validGreen
+                        )
+                    }
+                }
+                is ApiKeyValidationState.Invalid -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = "Invalid",
+                            tint = invalidRed,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = validationState.reason,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = invalidRed,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                is ApiKeyValidationState.Idle -> {
+                    if (onTest != null && showTestWhenAnyNonBlank) {
+                        Text(
+                            text = "Not tested",
+                            fontSize = 10.5.sp,
+                            color = TextSecondary.copy(alpha = 0.72f)
+                        )
+                    }
+                }
             }
         }
         Text(
@@ -417,9 +668,10 @@ private fun ApiKeyField(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(DarkSurfaceElevated)
-                .border(1.dp, if (isConfigured) AccentGold.copy(alpha = 0.35f) else GlassBorder, RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             BasicTextField(
                 value = value,
@@ -435,6 +687,23 @@ private fun ApiKeyField(
                     innerTextField()
                 }
             )
+            if (onTest != null && showTestWhenAnyNonBlank) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable(enabled = validationState !is ApiKeyValidationState.Testing) { onTest() }
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = testLabel,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AccentGold
+                    )
+                }
+            }
         }
     }
 }

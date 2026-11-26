@@ -23,10 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,6 +60,7 @@ import com.omnitrack.app.data.model.ComicDetailMeta
 import com.omnitrack.app.data.model.ComicEntryType
 import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.ComicTrackingMode
+import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.TextPrimary
@@ -82,6 +85,8 @@ fun DetailComicTrackingSection(
     onAddCustomIssue: (String, String?, ComicEntryType, String?) -> Unit,
     onDeleteIssue: (Long) -> Unit,
     onSeedIssues: (Int) -> Unit,
+    episodeLayoutMode: EpisodeLayoutMode = EpisodeLayoutMode.LIST,
+    onCycleLayoutMode: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -350,9 +355,26 @@ fun DetailComicTrackingSection(
                 color = TextPrimary
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                if (onCycleLayoutMode != null) {
+                    IconButton(
+                        onClick = onCycleLayoutMode,
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (episodeLayoutMode == EpisodeLayoutMode.TEXT_ONLY) {
+                                Icons.AutoMirrored.Filled.FormatListBulleted
+                            } else {
+                                Icons.Default.ViewAgenda
+                            },
+                            contentDescription = "Toggle Checklist Layout",
+                            tint = AccentGold,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
@@ -435,32 +457,34 @@ fun DetailComicTrackingSection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        if (!issue.coverUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = issue.coverUrl,
-                                contentDescription = "#${issue.issueNumber}",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .width(34.dp)
-                                    .aspectRatio(0.68f)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.White.copy(alpha = 0.08f))
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .width(34.dp)
-                                    .height(48.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.White.copy(alpha = 0.07f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "#${issue.issueNumber}",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AccentGold
+                        if (episodeLayoutMode != EpisodeLayoutMode.TEXT_ONLY) {
+                            if (!issue.coverUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = issue.coverUrl,
+                                    contentDescription = "#${issue.issueNumber}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .width(34.dp)
+                                        .aspectRatio(0.68f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
                                 )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .width(34.dp)
+                                        .height(48.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.White.copy(alpha = 0.07f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "#${issue.issueNumber}",
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGold
+                                    )
+                                }
                             }
                         }
 

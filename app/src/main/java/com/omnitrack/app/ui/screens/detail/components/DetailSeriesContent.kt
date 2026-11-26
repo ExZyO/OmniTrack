@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
@@ -488,13 +489,15 @@ fun LazyListScope.detailSeriesItems(
                                     EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
                                     EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
                                     EpisodeLayoutMode.VERTICAL_CARD -> EpisodeLayoutMode.POSTER_GRID
-                                    EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.HORIZONTAL
+                                    EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.TEXT_ONLY
+                                    EpisodeLayoutMode.TEXT_ONLY -> EpisodeLayoutMode.HORIZONTAL
                                 }
                             } else {
                                 when (seriesState.currentLayoutMode) {
                                     EpisodeLayoutMode.HORIZONTAL -> EpisodeLayoutMode.LIST
                                     EpisodeLayoutMode.LIST -> EpisodeLayoutMode.VERTICAL_CARD
-                                    EpisodeLayoutMode.VERTICAL_CARD, EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.HORIZONTAL
+                                    EpisodeLayoutMode.VERTICAL_CARD, EpisodeLayoutMode.POSTER_GRID -> EpisodeLayoutMode.TEXT_ONLY
+                                    EpisodeLayoutMode.TEXT_ONLY -> EpisodeLayoutMode.HORIZONTAL
                                 }
                             }
                             seriesState.currentLayoutMode = nextMode
@@ -512,6 +515,7 @@ fun LazyListScope.detailSeriesItems(
                             EpisodeLayoutMode.LIST -> Icons.Default.ViewAgenda
                             EpisodeLayoutMode.VERTICAL_CARD -> Icons.Default.ViewCarousel
                             EpisodeLayoutMode.POSTER_GRID -> Icons.Default.GridView
+                            EpisodeLayoutMode.TEXT_ONLY -> Icons.AutoMirrored.Filled.FormatListBulleted
                         }
                         Icon(
                             imageVector = iconVector,
@@ -677,6 +681,37 @@ fun LazyListScope.detailSeriesItems(
                             isMangaMode = isMangaMode,
                             isLightNovelVolumeMode = isLightNovelVolumeMode
                         )
+                    }
+                }
+            }
+
+            EpisodeLayoutMode.TEXT_ONLY -> {
+                itemsIndexed(
+                    items = filteredSeasonEpisodes,
+                    key = { idx, ep -> "ep_text_${ep.seasonNumber}_${ep.episodeNumber}_${ep.id}_$idx" },
+                    contentType = { _, _ -> "ep_text" }
+                ) { idx, episode ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                    ) {
+                        EpisodeTextOnlyChecklistRow(
+                            episode = episode,
+                            isWatched = isEpWatched(episode),
+                            onToggleWatched = { handleEpisodeClick(episode) },
+                            onOpenDetail = { onOpenEpisodeDetail(episode) },
+                            onLongPress = { seriesState.activeActionSheetEpisode = episode },
+                            meta = episodeMetaMap[episode.seasonNumber to episode.episodeNumber],
+                            isMangaMode = isMangaMode,
+                            isLightNovelVolumeMode = isLightNovelVolumeMode
+                        )
+                        if (idx < filteredSeasonEpisodes.lastIndex) {
+                            androidx.compose.material3.HorizontalDivider(
+                                color = Color.White.copy(alpha = 0.08f),
+                                thickness = 0.5.dp
+                            )
+                        }
                     }
                 }
             }
@@ -1605,6 +1640,118 @@ private fun EpisodeHorizontalCard(
     }
 }
 
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EpisodeTextOnlyChecklistRow(
+    episode: MediaEpisode,
+    isWatched: Boolean,
+    onToggleWatched: () -> Unit,
+    onOpenDetail: () -> Unit,
+    onLongPress: () -> Unit,
+    meta: EpisodeProgressEntity? = null,
+    isMangaMode: Boolean = false,
+    isLightNovelVolumeMode: Boolean = false
+) {
+    val numberPrefix = when {
+        isLightNovelVolumeMode -> "Vol. ${episode.episodeNumber}"
+        isMangaMode -> "Ch. ${episode.episodeNumber}"
+        episode.seasonNumber > 0 -> "S${episode.seasonNumber} E${episode.episodeNumber}"
+        else -> "E${episode.episodeNumber}"
+    }
+    val rawTitle = meta?.customLabel?.takeIf { it.isNotBlank() } ?: episode.title.trim()
+    val defaultUnitTitle = if (isLightNovelVolumeMode) "Volume ${episode.episodeNumber}" else if (isMangaMode) "Chapter ${episode.episodeNumber}" else "Episode ${episode.episodeNumber}"
+    val displayTitle = if (rawTitle.isBlank() || rawTitle.equals(defaultUnitTitle, ignoreCase = true)) {
+        numberPrefix
+    } else {
+        "$numberPrefix · $rawTitle"
+    }
+    val formattedDate = remember(episode.airDate) { formatEpisodeAirDate(episode.airDate) }
+    val subtitleParts = buildList {
+        if (!formattedDate.isNullOrBlank()) add(formattedDate)
+        episode.runtimeMinutes?.takeIf { it > 0 }?.let { add("${it}m") }
+        if (!isMangaMode && episode.voteAverage != null && episode.voteAverage > 0) {
+            add("★ ${String.format(java.util.Locale.US, "%.1f", episode.voteAverage)}")
+        }
+        if (episode.isRecap) add("RECAP") else if (episode.isFiller) add("FILLER")
+        meta?.userNote?.takeIf { it.isNotBlank() }?.let { add(it) }
+    }.joinToString(" · ")
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = onOpenDetail,
+                onLongClick = onLongPress
+            )
+            .padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(if (isWatched) AccentJade else Color.Transparent)
+                .border(
+                    1.5.dp,
+                    if (isWatched) AccentJade else Color.White.copy(alpha = 0.34f),
+                    CircleShape
+                )
+                .clickable { onToggleWatched() },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isWatched) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Completed",
+                    tint = Color.Black,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = displayTitle,
+                color = if (isWatched) Color.White.copy(alpha = 0.65f) else Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitleParts.isNotBlank()) {
+                Text(
+                    text = subtitleParts,
+                    color = if (!meta?.userNote.isNullOrBlank()) AccentArctic.copy(alpha = 0.85f) else TextSecondary,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        if (meta?.isBookmarked == true) {
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = "Starred",
+                tint = AccentGold,
+                modifier = Modifier.size(14.dp)
+            )
+        }
+        if (meta?.userRating != null) {
+            Text(
+                text = String.format(java.util.Locale.US, "%.1f", meta.userRating),
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = AccentJade
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

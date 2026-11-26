@@ -256,13 +256,15 @@ enum class EpisodeLayoutMode(val displayName: String, val description: String) {
     HORIZONTAL("Horizontal Carousel", "16:9 widescreen scrolling cards with in-image metadata"),
     LIST("Vertical Compact List", "Classic Nuvio side-by-side list with thumbnail on left"),
     VERTICAL_CARD("Vertical Hero Cards", "Full-width 16:9 vertical cards with in-image metadata"),
-    POSTER_GRID("Poster Grid", "3-column cover art poster grid for Light Novels & Volumes");
+    POSTER_GRID("Poster Grid", "3-column cover art poster grid for Light Novels & Volumes"),
+    TEXT_ONLY("Text Checklist", "Clean text-only rows inspired by Books layout — zero thumbnails");
 
     companion object {
         fun fromName(name: String?): EpisodeLayoutMode = when (name?.uppercase()) {
             "HORIZONTAL" -> HORIZONTAL
             "VERTICAL_CARD" -> VERTICAL_CARD
             "POSTER_GRID" -> POSTER_GRID
+            "TEXT_ONLY" -> TEXT_ONLY
             else -> LIST
         }
     }
@@ -718,6 +720,7 @@ class PreferenceManager(private val context: Context) {
         val IGDB_CLIENT_ID = stringPreferencesKey("igdb_client_id")
         val IGDB_CLIENT_SECRET = stringPreferencesKey("igdb_client_secret")
         val MDBLIST_API_KEY = stringPreferencesKey("mdblist_api_key")
+        val OMDB_API_KEY = stringPreferencesKey("omdb_api_key")
         val COMIC_VINE_API_KEY = stringPreferencesKey("comic_vine_api_key")
         val METRON_USERNAME = stringPreferencesKey("metron_username")
         val METRON_PASSWORD = stringPreferencesKey("metron_password")
@@ -758,6 +761,7 @@ class PreferenceManager(private val context: Context) {
         val FANFIC_NSFW_FILTER_MODE = stringPreferencesKey("fanfic_nsfw_filter_mode")
         val UNIVERSAL_HERO_BANNER_BLUR = stringPreferencesKey("universal_hero_banner_blur")
         val CATEGORY_HERO_BANNER_BLUR_OVERRIDES = stringPreferencesKey("category_hero_banner_blur_overrides")
+        val HIDDEN_RATING_SOURCES_MAP = stringPreferencesKey("hidden_rating_sources_map")
 
         // Performance & Smoothness
         val PERF_MODE_ENABLED = booleanPreferencesKey("perf_mode_enabled")
@@ -771,6 +775,8 @@ class PreferenceManager(private val context: Context) {
 
         fun priorityKey(mediaType: MediaType) = stringPreferencesKey("priority_${mediaType.name.lowercase()}")
         fun disabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("disabled_sources_${mediaType.name.lowercase()}")
+        fun bannerPriorityKey(mediaType: MediaType) = stringPreferencesKey("banner_priority_${mediaType.name.lowercase()}")
+        fun bannerDisabledSourcesKey(mediaType: MediaType) = stringPreferencesKey("banner_disabled_sources_${mediaType.name.lowercase()}")
     }
 
     val presentationSettings: Flow<PresentationSettings> = context.dataStore.data
@@ -1089,6 +1095,15 @@ class PreferenceManager(private val context: Context) {
         context.dataStore.edit { it[PreferencesKeys.MDBLIST_API_KEY] = key }
     }
 
+    val omdbApiKey: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { it[PreferencesKeys.OMDB_API_KEY] ?: "" }
+
+    suspend fun updateOmdbApiKey(key: String) {
+        cachedOmdbApiKey = key
+        context.dataStore.edit { it[PreferencesKeys.OMDB_API_KEY] = key }
+    }
+
     val aiSemanticSearchEnabled: Flow<Boolean> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { it[PreferencesKeys.AI_SEMANTIC_SEARCH_ENABLED] ?: false }
@@ -1366,6 +1381,163 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateDisabledArtSources(mediaType: MediaType, disabled: Set<String>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.disabledSourcesKey(mediaType)] = disabled.joinToString(",")
+        }
+    }
+
+    fun getBannerArtSourcePriority(mediaType: MediaType): Flow<List<String>> {
+        val defaultSources = getDefaultBannerSourcesFor(mediaType)
+        return context.dataStore.data
+            .catch { exception ->
+                if (exception is IOException) emit(emptyPreferences()) else throw exception
+            }
+            .map { prefs ->
+                val raw = prefs[PreferencesKeys.bannerPriorityKey(mediaType)]
+                if (raw.isNullOrBlank()) {
+                    defaultSources
+                } else {
+                    val saved = raw.split(",")
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() && !it.equals("NovelUpdates", ignoreCase = true) }
+                        .map { token ->
+                            if (token.equals("AniList", ignoreCase = true)) "AniList GraphQL" else token
+                        }
+                    val seen = LinkedHashMap<String, String>()
+                    saved.forEach { src ->
+                        val key = src.lowercase()
+                        if (key !in seen) seen[key] = src
+                    }
+                    defaultSources.forEach { src ->
+                        val key = src.lowercase()
+                        if (key !in seen) seen[key] = src
+                    }
+                    seen.values.toList()
+                }
+            }
+    }
+
+    suspend fun updateBannerArtSourcePriority(mediaType: MediaType, sources: List<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.bannerPriorityKey(mediaType)] = sources.joinToString(",")
+        }
+    }
+
+    suspend fun resetBannerArtSourcePriority(mediaType: MediaType) {
+        context.dataStore.edit { prefs ->
+            prefs.remove(PreferencesKeys.bannerPriorityKey(mediaType))
+            prefs.remove(PreferencesKeys.bannerDisabledSourcesKey(mediaType))
+        }
+    }
+
+    fun getBannerDisabledArtSources(mediaType: MediaType): Flow<Set<String>> {
+        return context.dataStore.data
+            .catch { exception ->
+                if (exception is IOException) emit(emptyPreferences()) else throw exception
+            }
+            .map { prefs ->
+                val raw = prefs[PreferencesKeys.bannerDisabledSourcesKey(mediaType)]
+                if (raw.isNullOrBlank()) {
+                    emptySet()
+                } else {
+                    raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                }
+            }
+    }
+
+    suspend fun updateBannerDisabledArtSources(mediaType: MediaType, disabled: Set<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.bannerDisabledSourcesKey(mediaType)] = disabled.joinToString(",")
+        }
+    }
+
+    private val ratingVisibilityJson = Json { ignoreUnknownKeys = true }
+
+    val hiddenRatingSourcesMap: Flow<Map<String, Set<String>>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP]
+            if (raw.isNullOrBlank()) {
+                emptyMap()
+            } else {
+                try {
+                    ratingVisibilityJson.decodeFromString<Map<String, List<String>>>(raw)
+                        .mapValues { (_, list) -> list.map { it.lowercase().trim() }.toSet() }
+                } catch (_: Exception) {
+                    emptyMap()
+                }
+            }
+        }
+        .distinctUntilChanged()
+
+    suspend fun hideRatingSourceForEntry(entryKey: String, sourceKey: String) {
+        val normKey = entryKey.trim()
+        val normSource = sourceKey.trim().lowercase()
+        if (normKey.isBlank() || normSource.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = try {
+                prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP]
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { ratingVisibilityJson.decodeFromString<Map<String, List<String>>>(it) }
+                    ?.mapValues { it.value.toMutableSet() }
+                    ?.toMutableMap()
+                    ?: mutableMapOf()
+            } catch (_: Exception) {
+                mutableMapOf()
+            }
+            val set = current.getOrPut(normKey) { mutableSetOf() }
+            set.add(normSource)
+            prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP] =
+                ratingVisibilityJson.encodeToString(current.mapValues { it.value.toList() })
+        }
+    }
+
+    suspend fun unhideRatingSourceForEntry(entryKey: String, sourceKey: String) {
+        val normKey = entryKey.trim()
+        val normSource = sourceKey.trim().lowercase()
+        if (normKey.isBlank() || normSource.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = try {
+                prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP]
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { ratingVisibilityJson.decodeFromString<Map<String, List<String>>>(it) }
+                    ?.mapValues { it.value.toMutableSet() }
+                    ?.toMutableMap()
+                    ?: mutableMapOf()
+            } catch (_: Exception) {
+                mutableMapOf()
+            }
+            val set = current[normKey] ?: return@edit
+            set.remove(normSource)
+            if (set.isEmpty()) current.remove(normKey)
+            if (current.isEmpty()) {
+                prefs.remove(PreferencesKeys.HIDDEN_RATING_SOURCES_MAP)
+            } else {
+                prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP] =
+                    ratingVisibilityJson.encodeToString(current.mapValues { it.value.toList() })
+            }
+        }
+    }
+
+    suspend fun resetHiddenRatingSourcesForEntry(entryKey: String) {
+        val normKey = entryKey.trim()
+        if (normKey.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = try {
+                prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP]
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { ratingVisibilityJson.decodeFromString<Map<String, List<String>>>(it) }
+                    ?.toMutableMap()
+                    ?: return@edit
+            } catch (_: Exception) {
+                return@edit
+            }
+            if (current.remove(normKey) != null) {
+                if (current.isEmpty()) {
+                    prefs.remove(PreferencesKeys.HIDDEN_RATING_SOURCES_MAP)
+                } else {
+                    prefs[PreferencesKeys.HIDDEN_RATING_SOURCES_MAP] =
+                        ratingVisibilityJson.encodeToString(current)
+                }
+            }
         }
     }
 
@@ -2205,6 +2377,9 @@ class PreferenceManager(private val context: Context) {
         var cachedMdblistApiKey: String = ""
 
         @Volatile
+        var cachedOmdbApiKey: String = ""
+
+        @Volatile
         var cachedIgdbClientId: String = ""
 
         @Volatile
@@ -2219,17 +2394,69 @@ class PreferenceManager(private val context: Context) {
         @Volatile
         var cachedMetronPassword: String = ""
 
+        fun ratingVisibilityKey(item: com.omnitrack.app.data.db.entity.MediaItemEntity): String {
+            if (item.id > 0L) return "id:${item.id}"
+            item.tmdbId?.takeIf { it > 0L }?.let { return "tmdb:${item.mediaType.name}:$it" }
+            item.anilistId?.takeIf { it > 0L }?.let { return "al:${item.mediaType.name}:$it" }
+            item.malId?.takeIf { it > 0L }?.let { return "mal:${item.mediaType.name}:$it" }
+            item.igdbId?.takeIf { it > 0L }?.let { return "igdb:${item.mediaType.name}:$it" }
+            item.steamAppId?.takeIf { it > 0L }?.let { return "steam:${item.mediaType.name}:$it" }
+            item.vndbId?.takeIf { it.isNotBlank() }?.let { return "vndb:${item.mediaType.name}:$it" }
+            item.hardcoverId?.takeIf { it.isNotBlank() }?.let { return "hc:${item.mediaType.name}:$it" }
+            item.comicVineId?.takeIf { it > 0L }?.let { return "cv:${item.mediaType.name}:$it" }
+            return "title:${item.mediaType.name}:${item.title.lowercase().trim()}"
+        }
+
+        fun ratingVisibilityKey(item: com.omnitrack.app.data.db.dto.MediaCardSummary): String {
+            if (item.id > 0L) return "id:${item.id}"
+            item.tmdbId?.takeIf { it > 0L }?.let { return "tmdb:${item.mediaType.name}:$it" }
+            item.anilistId?.takeIf { it > 0L }?.let { return "al:${item.mediaType.name}:$it" }
+            item.malId?.takeIf { it > 0L }?.let { return "mal:${item.mediaType.name}:$it" }
+            item.igdbId?.takeIf { it > 0L }?.let { return "igdb:${item.mediaType.name}:$it" }
+            item.steamAppId?.takeIf { it > 0L }?.let { return "steam:${item.mediaType.name}:$it" }
+            item.vndbId?.takeIf { it.isNotBlank() }?.let { return "vndb:${item.mediaType.name}:$it" }
+            item.hardcoverId?.takeIf { it.isNotBlank() }?.let { return "hc:${item.mediaType.name}:$it" }
+            item.comicVineId?.takeIf { it > 0L }?.let { return "cv:${item.mediaType.name}:$it" }
+            return "title:${item.mediaType.name}:${item.title.lowercase().trim()}"
+        }
+
+        fun ratingVisibilityKeyForSearch(item: com.omnitrack.app.data.search.SearchResultItem): String {
+            item.tmdbId?.takeIf { it > 0L }?.let { return "tmdb:${item.mediaType.name}:$it" }
+            item.anilistId?.takeIf { it > 0L }?.let { return "al:${item.mediaType.name}:$it" }
+            item.malId?.takeIf { it > 0L }?.let { return "mal:${item.mediaType.name}:$it" }
+            item.igdbId?.takeIf { it > 0L }?.let { return "igdb:${item.mediaType.name}:$it" }
+            item.steamAppId?.takeIf { it > 0L }?.let { return "steam:${item.mediaType.name}:$it" }
+            item.vndbId?.takeIf { it.isNotBlank() }?.let { return "vndb:${item.mediaType.name}:$it" }
+            item.hardcoverId?.takeIf { it.isNotBlank() }?.let { return "hc:${item.mediaType.name}:$it" }
+            item.comicVineId?.takeIf { it > 0L }?.let { return "cv:${item.mediaType.name}:$it" }
+            return "title:${item.mediaType.name}:${item.title.lowercase().trim()}"
+        }
+
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "TMDb", "Bangumi", "Kitsu", "MangaDex API")
             MediaType.MANGA -> listOf("MangaDex API", "AniList GraphQL", "BookWalker", "Naver", "Kuaikan", "Bangumi", "Comick", "Kitsu", "MyAnimeList")
             MediaType.COMIC -> listOf("Comic Vine", "Metron", "Apple Books", "Open Library")
             MediaType.NOVEL -> listOf("RanobeDB", "BookWalker", "AniList GraphQL", "Bangumi", "Naver", "MangaDex API", "Kuaikan", "Kitsu", "MyAnimeList")
             MediaType.BOOK -> listOf("Apple Books", "Hardcover", "Open Library", "Wikimedia Commons", "Google Books")
-            MediaType.SHOW -> listOf("TMDb", "TVMaze", "TheTVDB", "Bangumi")
-            MediaType.MOVIE -> listOf("TMDb", "Bangumi", "RPDB")
-            MediaType.GAME -> listOf("SteamGridDB", "Steam", "IGDB", "Bangumi")
+            MediaType.SHOW -> listOf("TMDb", "TheTVDB", "TVMaze", "Bangumi")
+            MediaType.MOVIE -> listOf("TMDb", "RPDB", "Bangumi")
+            MediaType.GAME -> listOf("SteamGridDB", "IGDB", "Steam", "Bangumi")
             MediaType.VISUAL_NOVEL -> listOf("VNDB Kana", "SteamGridDB", "Steam", "Bangumi", "AniList GraphQL", "IGDB")
             MediaType.FANFICTION -> listOf("AniList GraphQL", "TMDb", "SteamGridDB", "Hardcover", "IGDB", "Open Library")
+            MediaType.ALL -> listOf("Default")
+        }
+
+        fun getDefaultBannerSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
+            MediaType.ANIME -> listOf("TMDb", "AniList GraphQL", "Kitsu", "Bangumi", "MangaDex API")
+            MediaType.MANGA -> listOf("AniList GraphQL", "Naver", "Kuaikan", "Kitsu", "MangaDex API", "Bangumi", "BookWalker", "Comick", "MyAnimeList")
+            MediaType.COMIC -> listOf("Comic Vine", "Metron", "Apple Books", "Open Library")
+            MediaType.NOVEL -> listOf("AniList GraphQL", "Kitsu", "RanobeDB", "Naver", "Kuaikan", "Bangumi", "BookWalker", "MangaDex API", "MyAnimeList")
+            MediaType.BOOK -> listOf("Hardcover", "Wikimedia Commons", "Apple Books", "Open Library", "Google Books")
+            MediaType.SHOW -> listOf("TMDb", "TheTVDB", "TVMaze", "Bangumi")
+            MediaType.MOVIE -> listOf("TMDb", "Bangumi", "RPDB")
+            MediaType.GAME -> listOf("SteamGridDB", "Steam", "IGDB", "Bangumi")
+            MediaType.VISUAL_NOVEL -> listOf("SteamGridDB", "Steam", "VNDB Kana", "AniList GraphQL", "IGDB", "Bangumi")
+            MediaType.FANFICTION -> listOf("TMDb", "AniList GraphQL", "SteamGridDB", "IGDB", "Hardcover", "Open Library")
             MediaType.ALL -> listOf("Default")
         }
     }

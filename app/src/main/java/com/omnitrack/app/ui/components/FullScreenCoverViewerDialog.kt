@@ -1,10 +1,6 @@
 package com.omnitrack.app.ui.components
 
-import android.graphics.Color as AndroidColor
-import android.graphics.drawable.ColorDrawable
-import android.os.Build
-import android.view.ViewGroup
-import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,16 +9,20 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -31,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -47,15 +46,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
+import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -75,135 +70,135 @@ fun FullScreenCoverViewerDialog(
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var showControls by remember { mutableStateOf(true) }
+    val blockerInteraction = remember { MutableInteractionSource() }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    BackHandler(enabled = true) {
+        onDismiss()
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(100f)
+            .background(AmoledBlack)
+            .clickable(
+                interactionSource = blockerInteraction,
+                indication = null,
+                onClick = {}
+            )
     ) {
-        val windowProvider = LocalView.current.parent as? DialogWindowProvider
-        SideEffect {
-            windowProvider?.window?.let { window ->
-                WindowCompat.setDecorFitsSystemWindows(window, false)
-                window.setLayout(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                window.setBackgroundDrawable(ColorDrawable(AndroidColor.BLACK))
-                window.setDimAmount(0f)
-                @Suppress("DEPRECATION")
-                window.statusBarColor = AndroidColor.TRANSPARENT
-                @Suppress("DEPRECATION")
-                window.navigationBarColor = AndroidColor.TRANSPARENT
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    window.attributes = window.attributes.apply {
-                        layoutInDisplayCutoutMode =
-                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                    }
+        val containerWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+        val containerHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+
+        fun clampOffset(raw: Offset, curScale: Float): Offset {
+            if (curScale <= 1.02f) return Offset.Zero
+            val maxX = (containerWidthPx * (curScale - 1f)) * 0.5f
+            val maxY = (containerHeightPx * (curScale - 1f)) * 0.5f
+            return Offset(
+                x = raw.x.coerceIn(-maxX, maxX),
+                y = raw.y.coerceIn(-maxY, maxY)
+            )
+        }
+
+        val fullImageRequest = remember(coverModel, context) {
+            ImageRequest.Builder(context)
+                .data(coverModel)
+                .size(Size.ORIGINAL)
+                .crossfade(false)
+                .build()
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onDoubleTap = {
+                            if (scale > 1.05f) {
+                                scale = 1f
+                                offset = Offset.Zero
+                                showControls = true
+                            } else {
+                                scale = 2.5f
+                                showControls = false
+                            }
+                        },
+                        onTap = {
+                            showControls = !showControls
+                        }
+                    )
                 }
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        val prevScale = scale
+                        val nextScale = (scale * zoom).coerceIn(1f, 4f)
+                        scale = nextScale
+                        offset = if (nextScale <= 1.02f) {
+                            Offset.Zero
+                        } else {
+                            clampOffset(offset + pan, nextScale)
+                        }
+                        if (nextScale > 1.03f) {
+                            showControls = false
+                        } else if (prevScale > 1.03f && nextScale <= 1.03f) {
+                            showControls = true
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (coverModel != null && (coverModel !is String || coverModel.isNotBlank())) {
+                AsyncImage(
+                    model = fullImageRequest,
+                    contentDescription = title,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offset.x
+                            translationY = offset.y
+                        }
+                )
+            } else {
+                Text(
+                    text = "No cover image available",
+                    color = Color.White.copy(alpha = 0.65f),
+                    fontSize = 14.sp
+                )
             }
         }
 
-        BoxWithConstraints(
+        AnimatedVisibility(
+            visible = showControls,
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier
-                .fillMaxSize()
-                .background(AmoledBlack)
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
         ) {
-            val containerWidthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
-            val containerHeightPx = constraints.maxHeight.toFloat().coerceAtLeast(1f)
-
-            fun clampOffset(raw: Offset, curScale: Float): Offset {
-                if (curScale <= 1.02f) return Offset.Zero
-                val maxX = (containerWidthPx * (curScale - 1f)) * 0.5f
-                val maxY = (containerHeightPx * (curScale - 1f)) * 0.5f
-                return Offset(
-                    x = raw.x.coerceIn(-maxX, maxX),
-                    y = raw.y.coerceIn(-maxY, maxY)
-                )
-            }
-
-            val fullImageRequest = remember(coverModel, context) {
-                ImageRequest.Builder(context)
-                    .data(coverModel)
-                    .size(Size.ORIGINAL)
-                    .crossfade(false)
-                    .build()
-            }
-
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = {
-                                if (scale > 1.05f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                } else {
-                                    scale = 2.5f
-                                }
-                            },
-                            onTap = {
-                                showControls = !showControls
-                            }
-                        )
-                    }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            val nextScale = (scale * zoom).coerceIn(1f, 4f)
-                            scale = nextScale
-                            offset = clampOffset(offset + pan, nextScale)
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (coverModel != null && (coverModel !is String || coverModel.isNotBlank())) {
-                    AsyncImage(
-                        model = fullImageRequest,
-                        contentDescription = title,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 8.dp, vertical = 12.dp)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                translationX = offset.x
-                                translationY = offset.y
-                            }
-                    )
-                } else {
-                    Text(
-                        text = "No cover image available",
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            AnimatedVisibility(
-                visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                AmoledBlack.copy(alpha = 0.86f),
+                                Color.Transparent
+                            )
+                        )
+                    )
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    AmoledBlack.copy(alpha = 0.86f),
-                                    Color.Transparent
-                                )
+                        .windowInsetsPadding(
+                            WindowInsets.safeDrawing.only(
+                                WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                             )
                         )
-                        .statusBarsPadding()
-                        .padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 14.dp),
+                        .padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -231,29 +226,38 @@ fun FullScreenCoverViewerDialog(
                     }
                 }
             }
+        }
 
-            if (onCustomizeArtwork != null) {
-                AnimatedVisibility(
-                    visible = showControls,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
+        if (onCustomizeArtwork != null) {
+            AnimatedVisibility(
+                visible = showControls,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    AmoledBlack.copy(alpha = 0.88f)
+                                )
+                            )
+                        )
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        AmoledBlack.copy(alpha = 0.88f)
-                                    )
+                            .windowInsetsPadding(
+                                WindowInsets.safeDrawing.only(
+                                    WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal
                                 )
                             )
-                            .navigationBarsPadding()
-                            .padding(horizontal = 24.dp, vertical = 24.dp),
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(

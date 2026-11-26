@@ -32,14 +32,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,28 +72,45 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import coil3.SingletonImageLoader
+import coil3.annotation.ExperimentalCoilApi
 import com.omnitrack.app.OmniTrackApplication
+import com.omnitrack.app.data.artwork.ArtworkWaterfallRepository
+import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
+import com.omnitrack.app.ui.components.BackdropFocusCache
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
+import com.omnitrack.app.ui.theme.DarkSurface
+import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
+import com.omnitrack.app.ui.theme.GlassBorder
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import java.util.Locale
 
+private enum class ArtworkPriorityTarget(val label: String) {
+    COVERS("Covers"),
+    BANNERS("Banners")
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalCoilApi::class)
 @Composable
 fun ArtworkPriorityScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val prefManager = remember(context) {
-        (context.applicationContext as OmniTrackApplication).preferenceManager
-    }
+    val app = context.applicationContext as OmniTrackApplication
+    val prefManager = remember(app) { app.preferenceManager }
     val coroutineScope = rememberCoroutineScope()
 
     val categories = remember {
@@ -103,6 +128,10 @@ fun ArtworkPriorityScreen(
         )
     }
 
+    var activeTarget by remember { mutableStateOf(ArtworkPriorityTarget.COVERS) }
+    var showCacheResetSheet by remember { mutableStateOf(false) }
+    var isResettingCache by remember { mutableStateOf(false) }
+
     val pagerState = rememberPagerState(initialPage = 0) { categories.size }
     val hapticFeedback = LocalHapticFeedback.current
 
@@ -113,7 +142,7 @@ fun ArtworkPriorityScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top Bar: Circle-free pure white back arrow + Title
+        // Top Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -142,14 +171,36 @@ fun ArtworkPriorityScreen(
                 Text(
                     text = "Artwork & Metadata Sources",
                     color = TextPrimary,
-                    fontSize = 19.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.3).sp
                 )
                 Text(
-                    text = "Dynamic waterfall & uncompressed cover priority",
+                    text = "Separate Cover & Banner source priority",
                     color = TextMuted,
                     fontSize = 12.sp
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { showCacheResetSheet = true }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CleaningServices,
+                    contentDescription = "Reset Art Cache",
+                    tint = TextSecondary,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(
+                    text = "Cache",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
 
@@ -164,10 +215,14 @@ fun ArtworkPriorityScreen(
                         val activeCat = categories[pagerState.currentPage]
                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                         coroutineScope.launch {
-                            prefManager.resetArtSourcePriority(activeCat)
+                            if (activeTarget == ArtworkPriorityTarget.COVERS) {
+                                prefManager.resetArtSourcePriority(activeCat)
+                            } else {
+                                prefManager.resetBannerArtSourcePriority(activeCat)
+                            }
                             Toast.makeText(
                                 context,
-                                "Reset ${activeCat.displayName} art sources to recommended order",
+                                "Reset ${activeCat.displayName} ${activeTarget.label.lowercase()} priority to recommended order",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -176,10 +231,52 @@ fun ArtworkPriorityScreen(
             )
         }
 
-        // Horizontal Category Tabs (Synchronized auto-scroll with pager swiping)
+        // Covers vs Banners Segmented Mode Switcher
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 6.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(DarkSurfaceCard)
+                .border(0.8.dp, GlassBorder, RoundedCornerShape(10.dp))
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            ArtworkPriorityTarget.entries.forEach { target ->
+                val selected = activeTarget == target
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (selected) AccentGold.copy(alpha = 0.18f) else Color.Transparent)
+                        .clickable { activeTarget = target }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = target.label,
+                        color = if (selected) AccentGold else TextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = if (activeTarget == ArtworkPriorityTarget.COVERS) {
+                "Covers: Vertical posters & square box art used across Library & Home shelves"
+            } else {
+                "Banners: 16:9 widescreen headers & Hero Showcase backdrops"
+            },
+            color = TextMuted,
+            fontSize = 11.5.sp,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp)
+        )
+
+        // Horizontal Category Tabs
         val tabListState = rememberLazyListState()
 
-        // Auto-scroll the tab bar when pager swipes so current tab and next tab remain in view
         LaunchedEffect(pagerState.currentPage) {
             tabListState.animateScrollToItem(
                 index = pagerState.currentPage.coerceAtLeast(0),
@@ -245,7 +342,6 @@ fun ArtworkPriorityScreen(
             thickness = 0.6.dp
         )
 
-        // Subtitle instructions row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -268,7 +364,6 @@ fun ArtworkPriorityScreen(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Horizontal Category Pager
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
@@ -278,8 +373,200 @@ fun ArtworkPriorityScreen(
             val category = categories[page]
             CategoryWaterfallList(
                 category = category,
+                target = activeTarget,
                 prefManager = prefManager
             )
+        }
+    }
+
+    if (showCacheResetSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { if (!isResettingCache) showCacheResetSheet = false },
+            sheetState = sheetState,
+            containerColor = DarkSurface,
+            dragHandle = null
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Reset Artwork Cache",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Custom user covers, custom banners & manual framing are never removed",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                    IconButton(
+                        onClick = { if (!isResettingCache) showCacheResetSheet = false },
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextSecondary
+                        )
+                    }
+                }
+
+                // Option 1: Clear Image Cache (Safe)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(0.8.dp, GlassBorder, RoundedCornerShape(12.dp))
+                        .clickable(enabled = !isResettingCache) {
+                            coroutineScope.launch {
+                                isResettingCache = true
+                                try {
+                                    val reclaimedBytes = withContext(Dispatchers.IO) {
+                                        val loader = SingletonImageLoader.get(context)
+                                        withContext(Dispatchers.Main) {
+                                            loader.memoryCache?.clear()
+                                        }
+                                        runCatching { loader.diskCache?.clear() }
+                                        ArtworkWaterfallRepository.clearMemoryCache()
+                                        BackdropFocusCache.clear()
+                                        EnrichmentRepository.clearMemoryCaches()
+                                        app.coverCache.clearNonCustomCache()
+                                    }
+                                    val mb = reclaimedBytes / (1024.0 * 1024.0)
+                                    val msg = String.format(Locale.US, "Cleared artwork cache (%.1f MB freed). Custom art preserved.", mb)
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    showCacheResetSheet = false
+                                } finally {
+                                    isResettingCache = false
+                                }
+                            }
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (isResettingCache) {
+                        CircularProgressIndicator(
+                            color = AccentGold,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = null,
+                            tint = AccentGold,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Clear Image Cache",
+                            color = TextPrimary,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Clears temporary image downloads & artwork search cache so art reloads fresh.",
+                            color = TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+
+                // Option 2: Clear Cache & Re-fetch Auto Banners
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurfaceElevated)
+                        .border(0.8.dp, AccentGold.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .clickable(enabled = !isResettingCache) {
+                            coroutineScope.launch {
+                                isResettingCache = true
+                                try {
+                                    val updatedCount = withContext(Dispatchers.IO) {
+                                        val loader = SingletonImageLoader.get(context)
+                                        withContext(Dispatchers.Main) {
+                                            loader.memoryCache?.clear()
+                                        }
+                                        runCatching { loader.diskCache?.clear() }
+                                        ArtworkWaterfallRepository.clearMemoryCache()
+                                        BackdropFocusCache.clear()
+                                        EnrichmentRepository.clearMemoryCaches()
+                                        app.coverCache.clearNonCustomCache()
+
+                                        val dao = app.database.mediaDao()
+                                        val allItems = dao.getAllMedia().first()
+                                        var resetCount = 0
+                                        allItems.forEach { entry ->
+                                            val isProtectedCustom = entry.isCustomEntry ||
+                                                !entry.customBannerPath.isNullOrBlank() ||
+                                                !entry.customCoverPath.isNullOrBlank() ||
+                                                entry.artworkRole != "DEFAULT"
+                                            val hasExternalLink = entry.tmdbId != null ||
+                                                entry.anilistId != null ||
+                                                entry.malId != null ||
+                                                entry.igdbId != null ||
+                                                entry.steamAppId != null ||
+                                                !entry.vndbId.isNullOrBlank()
+                                            if (!isProtectedCustom && hasExternalLink && !entry.bannerUrl.isNullOrBlank()) {
+                                                dao.updateBanner(entry.id, null)
+                                                resetCount++
+                                            }
+                                        }
+                                        resetCount
+                                    }
+                                    Toast.makeText(
+                                        context,
+                                        "Cache cleared & $updatedCount auto banners queued for fresh priority lookup. Custom art kept.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    showCacheResetSheet = false
+                                } finally {
+                                    isResettingCache = false
+                                }
+                            }
+                        }
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Clear Cache & Re-fetch Auto Banners",
+                            color = TextPrimary,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Clears cache plus auto-fetched banners so your new Banner Priority applies on next open. Keeps all custom artwork untouched.",
+                            color = TextSecondary,
+                            fontSize = 11.5.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -287,18 +574,30 @@ fun ArtworkPriorityScreen(
 @Composable
 private fun CategoryWaterfallList(
     category: MediaType,
+    target: ArtworkPriorityTarget,
     prefManager: PreferenceManager
 ) {
     val coroutineScope = rememberCoroutineScope()
     val hapticFeedback = LocalHapticFeedback.current
 
-    val initialSources by prefManager.getArtSourcePriority(category)
-        .collectAsState(initial = null)
-    val disabledSources by prefManager.getDisabledArtSources(category)
-        .collectAsState(initial = emptySet())
+    val initialSources by remember(category, target) {
+        if (target == ArtworkPriorityTarget.COVERS) {
+            prefManager.getArtSourcePriority(category)
+        } else {
+            prefManager.getBannerArtSourcePriority(category)
+        }
+    }.collectAsState(initial = null)
 
-    val currentSources = remember(category) { mutableStateListOf<String>() }
-    var initialized by remember(category) { mutableStateOf(false) }
+    val disabledSources by remember(category, target) {
+        if (target == ArtworkPriorityTarget.COVERS) {
+            prefManager.getDisabledArtSources(category)
+        } else {
+            prefManager.getBannerDisabledArtSources(category)
+        }
+    }.collectAsState(initial = emptySet())
+
+    val currentSources = remember(category, target) { mutableStateListOf<String>() }
+    var initialized by remember(category, target) { mutableStateOf(false) }
 
     val lazyListState = rememberLazyListState()
     var isDraggingAny by remember { mutableStateOf(false) }
@@ -312,7 +611,7 @@ private fun CategoryWaterfallList(
         }
     }
 
-    LaunchedEffect(initialSources) {
+    LaunchedEffect(initialSources, target) {
         val loaded = initialSources ?: return@LaunchedEffect
         if (!initialized) {
             currentSources.clear()
@@ -338,7 +637,7 @@ private fun CategoryWaterfallList(
     ) {
         itemsIndexed(
             items = currentSources,
-            key = { _, source -> source }
+            key = { _, source -> "${target.name}_$source" }
         ) { idx, source ->
             val isEnabled = source !in disabledSources
             val displayRank = when {
@@ -347,7 +646,7 @@ private fun CategoryWaterfallList(
                 else -> "#${idx + 1}"
             }
 
-            ReorderableItem(reorderableState, key = source) { isDragging ->
+            ReorderableItem(reorderableState, key = "${target.name}_$source") { isDragging ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -373,7 +672,6 @@ private fun CategoryWaterfallList(
                         .padding(vertical = 12.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left: Eye Icon Toggle (Enable / Disable in waterfall)
                     IconButton(
                         onClick = {
                             val newDisabled = if (isEnabled) {
@@ -382,7 +680,11 @@ private fun CategoryWaterfallList(
                                 disabledSources - source
                             }
                             coroutineScope.launch {
-                                prefManager.updateDisabledArtSources(category, newDisabled)
+                                if (target == ArtworkPriorityTarget.COVERS) {
+                                    prefManager.updateDisabledArtSources(category, newDisabled)
+                                } else {
+                                    prefManager.updateBannerDisabledArtSources(category, newDisabled)
+                                }
                             }
                         },
                         modifier = Modifier.size(38.dp)
@@ -395,7 +697,6 @@ private fun CategoryWaterfallList(
                         )
                     }
 
-                    // Rank Badge Pill (Primary vs Fallback)
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 6.dp)
@@ -423,7 +724,6 @@ private fun CategoryWaterfallList(
                         )
                     }
 
-                    // Center: Source Title & Provider Description
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -439,7 +739,7 @@ private fun CategoryWaterfallList(
                         )
                         Text(
                             text = if (!isEnabled) {
-                                "Disabled — bypassed in artwork waterfall"
+                                "Disabled — bypassed in ${target.label.lowercase()} waterfall"
                             } else {
                                 getSourceDescription(source)
                             },
@@ -450,7 +750,6 @@ private fun CategoryWaterfallList(
                         )
                     }
 
-                    // Right: ≡ Drag Handle
                     Box(
                         modifier = Modifier
                             .size(44.dp)
@@ -462,7 +761,11 @@ private fun CategoryWaterfallList(
                                 onDragStopped = {
                                     isDraggingAny = false
                                     coroutineScope.launch {
-                                        prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                        if (target == ArtworkPriorityTarget.COVERS) {
+                                            prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                        } else {
+                                            prefManager.updateBannerArtSourcePriority(category, currentSources.toList())
+                                        }
                                     }
                                 }
                             ),

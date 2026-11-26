@@ -120,6 +120,13 @@ class EnrichmentRepository(
                 clearartMemoryCache[key] = url
             }
         }
+
+        fun clearMemoryCaches() {
+            clearartMemoryCache.clear()
+            aniZipLogoMemoryCache.clear()
+            aniZipRootCache.clear()
+            episodeFillerMemoryCache.clear()
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
@@ -222,8 +229,16 @@ class EnrichmentRepository(
         fanartApiKey: String? = null,
         tmdbApiKey: String? = null,
         mdblistApiKey: String? = null,
+        omdbApiKey: String? = null,
         onClearartResolved: (suspend (String, Long?) -> Unit)? = null
     ): EnrichmentData = withContext(Dispatchers.IO) {
+        if (item.mediaType !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)) {
+            return@withContext EnrichmentData(
+                clearartUrl = item.clearartUrl,
+                communityScore = item.communityScore,
+                releaseYear = item.releaseYear
+            )
+        }
         var clearart: String? = item.clearartUrl
         var tmdbBackdropUrl: String? = null
         var communityScore: Float? = item.communityScore
@@ -335,6 +350,25 @@ class EnrichmentRepository(
                 if (mdbRatings.traktScore != null) traktScore = mdbRatings.traktScore
                 if (mdbRatings.audienceScore != null) audienceScore = mdbRatings.audienceScore
                 if (mdbRatings.tmdbScore != null && (isMovie || isShow || item.mediaType == MediaType.ANIME)) communityScore = mdbRatings.tmdbScore
+            }
+        }
+
+        // Optional Free OMDb Backup (IMDb, Rotten Tomatoes & Metascore)
+        val effectiveOmdbKey = omdbApiKey?.ifBlank { null }
+            ?: PreferenceManager.cachedOmdbApiKey.ifBlank { null }
+        if (effectiveOmdbKey != null &&
+            (imdbScore == null || rtScore == null || metacriticScore == null) &&
+            (resolvedImdbId != null || effectiveTmdbId != null)
+        ) {
+            val omdbImdbId = resolvedImdbId ?: effectiveTmdbId?.let { fetchTmdbImdbId(it, isMovie, effectiveTmdbKey) }
+            if (omdbImdbId != null) {
+                resolvedImdbId = omdbImdbId
+                val omdb = fetchOmdbRatings(omdbImdbId, effectiveOmdbKey)
+                if (omdb != null) {
+                    if (imdbScore == null && omdb.imdbScore != null) imdbScore = omdb.imdbScore
+                    if (rtScore == null && omdb.rtScore != null) rtScore = omdb.rtScore
+                    if (metacriticScore == null && omdb.metacriticScore != null) metacriticScore = omdb.metacriticScore
+                }
             }
         }
 
@@ -636,6 +670,52 @@ class EnrichmentRepository(
                 null
             }
         }
+
+    private suspend fun fetchOmdbRatings(
+        imdbId: String,
+        apiKey: String
+    ): MdbRatings? = NetworkPacer.withGeneralPacing {
+        try {
+            val url = "https://www.omdbapi.com/?i=${URLEncoder.encode(imdbId, "UTF-8")}&apikey=${URLEncoder.encode(apiKey, "UTF-8")}"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withGeneralPacing null
+                val body = response.body?.string() ?: return@withGeneralPacing null
+                val root = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+                    ?: return@withGeneralPacing null
+                if (!root["Response"]?.jsonPrimitive?.contentOrNull.equals("True", ignoreCase = true)) {
+                    return@withGeneralPacing null
+                }
+                val imdb = root["imdbRating"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { !it.equals("N/A", ignoreCase = true) }
+                    ?.toFloatOrNull()
+                    ?.takeIf { it > 0f }
+                var rt: Int? = null
+                var meta: Int? = root["Metascore"]?.jsonPrimitive?.contentOrNull
+                    ?.takeIf { !it.equals("N/A", ignoreCase = true) }
+                    ?.toIntOrNull()
+                    ?.takeIf { it > 0 }
+                val ratingsArr = root["Ratings"] as? JsonArray
+                ratingsArr?.forEach { node ->
+                    val obj = node as? JsonObject ?: return@forEach
+                    val source = obj["Source"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    val valStr = obj["Value"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    when {
+                        source.equals("Rotten Tomatoes", ignoreCase = true) -> {
+                            rt = valStr.removeSuffix("%").trim().toIntOrNull()?.takeIf { it in 1..100 }
+                        }
+                        source.equals("Metacritic", ignoreCase = true) && meta == null -> {
+                            meta = valStr.substringBefore("/").trim().toIntOrNull()?.takeIf { it in 1..100 }
+                        }
+                    }
+                }
+                if (imdb == null && rt == null && meta == null) null
+                else MdbRatings(imdbScore = imdb, rtScore = rt, metacriticScore = meta)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private suspend fun fetchMdbListRatings(
         imdbId: String?,

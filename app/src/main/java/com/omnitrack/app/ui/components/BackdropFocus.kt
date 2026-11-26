@@ -409,6 +409,10 @@ internal object BackdropFocusCache {
             entries.remove(entries.keys.first())
         }
     }
+
+    fun clear() = synchronized(entries) {
+        entries.clear()
+    }
 }
 
 private data class FocusedBackdropAlignment(

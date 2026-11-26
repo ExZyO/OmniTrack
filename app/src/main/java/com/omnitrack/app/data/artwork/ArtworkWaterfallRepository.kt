@@ -116,9 +116,11 @@ class ArtworkWaterfallRepository(
     ): List<ArtworkCandidate> = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext emptyList()
         val clean = cleanTitle(title)
-        val userPriority = preferenceManager?.getArtSourcePriority(mediaType)?.firstOrNull().orEmpty()
-        val userDisabled = preferenceManager?.getDisabledArtSources(mediaType)?.firstOrNull().orEmpty()
-        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}:${openLibraryId.orEmpty()}:${bookAuthor.orEmpty()}:${userPriority.joinToString(",").hashCode()}:${userDisabled.sorted().joinToString(",").hashCode()}"
+        val coverPriority = preferenceManager?.getArtSourcePriority(mediaType)?.firstOrNull().orEmpty()
+        val coverDisabled = preferenceManager?.getDisabledArtSources(mediaType)?.firstOrNull().orEmpty()
+        val bannerPriority = preferenceManager?.getBannerArtSourcePriority(mediaType)?.firstOrNull().orEmpty()
+        val bannerDisabled = preferenceManager?.getBannerDisabledArtSources(mediaType)?.firstOrNull().orEmpty()
+        val cacheKey = "${mediaType.name}:${clean.lowercase()}:${anilistId ?: 0}:${malId ?: 0}:${mangadexId.orEmpty()}:${vndbId.orEmpty()}:${englishTitle.orEmpty()}:${steamAppId ?: 0}:${openLibraryId.orEmpty()}:${bookAuthor.orEmpty()}:${coverPriority.joinToString(",").hashCode()}:${coverDisabled.sorted().joinToString(",").hashCode()}:${bannerPriority.joinToString(",").hashCode()}:${bannerDisabled.sorted().joinToString(",").hashCode()}"
 
         fun normalizeSource(name: String): String = name.trim().lowercase()
             .removeSuffix(" graphql")
@@ -133,10 +135,11 @@ class ArtworkWaterfallRepository(
             return src == cfg || src.startsWith("$cfg ")
         }
 
-        fun userPriorityIndex(candidateSource: String): Int {
-            if (userPriority.isEmpty()) return Int.MAX_VALUE
-            val idx = userPriority.indexOfFirst { matchesArtSourceSetting(candidateSource, it) }
-            return if (idx >= 0) idx else userPriority.size + 10
+        fun userPriorityIndex(candidateSource: String, isBanner: Boolean): Int {
+            val priority = if (isBanner) bannerPriority else coverPriority
+            if (priority.isEmpty()) return Int.MAX_VALUE
+            val idx = priority.indexOfFirst { matchesArtSourceSetting(candidateSource, it) }
+            return if (idx >= 0) idx else priority.size + 10
         }
 
         fun cleanArtBannerRank(candidate: ArtworkCandidate): Int {
@@ -161,7 +164,8 @@ class ArtworkWaterfallRepository(
         fun sortForType(list: List<ArtworkCandidate>): List<ArtworkCandidate> {
             return when (mediaType) {
                 MediaType.MANGA, MediaType.NOVEL -> list.sortedWith(
-                    compareBy<ArtworkCandidate> { userPriorityIndex(it.sourceName) }
+                    compareBy<ArtworkCandidate> { it.isBanner }
+                        .thenBy { userPriorityIndex(it.sourceName, it.isBanner) }
                         .thenBy { candidate ->
                             if (candidate.isBanner) {
                                 MANGA_BANNER_PRIORITY[candidate.sourceName] ?: 99
@@ -172,12 +176,12 @@ class ArtworkWaterfallRepository(
                 )
                 MediaType.VISUAL_NOVEL, MediaType.GAME, MediaType.BOOK, MediaType.COMIC -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
-                        .thenBy { userPriorityIndex(it.sourceName) }
+                        .thenBy { userPriorityIndex(it.sourceName, it.isBanner) }
                         .thenBy { cleanArtBannerRank(it) }
                 )
                 else -> list.sortedWith(
                     compareBy<ArtworkCandidate> { it.isBanner }
-                        .thenBy { userPriorityIndex(it.sourceName) }
+                        .thenBy { userPriorityIndex(it.sourceName, it.isBanner) }
                 )
             }
         }
@@ -189,9 +193,10 @@ class ArtworkWaterfallRepository(
             val cleaned = batch
                 .map { it.copy(url = LosslessCoverMapper.toLosslessUrl(it.url)) }
                 .filter { cand ->
+                    val disabled = if (cand.isBanner) bannerDisabled else coverDisabled
                     cand.url.isNotBlank() && (
                         cand.sourceName.equals("Default", ignoreCase = true) ||
-                            userDisabled.none { matchesArtSourceSetting(cand.sourceName, it) }
+                            disabled.none { matchesArtSourceSetting(cand.sourceName, it) }
                         )
                 }
             if (cleaned.isEmpty()) return synchronized(lock) { sortForType(accumulated.values.toList()) }
@@ -2412,6 +2417,10 @@ class ArtworkWaterfallRepository(
 
     companion object {
         private val candidateCache = ConcurrentHashMap<String, List<ArtworkCandidate>>()
+
+        fun clearMemoryCache() {
+            candidateCache.clear()
+        }
 
         private val MANGA_COVER_PRIORITY = mapOf(
             "RanobeDB" to 1,
