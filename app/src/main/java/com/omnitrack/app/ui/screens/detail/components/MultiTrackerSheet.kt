@@ -688,18 +688,18 @@ fun MultiTrackerSheet(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
+                            val uThumb = ArtworkModelResolver.toCoilModel(
+                                localItem.customCoverPath?.takeIf { it.isNotBlank() }
+                                    ?: localItem.coverUrl.takeIf { it.isNotBlank() }
+                            )
                             Box(
                                 modifier = Modifier
                                     .width(46.dp)
                                     .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(if (thumbModel != null) DarkSurfaceCard else Color.Transparent),
+                                    .background(if (uThumb != null) DarkSurfaceCard else Color.Transparent),
                                 contentAlignment = Alignment.Center
                             ) {
-                                val uThumb = ArtworkModelResolver.toCoilModel(
-                                    localItem.customCoverPath?.takeIf { it.isNotBlank() }
-                                        ?: localItem.coverUrl.takeIf { it.isNotBlank() }
-                                )
                                 if (uThumb != null) {
                                     AsyncImage(
                                         model = uThumb,
