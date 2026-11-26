@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.TextMuted
@@ -37,6 +38,7 @@ import com.omnitrack.app.ui.theme.TextPrimary
 fun StatusFilterChips(
     selectedStatus: TrackingStatus,
     onStatusSelected: (TrackingStatus) -> Unit,
+    mediaType: MediaType? = null,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -74,7 +76,7 @@ fun StatusFilterChips(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = status.displayName,
+                        text = status.labelFor(mediaType),
                         color = textColor,
                         fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,

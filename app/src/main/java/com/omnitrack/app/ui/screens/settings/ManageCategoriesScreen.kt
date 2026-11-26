@@ -72,10 +72,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.omnitrack.app.data.db.entity.CategoryEntity
-import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.ChimanewLibrarySettings
 import com.omnitrack.app.data.preferences.HomeHeroSettings
-import com.omnitrack.app.data.preferences.MediaCategoryPrefs
+import com.omnitrack.app.data.preferences.MediaTabKey
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.repository.MediaRepository
 import com.omnitrack.app.ui.theme.AccentGold
@@ -108,31 +107,31 @@ fun ManageCategoriesScreen(
     val categoryAssignments by preferenceManager.categoryAssignments.collectAsState(initial = emptyMap())
     val libSettings by preferenceManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
     val heroSettings by preferenceManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
-    val mediaCategoryPrefs by preferenceManager.mediaCategoryPrefs.collectAsState(initial = MediaCategoryPrefs())
+    val loadedMediaCategoryPrefs by preferenceManager.mediaCategoryPrefs.collectAsState(initial = null)
 
     var activeTab by remember { mutableIntStateOf(0) } // 0 = Media Types (Hide & Reorder), 1 = Custom Folders
-    val currentMediaTypes = remember { mutableStateListOf<MediaType>() }
+    val currentMediaTabs = remember { mutableStateListOf<MediaTabKey>() }
     var mediaTypesInitialized by remember { mutableStateOf(false) }
     var isDraggingMediaType by remember { mutableStateOf(false) }
 
-    LaunchedEffect(mediaCategoryPrefs.orderedTypes) {
-        val loaded = mediaCategoryPrefs.orderedTypes
+    LaunchedEffect(loadedMediaCategoryPrefs) {
+        val loaded = loadedMediaCategoryPrefs?.orderedTabs ?: return@LaunchedEffect
         if (!mediaTypesInitialized) {
-            currentMediaTypes.clear()
-            currentMediaTypes.addAll(loaded)
+            currentMediaTabs.clear()
+            currentMediaTabs.addAll(loaded)
             mediaTypesInitialized = true
-        } else if (!isDraggingMediaType && currentMediaTypes.toList() != loaded) {
-            currentMediaTypes.clear()
-            currentMediaTypes.addAll(loaded)
+        } else if (!isDraggingMediaType && currentMediaTabs.toList() != loaded) {
+            currentMediaTabs.clear()
+            currentMediaTabs.addAll(loaded)
         }
     }
 
     val mediaTypeListState = rememberLazyListState()
     val mediaTypeReorderableState = rememberReorderableLazyListState(mediaTypeListState) { from, to ->
-        val fromIdx = currentMediaTypes.indexOfFirst { it.name == from.key }
-        val toIdx = currentMediaTypes.indexOfFirst { it.name == to.key }
+        val fromIdx = currentMediaTabs.indexOfFirst { it.name == from.key }
+        val toIdx = currentMediaTabs.indexOfFirst { it.name == to.key }
         if (fromIdx >= 0 && toIdx >= 0 && fromIdx != toIdx) {
-            currentMediaTypes.apply { add(toIdx, removeAt(fromIdx)) }
+            currentMediaTabs.apply { add(toIdx, removeAt(fromIdx)) }
             hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
@@ -320,147 +319,152 @@ fun ManageCategoriesScreen(
                 )
             }
 
-            LazyColumn(
-                state = mediaTypeListState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                itemsIndexed(
-                    items = currentMediaTypes,
-                    key = { _, mt -> mt.name }
-                ) { idx, mt ->
-                    val isEnabled = !mediaCategoryPrefs.isHidden(mt)
-                    val displayRank = when {
-                        !isEnabled -> "OFF"
-                        idx == 0 -> "#1"
-                        else -> "#${idx + 1}"
-                    }
+            val activeMediaPrefs = loadedMediaCategoryPrefs
+            if (!mediaTypesInitialized || activeMediaPrefs == null) {
+                Box(modifier = Modifier.fillMaxSize())
+            } else {
+                LazyColumn(
+                    state = mediaTypeListState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    itemsIndexed(
+                        items = currentMediaTabs,
+                        key = { _, tab -> tab.name }
+                    ) { idx, tab ->
+                        val isEnabled = !activeMediaPrefs.isTabHidden(tab)
+                        val displayRank = when {
+                            !isEnabled -> "OFF"
+                            idx == 0 -> "#1"
+                            else -> "#${idx + 1}"
+                        }
 
-                    ReorderableItem(mediaTypeReorderableState, key = mt.name) { isDragging ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .zIndex(if (isDragging) 10f else 1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isDragging) DarkSurfaceElevated else Color.Transparent)
-                                .border(
-                                    width = 1.dp,
-                                    color = if (isDragging) AccentGold.copy(alpha = 0.65f) else Color.Transparent,
-                                    shape = RoundedCornerShape(12.dp)
-                                )
-                                .drawBehind {
-                                    if (!isDragging) {
-                                        val strokeW = 1.dp.toPx()
-                                        drawLine(
-                                            color = Color.White.copy(alpha = 0.08f),
-                                            start = Offset(0f, size.height),
-                                            end = Offset(size.width, size.height),
-                                            strokeWidth = strokeW
-                                        )
-                                    }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    val visibleCount = currentMediaTypes.count { !mediaCategoryPrefs.isHidden(it) }
-                                    if (isEnabled && visibleCount <= 1) {
-                                        Toast.makeText(context, "Keep at least one category visible", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        coroutineScope.launch {
-                                            preferenceManager.setMediaTypeHidden(mt, isEnabled)
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = if (isEnabled) "Hide Category" else "Show Category",
-                                    tint = if (isEnabled) AccentGold else TextMuted.copy(alpha = 0.45f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            Box(
+                        ReorderableItem(mediaTypeReorderableState, key = tab.name) { isDragging ->
+                            Row(
                                 modifier = Modifier
-                                    .padding(horizontal = 6.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(
-                                        when {
-                                            !isEnabled -> Color.White.copy(alpha = 0.04f)
-                                            idx == 0 -> AccentGold.copy(alpha = 0.18f)
-                                            isDragging -> AccentGold.copy(alpha = 0.24f)
-                                            else -> Color.White.copy(alpha = 0.06f)
-                                        }
+                                    .fillMaxWidth()
+                                    .zIndex(if (isDragging) 10f else 1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isDragging) DarkSurfaceElevated else Color.Transparent)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isDragging) AccentGold.copy(alpha = 0.65f) else Color.Transparent,
+                                        shape = RoundedCornerShape(12.dp)
                                     )
-                                    .padding(horizontal = 7.dp, vertical = 3.dp)
+                                    .drawBehind {
+                                        if (!isDragging) {
+                                            val strokeW = 1.dp.toPx()
+                                            drawLine(
+                                                color = Color.White.copy(alpha = 0.08f),
+                                                start = Offset(0f, size.height),
+                                                end = Offset(size.width, size.height),
+                                                strokeWidth = strokeW
+                                            )
+                                        }
+                                    }
+                                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = displayRank,
-                                    color = when {
-                                        !isEnabled -> TextMuted
-                                        idx == 0 || isDragging -> AccentGold
-                                        else -> TextSecondary
-                                    },
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 8.dp)
-                            ) {
-                                Text(
-                                    text = mt.displayName,
-                                    color = if (isEnabled) TextPrimary else TextMuted.copy(alpha = 0.65f),
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = if (isEnabled) {
-                                        "Shown in Library, Home, Discover & History"
-                                    } else {
-                                        "Hidden \u2014 tracked entries stay safely saved"
-                                    },
-                                    color = if (isEnabled) TextSecondary else TextMuted.copy(alpha = 0.50f),
-                                    fontSize = 11.5.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .draggableHandle(
-                                        onDragStarted = {
-                                            isDraggingMediaType = true
-                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        },
-                                        onDragStopped = {
-                                            isDraggingMediaType = false
+                                IconButton(
+                                    onClick = {
+                                        val visibleCount = currentMediaTabs.count { !activeMediaPrefs.isTabHidden(it) }
+                                        if (isEnabled && visibleCount <= 1) {
+                                            Toast.makeText(context, "Keep at least one category visible", Toast.LENGTH_SHORT).show()
+                                        } else {
                                             coroutineScope.launch {
-                                                preferenceManager.updateMediaTypeOrder(currentMediaTypes.toList())
+                                                preferenceManager.setMediaTabHidden(tab, isEnabled)
                                             }
                                         }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DragHandle,
-                                    contentDescription = "Reorder",
-                                    tint = if (isDragging) AccentGold else TextSecondary,
-                                    modifier = Modifier.size(24.dp)
-                                )
+                                    },
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = if (isEnabled) "Hide Category" else "Show Category",
+                                        tint = if (isEnabled) AccentGold else TextMuted.copy(alpha = 0.45f),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .padding(horizontal = 6.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            when {
+                                                !isEnabled -> Color.White.copy(alpha = 0.04f)
+                                                idx == 0 -> AccentGold.copy(alpha = 0.18f)
+                                                isDragging -> AccentGold.copy(alpha = 0.24f)
+                                                else -> Color.White.copy(alpha = 0.06f)
+                                            }
+                                        )
+                                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = displayRank,
+                                        color = when {
+                                            !isEnabled -> TextMuted
+                                            idx == 0 || isDragging -> AccentGold
+                                            else -> TextSecondary
+                                        },
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 0.5.sp
+                                    )
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 8.dp)
+                                ) {
+                                    Text(
+                                        text = tab.displayName,
+                                        color = if (isEnabled) TextPrimary else TextMuted.copy(alpha = 0.65f),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = if (isEnabled) {
+                                            "Shown in Library, Home, Discover & History"
+                                        } else {
+                                            "Hidden \u2014 tracked entries stay safely saved"
+                                        },
+                                        color = if (isEnabled) TextSecondary else TextMuted.copy(alpha = 0.50f),
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .draggableHandle(
+                                            onDragStarted = {
+                                                isDraggingMediaType = true
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDragStopped = {
+                                                isDraggingMediaType = false
+                                                coroutineScope.launch {
+                                                    preferenceManager.updateMediaTabOrder(currentMediaTabs.toList())
+                                                }
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DragHandle,
+                                        contentDescription = "Reorder",
+                                        tint = if (isDragging) AccentGold else TextSecondary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
                         }
                     }

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sync
@@ -60,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.db.entity.CategoryEntity
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -171,6 +173,8 @@ fun MultiSelectBottomActionDock(
     onDeleteSelected: (() -> Unit)? = null,
     onOpenCategories: (() -> Unit)? = null,
     onOpenDetails: (() -> Unit)? = null,
+    onCustomizeArtwork: (() -> Unit)? = null,
+    singleMediaType: MediaType? = null,
     isInline: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -338,7 +342,7 @@ fun MultiSelectBottomActionDock(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = st.displayName,
+                            text = st.labelFor(singleMediaType),
                             color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Medium
@@ -393,6 +397,19 @@ fun MultiSelectBottomActionDock(
                         onClick = {
                             showMoreSheet = false
                             onOpenDetails()
+                        }
+                    )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                }
+
+                if (selectedCount == 1 && onCustomizeArtwork != null) {
+                    SheetActionRow(
+                        icon = Icons.Default.PhotoLibrary,
+                        label = "Customize Artwork",
+                        tint = AccentGold,
+                        onClick = {
+                            showMoreSheet = false
+                            onCustomizeArtwork()
                         }
                     )
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)

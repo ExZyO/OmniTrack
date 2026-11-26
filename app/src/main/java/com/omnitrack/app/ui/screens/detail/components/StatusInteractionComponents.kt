@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
@@ -81,7 +82,8 @@ fun TrackingStatus.statusColor(): Color = when (this) {
 fun StatusPickerSheet(
     currentStatus: TrackingStatus,
     onDismiss: () -> Unit,
-    onStatusSelected: (TrackingStatus) -> Unit
+    onStatusSelected: (TrackingStatus) -> Unit,
+    mediaType: MediaType? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val statuses = listOf(
@@ -149,7 +151,7 @@ fun StatusPickerSheet(
                                 .background(color)
                         )
                         Text(
-                            text = status.displayName,
+                            text = status.labelFor(mediaType),
                             fontSize = 14.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             color = if (isSelected) color else TextPrimary
@@ -183,7 +185,8 @@ fun AttachedStatusFanArcOverlay(
     currentStatus: TrackingStatus,
     thumbAnchor: Offset,
     onDismiss: () -> Unit,
-    onCommit: (TrackingStatus) -> Unit
+    onCommit: (TrackingStatus) -> Unit,
+    mediaType: MediaType? = null
 ) {
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current.density
@@ -333,7 +336,7 @@ fun AttachedStatusFanArcOverlay(
                     .background(statuses[selectedIndex].statusColor())
             )
             Text(
-                text = statuses[selectedIndex].displayName.uppercase(),
+                text = statuses[selectedIndex].labelFor(mediaType).uppercase(),
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Black,
                 color = statuses[selectedIndex].statusColor()

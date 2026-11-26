@@ -533,8 +533,13 @@ fun HistoryView(
     }
 
     if (isMultiSelectMode) {
+        val singleSelectedHistoryType = remember(selectedIds, activeHistoryMedia) {
+            if (selectedIds.size != 1) null
+            else activeHistoryMedia.firstOrNull { it.id in selectedIds }?.mediaType
+        }
         MultiSelectBottomActionDock(
             selectedCount = selectedIds.size,
+            singleMediaType = singleSelectedHistoryType,
             onMarkCompleted = {
                 onBatchMarkCompleted(selectedIds)
                 isMultiSelectMode = false
@@ -692,7 +697,7 @@ fun HistoryView(
                         Text(
                             text = listOfNotNull(
                                 sheetTarget.mediaType.displayName,
-                                sheetTarget.status.displayName,
+                                sheetTarget.status.labelFor(sheetTarget.mediaType),
                                 formatConciseProgress(sheetTarget).takeIf { it.isNotBlank() }
                             ).joinToString(" \u00B7 "),
                             fontSize = 12.sp,
@@ -783,7 +788,7 @@ fun HistoryView(
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
-                                text = st.displayName,
+                                text = st.labelFor(sheetTarget.mediaType),
                                 fontSize = 11.5.sp,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                 color = if (active) OnAccentColor else TextPrimary
@@ -959,7 +964,7 @@ private fun HistoryHairlineRow(
                 overflow = TextOverflow.Ellipsis
             )
             Text(
-                text = "${item.status.displayName} \u00B7 $timeLabel",
+                text = "${item.status.labelFor(item.mediaType)} \u00B7 $timeLabel",
                 fontSize = 11.sp,
                 color = TextSecondary.copy(alpha = 0.72f),
                 maxLines = 1,

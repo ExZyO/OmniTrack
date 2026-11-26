@@ -76,24 +76,13 @@ fun ChimanewStatusBottomSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = LocalHapticFeedback.current
 
-    val activeVerb = when (mediaType) {
-        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK, MediaType.FANFICTION -> "Reading"
-        MediaType.GAME, MediaType.VISUAL_NOVEL -> "Playing"
-        else -> "Watching"
-    }
-    val planVerb = when (mediaType) {
-        MediaType.MANGA, MediaType.COMIC, MediaType.NOVEL, MediaType.BOOK, MediaType.FANFICTION -> "Plan to Read"
-        MediaType.GAME, MediaType.VISUAL_NOVEL -> "Plan to Play"
-        else -> "Plan to Watch"
-    }
-
     val statuses = listOf(
-        TrackingStatus.IN_PROGRESS to activeVerb,
-        TrackingStatus.COMPLETED to "Completed",
-        TrackingStatus.PLAN_TO_TRACK to planVerb,
-        TrackingStatus.ON_HOLD to "On Hold",
-        TrackingStatus.DROPPED to "Dropped"
-    )
+        TrackingStatus.IN_PROGRESS,
+        TrackingStatus.COMPLETED,
+        TrackingStatus.PLAN_TO_TRACK,
+        TrackingStatus.ON_HOLD,
+        TrackingStatus.DROPPED
+    ).map { it to it.labelFor(mediaType) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

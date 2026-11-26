@@ -26,6 +26,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.IOException
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omnitrack_settings")
@@ -241,11 +246,6 @@ enum class BannerSizing(val displayName: String, val description: String) {
     FULL_BLEED("Full-Bleed Hero", "Edge-to-edge tall showcase")
 }
 
-enum class DetailsBackdropStyle(val displayName: String, val description: String) {
-    CINEMATIC_FADE("Cinematic Fade", "17-stop quintic smoothstep curve"),
-    SOLID_AMOLED("Solid AMOLED", "Direct transition into pure black")
-}
-
 enum class FallbackBackgroundStyle(val displayName: String, val description: String) {
     CINEMATIC_BLUR("Cinematic Blur", "Gentle ambient micro-blurred glow"),
     DOMINANT_COLOR("Ambient Palette Glow", "Dynamic dominant color extraction"),
@@ -276,7 +276,6 @@ enum class HomeRowKey(val displayName: String, val description: String) {
     RECENT("Recently Updated", "Latest additions and progress updates"),
     PLAN("Plan to Track", "Your queued backlog across all media"),
     FAVORITES("Favorites & Top Rated", "Your highest-rated and favorite titles"),
-    IN_PROGRESS("In Progress", "Everything you are actively watching, reading, or playing"),
     COMPLETED("Completed", "Finished titles in your collection"),
     ON_HOLD("On Hold", "Paused entries waiting to be resumed"),
     DROPPED("Dropped", "Titles you decided to stop tracking"),
@@ -379,6 +378,7 @@ data class HomeHeroSettings(
     val homeDashboardStyle: String = "EDITORIAL", // "EDITORIAL" (Option A) or "COMPACT" (Option C)
     val showQuickPlusOnContinue: Boolean = true,
     val shelfPosterSize: HomeShelfPosterSize = HomeShelfPosterSize.STANDARD,
+    val shelfPosterWidthDp: Int = 114,
     val shelfItemLimit: Int = 0, // 0 = Unlimited (Infinite), or 8 / 12 / 20
     val defaultCategory: MediaType = MediaType.ALL,
     val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
@@ -398,7 +398,6 @@ data class PresentationSettings(
     val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
     val autoCenterCoverWhenNoBanner: Boolean = true,
     val bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
-    val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
     val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR,
     val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
     val categoryBannerBlurOverrides: Map<String, HeroBannerBlurLevel> = emptyMap()
@@ -578,21 +577,53 @@ data class PerformanceSettings(
     val hardwareBitmaps: Boolean = true
 )
 
+enum class MediaTabKey(
+    val displayName: String,
+    val mediaType: MediaType,
+    val novelSubtypeFilter: String? = null
+) {
+    ANIME("Anime", MediaType.ANIME),
+    MANGA("Manga", MediaType.MANGA),
+    COMIC("Comics", MediaType.COMIC),
+    LIGHT_NOVEL("Light Novels", MediaType.NOVEL, "LIGHT_NOVEL"),
+    WEB_NOVEL("Web Novels", MediaType.NOVEL, "WEB_NOVEL"),
+    FANFICTION("Fanfiction", MediaType.FANFICTION),
+    BOOK("Books", MediaType.BOOK),
+    SHOW("Shows", MediaType.SHOW),
+    MOVIE("Movies", MediaType.MOVIE),
+    VISUAL_NOVEL("Visual Novels", MediaType.VISUAL_NOVEL),
+    GAME("Games", MediaType.GAME);
+}
+
 val DEFAULT_MEDIA_TYPE_ORDER: List<MediaType> = MediaType.filterTabs.filter { it != MediaType.ALL }
+val DEFAULT_MEDIA_TAB_ORDER: List<MediaTabKey> = MediaTabKey.entries
 
 @Immutable
 data class MediaCategoryPrefs(
-    val orderedTypes: List<MediaType> = DEFAULT_MEDIA_TYPE_ORDER,
-    val hiddenTypes: Set<MediaType> = emptySet()
+    val orderedTabs: List<MediaTabKey> = DEFAULT_MEDIA_TAB_ORDER,
+    val hiddenTabs: Set<MediaTabKey> = emptySet()
 ) {
+    val orderedTypes: List<MediaType>
+        get() = orderedTabs.map { it.mediaType }.distinct()
+
+    val hiddenTypes: Set<MediaType>
+        get() = DEFAULT_MEDIA_TYPE_ORDER.filter { mt ->
+            val tabsForType = MediaTabKey.entries.filter { it.mediaType == mt }
+            tabsForType.isNotEmpty() && tabsForType.all { it in hiddenTabs }
+        }.toSet()
+
+    fun visibleTabKeys(): List<MediaTabKey> =
+        orderedTabs.filter { it !in hiddenTabs }.ifEmpty { listOf(MediaTabKey.ANIME) }
+
     fun visibleMediaTypes(): List<MediaType> =
-        orderedTypes.filter { it != MediaType.ALL && it !in hiddenTypes }
-            .ifEmpty { listOf(MediaType.ANIME) }
+        visibleTabKeys().map { it.mediaType }.distinct().ifEmpty { listOf(MediaType.ANIME) }
 
     fun visibleFilterTabs(includeAll: Boolean = true): List<MediaType> =
         if (includeAll) listOf(MediaType.ALL) + visibleMediaTypes() else visibleMediaTypes()
 
     fun isHidden(type: MediaType): Boolean = type in hiddenTypes
+
+    fun isTabHidden(tab: MediaTabKey): Boolean = tab in hiddenTabs
 }
 
 class PreferenceManager(private val context: Context) {
@@ -605,7 +636,6 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_PAGE_PRESENTATION = stringPreferencesKey("details_page_presentation")
         val AUTO_CENTER_COVER_WHEN_NO_BANNER = booleanPreferencesKey("auto_center_cover_when_no_banner")
         val BANNER_SIZING = stringPreferencesKey("banner_sizing")
-        val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
         val DISCOVER_LAYOUT_STYLE = stringPreferencesKey("discover_layout_style")
@@ -643,6 +673,7 @@ class PreferenceManager(private val context: Context) {
         val HOME_DASHBOARD_STYLE = stringPreferencesKey("home_dashboard_style")
         val HOME_CONTINUE_QUICK_PLUS = booleanPreferencesKey("home_continue_quick_plus")
         val HOME_SHELF_POSTER_SIZE = stringPreferencesKey("home_shelf_poster_size")
+        val HOME_SHELF_POSTER_WIDTH_DP = intPreferencesKey("home_shelf_poster_width_dp")
         val HOME_SHELF_ITEM_LIMIT = intPreferencesKey("home_shelf_item_limit")
         val HOME_DEFAULT_CATEGORY = stringPreferencesKey("home_default_category")
         val LIBRARY_VIEW_MODE = stringPreferencesKey("library_view_mode")
@@ -759,9 +790,6 @@ class PreferenceManager(private val context: Context) {
                 bannerSizing = prefs[PreferencesKeys.BANNER_SIZING]?.let {
                     runCatching { BannerSizing.valueOf(it) }.getOrNull()
                 } ?: BannerSizing.FULL_BLEED,
-                detailsBackdropStyle = prefs[PreferencesKeys.DETAILS_BACKDROP_STYLE]?.let {
-                    runCatching { DetailsBackdropStyle.valueOf(it) }.getOrNull()
-                } ?: DetailsBackdropStyle.CINEMATIC_FADE,
                 fallbackBackgroundStyle = prefs[PreferencesKeys.FALLBACK_BACKGROUND_STYLE]?.let {
                     runCatching { FallbackBackgroundStyle.valueOf(it) }.getOrNull()
                 } ?: FallbackBackgroundStyle.CINEMATIC_BLUR,
@@ -921,12 +949,6 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateBannerSizing(sizing: BannerSizing) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.BANNER_SIZING] = sizing.name
-        }
-    }
-
-    suspend fun updateDetailsBackdropStyle(style: DetailsBackdropStyle) {
-        context.dataStore.edit { prefs ->
-            prefs[PreferencesKeys.DETAILS_BACKDROP_STYLE] = style.name
         }
     }
 
@@ -1379,7 +1401,14 @@ class PreferenceManager(private val context: Context) {
                 HomeLayoutDefaults.defaultRows
             } else {
                 try {
-                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<HomeRowItem>>(raw)
+                    val arr = Json.parseToJsonElement(raw).jsonArray
+                    val parsed = arr.mapNotNull { elem ->
+                        val obj = elem.jsonObject
+                        val keyStr = obj["key"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                        val key = runCatching { HomeRowKey.valueOf(keyStr) }.getOrNull() ?: return@mapNotNull null
+                        val enabled = obj["isEnabled"]?.jsonPrimitive?.booleanOrNull ?: true
+                        HomeRowItem(key = key, isEnabled = enabled)
+                    }.distinctBy { it.key }
                     val existingKeys = parsed.map { it.key }.toSet()
                     val missing = HomeLayoutDefaults.defaultRows.filter { it.key !in existingKeys }
                     parsed + missing
@@ -1451,6 +1480,9 @@ class PreferenceManager(private val context: Context) {
                 homeDashboardStyle = prefs[PreferencesKeys.HOME_DASHBOARD_STYLE] ?: "EDITORIAL",
                 showQuickPlusOnContinue = prefs[PreferencesKeys.HOME_CONTINUE_QUICK_PLUS] ?: true,
                 shelfPosterSize = HomeShelfPosterSize.fromName(prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE]),
+                shelfPosterWidthDp = (prefs[PreferencesKeys.HOME_SHELF_POSTER_WIDTH_DP]
+                    ?: HomeShelfPosterSize.fromName(prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE]).widthDp)
+                    .coerceIn(84, 168),
                 shelfItemLimit = (prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] ?: 0).let {
                     if (it in listOf(0, 8, 12, 20)) it else 0
                 },
@@ -1517,7 +1549,8 @@ class PreferenceManager(private val context: Context) {
     suspend fun setHomeHeroAutoRotate(enabled: Boolean) {
         context.dataStore.edit {
             it[PreferencesKeys.HOME_HERO_AUTO_ROTATE] = enabled
-            it[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = if (enabled) 6 else 0
+            val current = it[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] ?: 6
+            it[PreferencesKeys.HOME_HERO_ROTATE_SECONDS] = if (enabled) (if (current > 0) current else 6) else 0
         }
     }
 
@@ -1558,7 +1591,22 @@ class PreferenceManager(private val context: Context) {
     }
 
     suspend fun setHomeShelfPosterSize(size: HomeShelfPosterSize) {
-        context.dataStore.edit { it[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = size.name }
+        context.dataStore.edit {
+            it[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = size.name
+            it[PreferencesKeys.HOME_SHELF_POSTER_WIDTH_DP] = size.widthDp
+        }
+    }
+
+    suspend fun setHomeShelfPosterWidthDp(widthDp: Int) {
+        val safe = widthDp.coerceIn(84, 168)
+        context.dataStore.edit {
+            it[PreferencesKeys.HOME_SHELF_POSTER_WIDTH_DP] = safe
+            it[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = when {
+                safe <= 102 -> HomeShelfPosterSize.COMPACT.name
+                safe >= 130 -> HomeShelfPosterSize.LARGE.name
+                else -> HomeShelfPosterSize.STANDARD.name
+            }
+        }
     }
 
     suspend fun setHomeShelfItemLimit(limit: Int) {
@@ -1597,6 +1645,7 @@ class PreferenceManager(private val context: Context) {
             prefs[PreferencesKeys.HOME_DASHBOARD_STYLE] = "EDITORIAL"
             prefs[PreferencesKeys.HOME_CONTINUE_QUICK_PLUS] = true
             prefs[PreferencesKeys.HOME_SHELF_POSTER_SIZE] = HomeShelfPosterSize.STANDARD.name
+            prefs[PreferencesKeys.HOME_SHELF_POSTER_WIDTH_DP] = 114
             prefs[PreferencesKeys.HOME_SHELF_ITEM_LIMIT] = 0
             prefs[PreferencesKeys.HOME_DEFAULT_CATEGORY] = MediaType.ALL.name
         }
@@ -1868,7 +1917,7 @@ class PreferenceManager(private val context: Context) {
         .distinctUntilChanged()
 
     suspend fun updateFanfictionEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[PreferencesKeys.FANFICTION_ENABLED] = enabled }
+        setMediaTabHidden(MediaTabKey.FANFICTION, !enabled)
     }
 
     val fanficNsfwFilterMode: Flow<VnNsfwFilterMode> = context.dataStore.data
@@ -2015,64 +2064,88 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    private fun decodeMediaTabTokens(tokens: Iterable<String>): List<MediaTabKey> =
+        tokens.flatMap { raw ->
+            when (raw.trim().uppercase()) {
+                "", "ALL" -> emptyList()
+                "NOVEL" -> listOf(MediaTabKey.LIGHT_NOVEL, MediaTabKey.WEB_NOVEL)
+                else -> listOfNotNull(runCatching { MediaTabKey.valueOf(raw.trim().uppercase()) }.getOrNull())
+            }
+        }
+
     val mediaCategoryPrefs: Flow<MediaCategoryPrefs> = context.dataStore.data
         .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
             val savedOrder = prefs[PreferencesKeys.MEDIA_TYPE_ORDER]
                 ?.split(",")
-                ?.mapNotNull { raw -> runCatching { MediaType.valueOf(raw.trim()) }.getOrNull() }
-                ?.filter { it != MediaType.ALL }
+                ?.let(::decodeMediaTabTokens)
                 ?.distinct()
                 .orEmpty()
             val fullOrder = buildList {
                 addAll(savedOrder)
-                DEFAULT_MEDIA_TYPE_ORDER.forEach { mt -> if (mt !in this) add(mt) }
+                DEFAULT_MEDIA_TAB_ORDER.forEach { tab -> if (tab !in this) add(tab) }
             }
             val savedHidden = prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES]
-                ?.mapNotNull { raw -> runCatching { MediaType.valueOf(raw.trim()) }.getOrNull() }
-                ?.filter { it != MediaType.ALL }
+                ?.let(::decodeMediaTabTokens)
                 ?.toMutableSet()
                 ?: mutableSetOf()
             if (prefs[PreferencesKeys.FANFICTION_ENABLED] == false) {
-                savedHidden.add(MediaType.FANFICTION)
+                savedHidden.add(MediaTabKey.FANFICTION)
             }
             // Never allow all categories to be hidden at once
             if (savedHidden.size >= fullOrder.size) {
                 savedHidden.remove(fullOrder.first())
             }
-            MediaCategoryPrefs(orderedTypes = fullOrder, hiddenTypes = savedHidden)
+            MediaCategoryPrefs(orderedTabs = fullOrder, hiddenTabs = savedHidden)
         }
         .distinctUntilChanged()
 
-    suspend fun updateMediaTypeOrder(order: List<MediaType>) {
+    suspend fun updateMediaTabOrder(order: List<MediaTabKey>) {
         val clean = buildList {
-            order.filter { it != MediaType.ALL }.distinct().forEach { add(it) }
-            DEFAULT_MEDIA_TYPE_ORDER.forEach { if (it !in this) add(it) }
+            order.distinct().forEach { add(it) }
+            DEFAULT_MEDIA_TAB_ORDER.forEach { if (it !in this) add(it) }
         }
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.MEDIA_TYPE_ORDER] = clean.joinToString(",") { it.name }
         }
     }
 
-    suspend fun setMediaTypeHidden(type: MediaType, hidden: Boolean) {
-        if (type == MediaType.ALL) return
+    suspend fun setMediaTabHidden(tab: MediaTabKey, hidden: Boolean) {
         context.dataStore.edit { prefs ->
-            val current = prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES]?.toMutableSet() ?: mutableSetOf()
+            val current = prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES]
+                ?.let(::decodeMediaTabTokens)
+                ?.toMutableSet()
+                ?: mutableSetOf()
             if (prefs[PreferencesKeys.FANFICTION_ENABLED] == false) {
-                current.add(MediaType.FANFICTION.name)
+                current.add(MediaTabKey.FANFICTION)
             }
             if (hidden) {
                 // Keep at least 1 category visible
-                if (current.size < DEFAULT_MEDIA_TYPE_ORDER.size - 1) {
-                    current.add(type.name)
+                if (current.size < DEFAULT_MEDIA_TAB_ORDER.size - 1) {
+                    current.add(tab)
                 }
             } else {
-                current.remove(type.name)
+                current.remove(tab)
             }
-            prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES] = current
-            if (type == MediaType.FANFICTION) {
+            prefs[PreferencesKeys.HIDDEN_MEDIA_TYPES] = current.map { it.name }.toSet()
+            if (tab == MediaTabKey.FANFICTION) {
                 prefs[PreferencesKeys.FANFICTION_ENABLED] = !hidden
             }
+        }
+    }
+
+    suspend fun updateMediaTypeOrder(order: List<MediaType>) {
+        val tabs = order.filter { it != MediaType.ALL }.distinct().flatMap { mt ->
+            if (mt == MediaType.NOVEL) listOf(MediaTabKey.LIGHT_NOVEL, MediaTabKey.WEB_NOVEL)
+            else listOfNotNull(MediaTabKey.entries.firstOrNull { it.mediaType == mt })
+        }
+        updateMediaTabOrder(tabs)
+    }
+
+    suspend fun setMediaTypeHidden(type: MediaType, hidden: Boolean) {
+        if (type == MediaType.ALL) return
+        MediaTabKey.entries.filter { it.mediaType == type }.forEach { tab ->
+            setMediaTabHidden(tab, hidden)
         }
     }
 

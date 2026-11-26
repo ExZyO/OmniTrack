@@ -128,6 +128,7 @@ import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
 import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import kotlin.math.roundToInt
 import com.omnitrack.app.ui.components.glassCardDepth
 import com.omnitrack.app.ui.components.heroBackgroundOverscan
 import com.omnitrack.app.ui.components.heroPageForItem
@@ -226,8 +227,10 @@ fun HomeDashboardView(
 
     val isUnlimitedShelf = heroSettings.shelfItemLimit <= 0
     val shelfLimit = if (isUnlimitedShelf) Int.MAX_VALUE else heroSettings.shelfItemLimit.coerceIn(8, 24)
-    val posterWidthDp = heroSettings.shelfPosterSize.widthDp.dp
-    val posterHeightDp = heroSettings.shelfPosterSize.heightDp.dp
+    val shelfWidthInt = heroSettings.shelfPosterWidthDp.coerceIn(84, 168)
+    val posterWidthDp = shelfWidthInt.dp
+    val posterHeightDp = (shelfWidthInt * 1.5f).roundToInt().dp
+    val coverScale = shelfWidthInt / 114f
 
     val visibleAllMedia = remember(allMedia, fanfictionEnabled, fanficNsfwMode) {
         allMedia.filterNot { item ->
@@ -280,9 +283,6 @@ fun HomeDashboardView(
     }
     val favoriteItems = remember(allFavoriteItems, shelfLimit) {
         if (shelfLimit == Int.MAX_VALUE) allFavoriteItems else allFavoriteItems.take(shelfLimit)
-    }
-    val inProgressItems = remember(allContinueItems, shelfLimit) {
-        if (shelfLimit == Int.MAX_VALUE) allContinueItems else allContinueItems.take(shelfLimit)
     }
     val completedItems = remember(categoryMedia, shelfLimit) {
         val list = categoryMedia.filter { it.status == TrackingStatus.COMPLETED }.sortedByDescending { it.lastUpdated }
@@ -432,11 +432,22 @@ fun HomeDashboardView(
             listOf(poolForSourceKey(heroSettings.heroSource.name).filter(::matchesFilters))
         }
 
-        val mergedRaw: List<HomeHeroSlide> = if (heroSettings.slideOrder.equals("INTERLEAVED", ignoreCase = true) || heroSettings.heroSource == HomeHeroSource.ALL_MIXED) {
+        val mergedRaw: List<HomeHeroSlide> = if (heroSettings.slideOrder.equals("INTERLEAVED", ignoreCase = true)) {
+            val poolsToMix = if (activePools.size > 1) {
+                activePools
+            } else {
+                val single = activePools.firstOrNull().orEmpty()
+                single.groupBy { slide ->
+                    when (slide) {
+                        is HomeHeroSlide.LocalSlide -> slide.item.mediaType
+                        is HomeHeroSlide.TrendingSlide -> slide.item.mediaType
+                    }
+                }.values.toList()
+            }
             val out = mutableListOf<HomeHeroSlide>()
-            val maxLen = activePools.maxOfOrNull { it.size } ?: 0
+            val maxLen = poolsToMix.maxOfOrNull { it.size } ?: 0
             for (i in 0 until maxLen) {
-                activePools.forEach { pool -> if (i < pool.size) out.add(pool[i]) }
+                poolsToMix.forEach { pool -> if (i < pool.size) out.add(pool[i]) }
             }
             out.distinctBy { it.slideKey() }
         } else {
@@ -459,6 +470,26 @@ fun HomeDashboardView(
         }
 
         val ordered = when (heroSettings.slideOrder.uppercase()) {
+            "RECENT" -> {
+                val base = resolved.sortedWith(
+                    compareByDescending<HomeHeroSlide> { slide ->
+                        when (slide) {
+                            is HomeHeroSlide.LocalSlide -> slide.item.lastUpdated
+                            is HomeHeroSlide.TrendingSlide -> 0L
+                        }
+                    }
+                )
+                if (heroRefreshNonce > 0 && base.size > 1) {
+                    val shift = java.util.Random(heroRefreshNonce.toLong() * 7919L + 17L).nextInt(base.size - 1) + 1
+                    base.drop(shift) + base.take(shift)
+                } else base
+            }
+            "INTERLEAVED" -> {
+                if (heroRefreshNonce > 0 && resolved.size > 1) {
+                    val shift = java.util.Random(heroRefreshNonce.toLong() * 5381L + 13L).nextInt(resolved.size - 1) + 1
+                    resolved.drop(shift) + resolved.take(shift)
+                } else resolved
+            }
             "TOP_RATED" -> {
                 val base = resolved.sortedByDescending { slide ->
                     when (slide) {
@@ -946,6 +977,8 @@ fun HomeDashboardView(
                                                 item = item,
                                                 style = continueTrackingStyle,
                                                 posterStyle = posterStyle,
+                                                coverScale = coverScale,
+                                                posterWidthDp = posterWidthDp,
                                                 showQuickPlus = heroSettings.showQuickPlusOnContinue,
                                                 onClick = { onItemClick(item.id) },
                                                 onLongClick = {
@@ -1183,7 +1216,7 @@ fun HomeDashboardView(
                         if (planItems.isNotEmpty()) {
                             item(key = "row_plan") {
                                 MediaSummaryRail(
-                                    title = "Plan to Track",
+                                    title = TrackingStatus.PLAN_TO_TRACK.labelFor(selectedCategory),
                                     actionLabel = "Library",
                                     items = planItems,
                                     cardWidth = posterWidthDp,
@@ -1202,22 +1235,6 @@ fun HomeDashboardView(
                                     title = "Favorites & Top Rated",
                                     actionLabel = "Library",
                                     items = favoriteItems,
-                                    cardWidth = posterWidthDp,
-                                    cardHeight = posterHeightDp,
-                                    onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
-                                    onItemClick = onItemClick
-                                )
-                            }
-                        }
-                    }
-
-                    HomeRowKey.IN_PROGRESS -> {
-                        if (inProgressItems.isNotEmpty()) {
-                            item(key = "row_in_progress") {
-                                MediaSummaryRail(
-                                    title = "In Progress",
-                                    actionLabel = "Library",
-                                    items = inProgressItems,
                                     cardWidth = posterWidthDp,
                                     cardHeight = posterHeightDp,
                                     onActionClick = { onNavigateToLibraryCategory(selectedCategory) },
@@ -1747,7 +1764,7 @@ private fun rememberResolvedHomeHeroSlide(
         val cachedRatings = heroMultiRatingsCache[heroRatingsCacheKey(localItem.id, localItem.mediaType, localItem.title)]
         ResolvedHomeHeroSlide(
             title = localItem.title,
-            categoryBadge = "${localItem.mediaType.displayName.uppercase()} \u00B7 ${localItem.status.displayName.uppercase()}",
+            categoryBadge = "${localItem.mediaType.displayName.uppercase()} \u00B7 ${localItem.status.labelFor(localItem.mediaType).uppercase()}",
             posterModel = coverModel,
             posterFallback = if (localItem.mediaType == MediaType.FANFICTION && coverModel == null) {
                 {
@@ -2808,11 +2825,14 @@ private fun ContinueTrackingCard(
     item: MediaCardSummary,
     style: ContinueTrackingStyle,
     posterStyle: PosterCardStyle = PosterCardStyle(),
+    coverScale: Float = 1f,
+    posterWidthDp: Dp = 114.dp,
     showQuickPlus: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onQuickProgress: () -> Unit
 ) {
+    val perf = LocalPerformanceSettings.current
     val coverModel = remember(item.customCoverPath, item.coverUrl) {
         ArtworkModelResolver.toCoilModel(ArtworkModelResolver.preferredCover(item))
     }
@@ -2823,15 +2843,16 @@ private fun ContinueTrackingCard(
     val progressLabel = remember(item) { formatConciseProgress(item) }
     val fraction = remember(item) { computeProgressFraction(item) }
     val badgeText = progressLabel.ifBlank { item.mediaType.displayName }
-    val applyDepth = posterStyle.cardDepthEnabled && posterStyle.cardDepthContinueWatchingEnabled
+    val applyDepth = !perf.disableCardDepthEffects && posterStyle.cardDepthEnabled && posterStyle.cardDepthContinueWatchingEnabled
 
     when (style) {
         ContinueTrackingStyle.CARD -> {
             // Option A Frameless Editorial 16:9 Artwork + Clean Label Below
             val artShape = RoundedCornerShape(8.dp)
+            val cardWidth = (224f * coverScale).roundToInt().coerceIn(168, 330).dp
             Column(
                 modifier = Modifier
-                    .width(224.dp)
+                    .width(cardWidth)
                     .combinedClickable(onClick = onClick, onLongClick = onLongClick),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {
@@ -2936,9 +2957,12 @@ private fun ContinueTrackingCard(
         ContinueTrackingStyle.WIDE -> {
             // Frameless Editorial Wide Split Row (zero outer container/border)
             val posterShape = RoundedCornerShape(6.dp)
+            val wideTotalW = (286f * coverScale).roundToInt().coerceIn(220, 360).dp
+            val wideThumbW = (64f * coverScale).roundToInt().coerceIn(48, 96).dp
+            val wideThumbH = (96f * coverScale).roundToInt().coerceIn(72, 144).dp
             Column(
                 modifier = Modifier
-                    .width(286.dp)
+                    .width(wideTotalW)
                     .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             ) {
                 Row(
@@ -2950,8 +2974,8 @@ private fun ContinueTrackingCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .width(64.dp)
-                            .height(96.dp)
+                            .width(wideThumbW)
+                            .height(wideThumbH)
                             .clip(posterShape)
                             .background(Color.White.copy(alpha = 0.05f))
                             .glassCardDepth(
@@ -2987,7 +3011,7 @@ private fun ContinueTrackingCard(
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .height(92.dp),
+                            .height((wideThumbH - 4.dp).coerceAtLeast(68.dp)),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -3088,7 +3112,7 @@ private fun ContinueTrackingCard(
             val posterShape = RoundedCornerShape(8.dp)
             Column(
                 modifier = Modifier
-                    .width(118.dp)
+                    .width(posterWidthDp)
                     .combinedClickable(onClick = onClick, onLongClick = onLongClick),
                 verticalArrangement = Arrangement.spacedBy(7.dp)
             ) {

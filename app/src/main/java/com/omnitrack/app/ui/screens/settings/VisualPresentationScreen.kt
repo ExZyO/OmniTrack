@@ -65,7 +65,6 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.BannerSizing
-import com.omnitrack.app.data.preferences.DetailsBackdropStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
@@ -637,7 +636,10 @@ fun VisualPresentationScreen(
 
             // Section 6: Fanfiction (Tab Visibility & Mature/Explicit NSFW Filter)
             PresentationSectionTitle("FANFICTION (TAB & NSFW)")
-            val fanfictionEnabled by prefManager.fanfictionEnabled.collectAsState(initial = true)
+            val mediaCategoryPrefs by prefManager.mediaCategoryPrefs.collectAsState(
+                initial = com.omnitrack.app.data.preferences.MediaCategoryPrefs()
+            )
+            val fanfictionEnabled = !mediaCategoryPrefs.isHidden(MediaType.FANFICTION)
             val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
             PresentationChoiceCard(
                 title = if (fanfictionEnabled) "Fanfiction Tab Visible" else "Fanfiction Tab Hidden",

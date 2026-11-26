@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -470,7 +471,7 @@ class HomeViewModel(
             _undoEvent.value = ProgressUndoEvent(
                 mediaId = entity.id,
                 title = entity.title,
-                deltaLabel = status.displayName,
+                deltaLabel = status.labelFor(entity.mediaType),
                 previousProgress = entity.currentProgress,
                 previousStatus = entity.status,
                 previousAudioMinutes = entity.bookAudioMinutes,
@@ -1110,6 +1111,152 @@ class HomeViewModel(
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
             }
+        }
+    }
+
+    fun observeMediaById(id: Long): Flow<MediaItemEntity?> = repository.getMediaById(id)
+
+    private fun deleteLocalArtFileIfNeeded(path: String?) {
+        if (path.isNullOrBlank() || path == "NONE" || path.startsWith("http://") || path.startsWith("https://")) return
+        try {
+            java.io.File(path).delete()
+        } catch (_: Exception) {
+        }
+    }
+
+    fun updateItemCover(mediaId: Long, newCoverUrl: String) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            if (!latest.customCoverPath.isNullOrBlank() && latest.customCoverPath != newCoverUrl) {
+                deleteLocalArtFileIfNeeded(latest.customCoverPath)
+            }
+            val nextRole = if (latest.artworkRole == "BANNER_AS_COVER") "DEFAULT" else latest.artworkRole
+            repository.updateMedia(
+                latest.copy(
+                    coverUrl = newCoverUrl,
+                    customCoverPath = newCoverUrl,
+                    artworkRole = nextRole
+                )
+            )
+        }
+    }
+
+    fun updateItemCustomCoverPath(mediaId: Long, path: String?) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            if (!latest.customCoverPath.isNullOrBlank() && latest.customCoverPath != path) {
+                deleteLocalArtFileIfNeeded(latest.customCoverPath)
+            }
+            val nextRole = if (path != null && latest.artworkRole == "BANNER_AS_COVER") "DEFAULT" else latest.artworkRole
+            repository.updateMedia(latest.copy(customCoverPath = path, artworkRole = nextRole))
+        }
+    }
+
+    fun updateItemBanner(mediaId: Long, newBannerUrl: String) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            if (!latest.customBannerPath.isNullOrBlank() && latest.customBannerPath != newBannerUrl) {
+                deleteLocalArtFileIfNeeded(latest.customBannerPath)
+            }
+            val nextRole = if (latest.artworkRole == "DISABLE_BANNER" || latest.artworkRole == "COVER_AS_BANNER") {
+                "DEFAULT"
+            } else {
+                latest.artworkRole
+            }
+            repository.updateMedia(
+                latest.copy(
+                    bannerUrl = newBannerUrl,
+                    customBannerPath = newBannerUrl,
+                    artworkRole = nextRole
+                )
+            )
+        }
+    }
+
+    fun updateItemCustomBannerPath(mediaId: Long, path: String?) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            if (!latest.customBannerPath.isNullOrBlank() && latest.customBannerPath != path) {
+                deleteLocalArtFileIfNeeded(latest.customBannerPath)
+            }
+            val nextRole = when {
+                path == "NONE" -> "DISABLE_BANNER"
+                path != null && (latest.artworkRole == "DISABLE_BANNER" || latest.artworkRole == "COVER_AS_BANNER") -> "DEFAULT"
+                path == null && latest.artworkRole == "DISABLE_BANNER" -> "DEFAULT"
+                else -> latest.artworkRole
+            }
+            repository.updateMedia(latest.copy(customBannerPath = path, artworkRole = nextRole))
+        }
+    }
+
+    fun resetItemCover(mediaId: Long) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            deleteLocalArtFileIfNeeded(latest.customCoverPath)
+            val nextRole = if (latest.artworkRole == "BANNER_AS_COVER") "DEFAULT" else latest.artworkRole
+            repository.updateMedia(latest.copy(customCoverPath = null, artworkRole = nextRole))
+        }
+    }
+
+    fun resetItemBanner(mediaId: Long) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            deleteLocalArtFileIfNeeded(latest.customBannerPath)
+            val nextRole = if (latest.artworkRole == "DISABLE_BANNER" || latest.artworkRole == "COVER_AS_BANNER") {
+                "DEFAULT"
+            } else {
+                latest.artworkRole
+            }
+            repository.updateMedia(latest.copy(bannerUrl = null, customBannerPath = null, artworkRole = nextRole))
+        }
+    }
+
+    fun toggleItemDisableBanner(mediaId: Long) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val currentlyDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
+            val newRole = if (currentlyDisabled) "DEFAULT" else "DISABLE_BANNER"
+            val newCustomBanner = if (currentlyDisabled) {
+                latest.customBannerPath?.takeUnless { it == "NONE" }
+            } else {
+                "NONE"
+            }
+            repository.updateMedia(latest.copy(artworkRole = newRole, customBannerPath = newCustomBanner))
+        }
+    }
+
+    fun updateItemArtworkRole(mediaId: Long, role: String) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val normalizedBannerPath = when {
+                role == "DISABLE_BANNER" -> "NONE"
+                latest.customBannerPath == "NONE" -> null
+                else -> latest.customBannerPath
+            }
+            repository.updateMedia(latest.copy(artworkRole = role, customBannerPath = normalizedBannerPath))
+        }
+    }
+
+    fun updateItemBannerFraming(mediaId: Long, focalX: Float, focalY: Float, zoom: Float) {
+        val fx = focalX.coerceIn(-1f, 1f)
+        val fy = focalY.coerceIn(-1f, 1f)
+        val z = zoom.coerceIn(1f, 2.5f)
+        viewModelScope.launch {
+            repository.updateBannerFraming(mediaId, fx, fy, z)
+        }
+    }
+
+    fun updateItemExcludedArtSources(mediaId: Long, sources: Set<String>) {
+        viewModelScope.launch {
+            val latest = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val serialized = sources
+                .map { it.trim().uppercase() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .sorted()
+                .joinToString(",")
+                .takeIf { it.isNotBlank() }
+            repository.updateMedia(latest.copy(excludedArtSources = serialized))
         }
     }
 

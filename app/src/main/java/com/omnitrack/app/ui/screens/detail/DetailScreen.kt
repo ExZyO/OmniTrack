@@ -43,17 +43,21 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -108,12 +112,14 @@ import com.omnitrack.app.data.model.ComicFormat
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.model.TrackingStatus
 import com.omnitrack.app.data.preferences.BannerSizing
-import com.omnitrack.app.data.preferences.DetailsBackdropStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.FallbackBackgroundStyle
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.preferences.PresentationSettings
 import com.omnitrack.app.ui.components.ArtworkBackdrop
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -127,6 +133,7 @@ import com.omnitrack.app.ui.components.CoverGlowBox
 import com.omnitrack.app.ui.components.CustomEntryEditorSheet
 import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.FanficWebViewSheet
+import com.omnitrack.app.ui.components.FullScreenCoverViewerDialog
 import com.omnitrack.app.ui.components.featherArtwork
 import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
@@ -257,6 +264,7 @@ fun DetailScreen(
     viewModel: DetailViewModel,
     onBack: () -> Unit,
     onSearchInDiscover: (String) -> Unit = {},
+    onSearchInLibrary: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -340,6 +348,8 @@ fun DetailScreen(
 
     val coroutineScope = rememberCoroutineScope()
     var showArtworkPicker by remember { mutableStateOf(false) }
+    var showFullScreenCover by remember { mutableStateOf(false) }
+    var showTitleActionSheet by remember { mutableStateOf(false) }
     var showOptionsMenu by remember { mutableStateOf(false) }
     var showEditEntrySheet by remember { mutableStateOf(false) }
 
@@ -846,8 +856,15 @@ fun DetailScreen(
                                     bookDetailMeta = uiState.bookDetailMeta,
                                     comicDetailMeta = uiState.comicDetailMeta,
                                     showInlineOptionsButton = false,
-                                    onCoverClick = { showArtworkPicker = true },
-                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onCoverClick = { showFullScreenCover = true },
+                                    onCoverLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showArtworkPicker = true
+                                    },
+                                    onToggleTitle = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showTitleActionSheet = true
+                                    },
                                     onSearchInDiscover = onSearchInDiscover,
                                     onOptionsClick = { showOptionsMenu = true },
                                     onEditProgress = {
@@ -880,7 +897,10 @@ fun DetailScreen(
                                     stretchPx = detailStretchPx,
                                     animateOnScroll = animateHeroScroll,
                                     showInlineOptionsButton = false,
-                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onToggleTitle = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showTitleActionSheet = true
+                                    },
                                     onSearchInDiscover = onSearchInDiscover,
                                     onOptionsClick = { showOptionsMenu = true },
                                     onEditProgress = {
@@ -912,9 +932,16 @@ fun DetailScreen(
                                     scrollOffsetPx = detailScrollPx,
                                     stretchPx = detailStretchPx,
                                     animateOnScroll = animateHeroScroll,
-                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onToggleTitle = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showTitleActionSheet = true
+                                    },
                                     onSearchInDiscover = onSearchInDiscover,
-                                    onCoverClick = { showArtworkPicker = true },
+                                    onCoverClick = { showFullScreenCover = true },
+                                    onCoverLongClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showArtworkPicker = true
+                                    },
                                     onCoverLoaded = { url ->
                                         if (coverCache != null) {
                                             val diskCache = coil3.SingletonImageLoader.get(context).diskCache
@@ -2295,6 +2322,154 @@ fun DetailScreen(
                 )
             }
 
+            if (showFullScreenCover) {
+                FullScreenCoverViewerDialog(
+                    coverModel = coverImageModel,
+                    title = item.title,
+                    onDismiss = { showFullScreenCover = false },
+                    onCustomizeArtwork = {
+                        showFullScreenCover = false
+                        showArtworkPicker = true
+                    }
+                )
+            }
+
+            if (showTitleActionSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showTitleActionSheet = false },
+                    containerColor = AmoledBlack,
+                    dragHandle = {
+                        Box(
+                            modifier = Modifier
+                                .padding(vertical = 10.dp)
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.2f))
+                        )
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 8.dp)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = item.title,
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    showTitleActionSheet = false
+                                    onSearchInLibrary(item.title)
+                                }
+                                .padding(vertical = 13.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VideoLibrary,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Library Search",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Filter your Library for this title",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    showTitleActionSheet = false
+                                    onSearchInDiscover(item.title)
+                                }
+                                .padding(vertical = 13.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Global Search",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Search across all Discover sources",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.06f), thickness = 0.6.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("Title", item.title))
+                                    Toast.makeText(context, "Copied title to clipboard", Toast.LENGTH_SHORT).show()
+                                    showTitleActionSheet = false
+                                }
+                                .padding(vertical = 13.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "Copy to Clipboard",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Copy full title text",
+                                    color = TextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             DetailSeriesDialogs(
                 seriesState = seriesUiState,
                 seasons = uiState.realSeasons,
@@ -2845,7 +3020,7 @@ private fun UnboxedStatsRow(
             )
             Column {
                 Text(
-                    text = item.status.displayName,
+                    text = item.status.labelFor(item.mediaType),
                     color = TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
@@ -3340,6 +3515,7 @@ private fun DetailCenteredCoverHeroSection(
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
     showInlineOptionsButton: Boolean = false,
     onCoverClick: () -> Unit,
+    onCoverLongClick: (() -> Unit)? = null,
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
     onOptionsClick: () -> Unit,
@@ -3384,7 +3560,10 @@ private fun DetailCenteredCoverHeroSection(
                     .shadow(24.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Color.White.copy(alpha = 0.06f))
-                    .clickable { onCoverClick() }
+                    .combinedClickable(
+                        onClick = { onCoverClick() },
+                        onLongClick = { onCoverLongClick?.invoke() }
+                    )
             ) {
                 val hasJacketImg = coverImageModel != null && (coverImageModel !is String || coverImageModel.isNotBlank())
                 if (item.mediaType == MediaType.FANFICTION && !hasJacketImg) {
@@ -3598,6 +3777,7 @@ private fun DetailClassicHeaderSection(
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
     onCoverClick: () -> Unit,
+    onCoverLongClick: (() -> Unit)? = null,
     onCoverLoaded: (String) -> Unit,
     onOptionsClick: () -> Unit,
     onEditProgress: () -> Unit,
@@ -3684,7 +3864,10 @@ private fun DetailClassicHeaderSection(
                 .aspectRatio(0.68f)
                 .shadow(18.dp, RoundedCornerShape(14.dp))
                 .clip(RoundedCornerShape(14.dp))
-                .clickable { onCoverClick() }
+                .combinedClickable(
+                    onClick = { onCoverClick() },
+                    onLongClick = { onCoverLongClick?.invoke() }
+                )
         ) {
             val hasClassicCoverImg = coverImageModel != null && (coverImageModel !is String || coverImageModel.isNotBlank())
             if (item.mediaType == MediaType.FANFICTION && !hasClassicCoverImg) {

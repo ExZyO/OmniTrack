@@ -880,7 +880,7 @@ fun MultiTrackerSheet(
                             if (activeSnap?.remoteProgress != null || activeSnap?.remoteStatus != null) {
                                 val rProg = activeSnap.remoteProgress?.toInt()?.toString() ?: "0"
                                 val rTot = activeSnap.remoteTotal?.toInt()?.let { "/$it" }.orEmpty()
-                                val rSt = activeSnap.remoteStatus?.displayName ?: "Remote"
+                                val rSt = activeSnap.remoteStatus?.labelFor(localItem.mediaType) ?: "Remote"
                                 Text(
                                     text = "Remote: $rSt · $rProg$rTot (Local ${localItem.currentProgress.toInt()})",
                                     fontSize = 11.sp,
@@ -1058,7 +1058,7 @@ fun MultiTrackerSheet(
                                         .padding(horizontal = 13.dp, vertical = 7.dp)
                                 ) {
                                     Text(
-                                        text = st.displayName,
+                                        text = st.labelFor(localItem.mediaType),
                                         fontSize = 12.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (selected) AmoledBlack else TextPrimary

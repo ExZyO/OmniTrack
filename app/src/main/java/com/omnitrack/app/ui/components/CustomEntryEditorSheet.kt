@@ -643,7 +643,7 @@ fun CustomEntryEditorSheet(
                                 .padding(horizontal = 11.dp, vertical = 7.dp)
                         ) {
                             Text(
-                                text = st.displayName,
+                                text = st.labelFor(selectedType),
                                 fontSize = 12.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selected) AccentGold else TextSecondary

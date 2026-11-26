@@ -38,6 +38,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,13 +77,11 @@ import com.omnitrack.app.data.preferences.HomeHeroSettings
 import com.omnitrack.app.data.preferences.HomeHeroSource
 import com.omnitrack.app.data.preferences.HomeLayoutDefaults
 import com.omnitrack.app.data.preferences.HomeRowItem
-import com.omnitrack.app.data.preferences.HomeShelfPosterSize
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.components.ContinueStyleWireframe
 import com.omnitrack.app.ui.components.HeroHeightWireframe
 import com.omnitrack.app.ui.components.HeroMetadataLayoutWireframe
 import com.omnitrack.app.ui.components.HomeLayoutWireframe
-import com.omnitrack.app.ui.components.ShelfPosterSizeWireframe
 import com.omnitrack.app.ui.components.VisualOptionTile
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
@@ -91,6 +92,7 @@ import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -322,24 +324,65 @@ fun HomeCustomizerSheet(
 
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-                            CustomizerSectionLabel("SHELF POSTER SIZE")
+                            var sliderWidthDp by remember(heroSettings.shelfPosterWidthDp) {
+                                mutableFloatStateOf(heroSettings.shelfPosterWidthDp.toFloat())
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                HomeShelfPosterSize.entries.forEach { size ->
-                                    VisualOptionTile(
-                                        title = size.displayName,
-                                        subtitle = null,
-                                        isSelected = heroSettings.shelfPosterSize == size,
-                                        modifier = Modifier.weight(1f),
-                                        previewHeight = 54.dp,
-                                        onClick = {
-                                            coroutineScope.launch { preferenceManager.setHomeShelfPosterSize(size) }
-                                        }
-                                    ) {
-                                        ShelfPosterSizeWireframe(posterSize = size)
+                                CustomizerSectionLabel("HOME COVER SIZE")
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${sliderWidthDp.roundToInt()}dp",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGold
+                                    )
+                                    if (sliderWidthDp.roundToInt() != 114) {
+                                        Text(
+                                            text = "Reset",
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = AccentGold,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .clickable {
+                                                    sliderWidthDp = 114f
+                                                    coroutineScope.launch { preferenceManager.setHomeShelfPosterWidthDp(114) }
+                                                }
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
                                     }
+                                }
+                            }
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Slider(
+                                    value = sliderWidthDp,
+                                    onValueChange = { sliderWidthDp = it },
+                                    onValueChangeFinished = {
+                                        coroutineScope.launch {
+                                            preferenceManager.setHomeShelfPosterWidthDp(sliderWidthDp.roundToInt())
+                                        }
+                                    },
+                                    valueRange = 84f..168f,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = AccentGold,
+                                        activeTrackColor = AccentGold,
+                                        inactiveTrackColor = Color.White.copy(alpha = 0.14f)
+                                    )
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Compact (84dp)", fontSize = 10.5.sp, color = TextSecondary)
+                                    Text("Default (114dp)", fontSize = 10.5.sp, color = TextSecondary)
+                                    Text("Large (168dp)", fontSize = 10.5.sp, color = TextSecondary)
                                 }
                             }
 
@@ -767,7 +810,6 @@ fun HomeCustomizerSheet(
                                 onClick = {
                                     coroutineScope.launch {
                                         preferenceManager.setHomeHeroRotateSeconds(sec)
-                                        preferenceManager.setHomeHeroAutoRotate(sec > 0)
                                     }
                                 }
                             )

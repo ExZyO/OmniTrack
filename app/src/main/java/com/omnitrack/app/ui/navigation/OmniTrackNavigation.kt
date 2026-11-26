@@ -157,6 +157,12 @@ fun OmniTrackNavigation(
                     if (titleQuery.isNotBlank()) {
                         navigateDebounced(Routes.discoverSearch(titleQuery))
                     }
+                },
+                onSearchInLibrary = { titleQuery ->
+                    if (titleQuery.isNotBlank()) {
+                        com.omnitrack.app.data.model.LibrarySearchBus.requestSearch(titleQuery)
+                        navController.popBackStack(Routes.HOME, inclusive = false)
+                    }
                 }
             )
         }

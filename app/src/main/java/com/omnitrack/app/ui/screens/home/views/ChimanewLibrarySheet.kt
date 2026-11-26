@@ -98,8 +98,9 @@ data class LibraryCategorySubFilters(
     val onComicPublisher: (String) -> Unit = {},
     val comicFormat: String = "ALL",
     val onComicFormat: (String) -> Unit = {},
-    val fanficSite: String = "ALL",
-    val onFanficSite: (String) -> Unit = {},
+    val fanficSites: Set<String> = emptySet(),
+    val onToggleFanficSite: (String) -> Unit = {},
+    val onClearFanficSites: () -> Unit = {},
     val fanficRating: String = "ALL",
     val onFanficRating: (String) -> Unit = {},
     val fanficStatus: String = "ALL",
@@ -281,7 +282,7 @@ fun ChimanewLibrarySheet(
                         ) {
                             TrackingStatus.filterChips.forEach { st ->
                                 LibChoiceChip(
-                                    label = st.displayName,
+                                    label = st.labelFor(subFilters.activeMediaTabType),
                                     selected = selectedStatus == st,
                                     onClick = { onSelectStatus(st) }
                                 )
@@ -1001,7 +1002,7 @@ private fun CategorySubFiltersBlock(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SheetSectionLabel("FANFICTION \u00B7 SITE")
+                    SheetSectionLabel("FANFICTION \u00B7 SITES (MULTI-SELECT)")
                     Text(
                         text = "+ Import URL",
                         color = AccentGold,
@@ -1018,8 +1019,12 @@ private fun CategorySubFiltersBlock(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    LibChoiceChip(
+                        label = "All Sites",
+                        selected = subFilters.fanficSites.isEmpty(),
+                        onClick = subFilters.onClearFanficSites
+                    )
                     listOf(
-                        "ALL" to "All Sites",
                         "AO3" to "AO3",
                         "WATTPAD" to "Wattpad",
                         "FFN" to "FF.net",
@@ -1027,7 +1032,11 @@ private fun CategorySubFiltersBlock(
                         "SV" to "SV",
                         "QQ" to "QQ"
                     ).forEach { (k, lbl) ->
-                        LibChoiceChip(label = lbl, selected = subFilters.fanficSite == k, onClick = { subFilters.onFanficSite(k) })
+                        LibChoiceChip(
+                            label = lbl,
+                            selected = k in subFilters.fanficSites,
+                            onClick = { subFilters.onToggleFanficSite(k) }
+                        )
                     }
                 }
                 SheetSectionLabel("RATING & WORK STATUS")

@@ -242,7 +242,7 @@ fun SettingsView(
             icon = Icons.Default.Info,
             title = "About OmniTrack",
             keywords = "about schema version database library count",
-            trailingText = "v23",
+            trailingText = "v24",
             onClick = { showAboutDialog = true }
         )
     )
@@ -423,7 +423,7 @@ fun SettingsView(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Room Database Schema v23",
+                        text = "Room Database Schema v24",
                         fontSize = 13.sp,
                         color = AccentGold,
                         fontWeight = FontWeight.SemiBold

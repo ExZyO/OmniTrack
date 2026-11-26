@@ -261,7 +261,7 @@ fun DiscoverView(
     }
 
     // Multi-Vertical OmniSearch Trigger (strictly guarded by monotonic searchGenRef)
-    LaunchedEffect(searchQuery, selectedFilter, useAiSearch, activeGeminiModel) {
+    LaunchedEffect(searchQuery, selectedFilter, useAiSearch, activeGeminiModel, discoverSettings.showAiToggle) {
         val myGen = searchGenRef.incrementAndGet()
         val trimmed = searchQuery.trim()
         val prevQuery = homeViewModel?.discoverLastExecutedQuery ?: localLastExecutedQuery
@@ -290,7 +290,7 @@ fun DiscoverView(
             var filterToRun = selectedFilter
             var resolvedBanner: String? = null
 
-            if (useAiSearch) {
+            if (useAiSearch && discoverSettings.showAiToggle) {
                 val aiResult = aiEngine.resolveQuery(
                     rawQuery = trimmed,
                     geminiApiKey = geminiKey.ifBlank { null },
@@ -1261,7 +1261,31 @@ fun DiscoverView(
                             DiscoverHeroSkeletonBanner()
                         } else {
                             when (discoverSettings.layoutStyle) {
-                                DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT,
+                                DiscoverLayoutStyle.EDITORIAL_SPOTLIGHT -> {
+                                    val lead = heroPool.first()
+                                    val match = findLibraryMatch(allMedia, lead)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp)
+                                    ) {
+                                        DiscoverSpotlightBanner(
+                                            item = lead,
+                                            libraryMatch = match,
+                                            dimBanner = discoverSettings.dimHeroBanner,
+                                            bannerBlurDp = discoverSettings.resolveBannerBlurDp(lead.mediaType),
+                                            onDetails = {
+                                                if (match != null) {
+                                                    onItemClick(match.id)
+                                                } else {
+                                                    EphemeralPreviewHolder.previewItem = lead.toMediaItemEntity()
+                                                    onItemClick(-1L)
+                                                }
+                                            },
+                                            onAdd = { onAddMedia(lead) }
+                                        )
+                                    }
+                                }
                                 DiscoverLayoutStyle.HERO_CAROUSEL -> {
                                     DiscoverHeroCarousel(
                                         items = heroPool,
