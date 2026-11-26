@@ -832,19 +832,36 @@ fun HomeCustomizerSheet(
                     )
 
                     CustomizerSectionLabel("WIDE HERO BANNER BLUR (UNIVERSAL & PER-CATEGORY)")
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         HeroBannerBlurLevel.entries.forEach { level ->
-                            CustomizerChoiceChip(
-                                label = "Universal: ${level.shortLabel}",
-                                selected = heroSettings.universalBannerBlur == level,
-                                onClick = {
-                                    coroutineScope.launch { preferenceManager.updateUniversalHeroBannerBlur(level) }
-                                }
-                            )
+                            val active = heroSettings.universalBannerBlur == level
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (active) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                    .border(
+                                        0.7.dp,
+                                        if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch { preferenceManager.updateUniversalHeroBannerBlur(level) }
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = level.shortLabel,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (active) AccentGold else TextPrimary,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                     var selectedHomeBlurCat by remember { mutableStateOf(MediaType.ANIME) }
@@ -856,38 +873,93 @@ fun HomeCustomizerSheet(
                     ) {
                         MediaType.filterTabs.filter { it != MediaType.ALL }.forEach { cat ->
                             val ov = heroSettings.categoryBannerBlurOverrides[cat.name]
-                            CustomizerChoiceChip(
-                                label = if (ov != null) "${cat.displayName} \u00B7 ${ov.shortLabel}" else cat.displayName,
-                                selected = selectedHomeBlurCat == cat,
-                                onClick = { selectedHomeBlurCat = cat }
-                            )
+                            val isSel = selectedHomeBlurCat == cat
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                    .border(
+                                        0.7.dp,
+                                        when {
+                                            isSel -> AccentGold
+                                            ov != null -> AccentGold.copy(alpha = 0.40f)
+                                            else -> Color.White.copy(alpha = 0.07f)
+                                        },
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable { selectedHomeBlurCat = cat }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (ov != null) "${cat.displayName} \u00B7 ${ov.shortLabel}" else cat.displayName,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSel || ov != null) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSel || ov != null) AccentGold else TextSecondary,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         val currentOv = heroSettings.categoryBannerBlurOverrides[selectedHomeBlurCat.name]
-                        CustomizerChoiceChip(
-                            label = "Inherit (${heroSettings.universalBannerBlur.shortLabel})",
-                            selected = currentOv == null,
-                            onClick = {
-                                coroutineScope.launch {
-                                    preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, null)
-                                }
-                            }
-                        )
-                        HeroBannerBlurLevel.entries.forEach { level ->
-                            CustomizerChoiceChip(
-                                label = level.shortLabel,
-                                selected = currentOv == level,
-                                onClick = {
+                        val inheritActive = currentOv == null
+                        Box(
+                            modifier = Modifier
+                                .weight(1.15f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (inheritActive) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                .border(
+                                    0.7.dp,
+                                    if (inheritActive) AccentGold else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
                                     coroutineScope.launch {
-                                        preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, level)
+                                        preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, null)
                                     }
                                 }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Inherit (${heroSettings.universalBannerBlur.shortLabel})",
+                                fontSize = 11.sp,
+                                fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
+                                color = if (inheritActive) AccentGold else TextPrimary,
+                                maxLines = 1
                             )
+                        }
+                        HeroBannerBlurLevel.entries.forEach { level ->
+                            val active = currentOv == level
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (active) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                    .border(
+                                        0.7.dp,
+                                        if (active) AccentGold else Color.White.copy(alpha = 0.08f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, level)
+                                        }
+                                    }
+                                    .padding(vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = level.shortLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (active) AccentGold else TextPrimary,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                     CustomizerSwitchRow(

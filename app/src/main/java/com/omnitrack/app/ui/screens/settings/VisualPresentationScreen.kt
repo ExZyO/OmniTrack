@@ -400,10 +400,7 @@ fun VisualPresentationScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color.White.copy(alpha = 0.03f))
-                    .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
-                    .padding(14.dp),
+                    .padding(horizontal = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
@@ -426,17 +423,15 @@ fun VisualPresentationScreen(
                     }
                     if (presentationSettings.categoryBannerBlurOverrides.isNotEmpty()) {
                         Text(
-                            text = "Clear Overrides (${presentationSettings.categoryBannerBlurOverrides.size})",
-                            fontSize = 11.sp,
+                            text = "Reset (${presentationSettings.categoryBannerBlurOverrides.size})",
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = AccentGold,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(AccentGold.copy(alpha = 0.14f))
                                 .clickable {
                                     scope.launch { prefManager.clearAllCategoryHeroBannerBlurOverrides() }
                                 }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -451,9 +446,9 @@ fun VisualPresentationScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .background(if (active) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                 .border(
-                                    0.8.dp,
+                                    0.7.dp,
                                     if (active) AccentGold else Color.White.copy(alpha = 0.08f),
                                     RoundedCornerShape(6.dp)
                                 )
@@ -473,7 +468,7 @@ fun VisualPresentationScreen(
                     }
                 }
 
-                HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.6.dp)
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
                 Text(
                     text = "Per-Category Override",
@@ -496,17 +491,17 @@ fun VisualPresentationScreen(
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(
                                     when {
-                                        isSelected -> AccentGold.copy(alpha = 0.20f)
-                                        hasOverride -> AccentGold.copy(alpha = 0.08f)
-                                        else -> Color.White.copy(alpha = 0.05f)
+                                        isSelected -> AccentGold.copy(alpha = 0.18f)
+                                        hasOverride -> AccentGold.copy(alpha = 0.07f)
+                                        else -> Color.White.copy(alpha = 0.04f)
                                     }
                                 )
                                 .border(
                                     0.7.dp,
                                     when {
                                         isSelected -> AccentGold
-                                        hasOverride -> AccentGold.copy(alpha = 0.45f)
-                                        else -> Color.Transparent
+                                        hasOverride -> AccentGold.copy(alpha = 0.40f)
+                                        else -> Color.White.copy(alpha = 0.07f)
                                     },
                                     RoundedCornerShape(6.dp)
                                 )
@@ -534,9 +529,9 @@ fun VisualPresentationScreen(
                         modifier = Modifier
                             .weight(1.15f)
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (inheritActive) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                            .background(if (inheritActive) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                             .border(
-                                0.8.dp,
+                                0.7.dp,
                                 if (inheritActive) AccentGold else Color.White.copy(alpha = 0.08f),
                                 RoundedCornerShape(6.dp)
                             )
@@ -559,9 +554,9 @@ fun VisualPresentationScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (active) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .background(if (active) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                 .border(
-                                    0.8.dp,
+                                    0.7.dp,
                                     if (active) AccentGold else Color.White.copy(alpha = 0.08f),
                                     RoundedCornerShape(6.dp)
                                 )

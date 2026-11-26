@@ -45,7 +45,7 @@ private const val HERO_SWIPE_THRESHOLD_FRACTION = 0.16f
 private const val HERO_SWIPE_VELOCITY_THRESHOLD = 300f
 
 fun heroBackgroundOverscan(pageOffset: Float): Float =
-    1f + abs(pageOffset).coerceIn(0f, 1f) * 0.10f
+    1f + abs(pageOffset).coerceIn(0f, 1f) * 0.05f
 
 private val HeroStretchReleaseSpring = spring<Float>(
     dampingRatio = Spring.DampingRatioNoBouncy,
@@ -370,7 +370,7 @@ fun Modifier.heroStretchZoom(stretchPx: () -> Float): Modifier = graphicsLayer {
 }
 
 fun heroScrollBackdropScale(scrollOffsetPx: Float): Float =
-    (1f + scrollOffsetPx.coerceAtLeast(0f) * 0.00018f).coerceAtMost(1.18f)
+    (1f + scrollOffsetPx.coerceAtLeast(0f) * 0.00008f).coerceAtMost(1.06f)
 
 fun heroScrollBackdropAlpha(scrollOffsetPx: Float, heroHeightPx: Float): Float {
     val denom = (heroHeightPx * 0.88f).coerceAtLeast(1f)

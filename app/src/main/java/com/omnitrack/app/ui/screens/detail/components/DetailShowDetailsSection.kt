@@ -467,9 +467,64 @@ fun DetailGeneralInfoSection(
     }
 }
 
+private fun inferNativeLanguageLabel(item: MediaItemEntity, text: String): String {
+    val origin = item.originCountry?.trim()?.uppercase()
+    when (origin) {
+        "CN", "ZH", "TW", "HK", "CHINA", "CHINESE" -> return "Chinese"
+        "KR", "KO", "KOREA", "KOREAN" -> return "Korean"
+        "JP", "JA", "JAPAN", "JAPANESE" -> return "Japanese"
+        "TH", "THAILAND", "THAI" -> return "Thai"
+        "VN", "VI", "VIETNAM", "VIETNAMESE" -> return "Vietnamese"
+        "RU", "RUSSIA", "RUSSIAN" -> return "Russian"
+        "FR", "FRANCE", "FRENCH" -> return "French"
+        "DE", "GERMANY", "GERMAN" -> return "German"
+        "ES", "SPAIN", "MX", "SPANISH" -> return "Spanish"
+        "PT", "BR", "PORTUGAL", "PORTUGUESE" -> return "Portuguese"
+        "IT", "ITALY", "ITALIAN" -> return "Italian"
+        "AR", "ARABIC" -> return "Arabic"
+        "US", "GB", "UK", "CA", "AU", "EN", "ENGLISH" -> return "English"
+    }
+    var hasHangul = false
+    var hasKana = false
+    var hasHan = false
+    var hasCyrillic = false
+    var hasArabic = false
+    var hasThai = false
+    for (ch in text) {
+        val code = ch.code
+        when {
+            code in 0xAC00..0xD7AF || code in 0x1100..0x11FF || code in 0x3130..0x318F -> hasHangul = true
+            code in 0x3040..0x309F || code in 0x30A0..0x30FF || code in 0xFF66..0xFF9F -> hasKana = true
+            code in 0x4E00..0x9FFF || code in 0x3400..0x4DBF || code in 0xF900..0xFAFF -> hasHan = true
+            code in 0x0400..0x04FF -> hasCyrillic = true
+            code in 0x0600..0x06FF -> hasArabic = true
+            code in 0x0E00..0x0E7F -> hasThai = true
+        }
+    }
+    return when {
+        hasHangul -> "Korean"
+        hasKana -> "Japanese"
+        hasCyrillic -> "Russian"
+        hasArabic -> "Arabic"
+        hasThai -> "Thai"
+        hasHan -> if (item.mediaType in setOf(MediaType.ANIME, MediaType.VISUAL_NOVEL) && !item.isCustomEntry) "Japanese" else "Chinese"
+        else -> "Native"
+    }
+}
+
+private fun inferAsciiAltLabel(item: MediaItemEntity, explicitRomaji: String?): String {
+    if (!explicitRomaji.isNullOrBlank()) return "Romaji"
+    val origin = item.originCountry?.trim()?.uppercase()
+    if (origin in setOf("JP", "JA", "JAPAN", "JAPANESE")) return "Romaji"
+    if (origin == null && !item.isCustomEntry && item.mediaType in setOf(MediaType.ANIME, MediaType.MANGA, MediaType.VISUAL_NOVEL)) {
+        return "Romaji"
+    }
+    return "Alternative Title"
+}
+
 /**
  * Alternative Names & Synonyms Section:
- * Romaji, English, Japanese/Native titles, plus copyable Synonym tags.
+ * Romaji / Alternative, English, Localized Native titles, plus copyable Synonym tags.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -490,13 +545,13 @@ fun DetailNamesSynonymsSection(
         val effectiveNative = nativeTitle?.ifBlank { null } ?: item.nativeTitle?.takeIf { it.any { c -> c.code > 127 } }
 
         if (!effectiveRomaji.isNullOrBlank()) {
-            add("Romaji" to effectiveRomaji)
+            add(inferAsciiAltLabel(item, romajiTitle?.ifBlank { null }) to effectiveRomaji)
         }
         if (!effectiveEnglish.isNullOrBlank() && !effectiveEnglish.equals(effectiveRomaji, ignoreCase = true)) {
             add("English" to effectiveEnglish)
         }
         if (!effectiveNative.isNullOrBlank() && !effectiveNative.equals(effectiveRomaji, ignoreCase = true) && !effectiveNative.equals(effectiveEnglish, ignoreCase = true)) {
-            add("Japanese" to effectiveNative)
+            add(inferNativeLanguageLabel(item, effectiveNative) to effectiveNative)
         }
     }
 

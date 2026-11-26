@@ -54,6 +54,7 @@ import java.util.concurrent.TimeUnit
 
 data class EnrichmentData(
     val clearartUrl: String? = null,
+    val tmdbBackdropUrl: String? = null,
     val communityScore: Float? = null,
     val imdbScore: Float? = null,
     val rtScore: Int? = null,
@@ -224,6 +225,7 @@ class EnrichmentRepository(
         onClearartResolved: (suspend (String, Long?) -> Unit)? = null
     ): EnrichmentData = withContext(Dispatchers.IO) {
         var clearart: String? = item.clearartUrl
+        var tmdbBackdropUrl: String? = null
         var communityScore: Float? = item.communityScore
         var imdbScore: Float? = item.imdbScore
         var rtScore: Int? = item.rtScore
@@ -270,11 +272,26 @@ class EnrichmentRepository(
         if (isStaleTvdbLogo) {
             clearart = null
         }
+        val shouldQueryTmdbImages = effectiveTmdbId != null && !effectiveTmdbKey.isNullOrBlank() && (
+            clearart.isNullOrBlank() || (
+                item.mediaType in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE) &&
+                    item.customBannerPath.isNullOrBlank() &&
+                    item.artworkRole == "DEFAULT"
+                )
+            )
+        val tmdbImages = if (shouldQueryTmdbImages && effectiveTmdbId != null) {
+            fetchTmdbImages(effectiveTmdbId, isMovie, effectiveTmdbKey)
+        } else {
+            null
+        }
+        if (tmdbImages?.second != null) {
+            tmdbBackdropUrl = tmdbImages.second
+        }
         if (clearart.isNullOrBlank()) {
             var newClearart: String? = null
             if (effectiveTmdbId != null) {
                 if (!effectiveTmdbKey.isNullOrBlank()) {
-                    newClearart = fetchTmdbClearart(effectiveTmdbId, isMovie, effectiveTmdbKey)
+                    newClearart = tmdbImages?.first
                 }
                 if (newClearart.isNullOrBlank() && !fanartApiKey.isNullOrBlank()) {
                     newClearart = fetchFanartClearart(effectiveTmdbId, isMovie, fanartApiKey)
@@ -376,6 +393,9 @@ class EnrichmentRepository(
         if (effectiveTmdbId != null) {
             val details = fetchTmdbDetails(effectiveTmdbId, isMovie, effectiveTmdbKey)
             if (details != null) {
+                if (tmdbBackdropUrl == null && !details.backdropPath.isNullOrBlank()) {
+                    tmdbBackdropUrl = "https://image.tmdb.org/t/p/original${details.backdropPath}"
+                }
                 if (trailerKey == null) trailerKey = details.trailerKey
                 if (studio == null) studio = details.studio
                 if (runtime == null) runtime = details.runtime
@@ -395,6 +415,7 @@ class EnrichmentRepository(
 
         EnrichmentData(
             clearartUrl = clearart,
+            tmdbBackdropUrl = tmdbBackdropUrl,
             communityScore = communityScore,
             imdbScore = imdbScore,
             rtScore = rtScore,
@@ -457,41 +478,77 @@ class EnrichmentRepository(
             }
         }
 
-    private suspend fun fetchTmdbClearart(tmdbId: Long, isMovie: Boolean, apiKey: String): String? =
+    private suspend fun fetchTmdbImages(tmdbId: Long, isMovie: Boolean, apiKey: String): Pair<String?, String?> =
         NetworkPacer.withTmdbPacing {
             try {
                 val typeStr = if (isMovie) "movie" else "tv"
-                val url = "https://api.themoviedb.org/3/$typeStr/$tmdbId/images?api_key=$apiKey&include_image_language=en,null,ja"
+                val url = "https://api.themoviedb.org/3/$typeStr/$tmdbId/images?api_key=$apiKey&include_image_language=en,null,xx,ja"
                 val request = Request.Builder().url(url).get().build()
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withTmdbPacing null
-                    val body = response.body?.string() ?: return@withTmdbPacing null
+                    if (!response.isSuccessful) return@withTmdbPacing (null to null)
+                    val body = response.body?.string() ?: return@withTmdbPacing (null to null)
                     val root = json.parseToJsonElement(body).jsonObject
-                    val logos = root["logos"]?.jsonArray ?: return@withTmdbPacing null
 
+                    val logos = root["logos"]?.jsonArray
                     val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
-                    val best = when (pref) {
-                        com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> {
-                            logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "ja" }
-                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "en" }
-                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == null }
-                                ?: logos.firstOrNull()
+                    val bestLogo = if (logos != null) {
+                        when (pref) {
+                            com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE -> {
+                                logos.firstOrNull { it.jsonObject["iso_639_1"]?.takeUnless { n -> n is JsonNull }?.jsonPrimitive?.contentOrNull == "ja" }
+                                    ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.takeUnless { n -> n is JsonNull }?.jsonPrimitive?.contentOrNull == "en" }
+                                    ?: logos.firstOrNull { it.jsonObject["iso_639_1"] == null || it.jsonObject["iso_639_1"] is JsonNull }
+                                    ?: logos.firstOrNull()
+                            }
+                            else -> {
+                                logos.firstOrNull { it.jsonObject["iso_639_1"]?.takeUnless { n -> n is JsonNull }?.jsonPrimitive?.contentOrNull == "en" }
+                                    ?: logos.firstOrNull { it.jsonObject["iso_639_1"] == null || it.jsonObject["iso_639_1"] is JsonNull }
+                                    ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.takeUnless { n -> n is JsonNull }?.jsonPrimitive?.contentOrNull == "ja" }
+                                    ?: logos.firstOrNull()
+                            }
                         }
-                        else -> {
-                            logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "en" }
-                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == null }
-                                ?: logos.firstOrNull { it.jsonObject["iso_639_1"]?.jsonPrimitive?.content == "ja" }
-                                ?: logos.firstOrNull()
-                        }
-                    }
+                    } else null
+                    val logoPath = bestLogo?.jsonObject?.get("file_path")?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.trim()
+                    val logoUrl = if (!logoPath.isNullOrBlank()) "https://image.tmdb.org/t/p/w500$logoPath" else null
 
-                    val filePath = best?.jsonObject?.get("file_path")?.jsonPrimitive?.content ?: return@withTmdbPacing null
-                    "https://image.tmdb.org/t/p/w500$filePath"
+                    val backdrops = root["backdrops"]?.jsonArray
+                    val bestBackdropPath = backdrops
+                        ?.mapNotNull { elem ->
+                            val obj = elem.jsonObject
+                            val path = obj["file_path"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.trim()
+                            if (path.isNullOrBlank()) return@mapNotNull null
+                            val iso = obj["iso_639_1"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
+                            val isTextless = iso.isNullOrBlank() || iso.equals("null", ignoreCase = true) || iso.equals("xx", ignoreCase = true)
+                            val aspect = obj["aspect_ratio"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                            val width = obj["width"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            val voteAvg = obj["vote_average"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.toFloatOrNull() ?: 0f
+                            val voteCount = obj["vote_count"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            Triple(
+                                path,
+                                Triple(isTextless && aspect >= 1.5f && width >= 1280, isTextless && aspect >= 1.4f, aspect >= 1.4f),
+                                Triple(voteAvg, voteCount, width)
+                            )
+                        }
+                        ?.sortedWith(
+                            compareByDescending<Triple<String, Triple<Boolean, Boolean, Boolean>, Triple<Float, Int, Int>>> { it.second.first }
+                                .thenByDescending { it.second.second }
+                                .thenByDescending { it.second.third }
+                                .thenByDescending { it.third.first }
+                                .thenByDescending { it.third.second }
+                                .thenByDescending { it.third.third }
+                        )
+                        ?.firstOrNull()
+                        ?.first
+                    val backdropUrl = if (!bestBackdropPath.isNullOrBlank()) "https://image.tmdb.org/t/p/original$bestBackdropPath" else null
+
+                    logoUrl to backdropUrl
                 }
             } catch (_: Exception) {
-                null
+                null to null
             }
         }
+
+    private suspend fun fetchTmdbClearart(tmdbId: Long, isMovie: Boolean, apiKey: String): String? =
+        fetchTmdbImages(tmdbId, isMovie, apiKey).first
 
     suspend fun fetchTmdbImdbId(tmdbId: Long, isMovie: Boolean, apiKey: String): String? =
         NetworkPacer.withTmdbPacing {
@@ -789,7 +846,8 @@ class EnrichmentRepository(
         val contentRating: String? = null,
         val videos: List<MediaTrailer> = emptyList(),
         val belongsToCollectionId: Long? = null,
-        val belongsToCollectionName: String? = null
+        val belongsToCollectionName: String? = null,
+        val backdropPath: String? = null
     )
 
     data class TmdbCollectionData(
@@ -922,6 +980,7 @@ class EnrichmentRepository(
                 val belongsToCollObj = if (isMovie) root["belongs_to_collection"]?.let { if (it is kotlinx.serialization.json.JsonObject) it else null } else null
                 val belongsToCollId = belongsToCollObj?.get("id")?.jsonPrimitive?.content?.toLongOrNull()
                 val belongsToCollName = belongsToCollObj?.get("name")?.jsonPrimitive?.content
+                val backdropPath = root["backdrop_path"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
                 ExtraDetails(
                     trailerKey = trailerKey,
@@ -937,7 +996,8 @@ class EnrichmentRepository(
                     contentRating = contentRating,
                     videos = videoList,
                     belongsToCollectionId = belongsToCollId,
-                    belongsToCollectionName = belongsToCollName
+                    belongsToCollectionName = belongsToCollName,
+                    backdropPath = backdropPath
                 )
             }
         } catch (_: Exception) {

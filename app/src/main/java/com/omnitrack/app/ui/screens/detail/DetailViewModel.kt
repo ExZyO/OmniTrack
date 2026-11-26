@@ -892,9 +892,11 @@ class DetailViewModel(
                 val latestHasStaleTvdb = latest.clearartUrl?.contains("thetvdb.com") == true &&
                     currentPref != com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE
                 val nextClearartUrl = enrichment.clearartUrl ?: if (latestHasStaleTvdb) null else latest.clearartUrl
+                val nextBannerUrl = resolveUpgradedTmdbBanner(latest, enrichment.tmdbBackdropUrl)
                 val updated = latest.copy(
                     tmdbId = enrichment.resolvedTmdbId ?: latest.tmdbId,
                     imdbId = enrichment.resolvedImdbId ?: latest.imdbId,
+                    bannerUrl = nextBannerUrl,
                     clearartUrl = nextClearartUrl,
                     communityScore = enrichment.communityScore ?: latest.communityScore,
                     imdbScore = enrichment.imdbScore ?: latest.imdbScore,
@@ -920,9 +922,11 @@ class DetailViewModel(
                 if (!isStillCurrentItem()) return@launch
                 val currentPreview = _previewItem.value ?: return@launch
 
+                val nextPreviewBanner = resolveUpgradedTmdbBanner(currentPreview, enrichment.tmdbBackdropUrl)
                 val updated = currentPreview.copy(
                     tmdbId = enrichment.resolvedTmdbId ?: currentPreview.tmdbId,
                     imdbId = enrichment.resolvedImdbId ?: currentPreview.imdbId,
+                    bannerUrl = nextPreviewBanner,
                     clearartUrl = enrichment.clearartUrl ?: currentPreview.clearartUrl,
                     communityScore = enrichment.communityScore ?: currentPreview.communityScore,
                     imdbScore = enrichment.imdbScore ?: currentPreview.imdbScore,
@@ -2694,11 +2698,7 @@ class DetailViewModel(
                         val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
                         val allowedBookBanner = bookData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded, "WIKIMEDIA COMMONS") }
                         val allowedBookCover = bookData.coverUrl?.takeUnless { isArtSourceExcluded(it, excluded) }
-                        val nextBanner = if (!bannerDisabled && latest.customBannerPath.isNullOrBlank() && latest.bannerUrl.isNullOrBlank()) {
-                            allowedBookBanner
-                        } else {
-                            latest.bannerUrl
-                        }
+                        val nextBanner = latest.bannerUrl
                         val nextCover = latest.coverUrl.takeIf { it.isNotBlank() } ?: allowedBookCover.orEmpty()
                         val updated = latest.copy(
                             openLibraryId = latest.openLibraryId?.takeIf { it.isNotBlank() } ?: bookData.resolvedOpenLibraryId,
@@ -2741,7 +2741,7 @@ class DetailViewModel(
                                 studioOrNetwork = currentPreview.studioOrNetwork ?: bookData.publisher ?: bookData.authorName,
                                 synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: bookData.synopsis,
                                 coverUrl = currentPreview.coverUrl.takeIf { it.isNotBlank() } ?: bookData.coverUrl.orEmpty(),
-                                bannerUrl = currentPreview.bannerUrl?.takeIf { it.isNotBlank() } ?: bookData.bannerUrl,
+                                bannerUrl = currentPreview.bannerUrl,
                                 releaseYear = currentPreview.releaseYear ?: bookData.releaseYear,
                                 totalProgress = currentPreview.totalProgress ?: bookData.totalPages?.toDouble(),
                                 bookTotalAudioMinutes = currentPreview.bookTotalAudioMinutes ?: bookData.totalAudioMinutes,
@@ -5334,6 +5334,45 @@ class DetailViewModel(
             val joined = current.joinToString(",")
             repository.updateMedia(item.copy(platforms = joined, platform = current.firstOrNull()))
         }
+    }
+
+    private suspend fun resolveUpgradedTmdbBanner(
+        item: MediaItemEntity,
+        tmdbBackdropUrl: String?
+    ): String? {
+        if (item.mediaType !in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)) return item.bannerUrl
+        if (item.isCustomEntry) return item.bannerUrl
+        if (!item.customBannerPath.isNullOrBlank() || item.artworkRole != "DEFAULT") return item.bannerUrl
+        val candidate = tmdbBackdropUrl?.takeIf { it.isNotBlank() } ?: return item.bannerUrl
+        val excluded = item.excludedArtSet()
+        if (isArtSourceExcluded(candidate, excluded, "TMDB")) return item.bannerUrl
+
+        val prefs = preferenceManager ?: runCatching { com.omnitrack.app.OmniTrackApplication.instance.preferenceManager }.getOrNull()
+        val disabledSources = runCatching { prefs?.getDisabledArtSources(item.mediaType)?.firstOrNull() }.getOrNull().orEmpty()
+        if ("TMDb" in disabledSources) return item.bannerUrl
+
+        val currentBanner = item.bannerUrl?.takeIf { it.isNotBlank() }
+            ?: return candidate
+
+        if (currentBanner.contains("image.tmdb.org", ignoreCase = true)) {
+            return candidate
+        }
+
+        val currentSourceName = when {
+            currentBanner.contains("anilist.co", ignoreCase = true) -> "AniList GraphQL"
+            currentBanner.contains("bgm.tv", ignoreCase = true) || currentBanner.contains("bangumi", ignoreCase = true) -> "Bangumi"
+            currentBanner.contains("kitsu", ignoreCase = true) -> "Kitsu"
+            currentBanner.contains("mangadex", ignoreCase = true) -> "MangaDex API"
+            currentBanner.contains("tvmaze", ignoreCase = true) -> "TVMaze"
+            currentBanner.contains("thetvdb", ignoreCase = true) -> "TheTVDB"
+            else -> null
+        } ?: return item.bannerUrl
+
+        val priority = runCatching { prefs?.getArtSourcePriority(item.mediaType)?.firstOrNull() }.getOrNull()
+            ?: PreferenceManager.getDefaultSourcesFor(item.mediaType)
+        val tmdbRank = priority.indexOf("TMDb")
+        val currentRank = priority.indexOf(currentSourceName)
+        return if (tmdbRank in 0 until currentRank) candidate else item.bannerUrl
     }
 
     private fun MediaItemEntity.excludedArtSet(): Set<String> =

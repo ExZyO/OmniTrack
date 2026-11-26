@@ -135,9 +135,12 @@ import com.omnitrack.app.ui.components.FanficTypographicCover
 import com.omnitrack.app.ui.components.FanficWebViewSheet
 import com.omnitrack.app.ui.components.FullScreenCoverViewerDialog
 import com.omnitrack.app.ui.components.featherArtwork
+import com.omnitrack.app.ui.components.focusedAlignment
 import com.omnitrack.app.ui.components.prefetchArtworkBackdrop
 import com.omnitrack.app.ui.components.rememberArtworkBackdrop
+import com.omnitrack.app.ui.components.rememberBackdropFocusState
 import com.omnitrack.app.ui.components.rememberCoverDominantColor
+import com.omnitrack.app.ui.components.revealAlpha
 import com.omnitrack.app.ui.components.shouldBlurFanficCover
 import com.omnitrack.app.ui.screens.detail.components.CastMember
 import com.omnitrack.app.ui.screens.detail.components.ChimanewProgressBottomSheet
@@ -276,7 +279,7 @@ fun DetailScreen(
     val allCategories by app.repository.getAllCategories().collectAsState(initial = emptyList())
     val allLibrarySummaries by app.repository.getAllMediaSummaries().collectAsState(initial = emptyList())
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
-    val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
+    val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PreferenceManager.cachedPresentationSettings)
     val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
     val episodeLayoutScale by prefManager.episodeLayoutScale.collectAsState(initial = 1.0f)
     val seasonViewMode by prefManager.seasonViewMode.collectAsState(initial = "Posters")
@@ -611,7 +614,8 @@ fun DetailScreen(
             ) {
                 SiblingDetailPreview(
                     item = activePrevPreview,
-                    presentationSettings = presentationSettings
+                    presentationSettings = presentationSettings,
+                    customPosterPattern = customPosterPattern
                 )
             }
         }
@@ -628,7 +632,8 @@ fun DetailScreen(
             ) {
                 SiblingDetailPreview(
                     item = activeNextPreview,
-                    presentationSettings = presentationSettings
+                    presentationSettings = presentationSettings,
+                    customPosterPattern = customPosterPattern
                 )
             }
         }
@@ -830,9 +835,7 @@ fun DetailScreen(
             }
 
             val detailScrollBody: @Composable () -> Unit = {
-                val hasAuthenticBanner = !backdropTargetUrl.isNullOrBlank() &&
-                    backdropTargetUrl != effectiveCover &&
-                    backdropTargetUrl != item.coverUrl
+                val hasAuthenticBanner = hasAuthenticDetailBanner(item, effectiveCover, backdropTargetUrl)
                 val effectiveDetailLayout = when {
                     presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
                     presentationSettings.autoCenterCoverWhenNoBanner && !hasAuthenticBanner -> DetailsPagePresentation.CENTERED_COVER
@@ -1794,9 +1797,7 @@ fun DetailScreen(
                             .shadow(elevation = 8.dp, shape = CircleShape)
                     )
                 }
-                val hasAuthenticTopBarBanner = !backdropTargetUrl.isNullOrBlank() &&
-                    backdropTargetUrl != effectiveCover &&
-                    backdropTargetUrl != item?.coverUrl
+                val hasAuthenticTopBarBanner = item != null && hasAuthenticDetailBanner(item, effectiveCover, backdropTargetUrl)
                 val topBarEffectiveLayout = when {
                     presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
                     presentationSettings.autoCenterCoverWhenNoBanner && !hasAuthenticTopBarBanner -> DetailsPagePresentation.CENTERED_COVER
@@ -2715,6 +2716,18 @@ fun DetailScreen(
 }
 }
 
+private fun hasAuthenticDetailBanner(
+    item: MediaItemEntity,
+    effectiveCover: String,
+    backdropTargetUrl: String?
+): Boolean {
+    val raw = backdropTargetUrl?.trim()?.takeIf { it.isNotBlank() } ?: return false
+    val normBanner = LosslessCoverMapper.toLosslessUrl(raw)
+    val normEffCover = effectiveCover.trim().takeIf { it.isNotBlank() }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+    val normItemCover = item.coverUrl.trim().takeIf { it.isNotBlank() }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+    return normBanner != normEffCover && normBanner != normItemCover
+}
+
 /**
  * Zero-Black-Screen Sibling Detail Preview.
  * Preloads and renders adjacent library entries during horizontal swiping gestures,
@@ -2724,6 +2737,7 @@ fun DetailScreen(
 private fun SiblingDetailPreview(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     presentationSettings: PresentationSettings,
+    customPosterPattern: String = "",
     modifier: Modifier = Modifier
 ) {
     val cachedAux = remember(item.id, item.mediaType, item.tmdbId, item.anilistId, item.malId, item.igdbId, item.steamAppId) {
@@ -2766,10 +2780,16 @@ private fun SiblingDetailPreview(
         item.customCoverPath?.let { if (it.startsWith("http://") || it.startsWith("https://")) it else java.io.File(it) }
             ?: LosslessCoverMapper.toLosslessUrl(effectiveCover)
     }
+    val siblingCustomBannerUrl = remember(item, customPosterPattern) {
+        if (customPosterPattern.isNotBlank() && "{shape}" in customPosterPattern) {
+            com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = true)
+        } else null
+    }
     val isBannerExplicitlyDisabled = item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER"
     val effectiveBanner = when {
         isBannerExplicitlyDisabled -> null
         item.customBannerPath != null -> item.customBannerPath
+        siblingCustomBannerUrl != null -> siblingCustomBannerUrl
         item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
         item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
         else -> item.bannerUrl
@@ -2808,14 +2828,13 @@ private fun SiblingDetailPreview(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            val sibHasBanner = !backdropTargetUrl.isNullOrBlank() &&
-                backdropTargetUrl != effectiveCover &&
-                backdropTargetUrl != item.coverUrl
+            val sibHasBanner = hasAuthenticDetailBanner(displayItem, effectiveCover, backdropTargetUrl)
             val sibLayout = when {
                 presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
                 presentationSettings.autoCenterCoverWhenNoBanner && !sibHasBanner -> DetailsPagePresentation.CENTERED_COVER
                 else -> presentationSettings.detailsPagePresentation
             }
+            val sibBannerBlurDp = presentationSettings.resolveBannerBlurDp(displayItem.mediaType)
             when (sibLayout) {
                 DetailsPagePresentation.CENTERED_COVER -> {
                     DetailCenteredCoverHeroSection(
@@ -2825,6 +2844,7 @@ private fun SiblingDetailPreview(
                         vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                         gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
                         bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        comicDetailMeta = cachedAux?.comicDetailMeta ?: ComicDetailMeta(),
                         showInlineOptionsButton = false,
                         onCoverClick = {},
                         onOptionsClick = {},
@@ -2839,6 +2859,7 @@ private fun SiblingDetailPreview(
                         item = displayItem,
                         backdropTargetUrl = backdropTargetUrl,
                         bannerSizing = presentationSettings.bannerSizing,
+                        bannerBlurDp = sibBannerBlurDp,
                         englishTitle = cachedAux?.englishTitle,
                         romajiTitle = cachedAux?.romajiTitle,
                         heroClearLogoUrl = siblingClearLogo,
@@ -2846,6 +2867,7 @@ private fun SiblingDetailPreview(
                         vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                         gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
                         bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        comicDetailMeta = cachedAux?.comicDetailMeta ?: ComicDetailMeta(),
                         showInlineOptionsButton = false,
                         onOptionsClick = {},
                         onEditProgress = {},
@@ -2859,6 +2881,7 @@ private fun SiblingDetailPreview(
                         item = displayItem,
                         coverImageModel = coverImageModel,
                         backdropTargetUrl = backdropTargetUrl,
+                        bannerBlurDp = sibBannerBlurDp,
                         englishTitle = cachedAux?.englishTitle,
                         romajiTitle = cachedAux?.romajiTitle,
                         heroClearLogoUrl = siblingClearLogo,
@@ -2866,6 +2889,7 @@ private fun SiblingDetailPreview(
                         vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
                         gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
                         bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        comicDetailMeta = cachedAux?.comicDetailMeta ?: ComicDetailMeta(),
                         onCoverClick = {},
                         onCoverLoaded = {},
                         onOptionsClick = {},
@@ -3227,11 +3251,20 @@ private fun DetailHeroHeaderSection(
     val isCinemaShowcase = bannerSizing == BannerSizing.CINEMA_SHOWCASE
     if (backdropTargetUrl != null) {
         val heroContext = LocalContext.current
+        val hasManualFraming = kotlin.math.abs(item.bannerFocalX) > 0.01f ||
+            kotlin.math.abs(item.bannerFocalY) > 0.01f ||
+            kotlin.math.abs(item.bannerZoom - 1f) > 0.01f
+        val focusState = rememberBackdropFocusState(cacheKey = backdropTargetUrl, enabled = !hasManualFraming)
         val bannerRequest = remember(backdropTargetUrl, heroContext) {
             ImageRequest.Builder(heroContext)
                 .data(backdropTargetUrl)
                 .crossfade(false)
                 .build()
+        }
+        val effectiveBannerAlignment = if (hasManualFraming) {
+            BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f))
+        } else {
+            focusState.focusedAlignment(Alignment.Center)
         }
         if (isCinemaShowcase) {
             Box(
@@ -3254,7 +3287,9 @@ private fun DetailHeroHeaderSection(
                 AsyncImage(
                     model = bannerRequest,
                     contentDescription = item.title,
-                    alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+                    alignment = effectiveBannerAlignment,
+                    onSuccess = { state -> if (!hasManualFraming) focusState.onImageLoaded(state.result.image) },
+                    onError = { focusState.onImageFailed() },
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
@@ -3269,6 +3304,7 @@ private fun DetailHeroHeaderSection(
                             scaleY = totalZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                             translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                            if (!hasManualFraming) alpha = focusState.revealAlpha
                         }
                         .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier),
                     contentScale = ContentScale.Crop
@@ -3283,17 +3319,21 @@ private fun DetailHeroHeaderSection(
                         else Modifier.height(350.dp)
                     )
                     .clipToBounds()
+                    .featherArtwork(startYRatio = 0.50f)
             ) {
                 AsyncImage(
                     model = bannerRequest,
                     contentDescription = item.title,
-                    alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+                    alignment = effectiveBannerAlignment,
+                    onSuccess = { state -> if (!hasManualFraming) focusState.onImageLoaded(state.result.image) },
+                    onError = { focusState.onImageFailed() },
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
                             val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                             val fy = item.bannerFocalY.coerceIn(-1f, 1f)
                             val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
+                            val focusAlpha = if (hasManualFraming) 1f else focusState.revealAlpha
                             if (animateOnScroll) {
                                 val sPx = scrollOffsetPx()
                                 val stretch = stretchPx().coerceAtLeast(0f)
@@ -3307,16 +3347,16 @@ private fun DetailHeroHeaderSection(
                                 scaleY = totalZoom
                                 translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                                 translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.48f
-                                alpha = heroScrollBackdropAlpha(sPx, size.height)
+                                alpha = heroScrollBackdropAlpha(sPx, size.height) * focusAlpha
                             } else {
                                 scaleX = effZoom
                                 scaleY = effZoom
                                 translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                                 translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                                alpha = focusAlpha
                             }
                         }
-                        .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
-                        .featherArtwork(startYRatio = 0.50f),
+                        .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier),
                     contentScale = ContentScale.Crop
                 )
             }
@@ -3579,11 +3619,14 @@ private fun DetailCenteredCoverHeroSection(
                         isBlurred = false
                     )
                 } else {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
+                    val centeredCoverReq = remember(coverImageModel, context) {
+                        ImageRequest.Builder(context)
                             .data(coverImageModel)
-                            .crossfade(true)
-                            .build(),
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = centeredCoverReq,
                         contentDescription = item.title,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -3790,6 +3833,15 @@ private fun DetailClassicHeaderSection(
     val statsOffset = if (hasBackdrop) (-30).dp else 0.dp
 
     if (hasBackdrop) {
+        val hasManualFraming = kotlin.math.abs(item.bannerFocalX) > 0.01f ||
+            kotlin.math.abs(item.bannerFocalY) > 0.01f ||
+            kotlin.math.abs(item.bannerZoom - 1f) > 0.01f
+        val focusState = rememberBackdropFocusState(cacheKey = backdropTargetUrl, enabled = !hasManualFraming)
+        val effectiveBannerAlignment = if (hasManualFraming) {
+            BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f))
+        } else {
+            focusState.focusedAlignment(Alignment.Center)
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3798,6 +3850,7 @@ private fun DetailClassicHeaderSection(
                     else Modifier.height(350.dp)
                 )
                 .clipToBounds()
+                .featherArtwork(startYRatio = 0.50f)
         ) {
             val classicContext = LocalContext.current
             val bannerRequest = remember(backdropTargetUrl, classicContext) {
@@ -3809,13 +3862,16 @@ private fun DetailClassicHeaderSection(
             AsyncImage(
                 model = bannerRequest,
                 contentDescription = null,
-                alignment = BiasAlignment(item.bannerFocalX.coerceIn(-1f, 1f), item.bannerFocalY.coerceIn(-1f, 1f)),
+                alignment = effectiveBannerAlignment,
+                onSuccess = { state -> if (!hasManualFraming) focusState.onImageLoaded(state.result.image) },
+                onError = { focusState.onImageFailed() },
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         val fx = item.bannerFocalX.coerceIn(-1f, 1f)
                         val fy = item.bannerFocalY.coerceIn(-1f, 1f)
                         val effZoom = item.bannerZoom.coerceIn(1f, 2.5f)
+                        val focusAlpha = if (hasManualFraming) 1f else focusState.revealAlpha
                         if (animateOnScroll) {
                             val sPx = scrollOffsetPx()
                             val stretch = stretchPx().coerceAtLeast(0f)
@@ -3829,16 +3885,16 @@ private fun DetailClassicHeaderSection(
                             scaleY = totalZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                             translationY = -fy * size.height * (effZoom - 1f) * 0.5f + sPx * 0.48f
-                            alpha = heroScrollBackdropAlpha(sPx, size.height)
+                            alpha = heroScrollBackdropAlpha(sPx, size.height) * focusAlpha
                         } else {
                             scaleX = effZoom
                             scaleY = effZoom
                             translationX = -fx * size.width * (effZoom - 1f) * 0.5f
                             translationY = -fy * size.height * (effZoom - 1f) * 0.5f
+                            alpha = focusAlpha
                         }
                     }
-                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
-                    .featherArtwork(startYRatio = 0.50f),
+                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier),
                 contentScale = ContentScale.Crop
             )
         }

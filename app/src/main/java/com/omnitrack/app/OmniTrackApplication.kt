@@ -9,7 +9,6 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.allowHardware
-import coil3.request.allowRgb565
 import coil3.request.crossfade
 import com.omnitrack.app.data.ai.AiQueryEngine
 import com.omnitrack.app.data.cache.CoverCache
@@ -84,6 +83,10 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.comicVineApiKey.collect { PreferenceManager.cachedComicVineApiKey = it } }
             launch { preferenceManager.metronUsername.collect { PreferenceManager.cachedMetronUsername = it } }
             launch { preferenceManager.metronPassword.collect { PreferenceManager.cachedMetronPassword = it } }
+            launch { preferenceManager.presentationSettings.collect { } }
+            launch { preferenceManager.homeHeroSettings.collect { } }
+            launch { preferenceManager.homeRowOrder.collect { } }
+            launch { preferenceManager.performanceSettings.collect { } }
             launch { trackerTokenManager.tokens.collect { TrackerTokenManager.cachedHardcoverToken = it.hardcoverToken.orEmpty() } }
             launch {
                 preferenceManager.themeSettings.collect { themeCfg ->
@@ -123,7 +126,6 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             }
             .crossfade(true)
             .allowHardware(true)
-            .allowRgb565(true)
             .fetcherCoroutineContext(Dispatchers.IO.limitedParallelism(12))
             .decoderCoroutineContext(Dispatchers.IO.limitedParallelism(4))
             .build()

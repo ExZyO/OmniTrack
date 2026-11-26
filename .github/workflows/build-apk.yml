@@ -84,7 +84,7 @@ jobs:
           RELEASE_SHA256=$(sha256sum "release-output/OmniTrack-${{ steps.release_info.outputs.tag }}.apk" | awk '{print $1}')
           DEBUG_SHA256=$(sha256sum "release-output/OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk" | awk '{print $1}')
           COMMIT_SUBJ=$(git log -1 --pretty=%s)
-          SAFE_SUBJ=$(printf '%s' "$COMMIT_SUBJ" | tr '"' "'" | tr -d '\\')
+          SAFE_SUBJ=$(printf '%s' "$COMMIT_SUBJ" | tr '"' "'" | tr -d '\\' | tr '\n' ' ')
           cat <<EOF > release-output/version.json
           {
             "version": "${{ steps.release_info.outputs.tag }}",
@@ -98,25 +98,34 @@ jobs:
           EOF
           cp release-output/version.json version.json
 
-          cat <<EOF > release-output/notes.md
-          ## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})
-
-          ### ✨ What's in this build
-          - **Latest Update:** $COMMIT_SUBJ
-
-          ### 📦 Download Options
-          - **Release APK:** \`OmniTrack-${{ steps.release_info.outputs.tag }}.apk\`
-          - **Debug APK (for ADB / Wireless Debugging logs):** \`OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk\`
-
-          ### 🔐 Verification Checksums (SHA-256)
-          - **Release SHA-256:** \`$RELEASE_SHA256\`
-          - **Debug SHA-256:** \`$DEBUG_SHA256\`
-
-          ### 🔧 Technical Details
-          - **Commit:** ${{ github.sha }}
-          - **Build Type:** Release (R8 Minified) & Debug
-          - **Engine:** Room SQLite WAL, Coil 3 Lossless Artwork, Fast Dual-Channel Update Stream
-          EOF
+          {
+            echo "## 📱 OmniTrack Release (${{ steps.release_info.outputs.tag }})"
+            echo ""
+            if [ -s RELEASE_NOTES.md ]; then
+              cat RELEASE_NOTES.md
+            else
+              COMMIT_BODY=$(git log -1 --pretty=%b)
+              echo "### ✨ What's in this build"
+              echo "- **Latest Update:** $COMMIT_SUBJ"
+              if [ -n "$COMMIT_BODY" ]; then
+                echo ""
+                echo "$COMMIT_BODY"
+              fi
+            fi
+            echo ""
+            echo "### 📦 Download Options"
+            echo "- **Release APK:** \`OmniTrack-${{ steps.release_info.outputs.tag }}.apk\`"
+            echo "- **Debug APK (for ADB / Wireless Debugging logs):** \`OmniTrack-${{ steps.release_info.outputs.tag }}-debug.apk\`"
+            echo ""
+            echo "### 🔐 Verification Checksums (SHA-256)"
+            echo "- **Release SHA-256:** \`$RELEASE_SHA256\`"
+            echo "- **Debug SHA-256:** \`$DEBUG_SHA256\`"
+            echo ""
+            echo "### 🔧 Build Metadata"
+            echo "- **Commit:** ${{ github.sha }}"
+            echo "- **Build Type:** Release (R8 Minified) & Debug"
+            echo "- **Engine:** Room SQLite WAL, Coil 3 32-Bit Artwork + Saliency Focus, Fast Dual-Channel Update Stream"
+          } > release-output/notes.md
 
       - name: Upload APK Artifacts
         uses: actions/upload-artifact@v4

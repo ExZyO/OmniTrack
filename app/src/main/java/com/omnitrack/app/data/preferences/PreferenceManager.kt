@@ -782,7 +782,7 @@ class PreferenceManager(private val context: Context) {
             }
         }
         .map { prefs ->
-            PresentationSettings(
+            val resolved = PresentationSettings(
                 detailsPagePresentation = prefs[PreferencesKeys.DETAILS_PAGE_PRESENTATION]?.let {
                     DetailsPagePresentation.fromName(it)
                 } ?: DetailsPagePresentation.HERO,
@@ -796,6 +796,8 @@ class PreferenceManager(private val context: Context) {
                 universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
                 categoryBannerBlurOverrides = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES])
             )
+            cachedPresentationSettings = resolved
+            resolved
         }
         .distinctUntilChanged()
 
@@ -804,12 +806,14 @@ class PreferenceManager(private val context: Context) {
             if (exception is IOException || exception is ClassCastException) emit(emptyPreferences()) else throw exception
         }
         .map { prefs ->
-            OmniThemeSettings(
+            val resolved = OmniThemeSettings(
                 theme = OmniAppTheme.fromName(prefs[PreferencesKeys.APP_THEME]),
                 amoledBlack = prefs[PreferencesKeys.APP_AMOLED_BLACK] ?: true,
                 customFirstHex = prefs[PreferencesKeys.APP_CUSTOM_FIRST_HEX] ?: "#E8C26A",
                 customSecondHex = prefs[PreferencesKeys.APP_CUSTOM_SECOND_HEX] ?: "#35D6E8"
             )
+            cachedThemeSettings = resolved
+            resolved
         }
         .distinctUntilChanged()
 
@@ -1397,7 +1401,7 @@ class PreferenceManager(private val context: Context) {
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
         .map { prefs ->
             val raw = prefs[PreferencesKeys.HOME_ROW_ORDER]
-            if (raw.isNullOrBlank()) {
+            val resolved = if (raw.isNullOrBlank()) {
                 HomeLayoutDefaults.defaultRows
             } else {
                 try {
@@ -1416,6 +1420,8 @@ class PreferenceManager(private val context: Context) {
                     HomeLayoutDefaults.defaultRows
                 }
             }
+            cachedHomeRows = resolved
+            resolved
         }
         .distinctUntilChanged()
 
@@ -1451,7 +1457,7 @@ class PreferenceManager(private val context: Context) {
             val autoRotateBool = prefs[PreferencesKeys.HOME_HERO_AUTO_ROTATE] ?: true
             val rawRotateSecs = prefs[PreferencesKeys.HOME_HERO_ROTATE_SECONDS]
                 ?: if (autoRotateBool) 6 else 0
-            HomeHeroSettings(
+            val resolved = HomeHeroSettings(
                 showHero = prefs[PreferencesKeys.HOME_HERO_ENABLED] ?: true,
                 heroSource = HomeHeroSource.fromName(prefs[PreferencesKeys.HOME_HERO_SOURCE]),
                 heroSources = prefs[PreferencesKeys.HOME_HERO_SOURCES] ?: setOf("CONTINUE", "FAVORITES", "TRENDING"),
@@ -1492,6 +1498,8 @@ class PreferenceManager(private val context: Context) {
                 universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
                 categoryBannerBlurOverrides = HeroBannerBlurLevel.parseOverrides(prefs[PreferencesKeys.CATEGORY_HERO_BANNER_BLUR_OVERRIDES])
             )
+            cachedHomeHeroSettings = resolved
+            resolved
         }
         .distinctUntilChanged()
 
@@ -2009,7 +2017,7 @@ class PreferenceManager(private val context: Context) {
             // autoPauseBlurOnScroll = true, downsampleGridCovers = true,
             // prefetchAdjacentTabs = false (limit offscreen tabs), hardwareBitmaps = true.
             val perfMode = prefs[PreferencesKeys.PERF_MODE_ENABLED] ?: false
-            PerformanceSettings(
+            val resolved = PerformanceSettings(
                 performanceModeEnabled = perfMode,
                 liveNavBarBlur = if (perfMode) false else (prefs[PreferencesKeys.PERF_LIVE_NAV_BLUR] ?: true),
                 autoPauseBlurOnScroll = true,
@@ -2019,6 +2027,8 @@ class PreferenceManager(private val context: Context) {
                 prefetchAdjacentTabs = false,
                 hardwareBitmaps = true
             )
+            cachedPerformanceSettings = resolved
+            resolved
         }
         .distinctUntilChanged()
 
@@ -2158,6 +2168,21 @@ class PreferenceManager(private val context: Context) {
     }
 
     companion object {
+        @Volatile
+        var cachedPresentationSettings: PresentationSettings = PresentationSettings()
+
+        @Volatile
+        var cachedHomeHeroSettings: HomeHeroSettings = HomeHeroSettings()
+
+        @Volatile
+        var cachedHomeRows: List<HomeRowItem> = HomeLayoutDefaults.defaultRows
+
+        @Volatile
+        var cachedThemeSettings: OmniThemeSettings = OmniThemeSettings()
+
+        @Volatile
+        var cachedPerformanceSettings: PerformanceSettings = PerformanceSettings()
+
         @Volatile
         var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI
 

@@ -76,6 +76,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
@@ -92,6 +93,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
@@ -103,6 +105,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.omnitrack.app.R
 import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
@@ -123,11 +127,14 @@ import com.omnitrack.app.data.preferences.PosterCardStyle
 import com.omnitrack.app.data.preferences.heroRatingsCacheKey
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
+import com.omnitrack.app.ui.components.focusedAlignment
 import com.omnitrack.app.ui.components.HERO_BACKGROUND_PARALLAX
 import com.omnitrack.app.ui.components.HERO_CONTENT_PARALLAX
 import com.omnitrack.app.ui.components.HeroPageLayer
 import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.components.rememberBackdropFocusState
+import com.omnitrack.app.ui.components.revealAlpha
 import kotlin.math.roundToInt
 import com.omnitrack.app.ui.components.glassCardDepth
 import com.omnitrack.app.ui.components.heroBackgroundOverscan
@@ -200,6 +207,7 @@ fun HomeDashboardView(
     modifier: Modifier = Modifier,
     homeListState: LazyListState = rememberLazyListState(),
     posterStyle: PosterCardStyle = PosterCardStyle(),
+    isInitialLoading: Boolean = false,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     fanfictionEnabled: Boolean = true,
@@ -216,6 +224,10 @@ fun HomeDashboardView(
     val scope = rememberCoroutineScope()
     val perf = LocalPerformanceSettings.current
     var heroRefreshNonce by remember { mutableIntStateOf(0) }
+    var heroSessionSeed by rememberSaveable { mutableLongStateOf(System.nanoTime() xor (System.currentTimeMillis() shl 16)) }
+    var lastVisibleHeroKey by remember { mutableStateOf<String?>(null) }
+    var avoidFirstHeroKeyOnRefresh by remember { mutableStateOf<String?>(null) }
+    var lastHandledRefreshNonce by remember { mutableIntStateOf(0) }
     var localRefreshing by remember { mutableStateOf(false) }
     val pullState = rememberPullToRefreshState()
     var selectedCategory by remember { mutableStateOf(heroSettings.defaultCategory) }
@@ -322,7 +334,8 @@ fun HomeDashboardView(
         visibleAllMedia,
         customCategories,
         categoryAssignments,
-        heroRefreshNonce
+        heroRefreshNonce,
+        heroSessionSeed
     ) {
         fun matchesHeroCategory(type: MediaType, mediaId: Long? = null): Boolean = when (heroSettings.heroCategoryMode.uppercase()) {
             "FOLLOW_HOME" -> selectedCategory == MediaType.ALL || type == selectedCategory
@@ -469,6 +482,16 @@ fun HomeDashboardView(
                 else scopedRecent.map { HomeHeroSlide.LocalSlide(it) }
         }
 
+        fun List<HomeHeroSlide>.shuffleFresh(seed: Long, avoidFirstKey: String?): List<HomeHeroSlide> {
+            if (size <= 1) return this
+            val out = shuffled(java.util.Random(seed))
+            return if (avoidFirstKey != null && out.first().slideKey() == avoidFirstKey) {
+                out.drop(1) + out.take(1)
+            } else {
+                out
+            }
+        }
+
         val ordered = when (heroSettings.slideOrder.uppercase()) {
             "RECENT" -> {
                 val base = resolved.sortedWith(
@@ -479,16 +502,10 @@ fun HomeDashboardView(
                         }
                     }
                 )
-                if (heroRefreshNonce > 0 && base.size > 1) {
-                    val shift = java.util.Random(heroRefreshNonce.toLong() * 7919L + 17L).nextInt(base.size - 1) + 1
-                    base.drop(shift) + base.take(shift)
-                } else base
+                if (heroRefreshNonce > 0) base.shuffleFresh(heroSessionSeed, avoidFirstHeroKeyOnRefresh) else base
             }
             "INTERLEAVED" -> {
-                if (heroRefreshNonce > 0 && resolved.size > 1) {
-                    val shift = java.util.Random(heroRefreshNonce.toLong() * 5381L + 13L).nextInt(resolved.size - 1) + 1
-                    resolved.drop(shift) + resolved.take(shift)
-                } else resolved
+                if (heroRefreshNonce > 0) resolved.shuffleFresh(heroSessionSeed, avoidFirstHeroKeyOnRefresh) else resolved
             }
             "TOP_RATED" -> {
                 val base = resolved.sortedByDescending { slide ->
@@ -497,22 +514,16 @@ fun HomeDashboardView(
                         is HomeHeroSlide.TrendingSlide -> slide.item.communityScore ?: 0f
                     }
                 }
-                if (heroRefreshNonce > 0 && base.size > 1) {
-                    val shift = java.util.Random(heroRefreshNonce.toLong() * 31L).nextInt(base.size - 1) + 1
-                    base.drop(shift) + base.take(shift)
-                } else base
+                if (heroRefreshNonce > 0) base.shuffleFresh(heroSessionSeed, avoidFirstHeroKeyOnRefresh) else base
             }
             "SHUFFLE" -> {
-                if (heroRefreshNonce > 0) {
-                    resolved.shuffled(java.util.Random(heroRefreshNonce.toLong() * 1009L + 42L))
-                } else {
-                    resolved.shuffled(java.util.Random(42L))
-                }
+                resolved.shuffleFresh(
+                    seed = heroSessionSeed,
+                    avoidFirstKey = if (heroRefreshNonce > 0) avoidFirstHeroKeyOnRefresh else null
+                )
             }
             else -> {
-                if (heroRefreshNonce > 0 && resolved.size > 1) {
-                    resolved.shuffled(java.util.Random(heroRefreshNonce.toLong() * 7919L + 17L))
-                } else resolved
+                if (heroRefreshNonce > 0) resolved.shuffleFresh(heroSessionSeed, avoidFirstHeroKeyOnRefresh) else resolved
             }
         }
 
@@ -551,6 +562,8 @@ fun HomeDashboardView(
         state = pullState,
         onRefresh = {
             localRefreshing = true
+            avoidFirstHeroKeyOnRefresh = lastVisibleHeroKey
+            heroSessionSeed = System.nanoTime() xor ((heroRefreshNonce + 1).toLong() * 2654435761L)
             heroRefreshNonce++
             onRefresh()
             scope.launch {
@@ -587,14 +600,14 @@ fun HomeDashboardView(
                     val activeAllMedia = allMediaState.value
                     val activeHeroRatingsCache = heroRatingsCacheState.value
                     val activeIsRefreshing = isRefreshingState.value
+                    val heroHeightDp = when (activeHeroSettings.heroHeightPreset.uppercase()) {
+                        "COMPACT" -> 336.dp
+                        "TALL" -> 472.dp
+                        else -> 404.dp
+                    }
 
                     if (activeHeroSlides.isNotEmpty()) {
                         val animateHero = !perf.disableCardAnimations
-                        val heroHeightDp = when (activeHeroSettings.heroHeightPreset.uppercase()) {
-                            "COMPACT" -> 336.dp
-                            "TALL" -> 472.dp
-                            else -> 404.dp
-                        }
                         val density = LocalDensity.current
                         val heroHeightPx = with(density) { heroHeightDp.toPx() }
                         val heroScrollPx: () -> Float = {
@@ -640,17 +653,27 @@ fun HomeDashboardView(
                             }
                         }
 
-                        LaunchedEffect(heroRefreshNonce) {
-                            if (heroRefreshNonce > 0 && activeHeroSlides.isNotEmpty()) {
+                        LaunchedEffect(heroKeys, heroRefreshNonce) {
+                            if (activeHeroSlides.isEmpty()) return@LaunchedEffect
+                            if (heroRefreshNonce != lastHandledRefreshNonce) {
+                                lastHandledRefreshNonce = heroRefreshNonce
                                 runCatching { pagerState.scrollToPage(startIndex) }
+                                return@LaunchedEffect
                             }
-                        }
-
-                        LaunchedEffect(heroKeys) {
-                            if (activeHeroSlides.isNotEmpty() && !isDraggingHero && !pagerState.isScrollInProgress) {
-                                val curMod = if (isLooping) pagerState.currentPage % activeHeroSlides.size else 0
-                                val target = if (isLooping) startIndex + curMod else 0
-                                runCatching { pagerState.scrollToPage(target) }
+                            if (!isDraggingHero && !pagerState.isScrollInProgress) {
+                                val preservedIdx = lastVisibleHeroKey?.let { key -> heroKeys.indexOf(key) }?.takeIf { it >= 0 }
+                                if (preservedIdx != null) {
+                                    val target = if (isLooping) heroPageForItem(pagerState.currentPage, preservedIdx, activeHeroSlides.size) else preservedIdx
+                                    if (pagerState.currentPage != target) {
+                                        runCatching { pagerState.scrollToPage(target) }
+                                    }
+                                } else {
+                                    val curMod = if (isLooping) pagerState.currentPage % activeHeroSlides.size else 0
+                                    val target = if (isLooping) startIndex + curMod else 0
+                                    if (pagerState.currentPage != target) {
+                                        runCatching { pagerState.scrollToPage(target) }
+                                    }
+                                }
                             }
                         }
 
@@ -740,6 +763,12 @@ fun HomeDashboardView(
                             }
                             val activeSlideIndex = visibleLayers.lastOrNull()?.itemIndex ?: currentActualIndex
                             val activeSlide = activeHeroSlides.getOrNull(activeSlideIndex)
+                            val activeSlideKey = activeSlide?.slideKey()
+                            LaunchedEffect(activeSlideKey) {
+                                if (!activeSlideKey.isNullOrBlank()) {
+                                    lastVisibleHeroKey = activeSlideKey
+                                }
+                            }
                             val activeLibMatch = remember(activeSlide, activeAllMedia) {
                                 when (activeSlide) {
                                     is HomeHeroSlide.LocalSlide -> activeSlide.item
@@ -926,8 +955,15 @@ fun HomeDashboardView(
                                 }
                             }
                         }
-                    } else {
+                    } else if (!isInitialLoading) {
                         EmptyHomeHeroCard(onDiscoverClick = onNavigateToDiscover)
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(heroHeightDp)
+                                .background(AmoledBlack)
+                        )
                     }
                 }
             } else {
@@ -1868,14 +1904,33 @@ private fun ChimanewHeroBackdropLayer(
     animateHero: Boolean,
     scrollOffsetPx: () -> Float
 ) {
+    val context = LocalContext.current
     val overscanScale = if (animateHero) heroBackgroundOverscan(pageOffset) else 1f
     if (data.authenticBannerModel != null) {
         val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
+        val hasManualFraming = kotlin.math.abs(data.bannerFocalX) > 0.01f ||
+            kotlin.math.abs(data.bannerFocalY) > 0.01f ||
+            kotlin.math.abs(data.bannerZoom - 1f) > 0.01f
+        val focusKey = (data.authenticBannerModel as? String) ?: (data.authenticBannerModel as? File)?.absolutePath
+        val focusState = rememberBackdropFocusState(cacheKey = focusKey, enabled = !hasManualFraming)
+        val bannerRequest = remember(data.authenticBannerModel, context) {
+            ImageRequest.Builder(context)
+                .data(data.authenticBannerModel)
+                .crossfade(false)
+                .build()
+        }
+        val effectiveAlignment = if (hasManualFraming) {
+            BiasAlignment(data.bannerFocalX.coerceIn(-1f, 1f), data.bannerFocalY.coerceIn(-1f, 1f))
+        } else {
+            focusState.focusedAlignment(Alignment.Center)
+        }
         AsyncImage(
-            model = data.authenticBannerModel,
+            model = bannerRequest,
             contentDescription = null,
             contentScale = ContentScale.Crop,
-            alignment = BiasAlignment(data.bannerFocalX.coerceIn(-1f, 1f), data.bannerFocalY.coerceIn(-1f, 1f)),
+            alignment = effectiveAlignment,
+            onSuccess = { state -> if (!hasManualFraming) focusState.onImageLoaded(state.result.image) },
+            onError = { focusState.onImageFailed() },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -1885,13 +1940,14 @@ private fun ChimanewHeroBackdropLayer(
                     val sPx = scrollOffsetPx()
                     val scrollScale = if (animateHero) heroScrollBackdropScale(sPx) else 1f
                     val totalZoom = effZoom * overscanScale * scrollScale
+                    val focusAlpha = if (hasManualFraming) 1f else focusState.revealAlpha
                     scaleX = totalZoom
                     scaleY = totalZoom
                     translationX = -fx * size.width * (effZoom - 1f) * 0.5f -
                         (if (animateHero) pageOffset * heroWidthPx * HERO_BACKGROUND_PARALLAX else 0f)
                     translationY = -fy * size.height * (effZoom - 1f) * 0.5f +
                         (if (animateHero) sPx * 0.34f else 0f)
-                    alpha = baseAlpha * visibility * heroScrollBackdropAlpha(sPx, size.height)
+                    alpha = baseAlpha * visibility * heroScrollBackdropAlpha(sPx, size.height) * focusAlpha
                 }
                 .then(if (data.bannerBlurDp > 0) Modifier.blur(data.bannerBlurDp.dp) else Modifier)
         )

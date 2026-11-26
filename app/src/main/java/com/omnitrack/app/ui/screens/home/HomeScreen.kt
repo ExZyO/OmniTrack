@@ -235,8 +235,8 @@ fun HomeScreen(
     val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
     val perfSettings = LocalPerformanceSettings.current
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
-    val homeRows by prefManager.homeRowOrder.collectAsState(initial = HomeLayoutDefaults.defaultRows)
-    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = HomeHeroSettings())
+    val homeRows by prefManager.homeRowOrder.collectAsState(initial = PreferenceManager.cachedHomeRows)
+    val heroSettings by prefManager.homeHeroSettings.collectAsState(initial = PreferenceManager.cachedHomeHeroSettings)
     val continueTrackingStyle by prefManager.continueTrackingStyle.collectAsState(initial = ContinueTrackingStyle.CARD)
     val tmdbKey by prefManager.tmdbApiKey.collectAsState(initial = "")
     val heroMultiRatingsCache by prefManager.heroMultiRatingsCache.collectAsState(initial = emptyMap())
@@ -543,6 +543,7 @@ fun HomeScreen(
                         calendarReleases = calendarReleases,
                         isLoadingCalendar = isLoadingCalendar,
                         isLoadingTrending = isLoadingTrending,
+                        isInitialLoading = uiState.isLoading,
                         trendingItems = trendingItems,
                         categoryDiscoverShelves = categoryDiscoverShelves,
                         watchedTimestamps90d = watchedTimestamps90d,
@@ -1026,7 +1027,35 @@ fun HomeScreen(
                                     color = TextSecondary,
                                     modifier = Modifier
                                         .clickable {
-                                            activeSubFilterPills.forEach { it.second() }
+                                            when (activeMediaTabType) {
+                                                MediaType.MANGA -> selectedMangaSubtype = "ALL"
+                                                MediaType.NOVEL -> selectedNovelSubtype = "ALL"
+                                                MediaType.VISUAL_NOVEL -> {
+                                                    selectedVnOriginSubtype = "ALL"
+                                                    selectedVnLengthSubtype = "ALL"
+                                                }
+                                                MediaType.GAME -> {
+                                                    selectedGamePlatform = "ALL"
+                                                    selectedGameCompletion = "ALL"
+                                                }
+                                                MediaType.BOOK -> {
+                                                    selectedBookFormat = "ALL"
+                                                    selectedBookCategory = "ALL"
+                                                }
+                                                MediaType.COMIC -> {
+                                                    selectedComicPublisher = "ALL"
+                                                    selectedComicFormat = "ALL"
+                                                }
+                                                MediaType.FANFICTION -> {
+                                                    selectedFanficSitesRaw = ""
+                                                    selectedFanficRating = "ALL"
+                                                    selectedFanficStatus = "ALL"
+                                                    selectedFanficMinWords = 0
+                                                    fanficCrossoverOnly = false
+                                                    fanficTagFilter = ""
+                                                }
+                                                else -> activeSubFilterPills.forEach { it.second() }
+                                            }
                                         }
                                         .padding(horizontal = 6.dp, vertical = 4.dp)
                                 )
@@ -2083,6 +2112,7 @@ private fun HomeTabContent(
     calendarReleases: List<CalendarReleaseItem>,
     isLoadingCalendar: Boolean,
     isLoadingTrending: Boolean,
+    isInitialLoading: Boolean = false,
     trendingItems: List<SearchResultItem>,
     categoryDiscoverShelves: Map<HomeRowKey, List<SearchResultItem>>,
     watchedTimestamps90d: List<Long>,
@@ -2138,6 +2168,7 @@ private fun HomeTabContent(
         onNavigateToHistory = onNavigateToHistory,
         homeListState = homeListState,
         posterStyle = posterStyle,
+        isInitialLoading = isInitialLoading,
         isRefreshing = isLoadingTrending || isLoadingCalendar,
         onRefresh = {
             viewModel.loadHomeTrending(force = true)

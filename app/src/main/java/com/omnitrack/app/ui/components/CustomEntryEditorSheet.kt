@@ -172,6 +172,9 @@ fun CustomEntryEditorSheet(
     var nativeTitle by remember(existingItem?.id) {
         mutableStateOf(existingItem?.nativeTitle.orEmpty())
     }
+    var originCountryCode by remember(existingItem?.id) {
+        mutableStateOf(existingItem?.originCountry?.trim()?.uppercase().orEmpty())
+    }
     var primaryCreator by remember(existingItem?.id) {
         mutableStateOf(existingItem?.bookAuthor.orEmpty())
     }
@@ -558,6 +561,48 @@ fun CustomEntryEditorSheet(
                     colors = fieldColors,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Text(
+                    text = "ORIGIN / LANGUAGE (OPTIONAL)",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextSecondary,
+                    letterSpacing = 0.9.sp
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    listOf(
+                        "" to "Auto",
+                        "CN" to "Chinese",
+                        "JP" to "Japanese",
+                        "KR" to "Korean",
+                        "US" to "English",
+                        "FR" to "French",
+                        "ES" to "Spanish",
+                        "DE" to "German",
+                        "RU" to "Russian"
+                    ).forEach { (code, label) ->
+                        val selected = originCountryCode == code
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (selected) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
+                                .clickable { originCountryCode = code }
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) AccentGold else TextSecondary
+                            )
+                        }
+                    }
+                }
 
                 // Smart Dual Creator Fields (e.g. Mangaka + Artist/Publisher, Original Author + Studio, Director + Studio)
                 Text(
@@ -1285,6 +1330,7 @@ fun CustomEntryEditorSheet(
                     val updated = base.copy(
                         title = title.trim(),
                         nativeTitle = nativeTitle.trim().takeIf { it.isNotBlank() },
+                        originCountry = originCountryCode.takeIf { it.isNotBlank() },
                         synopsis = synopsis.trim().takeIf { it.isNotBlank() },
                         coverUrl = resolvedCoverUrl,
                         bannerUrl = resolvedBannerUrl,

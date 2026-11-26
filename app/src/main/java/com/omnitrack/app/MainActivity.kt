@@ -3,6 +3,8 @@ package com.omnitrack.app
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -26,11 +28,14 @@ import com.omnitrack.app.ui.theme.OmniThemeSettings
 import com.omnitrack.app.ui.theme.OmniThemeState
 import com.omnitrack.app.ui.theme.OmniTrackTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -70,9 +75,11 @@ class MainActivity : ComponentActivity() {
         handleAuthDeepLink(intent?.data, app)
         handleShareIntent(intent)
 
+        val startupReady = AtomicBoolean(false)
+
         setContent {
-            val themeSettings by app.preferenceManager.themeSettings.collectAsState(initial = OmniThemeSettings())
-            val perfSettings by app.preferenceManager.performanceSettings.collectAsState(initial = PerformanceSettings())
+            val themeSettings by app.preferenceManager.themeSettings.collectAsState(initial = PreferenceManager.cachedThemeSettings)
+            val perfSettings by app.preferenceManager.performanceSettings.collectAsState(initial = PreferenceManager.cachedPerformanceSettings)
             LaunchedEffect(themeSettings) {
                 OmniThemeState.apply(themeSettings)
             }
@@ -87,6 +94,41 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        val contentView = findViewById<View>(android.R.id.content)
+        val markStartupReady = {
+            if (startupReady.compareAndSet(false, true)) {
+                contentView?.post { contentView.invalidate() }
+            }
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            withTimeoutOrNull(450L) {
+                coroutineScope {
+                    launch { runCatching { app.preferenceManager.themeSettings.firstOrNull() } }
+                    launch { runCatching { app.preferenceManager.homeHeroSettings.firstOrNull() } }
+                    launch { runCatching { app.preferenceManager.presentationSettings.firstOrNull() } }
+                    launch { runCatching { app.preferenceManager.homeRowOrder.firstOrNull() } }
+                    launch { runCatching { app.preferenceManager.performanceSettings.firstOrNull() } }
+                    launch { runCatching { app.repository.getAllMediaSummaries().firstOrNull() } }
+                }
+            }
+            markStartupReady()
+        }
+        contentView?.postDelayed({ markStartupReady() }, 450L)
+        contentView?.viewTreeObserver?.addOnPreDrawListener(
+            object : ViewTreeObserver.OnPreDrawListener {
+                override fun onPreDraw(): Boolean {
+                    return if (startupReady.get()) {
+                        if (contentView.viewTreeObserver.isAlive) {
+                            contentView.viewTreeObserver.removeOnPreDrawListener(this)
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
