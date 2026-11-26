@@ -36,4 +36,10 @@ interface BookQuoteDao {
 
     @Query("DELETE FROM book_quotes")
     suspend fun deleteAllQuotes()
+
+    @Query("SELECT COUNT(*) FROM book_quotes WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun countOrphaned(): Int
+
+    @Query("DELETE FROM book_quotes WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun deleteOrphaned(): Int
 }

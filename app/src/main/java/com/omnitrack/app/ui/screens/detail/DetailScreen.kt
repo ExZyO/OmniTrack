@@ -229,7 +229,13 @@ import com.omnitrack.app.ui.screens.detail.components.VolumeChapterDetailSheet
 import com.omnitrack.app.ui.screens.detail.components.DetailAiringStatusLine
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeCastSection
 import com.omnitrack.app.ui.screens.detail.components.DetailAnimeStaffSection
+import com.omnitrack.app.ui.screens.detail.components.DetailAwardsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailFranchiseSection
+import com.omnitrack.app.ui.screens.detail.components.DetailWhereToWatchSection
+import com.omnitrack.app.ui.screens.detail.components.AwardWinnersBrowserSheet
+import com.omnitrack.app.ui.screens.detail.components.CrossMediumEditionsSection
+import com.omnitrack.app.ui.screens.detail.components.LinkCrossMediumEditionSheet
+import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -307,11 +313,22 @@ fun DetailScreen(
     val ranobeBookDetails by viewModel.ranobeBookDetails.collectAsState()
     val isTransitionLoading by viewModel.isTransitionLoading.collectAsState()
     val revealGeneration by viewModel.revealGeneration.collectAsState()
+    val seasonMetaMap by viewModel.seasonMetaMap.collectAsState()
+    val crossMediumEditions by viewModel.crossMediumEditions.collectAsState()
+    val allLibraryMedia by viewModel.allLibraryMedia.collectAsState()
+    val watchProviders by viewModel.watchProviders.collectAsState()
+    val isLoadingWatchProviders by viewModel.isLoadingWatchProviders.collectAsState()
+    val awards by viewModel.awards.collectAsState()
+    val awardWinnersSheetState by viewModel.awardWinnersSheetState.collectAsState()
+    val watchRegionPref by prefManager.watchProviderRegion.collectAsState(initial = PreferenceManager.cachedWatchProviderRegion)
     val mergedEpisodeMeta = remember(uiState.episodeMetaMap, previewEpisodeMeta) {
         uiState.episodeMetaMap + previewEpisodeMeta
     }
 
     val item = uiState.item
+    LaunchedEffect(item?.id, item?.tmdbId, item?.imdbId, item?.title, watchRegionPref) {
+        item?.let { viewModel.loadWatchProvidersAndAwards(it, watchRegionPref) }
+    }
     val customCoverUrl = remember(item, customPosterPattern) {
         if (item != null && customPosterPattern.isNotBlank()) {
             com.omnitrack.app.data.poster.CustomPosterUrlResolver.resolveForMediaItem(item, customPosterPattern, isLandscape = false)
@@ -371,6 +388,7 @@ fun DetailScreen(
     var showMultiTrackerSheet by remember { mutableStateOf(false) }
     var pendingHideRatingBadge by remember { mutableStateOf<RatingBadgeData?>(null) }
     var showManageRatingsSheet by remember { mutableStateOf(false) }
+    var showLinkEditionSheet by remember { mutableStateOf(false) }
     val entryRatingKey = remember(
         item?.id, item?.mediaType, item?.title, item?.tmdbId, item?.anilistId, item?.malId,
         item?.igdbId, item?.steamAppId, item?.vndbId, item?.hardcoverId, item?.comicVineId
@@ -1271,6 +1289,7 @@ fun DetailScreen(
                                         pushSheet(DetailSheetTarget.VolumeChapterDetail(ep.seasonNumber, ep.episodeNumber))
                                     },
                                     episodeMetaMap = mergedEpisodeMeta,
+                                    seasonMetaMap = seasonMetaMap,
                                     isFillerSkipEnabled = uiState.isFillerSkipEnabled,
                                     onToggleSkipFillers = { viewModel.toggleSkipFillers() },
                                     isMangaMode = isReadingType,
@@ -1717,6 +1736,64 @@ fun DetailScreen(
                                 }
                             }
                         }
+                        DetailSectionKey.CROSS_MEDIUM_EDITIONS -> {
+                            if (!uiState.isPreviewMode && item.id > 0L) {
+                                item(key = "section_cross_medium_editions", contentType = "cross_medium_editions") {
+                                    Column {
+                                        CrossMediumEditionsSection(
+                                            currentItem = item,
+                                            editions = crossMediumEditions,
+                                            isPreviewMode = uiState.isPreviewMode,
+                                            onOpenEdition = { edition ->
+                                                navHistory.clear()
+                                                viewModel.switchToCrossMediumEdition(edition)
+                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                            },
+                                            onOpenLinkPicker = { showLinkEditionSheet = true },
+                                            onUnlinkEdition = { edition -> viewModel.unlinkCrossMediumEdition(edition) }
+                                        )
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                        DetailSectionKey.WHERE_TO_WATCH -> {
+                            val showWhereToWatch = sectionsReady &&
+                                (item.mediaType == MediaType.MOVIE || item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME) &&
+                                item.tmdbId != null && item.tmdbId > 0L
+                            if (showWhereToWatch) {
+                                item(key = "section_where_to_watch", contentType = "where_to_watch") {
+                                    Column {
+                                        DetailWhereToWatchSection(
+                                            bundle = watchProviders,
+                                            configuredRegionPref = watchRegionPref,
+                                            isLoading = isLoadingWatchProviders,
+                                            onSelectRegionPref = { chosen ->
+                                                coroutineScope.launch {
+                                                    prefManager.setWatchProviderRegion(chosen)
+                                                }
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                        DetailSectionKey.AWARDS -> {
+                            if (sectionsReady && awards.isNotEmpty()) {
+                                item(key = "section_awards", contentType = "awards") {
+                                    Column {
+                                        DetailAwardsSection(
+                                            awards = awards,
+                                            onAwardClick = { honor ->
+                                                viewModel.openAwardWinners(honor, item.mediaType)
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.height(20.dp))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1947,7 +2024,12 @@ fun DetailScreen(
                 DetailOptionsMenuBottomSheet(
                     presentationSettings = presentationSettings,
                     isCustomEntry = item.isCustomEntry,
+                    canLinkEditions = !uiState.isPreviewMode && item.id > 0L,
                     onDismiss = { showOptionsMenu = false },
+                    onLinkEditions = {
+                        showOptionsMenu = false
+                        showLinkEditionSheet = true
+                    },
                     onToggleTitleLanguage = {
                         showOptionsMenu = false
                         viewModel.togglePreferredTitle()
@@ -2539,8 +2621,8 @@ fun DetailScreen(
                     onPullFromTracker = { trackerKey, overrideItem, cb ->
                         viewModel.pullFromTracker(trackerKey, overrideItem, cb)
                     },
-                    onPushToTracker = { overrideItem, trackerKey, cb ->
-                        viewModel.pushToTracker(overrideItem, trackerKey, cb)
+                    onPushToTracker = { overrideItem, trackerKey, selectedKeys, cb ->
+                        viewModel.pushToTracker(overrideItem, trackerKey, selectedKeys, cb)
                     },
                     onDeleteFromRemote = { trackerKey, alsoDeleteLocal, unlinkedItem, cb ->
                         viewModel.deleteFromRemoteTracker(trackerKey, alsoDeleteLocal, unlinkedItem) { outcome, removedLocal ->
@@ -2709,7 +2791,11 @@ fun DetailScreen(
                 onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
                 onJumpToProgress = if (isReadingType) {
                     { target -> viewModel.jumpToChapterOrVolume(target) }
-                } else null
+                } else null,
+                seasonMetaMap = seasonMetaMap,
+                onSaveSeasonMeta = { seasonNum, rating, note ->
+                    viewModel.saveSeasonMeta(seasonNum, rating, note)
+                }
             )
         }
     }
@@ -2946,6 +3032,41 @@ fun DetailScreen(
                     showFullScreenCover = false
                     showArtworkPicker = true
                 }
+            )
+        }
+        if (showLinkEditionSheet && item != null && item.id > 0L) {
+            LinkCrossMediumEditionSheet(
+                currentItem = item,
+                allLibraryItems = allLibraryMedia,
+                currentlyLinked = crossMediumEditions,
+                onLinkTarget = { target -> viewModel.linkCrossMediumEdition(target) },
+                onUnlinkTarget = { target -> viewModel.unlinkCrossMediumEdition(target) },
+                onDismiss = { showLinkEditionSheet = false }
+            )
+        }
+        awardWinnersSheetState?.let { winnersState ->
+            AwardWinnersBrowserSheet(
+                awardTitle = winnersState.awardTitle,
+                winners = winnersState.winners,
+                isLoading = winnersState.isLoading,
+                onOpenWinner = { winner ->
+                    viewModel.closeAwardWinners()
+                    pushPreview(
+                        RecommendationItem(
+                            title = winner.title,
+                            coverUrl = winner.posterUrl.orEmpty(),
+                            releaseYear = winner.year?.toString(),
+                            rating = null,
+                            mediaType = winner.mediaType,
+                            synopsis = null,
+                            tmdbId = winner.tmdbId
+                        )
+                    )
+                },
+                onAddWinner = { winner ->
+                    viewModel.addAwardWinnerToLibrary(winner)
+                },
+                onDismiss = { viewModel.closeAwardWinners() }
             )
         }
 }
@@ -4678,7 +4799,9 @@ private fun DetailProgressSection(
 private fun DetailOptionsMenuBottomSheet(
     presentationSettings: PresentationSettings,
     isCustomEntry: Boolean = false,
+    canLinkEditions: Boolean = false,
     onDismiss: () -> Unit,
+    onLinkEditions: () -> Unit = {},
     onToggleTitleLanguage: () -> Unit = {},
     onEditDetails: () -> Unit = {},
     onMatchAndEnrich: () -> Unit = {},
@@ -4905,6 +5028,38 @@ private fun DetailOptionsMenuBottomSheet(
                         color = TextMuted,
                         fontSize = 12.sp
                     )
+                }
+            }
+
+            if (canLinkEditions) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onLinkEditions() }
+                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Link / Combine Edition",
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Connect Anime, Manga, Novel, Book, or Game adaptations together",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
 

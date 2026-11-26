@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
@@ -66,6 +67,7 @@ import com.omnitrack.app.ui.components.ApiKeyConfigSheet
 import com.omnitrack.app.ui.components.BackupRestoreSheet
 import com.omnitrack.app.ui.components.PerformanceSettingsSheet
 import com.omnitrack.app.ui.components.PosterCustomizationSheet
+import com.omnitrack.app.ui.components.ReleaseAlertsSheet
 import com.omnitrack.app.ui.components.TrackerAccountsSheet
 import com.omnitrack.app.ui.screens.detail.components.EpisodeLayoutSheet
 import com.omnitrack.app.ui.theme.AccentGold
@@ -102,6 +104,9 @@ fun SettingsView(
     val tokenManager = app.trackerTokenManager
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val perfSettings by prefManager.performanceSettings.collectAsState(initial = PerformanceSettings())
+    val alertSettings by prefManager.releaseAlertSettings.collectAsState(
+        initial = com.omnitrack.app.data.preferences.ReleaseAlertSettings()
+    )
     val tokens by tokenManager.tokens.collectAsState(initial = TrackerTokens())
     val fanficConnectedSites by tokenManager.fanficConnectedSites.collectAsState(initial = emptySet())
 
@@ -128,6 +133,7 @@ fun SettingsView(
     var showPosterCustomizationSheet by remember { mutableStateOf(false) }
     var showEpisodeLayoutSheet by remember { mutableStateOf(false) }
     var showPerformanceSheet by remember { mutableStateOf(false) }
+    var showReleaseAlertsSheet by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
 
     val accountRows = listOf(
@@ -155,9 +161,17 @@ fun SettingsView(
         ),
         SettingRowEntry(
             icon = Icons.Default.Archive,
-            title = "Backup & Restore",
-            keywords = "backup restore export import json csv xml artwork",
+            title = "Backup, Restore & Repair",
+            keywords = "backup restore export import json csv xml artwork repair health check",
             onClick = { showBackupRestoreSheet = true }
+        ),
+        SettingRowEntry(
+            icon = Icons.Default.NotificationsActive,
+            title = "Release Alerts (Discord / Telegram)",
+            keywords = "release alerts notifications discord webhook telegram bot episode drop",
+            trailingText = if (alertSettings.enabled) "Active" else null,
+            accentIcon = alertSettings.enabled,
+            onClick = { showReleaseAlertsSheet = true }
         )
     )
 
@@ -400,6 +414,13 @@ fun SettingsView(
         )
     }
 
+    if (showReleaseAlertsSheet) {
+        ReleaseAlertsSheet(
+            preferenceManager = prefManager,
+            onDismiss = { showReleaseAlertsSheet = false }
+        )
+    }
+
     if (showAboutDialog) {
         AlertDialog(
             onDismissRequest = { showAboutDialog = false },
@@ -423,7 +444,7 @@ fun SettingsView(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Room Database Schema v24",
+                        text = "Room Database Schema v25",
                         fontSize = 13.sp,
                         color = AccentGold,
                         fontWeight = FontWeight.SemiBold

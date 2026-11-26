@@ -16,7 +16,8 @@ import kotlinx.serialization.Serializable
         Index("mediaType"),
         Index("status"),
         Index("lastUpdated"),
-        Index("title")
+        Index("title"),
+        Index("crossMediumGroupId")
     ]
 )
 data class MediaItemEntity(
@@ -137,5 +138,6 @@ data class MediaItemEntity(
     val fanficMetaJson: String? = null,
     val linkedParentMediaId: Long? = null,
     val linkedSeasonNumber: Int? = null,
+    val crossMediumGroupId: String? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

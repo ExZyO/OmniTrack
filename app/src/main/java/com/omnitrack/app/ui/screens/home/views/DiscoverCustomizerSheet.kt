@@ -273,11 +273,17 @@ fun DiscoverCustomizerSheet(
                         val uiToggles: List<Triple<String, String, Pair<Boolean, (Boolean) -> Unit>>> = listOf(
                             Triple("Spotlight / Hero Banner", "Featured visual showcase above shelves (Layouts A & B)", settings.showSpotlightBanner to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSpotlight(v) } }),
                             Triple("Dim Hero Banner Background", "Darkens the Discover hero backdrop for stronger text contrast", settings.dimHeroBanner to { v: Boolean -> scope.launch { preferenceManager.setDiscoverDimHeroBanner(v) } }),
+                            Triple("Daily Critics' Pick", "Handpicked acclaimed featured card at top of Discover", settings.showDailyCriticsPick to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowDailyCriticsPick(v) } }),
+                            Triple("Browse by Streaming Service", "Official service logos row (Netflix, Crunchyroll, Disney+, etc.)", settings.showStreamingServices to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowStreamingServices(v) } }),
+                            Triple("Top 10 Today", "Numbered daily trending poster shelf across verticals", settings.showTop10Today to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowTop10Today(v) } }),
+                            Triple("Taste-Matched Recommendations", "\"Because You Rated X Highly\" personalized picks from your ratings", settings.showTasteMatched to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowTasteMatched(v) } }),
+                            Triple("Curated Filter Rows", "Under 90 Min, Hidden Gems, Limited Series & By Decade", settings.showCuratedRows to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowCuratedRows(v) } }),
+                            Triple("Swipeable Discovery Queue Button", "Header Queue button for card-by-card swipe discovery", settings.showSwipeQueueButton to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSwipeQueueButton(v) } }),
                             Triple("Quick-Search Inspiration Chips", "Curated one-tap search pills below category tabs", settings.showQuickSearchChips to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowQuickChips(v) } }),
                             Triple("Secondary Sub-Filter Bars", "Format, origin, publisher & platform sub-filters", settings.showSubFilters to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowSubFilters(v) } }),
                             Triple("\"In Your Library\" Spotlight Rail", "Bottom rail highlighting entries you already track", settings.showInYourLibraryShelf to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowInLibrary(v) } }),
                             Triple("\"Create Custom Entry\" Card", "Manual entry fallback inside search results", settings.showCustomEntryCard to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowCustomEntry(v) } }),
-                            Triple("AI Smart Search Toggle Pill", "Inline AI natural-language search switch in search bar", settings.showAiToggle to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowAiToggle(v) } })
+                            Triple("AI Smart Search Toggle", "Inline AI natural-language search switch in search bar", settings.showAiToggle to { v: Boolean -> scope.launch { preferenceManager.setDiscoverShowAiToggle(v) } })
                         )
                         items(uiToggles, key = { "uitog_${it.first}" }) { (title, subtitle, statePair) ->
                             val (checked, onToggle) = statePair

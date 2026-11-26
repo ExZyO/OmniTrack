@@ -8,6 +8,7 @@ import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SeasonMetaEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import kotlinx.serialization.Serializable
@@ -76,7 +77,8 @@ data class OmniDatabaseDump(
     val bookQuotes: List<BookQuoteEntity> = emptyList(),
     val episodeProgress: List<EpisodeProgressEntity> = emptyList(),
     val comicIssues: List<ComicIssueEntity> = emptyList(),
-    val fanficChapters: List<FanficChapterEntity> = emptyList()
+    val fanficChapters: List<FanficChapterEntity> = emptyList(),
+    val seasonMeta: List<SeasonMetaEntity> = emptyList()
 )
 
 @Serializable

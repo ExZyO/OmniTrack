@@ -155,7 +155,7 @@ fun MultiTrackerSheet(
     backdropBitmap: ImageBitmap? = null,
     backdropTargetUrl: String? = null,
     onPullFromTracker: ((String, MediaItemEntity, (MediaItemEntity?, TrackerSyncOutcome) -> Unit) -> Unit)? = null,
-    onPushToTracker: ((MediaItemEntity, String?, (List<TrackerSyncOutcome>) -> Unit) -> Unit)? = null,
+    onPushToTracker: ((MediaItemEntity, String?, Set<String>?, (List<TrackerSyncOutcome>) -> Unit) -> Unit)? = null,
     onDeleteFromRemote: ((String, Boolean, MediaItemEntity, (TrackerSyncOutcome, Boolean) -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -384,14 +384,16 @@ fun MultiTrackerSheet(
         displayedKeys.map { buildTrackerDef(it, localItem) }
     }
 
-    var selectedTrackerKey by remember(item.id) {
-        mutableStateOf(
-            trackers.firstOrNull { it.boundId != null && it.isSignedIn }?.key
-                ?: trackers.firstOrNull { it.boundId != null }?.key
-                ?: trackers.firstOrNull()?.key
-                ?: "ANILIST"
-        )
+    val allEligibleUniversalKeys = remember(localItem, tokens) {
+        allOrderedKeys.map { buildTrackerDef(it, localItem) }
+            .filter { it.boundId != null && it.isSignedIn && it.supportsPush }
+            .map { it.key }
     }
+    var universalTargetKeys by remember(item.id, allEligibleUniversalKeys) {
+        mutableStateOf(allEligibleUniversalKeys.toSet())
+    }
+    var selectedTrackerKey by remember(item.id) { mutableStateOf("UNIVERSAL") }
+    val isUniversalMode = selectedTrackerKey == "UNIVERSAL"
     val activeTracker = trackers.firstOrNull { it.key == selectedTrackerKey }
         ?: trackers.first()
 
@@ -438,22 +440,26 @@ fun MultiTrackerSheet(
         onUpdateItem(next)
     }
 
-    fun triggerPush(targetKey: String?, itemToPush: MediaItemEntity = localItem) {
+    fun triggerPush(
+        targetKey: String?,
+        itemToPush: MediaItemEntity = localItem,
+        selectedKeys: Set<String>? = if (targetKey == null) universalTargetKeys else null
+    ) {
         if (isSyncingAll) return
         isSyncingAll = true
-        val runner: (MediaItemEntity, String?, (List<TrackerSyncOutcome>) -> Unit) -> Unit =
-            onPushToTracker ?: { itm, k, cb ->
+        val runner: (MediaItemEntity, String?, Set<String>?, (List<TrackerSyncOutcome>) -> Unit) -> Unit =
+            onPushToTracker ?: { itm, k, filterKeys, cb ->
                 scope.launch {
-                    val res = syncEngine.pushItemToTrackers(itm, k)
+                    val res = syncEngine.pushItemToTrackers(itm, k, filterKeys)
                     cb(res)
                 }
             }
-        runner(itemToPush, targetKey) { outcomes ->
+        runner(itemToPush, targetKey, selectedKeys) { outcomes ->
             isSyncingAll = false
             val failed = outcomes.filter { !it.success }
             val ok = outcomes.filter { it.success }
             syncStatusBanner = if (failed.isEmpty()) {
-                true to if (ok.size == 1) ok.first().message else "Synced ${ok.size} tracker(s) successfully"
+                true to if (ok.size == 1) ok.first().message else "Synced ${ok.size} tracker(s): ${ok.joinToString(", ") { it.trackerKey }}"
             } else {
                 false to failed.joinToString(" · ") { it.message }
             }
@@ -552,7 +558,7 @@ fun MultiTrackerSheet(
                     }
                     Row(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
+                            .clip(RoundedCornerShape(8.dp))
                             .background(AccentGold)
                             .clickable(enabled = !isSyncingAll) {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -659,7 +665,7 @@ fun MultiTrackerSheet(
                     }
                 }
 
-                // 2. Horizontal Matched-Artwork Switcher Strip
+                // 2. Horizontal Matched-Artwork Switcher Strip (Universal first!)
                 LazyRow(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -667,8 +673,71 @@ fun MultiTrackerSheet(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    item(key = "UNIVERSAL_TILE") {
+                        val readyCount = universalTargetKeys.size
+                        Column(
+                            modifier = Modifier
+                                .width(66.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isUniversalMode) AccentGold.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
+                                .clickable { selectedTrackerKey = "UNIVERSAL" }
+                                .padding(6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(46.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(DarkSurfaceCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val uThumb = ArtworkModelResolver.toCoilModel(
+                                    localItem.customCoverPath?.takeIf { it.isNotBlank() }
+                                        ?: localItem.coverUrl.takeIf { it.isNotBlank() }
+                                )
+                                if (uThumb != null) {
+                                    AsyncImage(
+                                        model = uThumb,
+                                        contentDescription = "Universal",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(AmoledBlack.copy(alpha = 0.45f))
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.Sync,
+                                    contentDescription = "Universal Sync",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Text(
+                                text = "Universal",
+                                fontSize = 10.5.sp,
+                                fontWeight = if (isUniversalMode) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isUniversalMode) AccentGold else TextPrimary,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = if (readyCount > 0) "$readyCount Ready" else "Setup",
+                                fontSize = 9.sp,
+                                color = if (readyCount > 0) AccentGold else TextSecondary,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
                     itemsIndexed(trackers, key = { _, t -> t.key }) { _, trk ->
-                        val selected = trk.key == activeTracker.key
+                        val selected = !isUniversalMode && trk.key == activeTracker.key
                         val snap = matchedSnapshots[trk.key]
                         val rawThumb = if (trk.boundId != null) {
                             localItem.customCoverPath?.takeIf { it.isNotBlank() }
@@ -825,156 +894,227 @@ fun MultiTrackerSheet(
                 ) {
                     val activeSnap = matchedSnapshots[activeTracker.key]
 
-                    // 3a. Matched Remote Entry Showcase (with bigger 2:3 art & diff)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val rawHeroCover = if (activeTracker.boundId != null) {
-                            localItem.customCoverPath?.takeIf { it.isNotBlank() }
-                                ?: activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
-                                ?: localItem.coverUrl.takeIf { it.isNotBlank() }
-                        } else {
-                            activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
-                        }
-                        val heroCoverModel = ArtworkModelResolver.toCoilModel(rawHeroCover)
-                        Box(
-                            modifier = Modifier
-                                .width(64.dp)
-                                .aspectRatio(2f / 3f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(DarkSurfaceCard),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (heroCoverModel != null) {
-                                AsyncImage(
-                                    model = heroCoverModel,
-                                    contentDescription = activeTracker.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                com.omnitrack.app.ui.components.TrackerBrandLogo(
-                                    serviceKey = activeTracker.key,
-                                    size = 20.dp,
-                                    cornerRadius = 5.dp,
-                                    innerPadding = 3.dp,
-                                    containerColor = AmoledBlack.copy(alpha = 0.85f),
-                                    borderColor = Color.White.copy(alpha = 0.16f),
-                                    modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(4.dp)
+                    if (isUniversalMode) {
+                        val readyTrackers = trackers.filter { it.boundId != null && it.isSignedIn && it.supportsPush }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "UNIVERSAL SYNC TARGETS (ADAPTS & PUSHES ALL AT ONCE)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextSecondary,
+                                letterSpacing = 0.8.sp
+                            )
+                            if (readyTrackers.isEmpty()) {
+                                val boundButSignedOut = trackers.filter { it.boundId != null && !it.isSignedIn && it.supportsPush }
+                                Text(
+                                    text = if (boundButSignedOut.isNotEmpty()) {
+                                        "Sign in to ${boundButSignedOut.joinToString(", ") { it.name }} in Settings → Tracker Accounts to push, or tap any service tile above to link accounts."
+                                    } else {
+                                        "No connected trackers linked yet. Tap any tracker tile above (AniList, MAL, Trakt, Simkl, etc.) to bind it, then push everything together here."
+                                    },
+                                    fontSize = 12.5.sp,
+                                    color = TextSecondary,
+                                    lineHeight = 18.sp
                                 )
                             } else {
-                                com.omnitrack.app.ui.components.TrackerBrandLogo(
-                                    serviceKey = activeTracker.key,
-                                    size = 38.dp,
-                                    cornerRadius = 9.dp,
-                                    innerPadding = 5.dp,
-                                    containerColor = Color.White.copy(alpha = 0.04f),
-                                    borderColor = Color.White.copy(alpha = 0.10f)
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    readyTrackers.forEach { trk ->
+                                        val enabled = trk.key in universalTargetKeys
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(if (enabled) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.05f))
+                                                .clickable {
+                                                    universalTargetKeys = if (enabled) universalTargetKeys - trk.key else universalTargetKeys + trk.key
+                                                }
+                                                .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                                serviceKey = trk.key,
+                                                size = 16.dp,
+                                                cornerRadius = 4.dp,
+                                                innerPadding = 2.dp
+                                            )
+                                            Text(
+                                                text = trk.name,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (enabled) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (enabled) AccentGold else TextSecondary
+                                            )
+                                            if (enabled) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Selected",
+                                                    tint = AccentGold,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                    } else {
+                        // 3a. Matched Remote Entry Showcase (with bigger 2:3 art & diff)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = activeSnap?.title ?: if (activeTracker.boundId != null) localItem.title else "Not bound on ${activeTracker.name}",
-                                fontSize = 15.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val metaLine = listOfNotNull(
-                                activeTracker.boundId?.let { "ID #$it" },
-                                activeSnap?.format,
-                                activeSnap?.year,
-                                if (!activeTracker.isSignedIn && activeTracker.supportsPush) "Signed Out" else null
-                            ).joinToString(" · ")
-                            if (metaLine.isNotBlank()) {
+                            val rawHeroCover = if (activeTracker.boundId != null) {
+                                localItem.customCoverPath?.takeIf { it.isNotBlank() }
+                                    ?: activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
+                                    ?: localItem.coverUrl.takeIf { it.isNotBlank() }
+                            } else {
+                                activeSnap?.coverUrl?.takeIf { it.isNotBlank() }
+                            }
+                            val heroCoverModel = ArtworkModelResolver.toCoilModel(rawHeroCover)
+                            Box(
+                                modifier = Modifier
+                                    .width(64.dp)
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurfaceCard),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (heroCoverModel != null) {
+                                    AsyncImage(
+                                        model = heroCoverModel,
+                                        contentDescription = activeTracker.name,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                        serviceKey = activeTracker.key,
+                                        size = 20.dp,
+                                        cornerRadius = 5.dp,
+                                        innerPadding = 3.dp,
+                                        containerColor = AmoledBlack.copy(alpha = 0.85f),
+                                        borderColor = Color.White.copy(alpha = 0.16f),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(4.dp)
+                                    )
+                                } else {
+                                    com.omnitrack.app.ui.components.TrackerBrandLogo(
+                                        serviceKey = activeTracker.key,
+                                        size = 38.dp,
+                                        cornerRadius = 9.dp,
+                                        innerPadding = 5.dp,
+                                        containerColor = Color.White.copy(alpha = 0.04f),
+                                        borderColor = Color.White.copy(alpha = 0.10f)
+                                    )
+                                }
+                            }
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Text(
-                                    text = metaLine,
-                                    fontSize = 11.5.sp,
-                                    color = if (!activeTracker.isSignedIn && activeTracker.supportsPush) Color(0xFFFCA5A5) else TextSecondary,
-                                    maxLines = 1,
+                                    text = activeSnap?.title ?: if (activeTracker.boundId != null) localItem.title else "Not bound on ${activeTracker.name}",
+                                    fontSize = 15.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextPrimary,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                            }
-                            if (activeSnap?.remoteProgress != null || activeSnap?.remoteStatus != null) {
-                                val rProg = activeSnap.remoteProgress?.toInt()?.toString() ?: "0"
-                                val rTot = activeSnap.remoteTotal?.toInt()?.let { "/$it" }.orEmpty()
-                                val rSt = activeSnap.remoteStatus?.labelFor(localItem.mediaType) ?: "Remote"
-                                Text(
-                                    text = "Remote: $rSt · $rProg$rTot (Local ${localItem.currentProgress.toInt()})",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = AccentGold
-                                )
+                                val metaLine = listOfNotNull(
+                                    activeTracker.boundId?.let { "ID #$it" },
+                                    activeSnap?.format,
+                                    activeSnap?.year,
+                                    if (!activeTracker.isSignedIn && activeTracker.supportsPush) "Signed Out" else null
+                                ).joinToString(" · ")
+                                if (metaLine.isNotBlank()) {
+                                    Text(
+                                        text = metaLine,
+                                        fontSize = 11.5.sp,
+                                        color = if (!activeTracker.isSignedIn && activeTracker.supportsPush) Color(0xFFFCA5A5) else TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (activeSnap?.remoteProgress != null || activeSnap?.remoteStatus != null) {
+                                    val rProg = activeSnap.remoteProgress?.toInt()?.toString() ?: "0"
+                                    val rTot = activeSnap.remoteTotal?.toInt()?.let { "/$it" }.orEmpty()
+                                    val rSt = activeSnap.remoteStatus?.labelFor(localItem.mediaType) ?: "Remote"
+                                    Text(
+                                        text = "Remote: $rSt · $rProg$rTot (Local ${localItem.currentProgress.toInt()})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = AccentGold
+                                    )
+                                }
                             }
                         }
-                    }
 
-                    // 3b. Action Strip: Rebind · Pull · Push · Open in Browser (+ LOCG for Comics)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        StudioActionPill(
-                            icon = Icons.Default.Search,
-                            label = if (activeTracker.boundId == null) "Search & Bind" else "Rebind",
-                            accent = activeTracker.boundId == null,
-                            onClick = { rebindTargetTracker = activeTracker }
-                        )
-                        if (activeTracker.boundId != null) {
+                        // 3b. Action Strip: Rebind · Pull · Push · Open in Browser (+ LOCG for Comics)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             StudioActionPill(
-                                icon = Icons.Default.CloudDownload,
-                                label = "Pull",
-                                onClick = { triggerPull(activeTracker.key) }
+                                icon = Icons.Default.Search,
+                                label = if (activeTracker.boundId == null) "Search & Bind" else "Rebind",
+                                accent = activeTracker.boundId == null,
+                                onClick = { rebindTargetTracker = activeTracker }
                             )
-                            if (activeTracker.supportsPush) {
+                            if (activeTracker.boundId != null) {
                                 StudioActionPill(
-                                    icon = Icons.Default.CloudUpload,
-                                    label = "Push",
-                                    accent = true,
-                                    onClick = { triggerPush(activeTracker.key) }
+                                    icon = Icons.Default.CloudDownload,
+                                    label = "Pull",
+                                    onClick = { triggerPull(activeTracker.key) }
                                 )
+                                if (activeTracker.supportsPush) {
+                                    StudioActionPill(
+                                        icon = Icons.Default.CloudUpload,
+                                        label = "Push",
+                                        accent = true,
+                                        onClick = { triggerPush(activeTracker.key) }
+                                    )
+                                }
+                                activeTracker.browserUrlTemplate?.let { urlGen ->
+                                    StudioActionPill(
+                                        icon = Icons.Default.OpenInBrowser,
+                                        label = "Open ↗",
+                                        onClick = {
+                                            runCatching {
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlGen(activeTracker.boundId))))
+                                            }
+                                        }
+                                    )
+                                }
                             }
-                            activeTracker.browserUrlTemplate?.let { urlGen ->
+                            if (localItem.mediaType == MediaType.COMIC) {
                                 StudioActionPill(
                                     icon = Icons.Default.OpenInBrowser,
-                                    label = "Open ↗",
+                                    label = "League of Comic Geeks ↗",
                                     onClick = {
+                                        val url = "https://leagueofcomicgeeks.com/search?keyword=${Uri.encode(localItem.title)}"
                                         runCatching {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(urlGen(activeTracker.boundId))))
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                         }
                                     }
                                 )
                             }
-                        }
-                        if (localItem.mediaType == MediaType.COMIC) {
-                            StudioActionPill(
-                                icon = Icons.Default.OpenInBrowser,
-                                label = "League of Comic Geeks ↗",
-                                onClick = {
-                                    val url = "https://leagueofcomicgeeks.com/search?keyword=${Uri.encode(localItem.title)}"
-                                    runCatching {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                    }
-                                }
-                            )
                         }
                     }
 
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
 
                     // 3c. Status + Lock Status
-                    val (isLockedForTracker, lockedStatusForTracker) = when (activeTracker.key) {
+                    val (isLockedForTracker, lockedStatusForTracker) = if (isUniversalMode) {
+                        false to null
+                    } else when (activeTracker.key) {
                         "ANILIST" -> localItem.isAnilistStatusLocked to localItem.anilistStatus
                         "MAL" -> localItem.isMalStatusLocked to localItem.malStatus
                         "BANGUMI" -> localItem.isBangumiStatusLocked to localItem.bangumiStatus
@@ -1002,10 +1142,10 @@ fun MultiTrackerSheet(
                                 color = TextSecondary,
                                 letterSpacing = 0.8.sp
                             )
-                            if (activeTracker.supportsStatusLock) {
+                            if (!isUniversalMode && activeTracker.supportsStatusLock) {
                                 Row(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(999.dp))
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(
                                             if (isLockedForTracker) AccentGold.copy(alpha = 0.16f)
                                             else Color.White.copy(alpha = 0.06f)
@@ -1059,7 +1199,7 @@ fun MultiTrackerSheet(
                                 val selected = activeEffectiveStatus == st
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(999.dp))
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(if (selected) AccentGold else Color.White.copy(alpha = 0.08f))
                                         .clickable {
                                             val updated = if (isLockedForTracker) {
@@ -1223,8 +1363,8 @@ fun MultiTrackerSheet(
                             }
                         }
 
-                        // Split-cour offset controls for episode-indexed trackers
-                        if (activeTracker.key in listOf("ANILIST", "MAL", "BANGUMI", "SIMKL", "TRAKT")) {
+                        // Split-cour offset controls for episode-indexed trackers (only shown per-tracker)
+                        if (!isUniversalMode && activeTracker.key in listOf("ANILIST", "MAL", "BANGUMI", "SIMKL", "TRAKT")) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1237,7 +1377,7 @@ fun MultiTrackerSheet(
                                     val label = if (delta == 0) "Reset (0)" else if (delta > 0) "+$delta" else "$delta"
                                     Box(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(999.dp))
+                                            .clip(RoundedCornerShape(6.dp))
                                             .background(Color.White.copy(alpha = 0.08f))
                                             .clickable {
                                                 val nextOffset = if (delta == 0) 0 else curOverride.episodeOffset + delta
@@ -1264,9 +1404,24 @@ fun MultiTrackerSheet(
                     var sliderVal by remember(localItem.id, localItem.userRating) {
                         mutableFloatStateOf(localItem.userRating?.coerceIn(0f, 10f) ?: 0f)
                     }
-                    val nativePreview = remember(sliderVal, activeTracker.key) {
+                    val nativePreview = remember(sliderVal, activeTracker.key, isUniversalMode, universalTargetKeys) {
                         if (sliderVal < 0.5f) "Unrated"
-                        else when (activeTracker.key) {
+                        else if (isUniversalMode) {
+                            val parts = universalTargetKeys.map { k ->
+                                when (k) {
+                                    "ANILIST" -> "AL ${(sliderVal * 10f).roundToInt()}/100"
+                                    "MAL" -> "MAL ${sliderVal.roundToInt()}/10"
+                                    "BANGUMI" -> "BGM ${sliderVal.roundToInt()}/10"
+                                    "TRAKT" -> "Trakt ${sliderVal.roundToInt()}/10"
+                                    "SIMKL" -> "Simkl ${sliderVal.roundToInt()}/10"
+                                    "TMDB" -> "TMDb ${((sliderVal * 2f).roundToInt() / 2.0)}/10"
+                                    "HARDCOVER" -> "HC ${((sliderVal / 2f) * 2f).roundToInt() / 2.0}★"
+                                    "VNDB" -> "VNDB ${(sliderVal * 10f).roundToInt()}/100"
+                                    else -> k
+                                }
+                            }
+                            if (parts.isEmpty()) "No targets" else parts.joinToString(" · ")
+                        } else when (activeTracker.key) {
                             "ANILIST", "VNDB", "IGDB" -> "${(sliderVal * 10f).roundToInt()}/100"
                             "HARDCOVER" -> "${((sliderVal / 2f) * 2f).roundToInt() / 2.0}★ / 5"
                             "TMDB" -> "${((sliderVal * 2f).roundToInt() / 2.0)}/10"
@@ -1280,17 +1435,27 @@ fun MultiTrackerSheet(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "RATING · ${activeTracker.scoreFormat.uppercase()}",
+                                text = if (isUniversalMode) "UNIVERSAL RATING (AUTO-ADAPTED)" else "RATING · ${activeTracker.scoreFormat.uppercase()}",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextSecondary,
                                 letterSpacing = 0.8.sp
                             )
                             Text(
-                                text = if (sliderVal < 0.5f) "Unrated" else "${String.format(Locale.US, "%.1f", sliderVal)}/10 ($nativePreview)",
+                                text = if (sliderVal < 0.5f) "Unrated" else "${String.format(Locale.US, "%.1f", sliderVal)}/10",
                                 fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AccentGold
+                            )
+                        }
+                        if (sliderVal >= 0.5f) {
+                            Text(
+                                text = nativePreview,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = TextSecondary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Slider(
@@ -1356,12 +1521,12 @@ fun MultiTrackerSheet(
                     HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
 
                     // 3g. Unified Personal Note + Custom Per-Tracker Override + Real Cap Counter
-                    val noteCap = activeTracker.noteCap
-                    val isCustomOverride = curOverride.useCustomNote
+                    val noteCap = if (isUniversalMode) 2000 else activeTracker.noteCap
+                    val isCustomOverride = !isUniversalMode && curOverride.useCustomNote
                     val activeNoteText = if (isCustomOverride) {
                         curOverride.customNote.orEmpty()
                     } else {
-                        localItem.personalNotes ?: when (activeTracker.key) {
+                        localItem.personalNotes ?: when (if (isUniversalMode) "ALL" else activeTracker.key) {
                             "ANILIST" -> localItem.anilistNotes.orEmpty()
                             "MAL" -> localItem.malComments.orEmpty()
                             "BANGUMI" -> localItem.bangumiComment.orEmpty()
@@ -1369,7 +1534,7 @@ fun MultiTrackerSheet(
                             else -> ""
                         }
                     }
-                    var draftNote by remember(localItem.id, activeTracker.key, isCustomOverride, activeNoteText) {
+                    var draftNote by remember(localItem.id, selectedTrackerKey, isCustomOverride, activeNoteText) {
                         mutableStateOf(activeNoteText)
                     }
 
@@ -1389,32 +1554,36 @@ fun MultiTrackerSheet(
                                 )
                                 val capStr = if (noteCap > 0) "${draftNote.length}/$noteCap chars" else "${draftNote.length} chars"
                                 Text(
-                                    text = if (isCustomOverride) "Custom for ${activeTracker.name} · $capStr" else "Mirrored with Details · $capStr",
+                                    text = if (isUniversalMode) "Auto-adapted per service limit · $capStr"
+                                    else if (isCustomOverride) "Custom for ${activeTracker.name} · $capStr"
+                                    else "Mirrored with Details · $capStr",
                                     fontSize = 10.5.sp,
                                     color = if (noteCap > 0 && draftNote.length > noteCap) Color(0xFFF59E0B) else AccentGold.copy(alpha = 0.85f)
                                 )
                             }
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(if (isCustomOverride) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
-                                    .clickable {
-                                        val nextOv = curOverride.copy(
-                                            useCustomNote = !isCustomOverride,
-                                            customNote = if (!isCustomOverride && curOverride.customNote.isNullOrBlank()) draftNote else curOverride.customNote
-                                        )
-                                        val nextMap = overridesMap.toMutableMap()
-                                        nextMap[activeTracker.key] = nextOv
-                                        commitLocalUpdate(localItem.copy(trackerOverridesJson = TrackerMetadataCodec.encodeOverrides(nextMap)))
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (isCustomOverride) "Custom Override" else "Global Note",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isCustomOverride) AccentGold else TextSecondary
-                                )
+                            if (!isUniversalMode) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isCustomOverride) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
+                                        .clickable {
+                                            val nextOv = curOverride.copy(
+                                                useCustomNote = !isCustomOverride,
+                                                customNote = if (!isCustomOverride && curOverride.customNote.isNullOrBlank()) draftNote else curOverride.customNote
+                                            )
+                                            val nextMap = overridesMap.toMutableMap()
+                                            nextMap[activeTracker.key] = nextOv
+                                            commitLocalUpdate(localItem.copy(trackerOverridesJson = TrackerMetadataCodec.encodeOverrides(nextMap)))
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (isCustomOverride) "Custom Override" else "Global Note",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isCustomOverride) AccentGold else TextSecondary
+                                    )
+                                }
                             }
                         }
 
@@ -1454,7 +1623,7 @@ fun MultiTrackerSheet(
                             )
                             if (draftNote.isEmpty()) {
                                 Text(
-                                    text = "Write a note for ${activeTracker.name}...",
+                                    text = if (isUniversalMode) "Write a unified personal note..." else "Write a note for ${activeTracker.name}...",
                                     fontSize = 13.sp,
                                     color = TextSecondary.copy(alpha = 0.55f)
                                 )
@@ -1462,8 +1631,33 @@ fun MultiTrackerSheet(
                         }
                     }
 
-                    // 3h. Native Tracker Extras
-                    when (activeTracker.key) {
+                    if (isUniversalMode) {
+                        Button(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                triggerPush(targetKey = null, itemToPush = localItem, selectedKeys = universalTargetKeys)
+                            },
+                            enabled = !isSyncingAll && universalTargetKeys.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentGold,
+                                contentColor = AmoledBlack,
+                                disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                                disabledContentColor = TextSecondary
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (universalTargetKeys.isEmpty()) "No Linked & Signed-In Trackers Selected"
+                                else "Save & Sync All Connected (${universalTargetKeys.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                        }
+                    }
+
+                    // 3h. Native Tracker Extras (per individual tracker)
+                    if (!isUniversalMode) when (activeTracker.key) {
                         "ANILIST" -> {
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1504,7 +1698,7 @@ fun MultiTrackerSheet(
                                         val sel = localItem.malPriority == pVal
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(999.dp))
+                                                .clip(RoundedCornerShape(8.dp))
                                                 .background(if (sel) AccentGold else Color.White.copy(alpha = 0.08f))
                                                 .clickable { commitLocalUpdate(localItem.copy(malPriority = pVal)) }
                                                 .padding(horizontal = 11.dp, vertical = 5.dp)
@@ -1551,7 +1745,7 @@ fun MultiTrackerSheet(
                     }
 
                     // 3i. Danger Footer: Unlink Locally | Delete from Tracker
-                    if (activeTracker.boundId != null) {
+                    if (!isUniversalMode && activeTracker.boundId != null) {
                         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
                         Row(
                             modifier = Modifier
@@ -1562,7 +1756,7 @@ fun MultiTrackerSheet(
                             Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(999.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(Color.White.copy(alpha = 0.07f))
                                     .clickable {
                                         val unlinked = activeTracker.onUpdateBoundId(null)
@@ -1583,7 +1777,7 @@ fun MultiTrackerSheet(
                             Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(999.dp))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(Color(0xFFEF4444).copy(alpha = 0.16f))
                                     .clickable { deleteDialogTracker = activeTracker }
                                     .padding(vertical = 10.dp),
@@ -1983,7 +2177,7 @@ private fun StudioActionPill(
 ) {
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(if (accent) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.08f))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),

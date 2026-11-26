@@ -208,7 +208,7 @@ fun HomeScreen(
     val posterStyle by prefManager.posterCardStyle.collectAsState(initial = PosterCardStyle())
     val customPosterPattern by prefManager.customPosterUrlPattern.collectAsState(initial = "")
     val mediaCategoryPrefs by prefManager.mediaCategoryPrefs.collectAsState(
-        initial = com.omnitrack.app.data.preferences.MediaCategoryPrefs()
+        initial = PreferenceManager.cachedMediaCategoryPrefs
     )
     val fanfictionEnabled = !mediaCategoryPrefs.isHidden(MediaType.FANFICTION)
     val fanficNsfwMode by prefManager.fanficNsfwFilterMode.collectAsState(initial = com.omnitrack.app.data.model.VnNsfwFilterMode.BLUR_TAP)
@@ -232,7 +232,7 @@ fun HomeScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val allCategories by viewModel.allCategories.collectAsState()
-    val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = ChimanewLibrarySettings())
+    val libSettings by prefManager.chimanewLibrarySettings.collectAsState(initial = PreferenceManager.cachedChimanewLibrarySettings)
     val perfSettings = LocalPerformanceSettings.current
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
     val homeRows by prefManager.homeRowOrder.collectAsState(initial = PreferenceManager.cachedHomeRows)
@@ -274,6 +274,15 @@ fun HomeScreen(
     var artworkPickerMediaId by remember { mutableStateOf<Long?>(null) }
     var showBatchDeleteConfirm by remember { mutableStateOf(false) }
     var pendingLibraryTabKey by remember { mutableStateOf<String?>(null) }
+    var savedLibraryTabKey by rememberSaveable { mutableStateOf<String?>(null) }
+    var reopenFilterSheetOnReturn by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        if (reopenFilterSheetOnReturn) {
+            reopenFilterSheetOnReturn = false
+            showLibraryFilterSheet = true
+        }
+    }
 
     val undoEvent by viewModel.undoEvent.collectAsState()
 
@@ -418,16 +427,41 @@ fun HomeScreen(
             pagerState.scrollToPage(0)
         }
     }
-    LaunchedEffect(pendingLibraryTabKey, dynamicTabs) {
-        val targetKey = pendingLibraryTabKey ?: return@LaunchedEffect
-        var targetIdx = dynamicTabs.indexOfFirst { it.key == targetKey }
-        if (targetIdx < 0 && targetKey == "MT_NOVEL") {
-            targetIdx = dynamicTabs.indexOfFirst { it.key == "MT_NOVEL_LN" || it.key == "MT_NOVEL_WN" }
+    LaunchedEffect(pendingLibraryTabKey, savedLibraryTabKey, dynamicTabs) {
+        val targetKey = pendingLibraryTabKey
+        if (targetKey != null) {
+            var targetIdx = dynamicTabs.indexOfFirst { it.key == targetKey }
+            if (targetIdx < 0 && targetKey == "MT_NOVEL") {
+                targetIdx = dynamicTabs.indexOfFirst { it.key == "MT_NOVEL_LN" || it.key == "MT_NOVEL_WN" }
+            }
+            if (targetIdx >= 0) {
+                runCatching { pagerState.scrollToPage(targetIdx) }
+                savedLibraryTabKey = dynamicTabs[targetIdx].key
+                pendingLibraryTabKey = null
+            }
+        } else {
+            val savedKey = savedLibraryTabKey
+            if (savedKey != null) {
+                val savedIdx = dynamicTabs.indexOfFirst { it.key == savedKey }
+                if (savedIdx >= 0 && pagerState.currentPage != savedIdx) {
+                    runCatching { pagerState.scrollToPage(savedIdx) }
+                }
+            }
         }
-        if (targetIdx >= 0) {
-            runCatching { pagerState.scrollToPage(targetIdx) }
-            pendingLibraryTabKey = null
-        }
+    }
+    LaunchedEffect(pagerState) {
+        var wasScrolling = false
+        androidx.compose.runtime.snapshotFlow { pagerState.isScrollInProgress to pagerState.settledPage }
+            .collect { (scrolling, settled) ->
+                if (scrolling) {
+                    wasScrolling = true
+                } else if (wasScrolling) {
+                    wasScrolling = false
+                    dynamicTabs.getOrNull(settled)?.key?.let { key ->
+                        savedLibraryTabKey = key
+                    }
+                }
+            }
     }
     LaunchedEffect(pagerState.currentPage, dynamicTabs) {
         val activeTab = dynamicTabs.getOrNull(pagerState.currentPage)
@@ -962,6 +996,7 @@ fun HomeScreen(
                                 showCounts = libSettings.showTabItemCounts,
                                 countsByKey = tabCounts,
                                 onTabSelected = { idx ->
+                                    dynamicTabs.getOrNull(idx)?.key?.let { savedLibraryTabKey = it }
                                     if (idx != pagerState.currentPage) {
                                         coroutineScope.launch {
                                             pagerState.animateScrollToPage(
@@ -1551,6 +1586,7 @@ fun HomeScreen(
                 releases = calendarReleases,
                 isLoading = isLoadingCalendar,
                 onRefresh = { viewModel.loadReleaseCalendar(force = true) },
+                onLoadMonthWindow = { viewModel.loadReleaseCalendar(force = false, daysAhead = 35) },
                 onOpenLocalMedia = { localId ->
                     showReleaseCalendarSheet = false
                     onItemClick(localId)
@@ -1700,6 +1736,7 @@ fun HomeScreen(
                     coroutineScope.launch { prefManager.setChimanewGroupMode(mode) }
                 },
                 onOpenManageCategories = {
+                    reopenFilterSheetOnReturn = true
                     showLibraryFilterSheet = false
                     onNavigateToManageCategories()
                 },

@@ -33,4 +33,10 @@ interface ComicIssueDao {
 
     @Query("DELETE FROM comic_issues")
     suspend fun deleteAllIssues()
+
+    @Query("SELECT COUNT(*) FROM comic_issues WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun countOrphaned(): Int
+
+    @Query("DELETE FROM comic_issues WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun deleteOrphaned(): Int
 }

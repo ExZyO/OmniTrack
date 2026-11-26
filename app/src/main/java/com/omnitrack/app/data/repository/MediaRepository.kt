@@ -8,6 +8,7 @@ import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.FanficChapterDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
+import com.omnitrack.app.data.db.dao.SeasonMetaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.dto.MediaCardSummary
@@ -19,6 +20,7 @@ import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SeasonMetaEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.model.MediaType
@@ -37,7 +39,8 @@ class MediaRepository(
     private val bookEntryDao: BookEntryDao? = null,
     private val bookQuoteDao: BookQuoteDao? = null,
     private val comicIssueDao: ComicIssueDao? = null,
-    private val fanficChapterDao: FanficChapterDao? = null
+    private val fanficChapterDao: FanficChapterDao? = null,
+    private val seasonMetaDao: SeasonMetaDao? = null
 ) {
     fun getFanficChapters(mediaId: Long): Flow<List<FanficChapterEntity>> =
         (fanficChapterDao?.getChaptersForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
@@ -222,6 +225,57 @@ class MediaRepository(
 
     suspend fun findLinkedChildren(parentId: Long): List<MediaItemEntity> =
         if (parentId <= 0L) emptyList() else mediaDao.findLinkedChildren(parentId)
+
+    fun observeSeasonMeta(mediaId: Long): Flow<List<SeasonMetaEntity>> =
+        (seasonMetaDao?.observeForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
+
+    suspend fun upsertSeasonMeta(mediaId: Long, seasonNumber: Int, rating: Float?, note: String?) {
+        if (seasonMetaDao == null || mediaId <= 0L) return
+        val normalizedNote = note?.trim()?.takeIf { it.isNotBlank() }
+        seasonMetaDao.upsert(
+            SeasonMetaEntity(
+                mediaId = mediaId,
+                seasonNumber = seasonNumber,
+                userRating = rating,
+                userNote = normalizedNote,
+                updatedAtMs = System.currentTimeMillis()
+            )
+        )
+    }
+
+    fun observeCrossMediumEditions(groupId: String?): Flow<List<MediaItemEntity>> =
+        if (groupId.isNullOrBlank()) emptyFlow() else mediaDao.observeByCrossMediumGroup(groupId).distinctUntilChanged()
+
+    suspend fun linkCrossMediumEditions(primaryId: Long, targetId: Long): String? {
+        if (primaryId <= 0L || targetId <= 0L || primaryId == targetId) return null
+        val a = mediaDao.getMediaByIdOnce(primaryId) ?: return null
+        val b = mediaDao.getMediaByIdOnce(targetId) ?: return null
+        val existingGroup = a.crossMediumGroupId?.takeIf { it.isNotBlank() }
+            ?: b.crossMediumGroupId?.takeIf { it.isNotBlank() }
+        val groupId = existingGroup ?: "grp_${minOf(a.id, b.id)}_${System.currentTimeMillis()}"
+        if (a.crossMediumGroupId != groupId) {
+            mediaDao.updateCrossMediumGroupId(a.id, groupId)
+        }
+        val oldBGroup = b.crossMediumGroupId?.takeIf { it.isNotBlank() && it != groupId }
+        if (oldBGroup != null) {
+            val siblings = mediaDao.getByCrossMediumGroupOnce(oldBGroup)
+            siblings.forEach { s -> mediaDao.updateCrossMediumGroupId(s.id, groupId) }
+        } else {
+            mediaDao.updateCrossMediumGroupId(b.id, groupId)
+        }
+        return groupId
+    }
+
+    suspend fun unlinkCrossMediumEdition(itemId: Long) {
+        if (itemId <= 0L) return
+        val item = mediaDao.getMediaByIdOnce(itemId) ?: return
+        val groupId = item.crossMediumGroupId?.takeIf { it.isNotBlank() } ?: return
+        mediaDao.updateCrossMediumGroupId(itemId, null)
+        val remaining = mediaDao.getByCrossMediumGroupOnce(groupId)
+        if (remaining.size <= 1) {
+            remaining.forEach { r -> mediaDao.updateCrossMediumGroupId(r.id, null) }
+        }
+    }
 
     suspend fun findMediaByAnilistIds(ids: List<Long>): List<MediaItemEntity> =
         if (ids.isEmpty()) emptyList() else mediaDao.findByAnilistIds(ids.distinct())

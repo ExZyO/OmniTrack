@@ -41,7 +41,7 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
     }
 
     val database by lazy { OmniTrackDatabase.getDatabase(this) }
-    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao(), database.vnRouteDao(), database.gameEntryDao(), database.bookEntryDao(), database.bookQuoteDao(), database.comicIssueDao(), database.fanficChapterDao()) }
+    val repository by lazy { MediaRepository(database.mediaDao(), database.categoryDao(), database.syncQueueDao(), database.episodeProgressDao(), database.vnRouteDao(), database.gameEntryDao(), database.bookEntryDao(), database.bookQuoteDao(), database.comicIssueDao(), database.fanficChapterDao(), database.seasonMetaDao()) }
     val coverCache by lazy { CoverCache(this) }
     val preferenceManager by lazy { PreferenceManager(this) }
     val omniSearchRepository by lazy { OmniSearchRepository() }
@@ -88,6 +88,17 @@ class OmniTrackApplication : Application(), SingletonImageLoader.Factory {
             launch { preferenceManager.homeHeroSettings.collect { } }
             launch { preferenceManager.homeRowOrder.collect { } }
             launch { preferenceManager.performanceSettings.collect { } }
+            launch { preferenceManager.mediaCategoryPrefs.collect { } }
+            launch { preferenceManager.chimanewLibrarySettings.collect { } }
+            launch { preferenceManager.watchProviderRegion.collect { } }
+            launch {
+                preferenceManager.releaseAlertSettings.collect { alertCfg ->
+                    com.omnitrack.app.data.alerts.ReleaseAlertScheduler.syncSchedule(
+                        this@OmniTrackApplication,
+                        alertCfg.enabled
+                    )
+                }
+            }
             launch { trackerTokenManager.tokens.collect { TrackerTokenManager.cachedHardcoverToken = it.hardcoverToken.orEmpty() } }
             launch {
                 preferenceManager.themeSettings.collect { themeCfg ->

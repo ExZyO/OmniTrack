@@ -12,16 +12,21 @@ import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SeasonMetaEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 import com.omnitrack.app.data.fanfic.FanficFetchResult
 import com.omnitrack.app.data.fanfic.FanficParsedWork
 import com.omnitrack.app.data.fanfic.FanficSiteEngine
+import com.omnitrack.app.data.enrichment.AwardHonorItem
+import com.omnitrack.app.data.enrichment.AwardWinnerEntry
 import com.omnitrack.app.data.enrichment.BookEnrichmentSource
 import com.omnitrack.app.data.enrichment.ComicEnrichmentSource
 import com.omnitrack.app.data.enrichment.ComicIssueSeed
 import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.enrichment.GameEnrichmentSource
 import com.omnitrack.app.data.enrichment.VisualNovelEnrichmentSource
+import com.omnitrack.app.data.enrichment.WatchProviderBundle
+import com.omnitrack.app.data.enrichment.WatchProvidersAndAwardsClient
 import com.omnitrack.app.data.model.BookDetailMeta
 import com.omnitrack.app.data.model.BookEditionItem
 import com.omnitrack.app.data.model.BookEntryType
@@ -119,6 +124,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 import com.omnitrack.app.data.model.ExternalLinkItem
+
+data class AwardWinnersSheetState(
+    val awardTitle: String,
+    val awardQid: String?,
+    val winners: List<AwardWinnerEntry> = emptyList(),
+    val isLoading: Boolean = true
+)
 
 data class NovelDetailMeta(
     val resolvedMode: Boolean? = null,
@@ -363,6 +375,18 @@ class DetailViewModel(
     val previewEpisodeMeta: StateFlow<Map<Pair<Int, Int>, EpisodeProgressEntity>> = _previewEpisodeMeta.asStateFlow()
     private val _ranobeBookDetails = MutableStateFlow<Map<Long, EnrichmentRepository.RanobeDbBookDetail>>(emptyMap())
     val ranobeBookDetails: StateFlow<Map<Long, EnrichmentRepository.RanobeDbBookDetail>> = _ranobeBookDetails.asStateFlow()
+
+    private val _watchProviders = MutableStateFlow<WatchProviderBundle?>(null)
+    val watchProviders: StateFlow<WatchProviderBundle?> = _watchProviders.asStateFlow()
+    private val _isLoadingWatchProviders = MutableStateFlow(false)
+    val isLoadingWatchProviders: StateFlow<Boolean> = _isLoadingWatchProviders.asStateFlow()
+    private val _awards = MutableStateFlow<List<AwardHonorItem>>(emptyList())
+    val awards: StateFlow<List<AwardHonorItem>> = _awards.asStateFlow()
+    private val _awardWinnersSheetState = MutableStateFlow<AwardWinnersSheetState?>(null)
+    val awardWinnersSheetState: StateFlow<AwardWinnersSheetState?> = _awardWinnersSheetState.asStateFlow()
+    private var watchAwardsJob: Job? = null
+    private var awardWinnersJob: Job? = null
+    private var lastWatchAwardsKey: String? = null
     private val _isTransitionLoading = MutableStateFlow(false)
     val isTransitionLoading: StateFlow<Boolean> = _isTransitionLoading.asStateFlow()
     private val _revealGeneration = MutableStateFlow(0)
@@ -1590,6 +1614,33 @@ class DetailViewModel(
         }
     )
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val seasonMetaMap: StateFlow<Map<Int, SeasonMetaEntity>> = combine(_mediaId, _previewItem) { id, prev ->
+        prev?.id?.takeIf { it > 0L } ?: id
+    }.distinctUntilChanged().flatMapLatest { activeId ->
+        if (activeId > 0L) {
+            repository.observeSeasonMeta(activeId).map { list -> list.associateBy { it.seasonNumber } }
+        } else {
+            flowOf(emptyMap())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val crossMediumEditions: StateFlow<List<MediaItemEntity>> = uiState
+        .map { it.item?.crossMediumGroupId }
+        .distinctUntilChanged()
+        .flatMapLatest { groupId ->
+            if (!groupId.isNullOrBlank()) {
+                repository.observeCrossMediumEditions(groupId)
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val allLibraryMedia: StateFlow<List<MediaItemEntity>> = repository.getAllMedia()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private val loadedAuxKeys = Collections.synchronizedSet(mutableSetOf<String>())
 
     private fun resetAuxFields() {
@@ -1646,6 +1697,10 @@ class DetailViewModel(
         _bookDetailMeta.value = BookDetailMeta()
         _comicDetailMeta.value = ComicDetailMeta()
         _fanficAuxState.value = FanficDetailAuxState()
+        _watchProviders.value = null
+        _isLoadingWatchProviders.value = false
+        _awards.value = emptyList()
+        lastWatchAwardsKey = null
     }
 
     fun isPreviewActive(): Boolean =
@@ -5135,6 +5190,10 @@ class DetailViewModel(
         _vnDetailMeta.value = cached?.vnDetailMeta ?: VnDetailMeta()
         _gameDetailMeta.value = cached?.gameDetailMeta ?: GameDetailMeta()
         _bookDetailMeta.value = cached?.bookDetailMeta ?: BookDetailMeta()
+        _watchProviders.value = null
+        _isLoadingWatchProviders.value = false
+        _awards.value = emptyList()
+        lastWatchAwardsKey = null
 
         val resolvedTmdb = targetItem?.tmdbId ?: (if (targetId > 0L) SeriesContentMemoryCache.resolvedTmdbIdCache[targetId] else null)
         val cachedSeasons = SeriesContentMemoryCache.findSeasons(targetItem, resolvedTmdb, targetId, targetItem?.anilistId)
@@ -5732,6 +5791,7 @@ class DetailViewModel(
     fun pushToTracker(
         itemOverride: MediaItemEntity? = null,
         targetTrackerKey: String? = null,
+        selectedTrackerKeys: Set<String>? = null,
         onResult: (List<TrackerSyncOutcome>) -> Unit
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -5743,8 +5803,14 @@ class DetailViewModel(
             } else {
                 base
             }
-            val outcomes = trackerSyncEngine?.pushItemToTrackers(saved, targetTrackerKey)
+            val outcomes = trackerSyncEngine?.pushItemToTrackers(saved, targetTrackerKey, selectedTrackerKeys)
                 ?: listOf(TrackerSyncOutcome("NONE", false, null, "Sync engine unavailable"))
+            if (saved.id > 0L) {
+                repository.getMediaByIdOnce(saved.id)?.let { refreshed ->
+                    latestRoomItemCache[saved.id] = refreshed
+                    updatePreviewEntity { refreshed }
+                }
+            }
             withContext(Dispatchers.Main) { onResult(outcomes) }
         }
     }
@@ -5862,6 +5928,163 @@ class DetailViewModel(
         activeSeriesFetchKey = null
         maybeEnrich(current, force = true)
         loadRecommendationsAndReviews(current, force = true)
+    }
+
+    fun saveSeasonMeta(seasonNumber: Int, rating: Float?, note: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0L) return@launch
+            repository.upsertSeasonMeta(mediaId, seasonNumber, rating, note)
+        }
+    }
+
+    fun linkCrossMediumEdition(targetItem: MediaItemEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val currentId = uiState.value.item?.id?.takeIf { it > 0L } ?: return@launch
+            repository.linkCrossMediumEditions(currentId, targetItem.id)
+        }
+    }
+
+    fun unlinkCrossMediumEdition(targetItem: MediaItemEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (targetItem.id > 0L) {
+                repository.unlinkCrossMediumEdition(targetItem.id)
+            }
+        }
+    }
+
+    fun switchToCrossMediumEdition(targetItem: MediaItemEntity): Boolean {
+        if (targetItem.id <= 0L) return false
+        return navigateToSibling(targetItem.id, targetItem)
+    }
+
+    fun loadWatchProvidersAndAwards(item: MediaItemEntity, regionPref: String) {
+        val isWatchEligible = item.mediaType == MediaType.MOVIE ||
+            item.mediaType == MediaType.SHOW ||
+            item.mediaType == MediaType.ANIME
+        val isAwardEligible = isWatchEligible || item.mediaType == MediaType.BOOK || item.mediaType == MediaType.GAME
+        if (!isWatchEligible && !isAwardEligible) {
+            _watchProviders.value = null
+            _awards.value = emptyList()
+            return
+        }
+        val effectiveRegion = if (regionPref.equals("AUTO", ignoreCase = true) || regionPref.isBlank()) {
+            PreferenceManager.resolveEffectiveWatchRegion()
+        } else {
+            regionPref.trim().uppercase()
+        }
+        val isAuto = regionPref.equals("AUTO", ignoreCase = true) || regionPref.isBlank()
+        val reqKey = "${item.id}_${item.mediaType.name}_${item.tmdbId}_${item.imdbId}_${item.title}_$effectiveRegion"
+        if (lastWatchAwardsKey == reqKey && (_watchProviders.value != null || _awards.value.isNotEmpty())) {
+            return
+        }
+        lastWatchAwardsKey = reqKey
+        watchAwardsJob?.cancel()
+        watchAwardsJob = viewModelScope.launch(Dispatchers.IO) {
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+                ?: PreferenceManager.cachedTmdbApiKey.ifBlank { "844dba0bfd8f3a4f3799f6130ef9e335" }
+            val omdbKey = preferenceManager?.omdbApiKey?.firstOrNull()?.ifBlank { null }
+                ?: PreferenceManager.cachedOmdbApiKey.ifBlank { null }
+
+            val tmdbId = item.tmdbId?.takeIf { it > 0L }
+            if (isWatchEligible && tmdbId != null) {
+                _isLoadingWatchProviders.value = true
+            } else {
+                _watchProviders.value = null
+                _isLoadingWatchProviders.value = false
+            }
+
+            try {
+                coroutineScope {
+                    val providersDeferred = if (isWatchEligible && tmdbId != null) {
+                        async {
+                            WatchProvidersAndAwardsClient.fetchWatchProviders(
+                                tmdbId = tmdbId,
+                                isMovie = item.mediaType == MediaType.MOVIE,
+                                tmdbApiKey = tmdbKey,
+                                regionCode = effectiveRegion,
+                                isAutoDetected = isAuto
+                            )
+                        }
+                    } else null
+
+                    val awardsDeferred = if (isAwardEligible) {
+                        async {
+                            WatchProvidersAndAwardsClient.fetchAwardsForItem(
+                                item = item,
+                                tmdbApiKey = tmdbKey,
+                                omdbApiKey = omdbKey
+                            )
+                        }
+                    } else null
+
+                    providersDeferred?.let {
+                        val bundle = it.await()
+                        if (isActive) _watchProviders.value = bundle
+                    }
+                    awardsDeferred?.let {
+                        val list = it.await()
+                        if (isActive) _awards.value = list
+                    }
+                }
+            } finally {
+                _isLoadingWatchProviders.value = false
+            }
+        }
+    }
+
+    fun openAwardWinners(honor: AwardHonorItem, preferredType: MediaType) {
+        awardWinnersJob?.cancel()
+        _awardWinnersSheetState.value = AwardWinnersSheetState(
+            awardTitle = honor.awardName,
+            awardQid = honor.awardQid,
+            winners = emptyList(),
+            isLoading = true
+        )
+        awardWinnersJob = viewModelScope.launch(Dispatchers.IO) {
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+                ?: PreferenceManager.cachedTmdbApiKey.ifBlank { "844dba0bfd8f3a4f3799f6130ef9e335" }
+            val winners = WatchProvidersAndAwardsClient.fetchAwardWinners(
+                awardQid = honor.awardQid,
+                awardName = honor.awardName,
+                preferredMediaType = preferredType,
+                tmdbApiKey = tmdbKey
+            )
+            _awardWinnersSheetState.value = AwardWinnersSheetState(
+                awardTitle = honor.awardName,
+                awardQid = honor.awardQid,
+                winners = winners,
+                isLoading = false
+            )
+        }
+    }
+
+    fun closeAwardWinners() {
+        awardWinnersJob?.cancel()
+        _awardWinnersSheetState.value = null
+    }
+
+    fun addAwardWinnerToLibrary(winner: AwardWinnerEntry) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.findExistingMedia(
+                tmdbId = winner.tmdbId,
+                title = winner.title,
+                mediaType = winner.mediaType
+            )
+            if (existing == null) {
+                repository.insertMedia(
+                    MediaItemEntity(
+                        title = winner.title,
+                        coverUrl = winner.posterUrl.orEmpty(),
+                        mediaType = winner.mediaType,
+                        tmdbId = winner.tmdbId,
+                        imdbId = winner.imdbId,
+                        releaseYear = winner.year?.toString(),
+                        status = TrackingStatus.PLAN_TO_TRACK
+                    )
+                )
+            }
+        }
     }
 
     fun deleteItem() {

@@ -22,6 +22,7 @@ import com.omnitrack.app.data.preferences.HomeRowKey
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
+import com.omnitrack.app.data.search.StreamingProviderChip
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -109,6 +110,33 @@ class HomeViewModel(
     val discoverShelves: StateFlow<Map<String, DiscoverShelfState>> = _discoverShelves.asStateFlow()
     private val loadingDiscoverIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
+    // Discover Overhaul state flows (Critics' Pick, Streaming Services, Top 10 Today, Taste-Matched, Curated Rows, Swipe Queue)
+    private val _streamingProviders = MutableStateFlow<List<StreamingProviderChip>>(emptyList())
+    val streamingProviders: StateFlow<List<StreamingProviderChip>> = _streamingProviders.asStateFlow()
+    private val _selectedStreamingProviderId = MutableStateFlow<Int?>(null)
+    val selectedStreamingProviderId: StateFlow<Int?> = _selectedStreamingProviderId.asStateFlow()
+    private val _streamingServiceTitles = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val streamingServiceTitles: StateFlow<List<SearchResultItem>> = _streamingServiceTitles.asStateFlow()
+    private val _isLoadingStreamingTitles = MutableStateFlow(false)
+    val isLoadingStreamingTitles: StateFlow<Boolean> = _isLoadingStreamingTitles.asStateFlow()
+    private val _top10TodayItems = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val top10TodayItems: StateFlow<List<SearchResultItem>> = _top10TodayItems.asStateFlow()
+    private val _tasteMatchedSeed = MutableStateFlow<MediaCardSummary?>(null)
+    val tasteMatchedSeed: StateFlow<MediaCardSummary?> = _tasteMatchedSeed.asStateFlow()
+    private val _tasteMatchedItems = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val tasteMatchedItems: StateFlow<List<SearchResultItem>> = _tasteMatchedItems.asStateFlow()
+    private val _selectedCuratedRowKey = MutableStateFlow("under_90")
+    val selectedCuratedRowKey: StateFlow<String> = _selectedCuratedRowKey.asStateFlow()
+    private val _curatedRowItems = MutableStateFlow<List<SearchResultItem>>(emptyList())
+    val curatedRowItems: StateFlow<List<SearchResultItem>> = _curatedRowItems.asStateFlow()
+    private val _isLoadingCuratedRow = MutableStateFlow(false)
+    val isLoadingCuratedRow: StateFlow<Boolean> = _isLoadingCuratedRow.asStateFlow()
+    private val _dailyCriticsPick = MutableStateFlow<SearchResultItem?>(null)
+    val dailyCriticsPick: StateFlow<SearchResultItem?> = _dailyCriticsPick.asStateFlow()
+    private val _skippedSwipeKeys = MutableStateFlow<Set<String>>(emptySet())
+    private var loadedHighlightsKey: String? = null
+    private var loadedCalendarWindowDays: Int = 14
+
     private val _undoEvent = MutableStateFlow<ProgressUndoEvent?>(null)
     val undoEvent: StateFlow<ProgressUndoEvent?> = _undoEvent.asStateFlow()
 
@@ -159,6 +187,14 @@ class HomeViewModel(
     private fun initializeLibraryMaintenance() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (_rawCalendarReleases.value.isEmpty()) {
+                    val diskCached = releaseCalendarRepository.loadCachedScheduleFromDisk(
+                        com.omnitrack.app.OmniTrackApplication.instance
+                    )
+                    if (diskCached.isNotEmpty()) {
+                        _rawCalendarReleases.value = diskCached
+                    }
+                }
                 val items = repository.getAllMediaSummaries().first()
                 _isLoading.value = false
                 if (items.isNotEmpty()) {
@@ -258,13 +294,19 @@ class HomeViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun loadReleaseCalendar(force: Boolean = false) {
+    fun loadReleaseCalendar(force: Boolean = false, daysAhead: Int = 14) {
         if (_isLoadingCalendar.value) return
-        if (!force && _rawCalendarReleases.value.isNotEmpty()) return
+        if (!force && _rawCalendarReleases.value.isNotEmpty() && loadedCalendarWindowDays >= daysAhead) return
         viewModelScope.launch {
             _isLoadingCalendar.value = true
             try {
-                _rawCalendarReleases.value = releaseCalendarRepository.fetchWeeklyAiringSchedule(force = force)
+                val fetched = releaseCalendarRepository.fetchWeeklyAiringSchedule(force = force, daysAhead = daysAhead)
+                _rawCalendarReleases.value = fetched
+                loadedCalendarWindowDays = maxOf(loadedCalendarWindowDays, daysAhead)
+                releaseCalendarRepository.saveCachedScheduleToDisk(
+                    com.omnitrack.app.OmniTrackApplication.instance,
+                    fetched
+                )
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
             } finally {
@@ -1258,6 +1300,135 @@ class HomeViewModel(
                 .takeIf { it.isNotBlank() }
             repository.updateMedia(latest.copy(excludedArtSources = serialized))
         }
+    }
+
+    fun loadDiscoverHighlights(mediaFilter: MediaType, regionPref: String, tmdbApiKey: String? = null) {
+        val effectiveRegion = if (regionPref.equals("AUTO", ignoreCase = true) || regionPref.isBlank()) {
+            PreferenceManager.resolveEffectiveWatchRegion()
+        } else {
+            regionPref.trim().uppercase()
+        }
+        val key = "${mediaFilter.name}_$effectiveRegion"
+        if (loadedHighlightsKey == key && _top10TodayItems.value.isNotEmpty()) return
+        loadedHighlightsKey = key
+        val tmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
+
+        viewModelScope.launch(Dispatchers.IO) {
+            coroutineScope {
+                launch {
+                    val pick = runCatching { homeSearchRepository.fetchDailyCriticsPick(tmdbKey) }.getOrNull()
+                    if (pick != null) _dailyCriticsPick.value = pick
+                }
+                launch {
+                    val top10 = runCatching { homeSearchRepository.fetchTop10Today(mediaFilter, tmdbKey) }.getOrDefault(emptyList())
+                    _top10TodayItems.value = top10
+                }
+                launch {
+                    val providers = runCatching {
+                        homeSearchRepository.fetchPopularStreamingProviders(effectiveRegion, tmdbKey)
+                    }.getOrDefault(emptyList())
+                    _streamingProviders.value = providers
+                    val activeId = _selectedStreamingProviderId.value?.takeIf { cur ->
+                        providers.any { it.providerId == cur }
+                    } ?: providers.firstOrNull()?.providerId
+                    _selectedStreamingProviderId.value = activeId
+                    if (activeId != null) {
+                        _isLoadingStreamingTitles.value = true
+                        _streamingServiceTitles.value = runCatching {
+                            homeSearchRepository.fetchStreamingServiceTitles(activeId, effectiveRegion, mediaFilter, tmdbKey)
+                        }.getOrDefault(emptyList())
+                        _isLoadingStreamingTitles.value = false
+                    }
+                }
+                launch {
+                    val rowKey = _selectedCuratedRowKey.value
+                    _isLoadingCuratedRow.value = true
+                    _curatedRowItems.value = runCatching {
+                        homeSearchRepository.fetchCuratedDiscoverRow(rowKey, tmdbKey)
+                    }.getOrDefault(emptyList())
+                    _isLoadingCuratedRow.value = false
+                }
+                launch {
+                    val library = uiState.value.allMediaSummaries.ifEmpty {
+                        repository.getAllMediaSummaries().firstOrNull().orEmpty()
+                    }
+                    val candidateSeed = library.filter { summary ->
+                        val matchFilter = mediaFilter == MediaType.ALL || summary.mediaType == mediaFilter
+                        val hasId = (summary.tmdbId ?: 0L) > 0L || (summary.anilistId ?: 0L) > 0L
+                        matchFilter && hasId && ((summary.userRating ?: 0f) >= 7.5f || summary.isFavorite)
+                    }.sortedWith(
+                        compareByDescending<MediaCardSummary> { it.isFavorite }
+                            .thenByDescending { it.userRating ?: 0f }
+                            .thenByDescending { it.lastUpdated }
+                    ).firstOrNull()
+                    _tasteMatchedSeed.value = candidateSeed
+                    _tasteMatchedItems.value = if (candidateSeed != null) {
+                        runCatching { homeSearchRepository.fetchTasteMatchedPicks(candidateSeed, tmdbKey) }.getOrDefault(emptyList())
+                    } else emptyList()
+                }
+            }
+        }
+    }
+
+    fun selectStreamingProvider(providerId: Int, regionPref: String, mediaFilter: MediaType, tmdbApiKey: String? = null) {
+        _selectedStreamingProviderId.value = providerId
+        val effectiveRegion = if (regionPref.equals("AUTO", ignoreCase = true) || regionPref.isBlank()) {
+            PreferenceManager.resolveEffectiveWatchRegion()
+        } else {
+            regionPref.trim().uppercase()
+        }
+        val tmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
+        viewModelScope.launch(Dispatchers.IO) {
+            _isLoadingStreamingTitles.value = true
+            try {
+                _streamingServiceTitles.value = runCatching {
+                    homeSearchRepository.fetchStreamingServiceTitles(providerId, effectiveRegion, mediaFilter, tmdbKey)
+                }.getOrDefault(emptyList())
+            } finally {
+                _isLoadingStreamingTitles.value = false
+            }
+        }
+    }
+
+    fun selectCuratedRow(rowKey: String, tmdbApiKey: String? = null) {
+        _selectedCuratedRowKey.value = rowKey
+        val tmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
+        viewModelScope.launch(Dispatchers.IO) {
+            _isLoadingCuratedRow.value = true
+            try {
+                _curatedRowItems.value = runCatching {
+                    homeSearchRepository.fetchCuratedDiscoverRow(rowKey, tmdbKey)
+                }.getOrDefault(emptyList())
+            } finally {
+                _isLoadingCuratedRow.value = false
+            }
+        }
+    }
+
+    fun skipSwipeQueueItem(item: SearchResultItem) {
+        val key = "${item.mediaType.name}_${item.tmdbId}_${item.anilistId}_${item.title.lowercase()}"
+        _skippedSwipeKeys.value = _skippedSwipeKeys.value + key
+    }
+
+    fun buildSwipeQueue(allMedia: List<MediaCardSummary>): List<SearchResultItem> {
+        val skipped = _skippedSwipeKeys.value
+        val combined = (_tasteMatchedItems.value + _top10TodayItems.value + _curatedRowItems.value + _streamingServiceTitles.value +
+            _discoverShelves.value.values.flatMap { it.items })
+        return combined
+            .distinctBy { "${it.mediaType.name}_${it.title.trim().lowercase()}" }
+            .filter { item ->
+                val key = "${item.mediaType.name}_${item.tmdbId}_${item.anilistId}_${item.title.lowercase()}"
+                key !in skipped && ArtworkModelResolver.findLibraryMatch(
+                    library = allMedia,
+                    mediaType = item.mediaType,
+                    anilistId = item.anilistId,
+                    malId = item.malId,
+                    tmdbId = item.tmdbId,
+                    openLibraryId = item.openLibraryId,
+                    title = item.title
+                ) == null
+            }
+            .take(30)
     }
 
     companion object {

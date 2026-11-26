@@ -1,8 +1,10 @@
 package com.omnitrack.app.data.search
 
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.network.NetworkPacer
+import com.omnitrack.app.data.sync.TrackerAccountVerifier
 import com.omnitrack.app.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +39,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
+data class StreamingProviderChip(
+    val providerId: Int,
+    val name: String,
+    val logoUrl: String
+)
+
 /**
  * Universal Multi-Vertical OmniSearch Engine.
  * Runs parallel async queries across AniList, MangaDex, Bangumi, TMDb/TVMaze, Steam, and VNDB.
@@ -49,6 +57,11 @@ class OmniSearchRepository(
         private val providerSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
         private val discoverShelfCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
         private val wikidataAliasCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<String, String>>>()
+        private val streamingProvidersCache = java.util.concurrent.ConcurrentHashMap<String, List<StreamingProviderChip>>()
+        @Volatile
+        private var cachedCriticsPickDay: Long = -1L
+        @Volatile
+        private var cachedCriticsPickItem: SearchResultItem? = null
 
         fun cleanSynopsis(raw: String?): String? {
             if (raw.isNullOrBlank()) return null
@@ -2617,6 +2630,359 @@ class OmniSearchRepository(
 
     private suspend fun searchComics(query: String): List<SearchResultItem> =
         com.omnitrack.app.data.enrichment.ComicEnrichmentSource(client).searchComics(query)
+
+    private fun buildTmdbRequest(pathAndQuery: String, tmdbApiKey: String?): Request {
+        val effectiveKey = tmdbApiKey?.trim()?.takeIf { it.isNotBlank() } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+        return if (TrackerAccountVerifier.isTmdbV4Jwt(effectiveKey)) {
+            Request.Builder()
+                .url("https://api.themoviedb.org/3/$pathAndQuery")
+                .header("Authorization", "Bearer $effectiveKey")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+        } else {
+            val sep = if ('?' in pathAndQuery) '&' else '?'
+            Request.Builder()
+                .url("https://api.themoviedb.org/3/$pathAndQuery${sep}api_key=$effectiveKey")
+                .header("Accept", "application/json")
+                .get()
+                .build()
+        }
+    }
+
+    private fun parseTmdbDiscoverItems(
+        results: JsonArray,
+        forcedMediaType: MediaType? = null
+    ): List<SearchResultItem> {
+        return results.take(20).mapNotNull { el ->
+            val o = el as? JsonObject ?: return@mapNotNull null
+            val mediaStr = o["media_type"].cleanString()?.lowercase()
+            val title = o["name"].cleanString() ?: o["title"].cleanString() ?: return@mapNotNull null
+            val posterPath = o["poster_path"].cleanString() ?: return@mapNotNull null
+            val backdropPath = o["backdrop_path"].cleanString()
+            val date = o["first_air_date"].cleanString() ?: o["release_date"].cleanString()
+            val genreIds = o["genre_ids"] as? JsonArray
+            val isAnimeGenre = genreIds?.any { (it as? JsonPrimitive)?.intOrNull == 16 } == true &&
+                o["original_language"].cleanString().equals("ja", ignoreCase = true)
+            val inferredType = when {
+                forcedMediaType != null -> forcedMediaType
+                mediaStr == "movie" -> MediaType.MOVIE
+                isAnimeGenre -> MediaType.ANIME
+                mediaStr == "tv" || o["first_air_date"].cleanString() != null -> MediaType.SHOW
+                else -> MediaType.MOVIE
+            }
+            SearchResultItem(
+                title = title,
+                nativeTitle = o["original_name"].cleanString() ?: o["original_title"].cleanString(),
+                synopsis = cleanSynopsis(o["overview"].cleanString()),
+                coverUrl = LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$posterPath"),
+                bannerUrl = backdropPath?.let { LosslessCoverMapper.toLosslessUrl("https://image.tmdb.org/t/p/original$it") },
+                mediaType = inferredType,
+                releaseYear = date?.split("-")?.firstOrNull()?.cleanString(),
+                communityScore = (o["vote_average"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.floatOrNull,
+                sourceProvider = "TMDb",
+                tmdbId = (o["id"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.contentOrNull?.toLongOrNull()
+            )
+        }
+    }
+
+    suspend fun fetchPopularStreamingProviders(
+        regionCode: String,
+        tmdbApiKey: String? = null
+    ): List<StreamingProviderChip> = withContext(Dispatchers.IO) {
+        val normRegion = regionCode.trim().uppercase().ifBlank { "US" }
+        streamingProvidersCache[normRegion]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        NetworkPacer.withTmdbPacing {
+            try {
+                val req = buildTmdbRequest("watch/providers/tv?language=en-US&watch_region=$normRegion", tmdbApiKey)
+                val parsed = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use emptyList()
+                    val results = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                        ?.get("results") as? JsonArray ?: return@use emptyList()
+                    val preferredIds = setOf(8, 283, 337, 9, 119, 350, 1899, 384, 15, 531, 386, 2, 3, 29, 387)
+                    results.mapNotNull { el ->
+                        val o = el as? JsonObject ?: return@mapNotNull null
+                        val id = (o["provider_id"] as? JsonPrimitive)?.intOrNull ?: return@mapNotNull null
+                        val name = o["provider_name"].cleanString() ?: return@mapNotNull null
+                        val logo = o["logo_path"].cleanString() ?: return@mapNotNull null
+                        val priority = (o["display_priority"] as? JsonPrimitive)?.intOrNull ?: 999
+                        Triple(
+                            StreamingProviderChip(id, name, "https://image.tmdb.org/t/p/w154$logo"),
+                            if (id in preferredIds) 0 else 1,
+                            priority
+                        )
+                    }.sortedWith(compareBy({ it.second }, { it.third }))
+                        .map { it.first }
+                        .distinctBy { it.providerId }
+                        .take(14)
+                }
+                if (parsed.isNotEmpty()) streamingProvidersCache[normRegion] = parsed
+                parsed
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchStreamingServiceTitles(
+        providerId: Int,
+        regionCode: String,
+        mediaFilter: MediaType,
+        tmdbApiKey: String? = null
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val normRegion = regionCode.trim().uppercase().ifBlank { "US" }
+        val cacheKey = "stream_${providerId}_${normRegion}_${mediaFilter.name}"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val wantMovie = mediaFilter == MediaType.ALL || mediaFilter == MediaType.MOVIE
+        val wantTv = mediaFilter == MediaType.ALL || mediaFilter == MediaType.SHOW || mediaFilter == MediaType.ANIME
+        val out = coroutineScope {
+            val movieDef = if (wantMovie) async {
+                NetworkPacer.withTmdbPacing {
+                    runCatching {
+                        val req = buildTmdbRequest(
+                            "discover/movie?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1",
+                            tmdbApiKey
+                        )
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) emptyList()
+                            else {
+                                val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                    ?.get("results") as? JsonArray ?: return@use emptyList()
+                                parseTmdbDiscoverItems(arr, MediaType.MOVIE)
+                            }
+                        }
+                    }.getOrDefault(emptyList())
+                }
+            } else null
+            val tvDef = if (wantTv) async {
+                NetworkPacer.withTmdbPacing {
+                    runCatching {
+                        val genreClause = if (mediaFilter == MediaType.ANIME) "&with_genres=16&with_original_language=ja" else ""
+                        val req = buildTmdbRequest(
+                            "discover/tv?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1$genreClause",
+                            tmdbApiKey
+                        )
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) emptyList()
+                            else {
+                                val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                    ?.get("results") as? JsonArray ?: return@use emptyList()
+                                parseTmdbDiscoverItems(arr, if (mediaFilter == MediaType.ANIME) MediaType.ANIME else MediaType.SHOW)
+                            }
+                        }
+                    }.getOrDefault(emptyList())
+                }
+            } else null
+            val movies = movieDef?.await().orEmpty()
+            val shows = tvDef?.await().orEmpty()
+            val interleaved = mutableListOf<SearchResultItem>()
+            val maxLen = maxOf(movies.size, shows.size)
+            for (i in 0 until maxLen) {
+                if (i < shows.size) interleaved.add(shows[i])
+                if (i < movies.size) interleaved.add(movies[i])
+            }
+            interleaved.distinctBy { "${it.mediaType}_${it.title.lowercase()}" }.take(20)
+        }
+        if (out.isNotEmpty()) discoverShelfCache[cacheKey] = out
+        out
+    }
+
+    suspend fun fetchTop10Today(
+        mediaFilter: MediaType,
+        tmdbApiKey: String? = null
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val cacheKey = "top10_today_${mediaFilter.name}"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val items = when (mediaFilter) {
+            MediaType.ANIME -> fetchDiscoverAnimeShelves("trending", 1).take(10)
+            MediaType.MANGA -> fetchDiscoverMangaShelves("trending", 1).take(10)
+            MediaType.NOVEL -> fetchDiscoverNovelsShelves("trending_ln", 1).take(10)
+            MediaType.BOOK -> fetchDiscoverBooksShelves("trending", 1).take(10)
+            MediaType.GAME -> fetchDiscoverGamesShelves("top_rated", 1).take(10)
+            MediaType.VISUAL_NOVEL -> fetchDiscoverVisualNovelsShelves("popular", 1).take(10)
+            MediaType.COMIC -> fetchDiscoverComicsShelves("trending", 1).take(10)
+            else -> NetworkPacer.withTmdbPacing {
+                try {
+                    val seg = when (mediaFilter) {
+                        MediaType.MOVIE -> "movie"
+                        MediaType.SHOW -> "tv"
+                        else -> "all"
+                    }
+                    val req = buildTmdbRequest("trending/$seg/day?language=en-US", tmdbApiKey)
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) emptyList()
+                        else {
+                            val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                ?.get("results") as? JsonArray ?: return@use emptyList()
+                            parseTmdbDiscoverItems(arr, mediaFilter.takeIf { it != MediaType.ALL }).take(10)
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    emptyList()
+                }
+            }
+        }
+        if (items.isNotEmpty()) discoverShelfCache[cacheKey] = items
+        items
+    }
+
+    suspend fun fetchCuratedDiscoverRow(
+        rowKey: String,
+        tmdbApiKey: String? = null
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val cacheKey = "curated_$rowKey"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val (endpoint, forcedType) = when (rowKey) {
+            "under_90" -> "discover/movie?with_runtime.lte=90&with_runtime.gte=55&vote_average.gte=7.0&vote_count.gte=250&sort_by=popularity.desc&page=1" to MediaType.MOVIE
+            "hidden_gems" -> "discover/movie?vote_average.gte=7.8&vote_count.gte=120&vote_count.lte=1200&sort_by=vote_average.desc&page=1" to MediaType.MOVIE
+            "limited_series" -> "discover/tv?with_type=2&vote_average.gte=7.5&vote_count.gte=150&sort_by=popularity.desc&page=1" to MediaType.SHOW
+            "decade_2020s" -> "discover/movie?primary_release_date.gte=2020-01-01&primary_release_date.lte=2029-12-31&vote_count.gte=500&sort_by=vote_average.desc&page=1" to MediaType.MOVIE
+            "decade_2010s" -> "discover/movie?primary_release_date.gte=2010-01-01&primary_release_date.lte=2019-12-31&vote_count.gte=800&sort_by=vote_average.desc&page=1" to MediaType.MOVIE
+            "decade_2000s" -> "discover/movie?primary_release_date.gte=2000-01-01&primary_release_date.lte=2009-12-31&vote_count.gte=800&sort_by=vote_average.desc&page=1" to MediaType.MOVIE
+            else -> "discover/movie?primary_release_date.gte=1990-01-01&primary_release_date.lte=1999-12-31&vote_count.gte=600&sort_by=vote_average.desc&page=1" to MediaType.MOVIE
+        }
+        NetworkPacer.withTmdbPacing {
+            try {
+                val req = buildTmdbRequest(endpoint, tmdbApiKey)
+                val items = client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) emptyList()
+                    else {
+                        val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("results") as? JsonArray ?: return@use emptyList()
+                        parseTmdbDiscoverItems(arr, forcedType)
+                    }
+                }
+                if (items.isNotEmpty()) discoverShelfCache[cacheKey] = items
+                items
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun fetchTasteMatchedPicks(
+        seed: MediaCardSummary,
+        tmdbApiKey: String? = null
+    ): List<SearchResultItem> = withContext(Dispatchers.IO) {
+        val cacheKey = "taste_${seed.id}_${seed.mediaType.name}_${seed.tmdbId}_${seed.anilistId}"
+        discoverShelfCache[cacheKey]?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val items = when {
+            seed.tmdbId != null && seed.tmdbId > 0L && (seed.mediaType == MediaType.MOVIE || seed.mediaType == MediaType.SHOW) -> {
+                NetworkPacer.withTmdbPacing {
+                    runCatching {
+                        val seg = if (seed.mediaType == MediaType.MOVIE) "movie" else "tv"
+                        val req = buildTmdbRequest("$seg/${seed.tmdbId}/recommendations?language=en-US&page=1", tmdbApiKey)
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) emptyList()
+                            else {
+                                val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                    ?.get("results") as? JsonArray ?: return@use emptyList()
+                                parseTmdbDiscoverItems(arr, seed.mediaType)
+                            }
+                        }
+                    }.getOrDefault(emptyList())
+                }
+            }
+            seed.anilistId != null && seed.anilistId > 0L -> {
+                NetworkPacer.withAniListSearchPacing {
+                    runCatching {
+                        val gql = """
+                            query {
+                                Media(id: ${seed.anilistId}) {
+                                    recommendations(sort: [RATING_DESC], perPage: 12) {
+                                        nodes {
+                                            mediaRecommendation {
+                                                id idMal type format
+                                                title { romaji english native }
+                                                coverImage { extraLarge large }
+                                                bannerImage averageScore
+                                                startDate { year }
+                                                episodes chapters
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        """.trimIndent()
+                        val payload = buildJsonObject { put("query", gql) }
+                        val req = Request.Builder()
+                            .url("https://graphql.anilist.co")
+                            .header("User-Agent", "OmniTrack/1.0")
+                            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+                        client.newCall(req).execute().use { resp ->
+                            if (!resp.isSuccessful) emptyList()
+                            else {
+                                val nodes = json.parseToJsonElement(resp.body?.string().orEmpty())
+                                    .jsonObject["data"]?.jsonObject?.get("Media")?.jsonObject
+                                    ?.get("recommendations")?.jsonObject?.get("nodes")?.jsonArray
+                                    ?: return@use emptyList()
+                                nodes.mapNotNull { n ->
+                                    val rec = (n as? JsonObject)?.get("mediaRecommendation") as? JsonObject ?: return@mapNotNull null
+                                    val titleObj = rec["title"]?.jsonObject
+                                    val t = titleObj?.get("english").cleanString() ?: titleObj?.get("romaji").cleanString() ?: return@mapNotNull null
+                                    val cov = rec["coverImage"]?.jsonObject?.get("extraLarge").cleanString()
+                                        ?: rec["coverImage"]?.jsonObject?.get("large").cleanString()
+                                        ?: return@mapNotNull null
+                                    val fmt = rec["format"].cleanString()
+                                    val tp = rec["type"].cleanString()
+                                    val mType = when {
+                                        tp == "MANGA" && fmt == "NOVEL" -> MediaType.NOVEL
+                                        tp == "MANGA" -> MediaType.MANGA
+                                        else -> MediaType.ANIME
+                                    }
+                                    SearchResultItem(
+                                        title = t,
+                                        nativeTitle = titleObj?.get("native").cleanString(),
+                                        coverUrl = LosslessCoverMapper.toLosslessUrl(cov),
+                                        bannerUrl = rec["bannerImage"].cleanString()?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                                        mediaType = mType,
+                                        releaseYear = rec["startDate"]?.jsonObject?.get("year").cleanString(),
+                                        communityScore = rec["averageScore"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f },
+                                        sourceProvider = "AniList",
+                                        anilistId = rec["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+                                        malId = rec["idMal"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                                    )
+                                }
+                            }
+                        }
+                    }.getOrDefault(emptyList())
+                }
+            }
+            else -> emptyList()
+        }
+        if (items.isNotEmpty()) discoverShelfCache[cacheKey] = items
+        items
+    }
+
+    suspend fun fetchDailyCriticsPick(tmdbApiKey: String? = null): SearchResultItem? = withContext(Dispatchers.IO) {
+        val dayKey = java.time.LocalDate.now().toEpochDay()
+        if (cachedCriticsPickDay == dayKey && cachedCriticsPickItem != null) {
+            return@withContext cachedCriticsPickItem
+        }
+        val pool = NetworkPacer.withTmdbPacing {
+            runCatching {
+                val req = buildTmdbRequest("movie/top_rated?language=en-US&page=1", tmdbApiKey)
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) emptyList()
+                    else {
+                        val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                            ?.get("results") as? JsonArray ?: return@use emptyList()
+                        parseTmdbDiscoverItems(arr, MediaType.MOVIE).filter { !it.bannerUrl.isNullOrBlank() }
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+        val pick = if (pool.isNotEmpty()) pool[((dayKey % pool.size).toInt().coerceIn(0, pool.lastIndex))] else null
+        if (pick != null) {
+            cachedCriticsPickDay = dayKey
+            cachedCriticsPickItem = pick
+        }
+        pick
+    }
 
     private fun cleanSynopsis(raw: String?): String? = Companion.cleanSynopsis(raw)
 }

@@ -38,4 +38,10 @@ interface EpisodeProgressDao {
 
     @Query("DELETE FROM episode_progress")
     suspend fun deleteAllProgress()
+
+    @Query("SELECT COUNT(*) FROM episode_progress WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun countOrphaned(): Int
+
+    @Query("DELETE FROM episode_progress WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun deleteOrphaned(): Int
 }

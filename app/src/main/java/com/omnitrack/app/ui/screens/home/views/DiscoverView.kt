@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,6 +104,7 @@ import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.DiscoverShelfCatalog
 import com.omnitrack.app.data.preferences.DiscoverShelfDef
 import com.omnitrack.app.data.preferences.PosterCardStyle
+import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.ui.components.FanficTypographicCover
@@ -192,6 +194,33 @@ fun DiscoverView(
     val storedUseAi by useAiFlow.collectAsState()
     val discoverShelves by shelvesFlow.collectAsState()
     val useAiSearch = storedUseAi ?: aiSearchSetting
+    val watchRegionPref by prefManager.watchProviderRegion.collectAsState(
+        initial = PreferenceManager.cachedWatchProviderRegion
+    )
+    val streamingProvidersFlow = remember(homeViewModel) { homeViewModel?.streamingProviders ?: MutableStateFlow(emptyList()) }
+    val selectedStreamingProviderIdFlow = remember(homeViewModel) { homeViewModel?.selectedStreamingProviderId ?: MutableStateFlow(null) }
+    val streamingServiceTitlesFlow = remember(homeViewModel) { homeViewModel?.streamingServiceTitles ?: MutableStateFlow(emptyList()) }
+    val isLoadingStreamingTitlesFlow = remember(homeViewModel) { homeViewModel?.isLoadingStreamingTitles ?: MutableStateFlow(false) }
+    val top10TodayFlow = remember(homeViewModel) { homeViewModel?.top10TodayItems ?: MutableStateFlow(emptyList()) }
+    val tasteMatchedSeedFlow = remember(homeViewModel) { homeViewModel?.tasteMatchedSeed ?: MutableStateFlow(null) }
+    val tasteMatchedItemsFlow = remember(homeViewModel) { homeViewModel?.tasteMatchedItems ?: MutableStateFlow(emptyList()) }
+    val selectedCuratedRowFlow = remember(homeViewModel) { homeViewModel?.selectedCuratedRowKey ?: MutableStateFlow("under_90") }
+    val curatedRowItemsFlow = remember(homeViewModel) { homeViewModel?.curatedRowItems ?: MutableStateFlow(emptyList()) }
+    val isLoadingCuratedRowFlow = remember(homeViewModel) { homeViewModel?.isLoadingCuratedRow ?: MutableStateFlow(false) }
+    val dailyCriticsPickFlow = remember(homeViewModel) { homeViewModel?.dailyCriticsPick ?: MutableStateFlow(null) }
+
+    val streamingProviders by streamingProvidersFlow.collectAsState()
+    val selectedStreamingProviderId by selectedStreamingProviderIdFlow.collectAsState()
+    val streamingServiceTitles by streamingServiceTitlesFlow.collectAsState()
+    val isLoadingStreamingTitles by isLoadingStreamingTitlesFlow.collectAsState()
+    val top10TodayItems by top10TodayFlow.collectAsState()
+    val tasteMatchedSeed by tasteMatchedSeedFlow.collectAsState()
+    val tasteMatchedItems by tasteMatchedItemsFlow.collectAsState()
+    val selectedCuratedRowKey by selectedCuratedRowFlow.collectAsState()
+    val curatedRowItems by curatedRowItemsFlow.collectAsState()
+    val isLoadingCuratedRow by isLoadingCuratedRowFlow.collectAsState()
+    val dailyCriticsPick by dailyCriticsPickFlow.collectAsState()
+    var showSwipeQueueSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(aiSearchSetting) {
         if (useAiFlow.value == null) {
@@ -238,13 +267,19 @@ fun DiscoverView(
         selectedFilter,
         tmdbKey,
         discoverSettings.disabledCategories,
-        discoverSettings.disabledShelves
+        discoverSettings.disabledShelves,
+        watchRegionPref
     ) {
         homeViewModel?.loadDiscoverCategoryShelves(
             filter = selectedFilter,
             tmdbApiKey = tmdbKey,
             disabledCategories = discoverSettings.disabledCategories,
             disabledShelves = discoverSettings.disabledShelves
+        )
+        homeViewModel?.loadDiscoverHighlights(
+            mediaFilter = selectedFilter,
+            regionPref = watchRegionPref,
+            tmdbApiKey = tmdbKey
         )
     }
 
@@ -492,6 +527,31 @@ fun DiscoverView(
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
+            }
+            if (discoverSettings.showSwipeQueueButton && homeViewModel != null) {
+                Row(
+                    modifier = Modifier
+                        .padding(end = 6.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable { showSwipeQueueSheet = true }
+                        .padding(horizontal = 9.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ViewCarousel,
+                        contentDescription = "Swipe Discovery Queue",
+                        tint = AccentGold,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "Queue",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                }
             }
             if (fanfictionEnabled) {
                 Row(
@@ -1330,6 +1390,91 @@ fun DiscoverView(
                     }
                 }
 
+                // Daily Critics' Pick editorial card
+                if (discoverSettings.showDailyCriticsPick && dailyCriticsPick != null) {
+                    item(key = "discover_daily_critics_pick") {
+                        val pick = dailyCriticsPick!!
+                        val libMatch = findLibraryMatch(allMedia, pick)
+                        DailyCriticsPickCard(
+                            item = pick,
+                            libraryMatch = libMatch,
+                            onOpenDetails = {
+                                if (libMatch != null) {
+                                    onItemClick(libMatch.id)
+                                } else {
+                                    EphemeralPreviewHolder.previewItem = pick.toMediaItemEntity()
+                                    onItemClick(-1L)
+                                }
+                            },
+                            onAddToLibrary = { onAddMedia(pick) }
+                        )
+                    }
+                }
+
+                // Browse by Streaming Service logo rail + live catalog shelf
+                val showStreamingBar = discoverSettings.showStreamingServices &&
+                    (selectedFilter == MediaType.ALL || selectedFilter == MediaType.MOVIE || selectedFilter == MediaType.SHOW || selectedFilter == MediaType.ANIME)
+                if (showStreamingBar && (streamingProviders.isNotEmpty() || streamingServiceTitles.isNotEmpty())) {
+                    item(key = "discover_streaming_services") {
+                        StreamingServiceDiscoverSection(
+                            providers = streamingProviders,
+                            selectedProviderId = selectedStreamingProviderId,
+                            regionPref = watchRegionPref,
+                            titles = streamingServiceTitles,
+                            isLoadingTitles = isLoadingStreamingTitles,
+                            allMedia = allMedia,
+                            onSelectProvider = { provId ->
+                                homeViewModel?.selectStreamingProvider(provId, watchRegionPref, selectedFilter, tmdbKey)
+                            },
+                            onSelectRegionPref = { chosen ->
+                                scope.launch { prefManager.setWatchProviderRegion(chosen) }
+                            },
+                            onItemClick = onItemClick
+                        )
+                    }
+                }
+
+                // Top 10 Today oversized editorial numbered row
+                if (discoverSettings.showTop10Today && top10TodayItems.isNotEmpty()) {
+                    item(key = "discover_top_10_today") {
+                        Top10TodayDiscoverSection(
+                            items = top10TodayItems,
+                            allMedia = allMedia,
+                            onItemClick = onItemClick
+                        )
+                    }
+                }
+
+                // Taste-Matched "Because You Liked X"
+                if (discoverSettings.showTasteMatched && tasteMatchedSeed != null && tasteMatchedItems.isNotEmpty()) {
+                    item(key = "discover_taste_matched") {
+                        TasteMatchedDiscoverSection(
+                            seed = tasteMatchedSeed,
+                            items = tasteMatchedItems,
+                            allMedia = allMedia,
+                            onItemClick = onItemClick
+                        )
+                    }
+                }
+
+                // Curated Filter Rows (Under 90 Min, Hidden Gems, Limited Series, By Decade)
+                val showCurated = discoverSettings.showCuratedRows &&
+                    (selectedFilter == MediaType.ALL || selectedFilter == MediaType.MOVIE || selectedFilter == MediaType.SHOW)
+                if (showCurated) {
+                    item(key = "discover_curated_filter_rows") {
+                        CuratedFilterDiscoverSection(
+                            selectedRowKey = selectedCuratedRowKey,
+                            items = curatedRowItems,
+                            isLoading = isLoadingCuratedRow,
+                            allMedia = allMedia,
+                            onSelectRow = { rowKey ->
+                                homeViewModel?.selectCuratedRow(rowKey, tmdbKey)
+                            },
+                            onItemClick = onItemClick
+                        )
+                    }
+                }
+
                 if (activeDefs.isEmpty()) {
                     item(key = "discover_all_disabled") {
                         Column(
@@ -1570,6 +1715,38 @@ fun DiscoverView(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
+        }
+        if (showSwipeQueueSheet && homeViewModel != null) {
+            val queue = remember(
+                allMedia,
+                top10TodayItems,
+                tasteMatchedItems,
+                curatedRowItems,
+                streamingServiceTitles,
+                discoverShelves
+            ) {
+                homeViewModel.buildSwipeQueue(allMedia)
+            }
+            SwipeDiscoveryQueueSheet(
+                queueItems = queue,
+                onAddPlanToWatch = { picked ->
+                    onAddMedia(picked)
+                    homeViewModel.skipSwipeQueueItem(picked)
+                },
+                onSkip = { skipped ->
+                    homeViewModel.skipSwipeQueueItem(skipped)
+                },
+                onOpenDetails = { picked ->
+                    val inLib = findLibraryMatch(allMedia, picked)
+                    if (inLib != null) {
+                        onItemClick(inLib.id)
+                    } else {
+                        EphemeralPreviewHolder.previewItem = picked.toMediaItemEntity()
+                        onItemClick(-1L)
+                    }
+                },
+                onDismiss = { showSwipeQueueSheet = false }
+            )
         }
     }
 }

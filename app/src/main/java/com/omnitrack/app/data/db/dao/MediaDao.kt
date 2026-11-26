@@ -48,6 +48,21 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE linkedParentMediaId = :parentId ORDER BY COALESCE(linkedSeasonNumber, 999) ASC, id ASC")
     suspend fun findLinkedChildren(parentId: Long): List<MediaItemEntity>
 
+    @Query("SELECT * FROM media_items WHERE crossMediumGroupId = :groupId ORDER BY id ASC")
+    fun observeByCrossMediumGroup(groupId: String): Flow<List<MediaItemEntity>>
+
+    @Query("SELECT * FROM media_items WHERE crossMediumGroupId = :groupId ORDER BY id ASC")
+    suspend fun getByCrossMediumGroupOnce(groupId: String): List<MediaItemEntity>
+
+    @Query("UPDATE media_items SET crossMediumGroupId = :groupId, lastUpdated = :updated WHERE id = :id")
+    suspend fun updateCrossMediumGroupId(id: Long, groupId: String?, updated: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET linkedParentMediaId = :parentId, linkedSeasonNumber = :seasonNumber, lastUpdated = :updated WHERE id = :id")
+    suspend fun updateLinkedParent(id: Long, parentId: Long?, seasonNumber: Int?, updated: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
+    suspend fun getAllMediaOnce(): List<MediaItemEntity>
+
     @Query("SELECT * FROM media_items WHERE anilistId IN (:ids)")
     suspend fun findByAnilistIds(ids: List<Long>): List<MediaItemEntity>
 

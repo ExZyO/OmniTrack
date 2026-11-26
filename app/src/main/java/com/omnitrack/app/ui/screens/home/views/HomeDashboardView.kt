@@ -3121,10 +3121,10 @@ private fun ContinueTrackingCard(
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .height((wideThumbH - 4.dp).coerceAtLeast(68.dp)),
+                            .heightIn(min = (wideThumbH - 4.dp).coerceAtLeast(78.dp)),
                         verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -3178,8 +3178,9 @@ private fun ContinueTrackingCard(
                             )
                         }
 
-                        if (fraction > 0f) {
+                        if (fraction > 0f || (item.totalProgress != null && item.totalProgress > 0.0)) {
                             Row(
+                                modifier = Modifier.padding(top = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {

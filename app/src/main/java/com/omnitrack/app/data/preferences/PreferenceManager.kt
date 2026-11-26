@@ -217,6 +217,12 @@ data class DiscoverCustomizationSettings(
     val showInYourLibraryShelf: Boolean = true,
     val showCustomEntryCard: Boolean = true,
     val showAiToggle: Boolean = true,
+    val showStreamingServices: Boolean = true,
+    val showTop10Today: Boolean = true,
+    val showDailyCriticsPick: Boolean = true,
+    val showTasteMatched: Boolean = true,
+    val showCuratedRows: Boolean = true,
+    val showSwipeQueueButton: Boolean = true,
     val disabledCategories: Set<String> = emptySet(),
     val disabledShelves: Set<String> = emptySet(),
     val universalBannerBlur: HeroBannerBlurLevel = HeroBannerBlurLevel.OFF,
@@ -225,6 +231,16 @@ data class DiscoverCustomizationSettings(
     fun resolveBannerBlurDp(mediaType: MediaType?): Int =
         HeroBannerBlurLevel.resolveBlurDp(mediaType, universalBannerBlur, categoryBannerBlurOverrides)
 }
+
+data class ReleaseAlertSettings(
+    val enabled: Boolean = false,
+    val discordWebhookUrl: String = "",
+    val telegramBotToken: String = "",
+    val telegramChatId: String = "",
+    val currentlyTrackingOnly: Boolean = true,
+    val includeArtwork: Boolean = true,
+    val notifiedKeys: Set<String> = emptySet()
+)
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
     HERO("Hero Layout", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
@@ -648,6 +664,12 @@ class PreferenceManager(private val context: Context) {
         val DISCOVER_SHOW_IN_LIBRARY = booleanPreferencesKey("discover_show_in_library")
         val DISCOVER_SHOW_CUSTOM_ENTRY = booleanPreferencesKey("discover_show_custom_entry")
         val DISCOVER_SHOW_AI_TOGGLE = booleanPreferencesKey("discover_show_ai_toggle")
+        val DISCOVER_SHOW_STREAMING_SERVICES = booleanPreferencesKey("discover_show_streaming_services")
+        val DISCOVER_SHOW_TOP10 = booleanPreferencesKey("discover_show_top10")
+        val DISCOVER_SHOW_CRITICS_PICK = booleanPreferencesKey("discover_show_critics_pick")
+        val DISCOVER_SHOW_TASTE_MATCHED = booleanPreferencesKey("discover_show_taste_matched")
+        val DISCOVER_SHOW_CURATED_ROWS = booleanPreferencesKey("discover_show_curated_rows")
+        val DISCOVER_SHOW_SWIPE_QUEUE = booleanPreferencesKey("discover_show_swipe_queue")
         val DISCOVER_DISABLED_CATEGORIES = stringSetPreferencesKey("discover_disabled_categories")
         val DISCOVER_DISABLED_SHELVES = stringSetPreferencesKey("discover_disabled_shelves")
         val HOME_ROW_ORDER = stringPreferencesKey("home_row_order")
@@ -708,6 +730,14 @@ class PreferenceManager(private val context: Context) {
         val CHIMANEW_LIB_DEFAULT_CATEGORY_ID = longPreferencesKey("chimanew_lib_default_category_id")
         val CHIMANEW_CATEGORY_ASSIGNMENTS = stringPreferencesKey("chimanew_category_assignments")
         val HERO_MULTI_RATINGS_CACHE = stringPreferencesKey("hero_multi_ratings_cache")
+        val WATCH_PROVIDER_REGION = stringPreferencesKey("watch_provider_region")
+        val ALERT_ENABLED = booleanPreferencesKey("release_alert_enabled")
+        val ALERT_DISCORD_WEBHOOK = stringPreferencesKey("release_alert_discord_webhook")
+        val ALERT_TELEGRAM_BOT = stringPreferencesKey("release_alert_telegram_bot")
+        val ALERT_TELEGRAM_CHAT_ID = stringPreferencesKey("release_alert_telegram_chat_id")
+        val ALERT_TRACKING_ONLY = booleanPreferencesKey("release_alert_tracking_only")
+        val ALERT_INCLUDE_ART = booleanPreferencesKey("release_alert_include_art")
+        val ALERT_NOTIFIED_KEYS = stringSetPreferencesKey("release_alert_notified_keys")
 
         val GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
         val GEMINI_MODEL = stringPreferencesKey("gemini_model")
@@ -862,6 +892,12 @@ class PreferenceManager(private val context: Context) {
                 showInYourLibraryShelf = prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] ?: true,
                 showCustomEntryCard = prefs[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] ?: true,
                 showAiToggle = prefs[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] ?: true,
+                showStreamingServices = prefs[PreferencesKeys.DISCOVER_SHOW_STREAMING_SERVICES] ?: true,
+                showTop10Today = prefs[PreferencesKeys.DISCOVER_SHOW_TOP10] ?: true,
+                showDailyCriticsPick = prefs[PreferencesKeys.DISCOVER_SHOW_CRITICS_PICK] ?: true,
+                showTasteMatched = prefs[PreferencesKeys.DISCOVER_SHOW_TASTE_MATCHED] ?: true,
+                showCuratedRows = prefs[PreferencesKeys.DISCOVER_SHOW_CURATED_ROWS] ?: true,
+                showSwipeQueueButton = prefs[PreferencesKeys.DISCOVER_SHOW_SWIPE_QUEUE] ?: true,
                 disabledCategories = prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] ?: emptySet(),
                 disabledShelves = prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] ?: emptySet(),
                 universalBannerBlur = HeroBannerBlurLevel.fromName(prefs[PreferencesKeys.UNIVERSAL_HERO_BANNER_BLUR]),
@@ -896,6 +932,30 @@ class PreferenceManager(private val context: Context) {
 
     suspend fun setDiscoverShowAiToggle(enabled: Boolean) {
         context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] = enabled }
+    }
+
+    suspend fun setDiscoverShowStreamingServices(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_STREAMING_SERVICES] = enabled }
+    }
+
+    suspend fun setDiscoverShowTop10Today(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_TOP10] = enabled }
+    }
+
+    suspend fun setDiscoverShowDailyCriticsPick(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_CRITICS_PICK] = enabled }
+    }
+
+    suspend fun setDiscoverShowTasteMatched(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_TASTE_MATCHED] = enabled }
+    }
+
+    suspend fun setDiscoverShowCuratedRows(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_CURATED_ROWS] = enabled }
+    }
+
+    suspend fun setDiscoverShowSwipeQueueButton(enabled: Boolean) {
+        context.dataStore.edit { it[PreferencesKeys.DISCOVER_SHOW_SWIPE_QUEUE] = enabled }
     }
 
     suspend fun setDiscoverCategoryEnabled(category: MediaType, enabled: Boolean) {
@@ -939,6 +999,12 @@ class PreferenceManager(private val context: Context) {
             prefs[PreferencesKeys.DISCOVER_SHOW_IN_LIBRARY] = true
             prefs[PreferencesKeys.DISCOVER_SHOW_CUSTOM_ENTRY] = true
             prefs[PreferencesKeys.DISCOVER_SHOW_AI_TOGGLE] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_STREAMING_SERVICES] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_TOP10] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_CRITICS_PICK] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_TASTE_MATCHED] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_CURATED_ROWS] = true
+            prefs[PreferencesKeys.DISCOVER_SHOW_SWIPE_QUEUE] = true
             prefs[PreferencesKeys.DISCOVER_DISABLED_CATEGORIES] = emptySet()
             prefs[PreferencesKeys.DISCOVER_DISABLED_SHELVES] = emptySet()
         }
@@ -1552,9 +1618,17 @@ class PreferenceManager(private val context: Context) {
                     val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<DetailSectionItem>>(raw)
                     val existingKeys = parsed.map { it.key }.toSet()
                     val missingTop = DetailsPageLayoutDefaults.defaultSections
-                        .filter { it.key == DetailSectionKey.PERSONAL_NOTES && it.key !in existingKeys }
+                        .filter {
+                            (it.key == DetailSectionKey.CROSS_MEDIUM_EDITIONS ||
+                                it.key == DetailSectionKey.PERSONAL_NOTES) &&
+                                it.key !in existingKeys
+                        }
                     val missingTail = DetailsPageLayoutDefaults.defaultSections
-                        .filter { it.key != DetailSectionKey.PERSONAL_NOTES && it.key !in existingKeys }
+                        .filter {
+                            it.key != DetailSectionKey.CROSS_MEDIUM_EDITIONS &&
+                                it.key != DetailSectionKey.PERSONAL_NOTES &&
+                                it.key !in existingKeys
+                        }
                     missingTop + parsed + missingTail
                 } catch (_: Exception) {
                     DetailsPageLayoutDefaults.defaultSections
@@ -1909,7 +1983,7 @@ class PreferenceManager(private val context: Context) {
                 showHiddenCategories = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] ?: false,
                 groupAnimeSeasonsInLibrary = prefs[PreferencesKeys.CHIMANEW_LIB_GROUP_ANIME_SEASONS] ?: false,
                 defaultCategoryId = rawDefCat?.takeIf { it > 0L }
-            )
+            ).also { cachedChimanewLibrarySettings = it }
         }
         .distinctUntilChanged()
 
@@ -2279,6 +2353,7 @@ class PreferenceManager(private val context: Context) {
                 savedHidden.remove(fullOrder.first())
             }
             MediaCategoryPrefs(orderedTabs = fullOrder, hiddenTabs = savedHidden)
+                .also { cachedMediaCategoryPrefs = it }
         }
         .distinctUntilChanged()
 
@@ -2339,6 +2414,63 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    val watchProviderRegion: Flow<String> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            (prefs[PreferencesKeys.WATCH_PROVIDER_REGION]?.trim()?.uppercase()?.ifBlank { "AUTO" } ?: "AUTO")
+                .also { cachedWatchProviderRegion = it }
+        }
+        .distinctUntilChanged()
+
+    suspend fun setWatchProviderRegion(regionCode: String) {
+        val clean = regionCode.trim().uppercase().ifBlank { "AUTO" }
+        cachedWatchProviderRegion = clean
+        context.dataStore.edit { it[PreferencesKeys.WATCH_PROVIDER_REGION] = clean }
+    }
+
+    val releaseAlertSettings: Flow<ReleaseAlertSettings> = context.dataStore.data
+        .catch { if (it is IOException || it is ClassCastException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            ReleaseAlertSettings(
+                enabled = prefs[PreferencesKeys.ALERT_ENABLED] ?: false,
+                discordWebhookUrl = prefs[PreferencesKeys.ALERT_DISCORD_WEBHOOK].orEmpty(),
+                telegramBotToken = prefs[PreferencesKeys.ALERT_TELEGRAM_BOT].orEmpty(),
+                telegramChatId = prefs[PreferencesKeys.ALERT_TELEGRAM_CHAT_ID].orEmpty(),
+                currentlyTrackingOnly = prefs[PreferencesKeys.ALERT_TRACKING_ONLY] ?: true,
+                includeArtwork = prefs[PreferencesKeys.ALERT_INCLUDE_ART] ?: true,
+                notifiedKeys = prefs[PreferencesKeys.ALERT_NOTIFIED_KEYS] ?: emptySet()
+            )
+        }
+        .distinctUntilChanged()
+
+    suspend fun updateReleaseAlertSettings(
+        enabled: Boolean? = null,
+        discordWebhookUrl: String? = null,
+        telegramBotToken: String? = null,
+        telegramChatId: String? = null,
+        currentlyTrackingOnly: Boolean? = null,
+        includeArtwork: Boolean? = null
+    ) {
+        context.dataStore.edit { prefs ->
+            enabled?.let { prefs[PreferencesKeys.ALERT_ENABLED] = it }
+            discordWebhookUrl?.let { prefs[PreferencesKeys.ALERT_DISCORD_WEBHOOK] = it.trim() }
+            telegramBotToken?.let { prefs[PreferencesKeys.ALERT_TELEGRAM_BOT] = it.trim() }
+            telegramChatId?.let { prefs[PreferencesKeys.ALERT_TELEGRAM_CHAT_ID] = it.trim() }
+            currentlyTrackingOnly?.let { prefs[PreferencesKeys.ALERT_TRACKING_ONLY] = it }
+            includeArtwork?.let { prefs[PreferencesKeys.ALERT_INCLUDE_ART] = it }
+        }
+    }
+
+    suspend fun recordNotifiedReleaseKeys(newKeys: Set<String>) {
+        if (newKeys.isEmpty()) return
+        context.dataStore.edit { prefs ->
+            val current = (prefs[PreferencesKeys.ALERT_NOTIFIED_KEYS] ?: emptySet()).toMutableList()
+            newKeys.forEach { k -> if (k !in current) current.add(k) }
+            val trimmed = if (current.size > 200) current.takeLast(200).toSet() else current.toSet()
+            prefs[PreferencesKeys.ALERT_NOTIFIED_KEYS] = trimmed
+        }
+    }
+
     companion object {
         @Volatile
         var cachedPresentationSettings: PresentationSettings = PresentationSettings()
@@ -2354,6 +2486,21 @@ class PreferenceManager(private val context: Context) {
 
         @Volatile
         var cachedPerformanceSettings: PerformanceSettings = PerformanceSettings()
+
+        @Volatile
+        var cachedChimanewLibrarySettings: ChimanewLibrarySettings = ChimanewLibrarySettings()
+
+        @Volatile
+        var cachedMediaCategoryPrefs: MediaCategoryPrefs = MediaCategoryPrefs()
+
+        @Volatile
+        var cachedWatchProviderRegion: String = "AUTO"
+
+        fun resolveEffectiveWatchRegion(explicitOverride: String? = null): String {
+            val raw = (explicitOverride ?: cachedWatchProviderRegion).trim().uppercase()
+            if (raw.isNotBlank() && raw != "AUTO" && raw.length == 2) return raw
+            return java.util.Locale.getDefault().country.trim().uppercase().takeIf { it.length == 2 } ?: "US"
+        }
 
         @Volatile
         var cachedPreferredTitleLanguage: PreferredTitleLanguage = PreferredTitleLanguage.ROMAJI

@@ -5,15 +5,19 @@
 ## Features
 
 - **10 Media Verticals in One App**: Anime, Manga, Comics, Light & Web Novels, Fanfiction, Books, TV Shows, Movies, Games, and Visual Novels — hide or reorder any category globally to fit your library.
-- **Multi-Tracker Two-Way Sync**: Connect **AniList**, **MyAnimeList**, **Bangumi**, **Comick**, **Trakt.tv**, **SIMKL**, **TMDb**, **Steam**, **VNDB**, and **Hardcover**, plus CSV/XML imports (Goodreads, Letterboxd, MAL XML).
-- **Rich Vertical-Specific Tracking**:
+- **Universal Multi-Tracker Sync**: Enter status, progress, 0.1-precision ratings, dates, and notes once in Universal Mode and sync in parallel across **AniList**, **MyAnimeList**, **Bangumi**, **Comick**, **Trakt.tv**, **SIMKL**, **TMDb**, **Steam**, **VNDB**, and **Hardcover**, plus CSV/XML imports (Goodreads, Letterboxd, MAL XML).
+- **Rich Vertical-Specific & Cross-Medium Tracking**:
+  - **Season Ratings & Notes + Combine Editions**: Rate individual seasons with a 0.1-precision slider and personal notes, and link Manga, Anime, Light Novel, Book, or Game adaptations together with an inline switcher.
+  - **Where to Watch & Awards**: Regional streaming service logos (Netflix, Crunchyroll, Disney+, Prime, Apple TV+, Max & more) with automatic country detection + searchable country selector, plus Wikidata & OMDb Awards & Honors with a browsable winners list.
   - **Visual Novels**: Character routes & endings with custom route photos (pinch-to-zoom & drag reframing), spoiler masking, playtime tracking, and VNDB metadata.
   - **Games**: Playtime steppers, completion tiers, platform tags, DLC/sub-entries, and Steam/IGDB metadata.
   - **Fanfiction & Web Novels**: Chapter checklists, update checks, cross-site mirror linking, and in-app WebView reading across **AO3**, **FanFiction.net**, **SpaceBattles**, **Sufficient Velocity**, **Questionable Questing**, and **Wattpad**.
   - **Books & Comics**: Format/publisher filters, reading quotes, and issue/volume tracking.
-- **Custom Artwork & Framing**: Multi-source lossless cover & banner waterfall with interactive pinch-to-zoom banner reframing.
+- **Curated Discover & Swipe Queue**: Daily Critics' Pick, Browse by Streaming Service with official logos, Top 10 Today numbered rails, Taste-Matched suggestions (`Because You Liked`), curated spotlight lists (Under 90 Min, Hidden Gems, Limited Series, By Decade), and a swipe-card Discovery Queue — every section toggleable in Discover settings.
+- **Up Next Calendar & Discord / Telegram Alerts**: Instant cached 14-day schedule + interactive Month calendar grid, plus background Discord webhook & Telegram bot release pings every 6 hours.
+- **Custom Artwork & Framing**: Multi-source lossless cover & banner waterfall with interactive pinch-to-zoom banner reframing and separate Cover & Banner priorities per medium.
 - **Performance Mode**: Pure AMOLED themes, hardware-accelerated image pipelines, and optional Performance Mode toggles for smooth scrolling on mid-range devices.
-- **Encrypted Backups & In-App Updates**: Local backup/restore and automatic GitHub Releases update checks with SHA-256 verification.
+- **Encrypted Backups, Library Repair & In-App Updates**: One-file `.omnibk` backup/restore, Library Health Check & Safe Repair (preserving custom entries & artwork), and automatic GitHub Releases update checks with SHA-256 verification.
 
 ## Installation
 

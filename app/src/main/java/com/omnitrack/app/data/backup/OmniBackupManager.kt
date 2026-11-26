@@ -105,6 +105,7 @@ object OmniBackupManager {
             val episodeProgress = if (options.includeSubEntries) database.episodeProgressDao().getAllProgressOnce() else emptyList()
             val comicIssues = if (options.includeSubEntries) database.comicIssueDao().getAllIssuesOnce() else emptyList()
             val fanficChapters = if (options.includeSubEntries) database.fanficChapterDao().getAllChaptersOnce() else emptyList()
+            val seasonMeta = if (options.includeSubEntries) database.seasonMetaDao().getAllOnce() else emptyList()
 
             val includeDbDump = options.includeLibrary || options.includeSubEntries
             val dbDumpJson = if (includeDbDump) {
@@ -119,7 +120,8 @@ object OmniBackupManager {
                         bookQuotes = bookQuotes,
                         episodeProgress = episodeProgress,
                         comicIssues = comicIssues,
-                        fanficChapters = fanficChapters
+                        fanficChapters = fanficChapters,
+                        seasonMeta = seasonMeta
                     )
                 )
             } else null
@@ -526,6 +528,7 @@ object OmniBackupManager {
                         database.gameEntryDao().deleteAllEntries()
                         database.bookEntryDao().deleteAllEntries()
                         database.bookQuoteDao().deleteAllQuotes()
+                        database.seasonMetaDao().deleteAll()
 
                         if (dump.episodeProgress.isNotEmpty()) {
                             database.episodeProgressDao().insertOrUpdateAll(dump.episodeProgress)
@@ -549,6 +552,9 @@ object OmniBackupManager {
                         }
                         if (dump.bookQuotes.isNotEmpty()) {
                             database.bookQuoteDao().insertQuotes(dump.bookQuotes)
+                        }
+                        if (dump.seasonMeta.isNotEmpty()) {
+                            database.seasonMetaDao().upsertAll(dump.seasonMeta)
                         }
                     }
                 }

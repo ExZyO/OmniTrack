@@ -162,6 +162,7 @@ fun LazyListScope.detailSeriesItems(
     onToggleSeasonWatched: (Int) -> Unit,
     onOpenEpisodeDetail: (MediaEpisode) -> Unit,
     episodeMetaMap: Map<Pair<Int, Int>, EpisodeProgressEntity> = emptyMap(),
+    seasonMetaMap: Map<Int, com.omnitrack.app.data.db.entity.SeasonMetaEntity> = emptyMap(),
     episodesBySeason: Map<Int, List<MediaEpisode>> = emptyMap(),
     layoutScale: Float = 1.0f,
     onSeasonViewModeChanged: ((String) -> Unit)? = null,
@@ -304,6 +305,7 @@ fun LazyListScope.detailSeriesItems(
                             episodes = episodes,
                             episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
+                            seasonMetaMap = seasonMetaMap,
                             fallbackImageUrl = fallbackCoverUrl,
                             useProgressAsWatchedTruth = useProgressAsWatchedTruth,
                             currentTotalProgress = currentTotalProgress,
@@ -317,6 +319,7 @@ fun LazyListScope.detailSeriesItems(
                             episodes = episodes,
                             episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
+                            seasonMetaMap = seasonMetaMap,
                             useProgressAsWatchedTruth = useProgressAsWatchedTruth,
                             currentTotalProgress = currentTotalProgress,
                             onSelectSeason = onSelectSeason,
@@ -741,7 +744,9 @@ fun DetailSeriesDialogs(
     onToggleSeasonWatched: (Int) -> Unit,
     onMarkPreviousSeasonsWatched: ((Int) -> Unit)? = null,
     onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
-    onJumpToProgress: ((Int) -> Unit)? = null
+    onJumpToProgress: ((Int) -> Unit)? = null,
+    seasonMetaMap: Map<Int, com.omnitrack.app.data.db.entity.SeasonMetaEntity> = emptyMap(),
+    onSaveSeasonMeta: ((Int, Float?, String?) -> Unit)? = null
 ) {
     val totalItemsAcrossSeasons = remember(episodesBySeason, episodes) {
         val byMap = episodesBySeason.values.sumOf { it.size }
@@ -773,6 +778,7 @@ fun DetailSeriesDialogs(
         val isSeasonWatched = effectiveCount > 0 && watchedCount >= effectiveCount
         val canMarkPrevious = seasons.any { it.seasonNumber in 1 until season.seasonNumber }
 
+        val existingMeta = seasonMetaMap[season.seasonNumber]
         SeasonWatchedActionSheet(
             seasonLabel = seasonLabel,
             episodeCount = effectiveCount,
@@ -780,6 +786,11 @@ fun DetailSeriesDialogs(
             isSeasonWatched = isSeasonWatched,
             canMarkPreviousSeasons = canMarkPrevious,
             isReadingMode = isMangaMode,
+            initialRating = existingMeta?.userRating,
+            initialNote = existingMeta?.userNote,
+            onSaveSeasonMeta = onSaveSeasonMeta?.let { cb ->
+                { rating, note -> cb(season.seasonNumber, rating, note) }
+            },
             onDismiss = { seriesState.activeActionSheetSeason = null },
             onToggleSeasonWatched = { onToggleSeasonWatched(season.seasonNumber) },
             onMarkPreviousSeasonsWatched = { onMarkPreviousSeasonsWatched?.invoke(season.seasonNumber) }
@@ -2168,6 +2179,7 @@ private fun SeasonPosterScrollRow(
     episodes: List<MediaEpisode>,
     episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
+    seasonMetaMap: Map<Int, com.omnitrack.app.data.db.entity.SeasonMetaEntity> = emptyMap(),
     fallbackImageUrl: String?,
     useProgressAsWatchedTruth: Boolean = false,
     currentTotalProgress: Int? = null,
@@ -2276,6 +2288,44 @@ private fun SeasonPosterScrollRow(
                             )
                         }
                     }
+                    val sMeta = seasonMetaMap[season.seasonNumber]
+                    val sRating = sMeta?.userRating?.takeIf { it > 0f }
+                    val hasNote = !sMeta?.userNote.isNullOrBlank()
+                    if (sRating != null || hasNote) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(6.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.Black.copy(alpha = 0.80f))
+                                .padding(horizontal = 5.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            if (sRating != null) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = com.omnitrack.app.ui.theme.AccentGold,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = String.format(java.util.Locale.US, "%.1f", sRating),
+                                    color = com.omnitrack.app.ui.theme.AccentGold,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            if (hasNote) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.Edit,
+                                    contentDescription = "Season Note",
+                                    tint = Color.White.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(10.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Text(
@@ -2301,6 +2351,7 @@ private fun SeasonTextChipScrollRow(
     episodes: List<MediaEpisode>,
     episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
+    seasonMetaMap: Map<Int, com.omnitrack.app.data.db.entity.SeasonMetaEntity> = emptyMap(),
     useProgressAsWatchedTruth: Boolean = false,
     currentTotalProgress: Int? = null,
     onSelectSeason: (Int) -> Unit,
@@ -2365,6 +2416,31 @@ private fun SeasonTextChipScrollRow(
                     fontSize = 15.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold
                 )
+                val sMeta = seasonMetaMap[season.seasonNumber]
+                val sRating = sMeta?.userRating?.takeIf { it > 0f }
+                val hasNote = !sMeta?.userNote.isNullOrBlank()
+                if (sRating != null) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Star,
+                        contentDescription = null,
+                        tint = com.omnitrack.app.ui.theme.AccentGold,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = String.format(java.util.Locale.US, "%.1f", sRating),
+                        color = com.omnitrack.app.ui.theme.AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                if (hasNote) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Edit,
+                        contentDescription = "Season Note",
+                        tint = Color.White.copy(alpha = 0.72f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
             }
         }
     }

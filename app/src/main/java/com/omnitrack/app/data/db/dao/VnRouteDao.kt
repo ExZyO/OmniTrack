@@ -36,4 +36,10 @@ interface VnRouteDao {
 
     @Query("DELETE FROM vn_routes")
     suspend fun deleteAllRoutes()
+
+    @Query("SELECT COUNT(*) FROM vn_routes WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun countOrphaned(): Int
+
+    @Query("DELETE FROM vn_routes WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun deleteOrphaned(): Int
 }

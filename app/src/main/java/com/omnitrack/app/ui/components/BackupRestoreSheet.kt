@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,10 +28,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -38,9 +41,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -69,13 +74,17 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.backup.BackupInspectionResult
 import com.omnitrack.app.data.backup.BackupModuleOptions
+import com.omnitrack.app.data.backup.LibraryRepairEngine
+import com.omnitrack.app.data.backup.LibraryRepairReport
 import com.omnitrack.app.data.backup.OmniBackupManager
 import com.omnitrack.app.ui.theme.AccentGold
+import com.omnitrack.app.ui.theme.AccentJade
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.CancellationException
@@ -122,10 +131,22 @@ fun BackupRestoreSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Create, 1 = Restore
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Backup, 1 = Restore, 2 = Repair
     var isProcessing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var repairReport by remember { mutableStateOf<LibraryRepairReport?>(null) }
+    var isScanningRepair by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 2 && repairReport == null && !isScanningRepair) {
+            isScanningRepair = true
+            repairReport = runCatching {
+                LibraryRepairEngine.scan(context, app.database)
+            }.getOrNull()
+            isScanningRepair = false
+        }
+    }
 
     // Create options
     var createOptions by remember { mutableStateOf(BackupModuleOptions()) }
@@ -322,40 +343,41 @@ fun BackupRestoreSheet(
                 }
             }
 
-            // 2-Tab Segmented Switcher
+            // Option A 3-Tab Underline Switcher (Backup | Restore | Repair)
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkSurfaceElevated)
-                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                listOf("Create Backup", "Restore Backup").forEachIndexed { idx, label ->
+                listOf("Backup", "Restore", "Repair").forEachIndexed { idx, label ->
                     val active = selectedTab == idx
-                    Box(
+                    Column(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(if (active) AccentGold else Color.Transparent)
                             .clickable(enabled = !isProcessing) {
                                 selectedTab = idx
                                 errorMessage = null
                                 statusMessage = null
                             }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(top = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
                             text = label,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (active) AmoledBlack else TextSecondary
+                            fontSize = 13.5.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            color = if (active) TextPrimary else TextMuted
+                        )
+                        Spacer(modifier = Modifier.height(7.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(if (active) AccentGold else Color.Transparent)
                         )
                     }
                 }
             }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
             // Status / Error Banner
             if (isProcessing) {
@@ -436,7 +458,7 @@ fun BackupRestoreSheet(
                         modifier = Modifier.weight(1f)
                     )
                     PresetPill(
-                        label = "Full (All)",
+                        label = "Select All (1-File Full)",
                         isSelected = createOptions.includeLibrary &&
                             createOptions.includeSubEntries &&
                             createOptions.includeSettings &&
@@ -519,31 +541,31 @@ fun BackupRestoreSheet(
                     }
                 }
 
-                Button(
-                    onClick = {
-                        val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
-                        exportFileLauncher.launch("omnitrack_backup_$timestamp.omnibk")
-                    },
-                    enabled = !isProcessing && anyCreateSelected &&
-                        (!createOptions.includeCredentials || createCredentialsPassword.trim().length >= 6),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentGold,
-                        contentColor = AmoledBlack
-                    )
-                ) {
-                    Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Create .omnibk Backup",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            } else {
+                    Button(
+                        onClick = {
+                            val timestamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.US).format(Date())
+                            exportFileLauncher.launch("omnitrack_backup_$timestamp.omnibk")
+                        },
+                        enabled = !isProcessing && anyCreateSelected &&
+                            (!createOptions.includeCredentials || createCredentialsPassword.trim().length >= 6),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGold,
+                            contentColor = AmoledBlack
+                        )
+                    ) {
+                        Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Create .omnibk Backup",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+            } else if (selectedTab == 1) {
                 // Restore Tab: File Picker
                 Row(
                     modifier = Modifier
@@ -816,10 +838,159 @@ fun BackupRestoreSheet(
                         }
                     }
                 }
+            } else {
+                // Repair & Health Check Tab
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Safe Maintenance Guarantee: Custom entries, custom titles, and all existing cover/banner files remain 100% untouched.",
+                        color = AccentJade,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+                    val report = repairReport
+                    if (isScanningRepair && report == null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 24.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(color = AccentGold, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Scanning library database & local artwork...", color = TextSecondary, fontSize = 13.sp)
+                        }
+                    } else if (report != null) {
+                        RepairDiagnosticRow(
+                            label = "Library & Custom Protection",
+                            value = "${report.totalMediaCount} items (${report.protectedCustomEntries} custom protected)",
+                            ok = true
+                        )
+                        RepairDiagnosticRow(
+                            label = "Orphaned Sub-Entries",
+                            value = if (report.orphanedSubEntriesCount == 0) "Clean (0)" else "${report.orphanedSubEntriesCount} orphaned rows",
+                            ok = report.orphanedSubEntriesCount == 0
+                        )
+                        RepairDiagnosticRow(
+                            label = "Missing Local Artwork Links",
+                            value = if (report.brokenLocalArtworkPathsCount == 0) "Valid (0 broken)" else "${report.brokenLocalArtworkPathsCount} broken file links",
+                            ok = report.brokenLocalArtworkPathsCount == 0
+                        )
+                        RepairDiagnosticRow(
+                            label = "Stale Cross-Medium Groups",
+                            value = if (report.staleCrossMediumGroupsCount == 0) "Clean (0)" else "${report.staleCrossMediumGroupsCount} singletons",
+                            ok = report.staleCrossMediumGroupsCount == 0
+                        )
+                        RepairDiagnosticRow(
+                            label = "SQLite Database Integrity",
+                            value = if (report.sqliteIntegrityOk) "Healthy (${report.sqliteIntegrityDetail})" else report.sqliteIntegrityDetail,
+                            ok = report.sqliteIntegrityOk
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                if (!isScanningRepair && !isProcessing) {
+                                    isScanningRepair = true
+                                    errorMessage = null
+                                    statusMessage = null
+                                    scope.launch {
+                                        repairReport = runCatching {
+                                            LibraryRepairEngine.scan(context, app.database)
+                                        }.getOrNull()
+                                        isScanningRepair = false
+                                    }
+                                }
+                            },
+                            enabled = !isScanningRepair && !isProcessing,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(0.8.dp, GlassBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Scan Library", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (!isScanningRepair && !isProcessing) {
+                                    isProcessing = true
+                                    errorMessage = null
+                                    statusMessage = "Running safe library repair..."
+                                    scope.launch {
+                                        try {
+                                            val outcome = LibraryRepairEngine.runSafeRepair(context, app.database)
+                                            repairReport = outcome.postScan
+                                            val fixedTotal = outcome.removedOrphans + outcome.clearedBrokenArtworkPaths + outcome.cleanedSingletonGroups
+                                            statusMessage = if (fixedTotal == 0) {
+                                                "Library checked — already clean (${outcome.postScan.protectedCustomEntries} custom entries preserved)"
+                                            } else {
+                                                "Cleaned ${outcome.removedOrphans} orphans, ${outcome.clearedBrokenArtworkPaths} broken paths, ${outcome.cleanedSingletonGroups} stale links"
+                                            }
+                                        } catch (e: Exception) {
+                                            if (e is CancellationException) throw e
+                                            errorMessage = e.message ?: "Safe repair failed"
+                                            statusMessage = null
+                                        } finally {
+                                            isProcessing = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isScanningRepair && !isProcessing,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold, contentColor = AmoledBlack),
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(46.dp)
+                        ) {
+                            Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Run Safe Repair", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
         }
+    }
+}
+
+@Composable
+private fun RepairDiagnosticRow(
+    label: String,
+    value: String,
+    ok: Boolean
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = value,
+                color = if (ok) AccentJade else AccentGold,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
     }
 }
 

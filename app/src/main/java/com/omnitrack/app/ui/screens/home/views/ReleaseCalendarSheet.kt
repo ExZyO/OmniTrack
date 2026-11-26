@@ -30,6 +30,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayCircleOutline
@@ -45,6 +47,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,6 +75,7 @@ import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -85,7 +90,8 @@ fun ReleaseCalendarSheet(
     onOpenLocalMedia: (Long) -> Unit,
     onPreviewRelease: (CalendarReleaseItem) -> Unit,
     onAddRelease: (CalendarReleaseItem) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onLoadMonthWindow: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val zone = remember { ZoneId.systemDefault() }
@@ -96,6 +102,14 @@ fun ReleaseCalendarSheet(
     var onlyLibrary by remember(hasLibraryMatches) { mutableStateOf(hasLibraryMatches) }
     var selectedTypeFilter by remember { mutableStateOf("ALL") } // "ALL" or MediaType.name
     var selectedDate by remember { mutableStateOf(today) }
+    var isMonthView by remember { mutableStateOf(false) }
+    var displayedMonth by remember { mutableStateOf(YearMonth.from(today)) }
+
+    LaunchedEffect(isMonthView) {
+        if (isMonthView) {
+            onLoadMonthWindow()
+        }
+    }
 
     val scopeFilteredReleases = remember(releases, onlyLibrary, selectedTypeFilter) {
         releases.filter { item ->
@@ -270,58 +284,193 @@ fun ReleaseCalendarSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 14-Day Scrollable Strip
+            // 14-Day | Month underline toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                windowDays.forEach { day ->
-                    val isSelected = day == selectedDate
-                    val isToday = day == today
-                    val hasEvent = day in datesWithEvents
-                    Column(
-                        modifier = Modifier
-                            .width(48.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                when {
-                                    isSelected -> AccentGold
-                                    isToday -> AccentGold.copy(alpha = 0.12f)
-                                    else -> Color.White.copy(alpha = 0.04f)
-                                }
-                            )
-                            .clickable { selectedDate = day }
-                            .padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Text(
-                            text = if (isToday) "TODAY" else day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US).uppercase(),
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSelected) OnAccentColor else TextSecondary
-                        )
-                        Text(
-                            text = day.dayOfMonth.toString(),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSelected) OnAccentColor else TextPrimary
-                        )
-                        Box(
+                CalendarToggleTab(
+                    label = "14-Day",
+                    selected = !isMonthView,
+                    onClick = { isMonthView = false },
+                    modifier = Modifier.weight(1f)
+                )
+                CalendarToggleTab(
+                    label = "Month Grid",
+                    selected = isMonthView,
+                    onClick = { isMonthView = true },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (!isMonthView) {
+                // 14-Day Scrollable Strip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    windowDays.forEach { day ->
+                        val isSelected = day == selectedDate
+                        val isToday = day == today
+                        val hasEvent = day in datesWithEvents
+                        Column(
                             modifier = Modifier
-                                .size(5.dp)
-                                .clip(CircleShape)
+                                .width(48.dp)
+                                .clip(RoundedCornerShape(6.dp))
                                 .background(
                                     when {
-                                        hasEvent && isSelected -> OnAccentColor
-                                        hasEvent -> AccentGold
-                                        else -> Color.Transparent
+                                        isSelected -> AccentGold
+                                        isToday -> AccentGold.copy(alpha = 0.12f)
+                                        else -> Color.White.copy(alpha = 0.04f)
                                     }
                                 )
+                                .clickable { selectedDate = day }
+                                .padding(vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = if (isToday) "TODAY" else day.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.US).uppercase(),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) OnAccentColor else TextSecondary
+                            )
+                            Text(
+                                text = day.dayOfMonth.toString(),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) OnAccentColor else TextPrimary
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        when {
+                                            hasEvent && isSelected -> OnAccentColor
+                                            hasEvent -> AccentGold
+                                            else -> Color.Transparent
+                                        }
+                                    )
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Interactive Month Grid with < Month Year > navigation + event dots
+                val firstOfMonth = displayedMonth.atDay(1)
+                val leadingBlanks = (firstOfMonth.dayOfWeek.value - 1).coerceIn(0, 6) // Mon=0 .. Sun=6
+                val daysInMonth = displayedMonth.lengthOfMonth()
+                val cells = remember(displayedMonth) {
+                    buildList<LocalDate?> {
+                        repeat(leadingBlanks) { add(null) }
+                        for (d in 1..daysInMonth) add(displayedMonth.atDay(d))
+                        while (size % 7 != 0) add(null)
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { displayedMonth = displayedMonth.minusMonths(1) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.ChevronLeft, contentDescription = "Previous month", tint = TextPrimary)
+                        }
+                        Text(
+                            text = "${displayedMonth.month.getDisplayName(TextStyle.FULL, Locale.US)} ${displayedMonth.year}",
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
+                        IconButton(
+                            onClick = { displayedMonth = displayedMonth.plusMonths(1) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Next month", tint = TextPrimary)
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        listOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN").forEach { dow ->
+                            Text(
+                                text = dow,
+                                color = TextMuted,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    cells.chunked(7).forEach { week ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            week.forEach { day ->
+                                if (day == null) {
+                                    Spacer(modifier = Modifier.weight(1f).height(38.dp))
+                                } else {
+                                    val isSelected = day == selectedDate
+                                    val isToday = day == today
+                                    val hasEvent = day in datesWithEvents
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(38.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                when {
+                                                    isSelected -> AccentGold
+                                                    isToday -> AccentGold.copy(alpha = 0.14f)
+                                                    else -> Color.White.copy(alpha = 0.03f)
+                                                }
+                                            )
+                                            .clickable { selectedDate = day },
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = day.dayOfMonth.toString(),
+                                            fontSize = 12.5.sp,
+                                            fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) OnAccentColor else TextPrimary
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(4.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    when {
+                                                        hasEvent && isSelected -> OnAccentColor
+                                                        hasEvent -> AccentGold
+                                                        else -> Color.Transparent
+                                                    }
+                                                )
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

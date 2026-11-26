@@ -1,5 +1,6 @@
 package com.omnitrack.app.data.enrichment
 
+import android.content.Context
 import com.omnitrack.app.data.artwork.LosslessCoverMapper
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.network.NetworkClient
@@ -8,12 +9,16 @@ import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.OmniSearchRepository
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.data.sync.TrackerTokenManager
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -35,6 +40,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+@Serializable
 data class CalendarReleaseItem(
     val id: String,
     val title: String,
@@ -79,36 +85,68 @@ class ReleaseCalendarRepository(
         private var cachedAtMs: Long = 0L
 
         @Volatile
+        private var cachedWindowDays: Int = 14
+
+        @Volatile
         private var cachedTrendingItems: List<SearchResultItem> = emptyList()
 
         @Volatile
         private var cachedTrendingAtMs: Long = 0L
 
         private const val CACHE_TTL_MS = 30 * 60 * 1000L
+        private const val DISK_CACHE_FILE = "release_calendar_cache.json"
     }
 
-    suspend fun fetchWeeklyAiringSchedule(force: Boolean = false): List<CalendarReleaseItem> = withContext(Dispatchers.IO) {
+    fun loadCachedScheduleFromDisk(context: Context): List<CalendarReleaseItem> {
+        if (cachedItems.isNotEmpty()) return cachedItems
+        return runCatching {
+            val file = File(context.cacheDir, DISK_CACHE_FILE)
+            if (!file.exists()) return@runCatching emptyList()
+            val raw = file.readText()
+            if (raw.isBlank()) return@runCatching emptyList()
+            val decoded = json.decodeFromString<List<CalendarReleaseItem>>(raw)
+            if (decoded.isNotEmpty()) {
+                cachedItems = decoded
+                cachedAtMs = file.lastModified()
+            }
+            decoded
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveCachedScheduleToDisk(context: Context, items: List<CalendarReleaseItem>) {
+        if (items.isEmpty()) return
+        runCatching {
+            val file = File(context.cacheDir, DISK_CACHE_FILE)
+            file.writeText(json.encodeToString(items))
+        }
+    }
+
+    suspend fun fetchWeeklyAiringSchedule(
+        force: Boolean = false,
+        daysAhead: Int = 14
+    ): List<CalendarReleaseItem> = withContext(Dispatchers.IO) {
+        val safeDays = daysAhead.coerceIn(7, 45)
         val nowMs = System.currentTimeMillis()
-        if (!force && cachedItems.isNotEmpty() && (nowMs - cachedAtMs) < CACHE_TTL_MS) {
+        if (!force && cachedItems.isNotEmpty() && cachedWindowDays >= safeDays && (nowMs - cachedAtMs) < CACHE_TTL_MS) {
             return@withContext cachedItems
         }
 
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
         val startOfTodaySec = today.atStartOfDay(zone).toEpochSecond()
-        val endOfWindowSec = today.plusDays(14).atStartOfDay(zone).toEpochSecond()
+        val endOfWindowSec = today.plusDays(safeDays.toLong()).atStartOfDay(zone).toEpochSecond()
 
         val collected = coroutineScope {
             listOf(
                 async { runCatching { fetchAniListSchedule(startOfTodaySec, endOfWindowSec) }.getOrDefault(emptyList()) },
                 async { runCatching { ComicEnrichmentSource(client).fetchWeeklyComicReleases(force = force) }.getOrDefault(emptyList()) },
                 async { runCatching { fetchTvMazeSchedule(today, zone) }.getOrDefault(emptyList()) },
-                async { runCatching { fetchMovieReleases(today, zone) }.getOrDefault(emptyList()) },
+                async { runCatching { fetchMovieReleases(today, zone, safeDays) }.getOrDefault(emptyList()) },
                 async { runCatching { fetchMangaDexRecentChapters(today, zone) }.getOrDefault(emptyList()) },
                 async { runCatching { fetchReleasingNovels(today, zone) }.getOrDefault(emptyList()) },
                 async { runCatching { fetchUpcomingBooksReleases(today, zone) }.getOrDefault(emptyList()) },
                 async { runCatching { fetchGamesReleases(today, startOfTodaySec, endOfWindowSec, zone) }.getOrDefault(emptyList()) },
-                async { runCatching { fetchVndbUpcoming(today, zone) }.getOrDefault(emptyList()) }
+                async { runCatching { fetchVndbUpcoming(today, zone, safeDays) }.getOrDefault(emptyList()) }
             ).awaitAll().flatten()
         }
 
@@ -122,6 +160,7 @@ class ReleaseCalendarRepository(
         if (resolved.isNotEmpty()) {
             cachedItems = resolved
             cachedAtMs = System.currentTimeMillis()
+            cachedWindowDays = maxOf(cachedWindowDays, safeDays)
         }
         resolved
     }
@@ -418,11 +457,11 @@ class ReleaseCalendarRepository(
         return results.distinctBy { "${it.title.lowercase()}_${it.seasonNumber}_${it.episodeNumber}" }.take(40)
     }
 
-    private suspend fun fetchMovieReleases(today: LocalDate, zone: ZoneId): List<CalendarReleaseItem> {
+    private suspend fun fetchMovieReleases(today: LocalDate, zone: ZoneId, daysAhead: Int = 14): List<CalendarReleaseItem> {
         val tmdbKey = PreferenceManager.cachedTmdbApiKey
         if (tmdbKey.isNotBlank()) {
             val startIso = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val endIso = today.plusDays(13).format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val endIso = today.plusDays((daysAhead - 1).coerceAtLeast(6).toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE)
             val tmdbMovies = NetworkPacer.withTmdbPacing {
                 try {
                     val req = Request.Builder()
@@ -770,11 +809,11 @@ class ReleaseCalendarRepository(
         }
     }
 
-    private suspend fun fetchVndbUpcoming(today: LocalDate, zone: ZoneId): List<CalendarReleaseItem> =
+    private suspend fun fetchVndbUpcoming(today: LocalDate, zone: ZoneId, daysAhead: Int = 14): List<CalendarReleaseItem> =
         NetworkPacer.withVndbPacing {
             try {
                 val startIso = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                val endIso = today.plusDays(13).format(DateTimeFormatter.ISO_LOCAL_DATE)
+                val endIso = today.plusDays((daysAhead - 1).coerceAtLeast(6).toLong()).format(DateTimeFormatter.ISO_LOCAL_DATE)
                 val payload = buildJsonObject {
                     put("filters", json.parseToJsonElement("""["and", ["released", ">=", "$startIso"], ["released", "<=", "$endIso"]]"""))
                     put("fields", "id, title, released, image{url,sexual,violence}")

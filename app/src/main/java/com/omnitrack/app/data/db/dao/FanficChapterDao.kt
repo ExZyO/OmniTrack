@@ -36,4 +36,10 @@ interface FanficChapterDao {
 
     @Query("DELETE FROM fanfic_chapters")
     suspend fun deleteAllChapters()
+
+    @Query("SELECT COUNT(*) FROM fanfic_chapters WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun countOrphaned(): Int
+
+    @Query("DELETE FROM fanfic_chapters WHERE mediaId NOT IN (SELECT id FROM media_items)")
+    suspend fun deleteOrphaned(): Int
 }

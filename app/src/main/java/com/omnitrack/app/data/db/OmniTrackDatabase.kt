@@ -15,6 +15,7 @@ import com.omnitrack.app.data.db.dao.EpisodeProgressDao
 import com.omnitrack.app.data.db.dao.FanficChapterDao
 import com.omnitrack.app.data.db.dao.GameEntryDao
 import com.omnitrack.app.data.db.dao.MediaDao
+import com.omnitrack.app.data.db.dao.SeasonMetaDao
 import com.omnitrack.app.data.db.dao.SyncQueueDao
 import com.omnitrack.app.data.db.dao.VnRouteDao
 import com.omnitrack.app.data.db.entity.BookEntryEntity
@@ -25,6 +26,7 @@ import com.omnitrack.app.data.db.entity.EpisodeProgressEntity
 import com.omnitrack.app.data.db.entity.FanficChapterEntity
 import com.omnitrack.app.data.db.entity.GameEntryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
+import com.omnitrack.app.data.db.entity.SeasonMetaEntity
 import com.omnitrack.app.data.db.entity.SyncQueueEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
 
@@ -39,9 +41,10 @@ import com.omnitrack.app.data.db.entity.VnRouteEntity
         BookEntryEntity::class,
         BookQuoteEntity::class,
         ComicIssueEntity::class,
-        FanficChapterEntity::class
+        FanficChapterEntity::class,
+        SeasonMetaEntity::class
     ],
-    version = 24,
+    version = 25,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -57,6 +60,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
     abstract fun bookQuoteDao(): BookQuoteDao
     abstract fun comicIssueDao(): ComicIssueDao
     abstract fun fanficChapterDao(): FanficChapterDao
+    abstract fun seasonMetaDao(): SeasonMetaDao
 
     companion object {
         @Volatile
@@ -334,6 +338,23 @@ abstract class OmniTrackDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE media_items ADD COLUMN crossMediumGroupId TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_media_items_crossMediumGroupId ON media_items(crossMediumGroupId)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS season_meta (
+                        mediaId INTEGER NOT NULL,
+                        seasonNumber INTEGER NOT NULL,
+                        userRating REAL,
+                        userNote TEXT,
+                        updatedAtMs INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (mediaId, seasonNumber)
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getDatabase(context: Context): OmniTrackDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -341,7 +362,7 @@ abstract class OmniTrackDatabase : RoomDatabase() {
                     OmniTrackDatabase::class.java,
                     "omnitrack.db"
                 )
-                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24)
+                    .addMigrations(MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25)
                     .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                     .addCallback(object : RoomDatabase.Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {
