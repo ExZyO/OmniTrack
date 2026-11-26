@@ -693,7 +693,7 @@ fun MultiTrackerSheet(
                                     .width(46.dp)
                                     .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(DarkSurfaceCard),
+                                    .background(if (thumbModel != null) DarkSurfaceCard else Color.Transparent),
                                 contentAlignment = Alignment.Center
                             ) {
                                 val uThumb = ArtworkModelResolver.toCoilModel(
@@ -778,7 +778,7 @@ fun MultiTrackerSheet(
                                     .width(46.dp)
                                     .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(DarkSurfaceCard),
+                                    .background(if (thumbModel != null) DarkSurfaceCard else Color.Transparent),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (thumbModel != null) {
@@ -793,6 +793,7 @@ fun MultiTrackerSheet(
                                         size = 16.dp,
                                         cornerRadius = 4.dp,
                                         innerPadding = 2.dp,
+                                        showContainer = true,
                                         containerColor = AmoledBlack.copy(alpha = 0.85f),
                                         borderColor = Color.White.copy(alpha = 0.16f),
                                         modifier = Modifier
@@ -802,12 +803,9 @@ fun MultiTrackerSheet(
                                 } else {
                                     com.omnitrack.app.ui.components.TrackerBrandLogo(
                                         serviceKey = trk.key,
-                                        size = 30.dp,
-                                        cornerRadius = 8.dp,
-                                        innerPadding = 4.dp,
-                                        containerColor = Color.White.copy(alpha = 0.04f),
-                                        borderColor = Color.White.copy(alpha = 0.10f),
-                                        alpha = 0.78f
+                                        size = 28.dp,
+                                        cornerRadius = 6.dp,
+                                        alpha = 0.85f
                                     )
                                 }
                                 Box(
@@ -939,8 +937,7 @@ fun MultiTrackerSheet(
                                             com.omnitrack.app.ui.components.TrackerBrandLogo(
                                                 serviceKey = trk.key,
                                                 size = 16.dp,
-                                                cornerRadius = 4.dp,
-                                                innerPadding = 2.dp
+                                                cornerRadius = 3.dp
                                             )
                                             Text(
                                                 text = trk.name,
@@ -981,7 +978,7 @@ fun MultiTrackerSheet(
                                     .width(64.dp)
                                     .aspectRatio(2f / 3f)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurfaceCard),
+                                    .background(if (heroCoverModel != null) DarkSurfaceCard else Color.Transparent),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (heroCoverModel != null) {
@@ -996,6 +993,7 @@ fun MultiTrackerSheet(
                                         size = 20.dp,
                                         cornerRadius = 5.dp,
                                         innerPadding = 3.dp,
+                                        showContainer = true,
                                         containerColor = AmoledBlack.copy(alpha = 0.85f),
                                         borderColor = Color.White.copy(alpha = 0.16f),
                                         modifier = Modifier
@@ -1005,11 +1003,8 @@ fun MultiTrackerSheet(
                                 } else {
                                     com.omnitrack.app.ui.components.TrackerBrandLogo(
                                         serviceKey = activeTracker.key,
-                                        size = 38.dp,
-                                        cornerRadius = 9.dp,
-                                        innerPadding = 5.dp,
-                                        containerColor = Color.White.copy(alpha = 0.04f),
-                                        borderColor = Color.White.copy(alpha = 0.10f)
+                                        size = 36.dp,
+                                        cornerRadius = 7.dp
                                     )
                                 }
                             }

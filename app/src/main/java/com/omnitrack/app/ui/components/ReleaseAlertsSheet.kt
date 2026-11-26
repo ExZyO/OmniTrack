@@ -262,12 +262,10 @@ fun ReleaseAlertsSheet(
                     onClick = {
                         scope.launch {
                             preferenceManager.updateReleaseAlertSettings(
-                                saved.copy(
-                                    enabled = enabled,
-                                    discordWebhookUrl = discordUrl.trim(),
-                                    telegramBotToken = telegramToken.trim(),
-                                    telegramChatId = telegramChatId.trim()
-                                )
+                                enabled = enabled,
+                                discordWebhookUrl = discordUrl.trim(),
+                                telegramBotToken = telegramToken.trim(),
+                                telegramChatId = telegramChatId.trim()
                             )
                             onDismiss()
                         }

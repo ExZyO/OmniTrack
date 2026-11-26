@@ -203,7 +203,7 @@ fun LinkCrossMediumEditionSheet(
             raw.filter {
                 it.title.lowercase().contains(q) ||
                     it.mediaType.displayName.lowercase().contains(q) ||
-                    (it.author ?: "").lowercase().contains(q)
+                    (it.bookAuthor ?: "").lowercase().contains(q)
             }
         }
         filtered.take(60)

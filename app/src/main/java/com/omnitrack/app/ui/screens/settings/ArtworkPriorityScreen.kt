@@ -52,6 +52,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,6 +81,7 @@ import com.omnitrack.app.data.enrichment.EnrichmentRepository
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.ui.components.BackdropFocusCache
+import com.omnitrack.app.ui.components.TrackerBrandLogo
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurface
@@ -131,6 +133,7 @@ fun ArtworkPriorityScreen(
     var activeTarget by remember { mutableStateOf(ArtworkPriorityTarget.COVERS) }
     var showCacheResetSheet by remember { mutableStateOf(false) }
     var isResettingCache by remember { mutableStateOf(false) }
+    var isDraggingAnyRow by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(initialPage = 0) { categories.size }
     val hapticFeedback = LocalHapticFeedback.current
@@ -231,37 +234,43 @@ fun ArtworkPriorityScreen(
             )
         }
 
-        // Covers vs Banners Segmented Mode Switcher
+        // Covers vs Banners Option A Underline Mode Switcher
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(DarkSurfaceCard)
-                .border(0.8.dp, GlassBorder, RoundedCornerShape(10.dp))
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             ArtworkPriorityTarget.entries.forEach { target ->
                 val selected = activeTarget == target
-                Box(
+                Column(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(if (selected) AccentGold.copy(alpha = 0.18f) else Color.Transparent)
                         .clickable { activeTarget = target }
-                        .padding(vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(top = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
                         text = target.label,
-                        color = if (selected) AccentGold else TextSecondary,
-                        fontSize = 13.sp,
+                        color = if (selected) TextPrimary else TextMuted,
+                        fontSize = 13.5.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(7.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (selected) AccentGold else Color.Transparent)
                     )
                 }
             }
         }
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.08f),
+            thickness = 0.6.dp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
 
         Text(
             text = if (activeTarget == ArtworkPriorityTarget.COVERS) {
@@ -366,16 +375,20 @@ fun ArtworkPriorityScreen(
 
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = !isDraggingAnyRow,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) { page ->
             val category = categories[page]
-            CategoryWaterfallList(
-                category = category,
-                target = activeTarget,
-                prefManager = prefManager
-            )
+            key(category, activeTarget) {
+                CategoryWaterfallList(
+                    category = category,
+                    target = activeTarget,
+                    prefManager = prefManager,
+                    onDraggingChange = { isDraggingAnyRow = it }
+                )
+            }
         }
     }
 
@@ -575,7 +588,8 @@ fun ArtworkPriorityScreen(
 private fun CategoryWaterfallList(
     category: MediaType,
     target: ArtworkPriorityTarget,
-    prefManager: PreferenceManager
+    prefManager: PreferenceManager,
+    onDraggingChange: (Boolean) -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val hapticFeedback = LocalHapticFeedback.current
@@ -598,9 +612,10 @@ private fun CategoryWaterfallList(
 
     val currentSources = remember(category, target) { mutableStateListOf<String>() }
     var initialized by remember(category, target) { mutableStateOf(false) }
+    var pendingLocalCommit by remember(category, target) { mutableStateOf<List<String>?>(null) }
 
     val lazyListState = rememberLazyListState()
-    var isDraggingAny by remember { mutableStateOf(false) }
+    var isDraggingAny by remember(category, target) { mutableStateOf(false) }
 
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromIdx = currentSources.indexOfFirst { it == from.key }
@@ -613,11 +628,15 @@ private fun CategoryWaterfallList(
 
     LaunchedEffect(initialSources, target) {
         val loaded = initialSources ?: return@LaunchedEffect
+        val pending = pendingLocalCommit
+        if (pending != null && loaded == pending) {
+            pendingLocalCommit = null
+        }
         if (!initialized) {
             currentSources.clear()
             currentSources.addAll(loaded)
             initialized = true
-        } else if (!isDraggingAny && currentSources.toList() != loaded) {
+        } else if (!isDraggingAny && pendingLocalCommit == null && currentSources.toList() != loaded) {
             currentSources.clear()
             currentSources.addAll(loaded)
         }
@@ -637,7 +656,7 @@ private fun CategoryWaterfallList(
     ) {
         itemsIndexed(
             items = currentSources,
-            key = { _, source -> "${target.name}_$source" }
+            key = { _, source -> source }
         ) { idx, source ->
             val isEnabled = source !in disabledSources
             val displayRank = when {
@@ -646,17 +665,17 @@ private fun CategoryWaterfallList(
                 else -> "#${idx + 1}"
             }
 
-            ReorderableItem(reorderableState, key = "${target.name}_$source") { isDragging ->
+            ReorderableItem(reorderableState, key = source) { isDragging ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .zIndex(if (isDragging) 10f else 1f)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .background(if (isDragging) DarkSurfaceElevated else Color.Transparent)
                         .border(
                             width = 1.dp,
                             color = if (isDragging) AccentGold.copy(alpha = 0.65f) else Color.Transparent,
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(10.dp)
                         )
                         .drawBehind {
                             if (!isDragging) {
@@ -687,19 +706,19 @@ private fun CategoryWaterfallList(
                                 }
                             }
                         },
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = if (isEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             contentDescription = if (isEnabled) "Disable Source" else "Enable Source",
                             tint = if (isEnabled) AccentGold else TextMuted.copy(alpha = 0.45f),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(19.dp)
                         )
                     }
 
                     Box(
                         modifier = Modifier
-                            .padding(horizontal = 6.dp)
+                            .padding(start = 4.dp, end = 10.dp)
                             .clip(RoundedCornerShape(6.dp))
                             .background(
                                 when {
@@ -724,10 +743,17 @@ private fun CategoryWaterfallList(
                         )
                     }
 
+                    TrackerBrandLogo(
+                        serviceKey = source,
+                        size = 24.dp,
+                        cornerRadius = 5.dp,
+                        alpha = if (isEnabled) 1f else 0.42f
+                    )
+
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 8.dp)
+                            .padding(horizontal = 10.dp)
                     ) {
                         Text(
                             text = source,
@@ -756,15 +782,19 @@ private fun CategoryWaterfallList(
                             .draggableHandle(
                                 onDragStarted = {
                                     isDraggingAny = true
+                                    onDraggingChange(true)
                                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
                                 onDragStopped = {
                                     isDraggingAny = false
+                                    onDraggingChange(false)
+                                    val committed = currentSources.toList()
+                                    pendingLocalCommit = committed
                                     coroutineScope.launch {
                                         if (target == ArtworkPriorityTarget.COVERS) {
-                                            prefManager.updateArtSourcePriority(category, currentSources.toList())
+                                            prefManager.updateArtSourcePriority(category, committed)
                                         } else {
-                                            prefManager.updateBannerArtSourcePriority(category, currentSources.toList())
+                                            prefManager.updateBannerArtSourcePriority(category, committed)
                                         }
                                     }
                                 }

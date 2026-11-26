@@ -34,8 +34,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.blur
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -65,6 +67,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -235,7 +238,6 @@ import com.omnitrack.app.ui.screens.detail.components.DetailWhereToWatchSection
 import com.omnitrack.app.ui.screens.detail.components.AwardWinnersBrowserSheet
 import com.omnitrack.app.ui.screens.detail.components.CrossMediumEditionsSection
 import com.omnitrack.app.ui.screens.detail.components.LinkCrossMediumEditionSheet
-import com.omnitrack.app.ui.screens.detail.components.RecommendationItem
 import com.omnitrack.app.ui.theme.AccentArctic
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AccentJade
@@ -4810,13 +4812,15 @@ private fun DetailOptionsMenuBottomSheet(
     onManageRatings: () -> Unit = {},
     onRemoveFromLibrary: () -> Unit
 ) {
+    val optionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = optionsSheetState,
         containerColor = AmoledBlack,
         dragHandle = {
             Box(
                 modifier = Modifier
-                    .padding(vertical = 10.dp)
+                    .padding(vertical = 8.dp)
                     .width(36.dp)
                     .height(4.dp)
                     .clip(CircleShape)
@@ -4827,9 +4831,10 @@ private fun DetailOptionsMenuBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 6.dp)
                 .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text(
                 text = "Entry Options",

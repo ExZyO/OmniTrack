@@ -71,7 +71,7 @@ class ReleaseAlertWorker(
                 if (!matchesLibrary) return@filter false
                 val delta = kotlin.math.abs(rel.airingAtEpochSec - nowSec)
                 val key = "${rel.id}_${rel.episodeNumber ?: 0}_${rel.airingAtEpochSec / 3600L}"
-                delta <= windowSec && key !in settings.notifiedReleaseKeys
+                delta <= windowSec && key !in settings.notifiedKeys
             }
 
             if (dueReleases.isNotEmpty()) {

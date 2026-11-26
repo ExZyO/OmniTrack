@@ -71,8 +71,8 @@ import com.omnitrack.app.data.enrichment.WatchProvidersAndAwardsClient
 import com.omnitrack.app.data.preferences.PreferenceManager
 import com.omnitrack.app.data.search.SearchResultItem
 import com.omnitrack.app.data.search.StreamingProviderChip
-import com.omnitrack.app.ui.components.EphemeralPreviewHolder
 import com.omnitrack.app.ui.components.NuvioRailPosterCard
+import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.WatchRegionPickerSheet
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack

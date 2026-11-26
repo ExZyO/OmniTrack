@@ -2581,7 +2581,7 @@ class PreferenceManager(private val context: Context) {
 
         fun getDefaultSourcesFor(mediaType: MediaType): List<String> = when (mediaType) {
             MediaType.ANIME -> listOf("AniList GraphQL", "TMDb", "Bangumi", "Kitsu", "MangaDex API")
-            MediaType.MANGA -> listOf("MangaDex API", "AniList GraphQL", "BookWalker", "Naver", "Kuaikan", "Bangumi", "Comick", "Kitsu", "MyAnimeList")
+            MediaType.MANGA -> listOf("MangaDex API", "AniList GraphQL", "BookWalker", "Comick", "Naver", "Kuaikan", "Bangumi", "Kitsu", "MyAnimeList")
             MediaType.COMIC -> listOf("Comic Vine", "Metron", "Apple Books", "Open Library")
             MediaType.NOVEL -> listOf("RanobeDB", "BookWalker", "AniList GraphQL", "Bangumi", "Naver", "MangaDex API", "Kuaikan", "Kitsu", "MyAnimeList")
             MediaType.BOOK -> listOf("Apple Books", "Hardcover", "Open Library", "Wikimedia Commons", "Google Books")

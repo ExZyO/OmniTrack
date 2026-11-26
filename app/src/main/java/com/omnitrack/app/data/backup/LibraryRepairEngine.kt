@@ -117,7 +117,7 @@ object LibraryRepairEngine {
             val bannerBroken = isMissingLocalPath(item.customBannerPath)
             val singletonGroup = item.crossMediumGroupId?.let { (groupCounts[it] ?: 0) <= 1 } ?: false
             if (coverBroken || bannerBroken || singletonGroup) {
-                database.mediaDao().update(
+                database.mediaDao().updateMedia(
                     item.copy(
                         customCoverPath = if (coverBroken) null else item.customCoverPath,
                         customBannerPath = if (bannerBroken) null else item.customBannerPath,

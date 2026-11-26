@@ -824,10 +824,8 @@ private fun TrackerGroupedRow(
     ) {
         TrackerBrandLogo(
             serviceKey = code,
-            size = 36.dp,
-            cornerRadius = 10.dp,
-            innerPadding = 5.dp,
-            borderColor = if (isConnected) AccentGold.copy(alpha = 0.40f) else GlassBorder
+            size = 30.dp,
+            cornerRadius = 6.dp
         )
 
         Column(modifier = Modifier.weight(1f)) {
@@ -917,9 +915,8 @@ private fun TrackerAccountDetailView(
         Spacer(modifier = Modifier.width(4.dp))
         TrackerBrandLogo(
             serviceKey = service.name.lowercase(),
-            size = 34.dp,
-            cornerRadius = 9.dp,
-            innerPadding = 5.dp
+            size = 28.dp,
+            cornerRadius = 6.dp
         )
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {

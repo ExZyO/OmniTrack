@@ -1179,7 +1179,7 @@ class TrackerSyncEngine(
                         .get()
                         .build()
                     val (epIdsToMark, epIdsToUnmark) = client.newCall(epGetReq).execute().use { epResp ->
-                        if (!epResp.isSuccessful) emptyList<Long>() to emptyList()
+                        if (!epResp.isSuccessful) emptyList<Long>() to emptyList<Long>()
                         else {
                             val rootObj = json.parseToJsonElement(epResp.body?.string().orEmpty()).asSafeObj()
                             val dataArr = rootObj?.get("data").asSafeArr().orEmpty()
@@ -1203,7 +1203,7 @@ class TrackerSyncEngine(
                                     toUnmark.add(epId)
                                 }
                             }
-                            toMark to toUnmark
+                            toMark.toList() to toUnmark.toList()
                         }
                     }
                     if (epIdsToMark.isNotEmpty()) {

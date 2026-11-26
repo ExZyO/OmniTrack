@@ -2737,41 +2737,45 @@ class OmniSearchRepository(
         val wantMovie = mediaFilter == MediaType.ALL || mediaFilter == MediaType.MOVIE
         val wantTv = mediaFilter == MediaType.ALL || mediaFilter == MediaType.SHOW || mediaFilter == MediaType.ANIME
         val out = coroutineScope {
-            val movieDef = if (wantMovie) async {
-                NetworkPacer.withTmdbPacing {
-                    runCatching {
-                        val req = buildTmdbRequest(
-                            "discover/movie?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1",
-                            tmdbApiKey
-                        )
-                        client.newCall(req).execute().use { resp ->
-                            if (!resp.isSuccessful) emptyList()
-                            else {
-                                val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
-                                    ?.get("results") as? JsonArray ?: return@use emptyList()
-                                parseTmdbDiscoverItems(arr, MediaType.MOVIE)
+            val movieDef: kotlinx.coroutines.Deferred<List<SearchResultItem>>? = if (wantMovie) {
+                async<List<SearchResultItem>> {
+                    NetworkPacer.withTmdbPacing {
+                        runCatching {
+                            val req = buildTmdbRequest(
+                                "discover/movie?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1",
+                                tmdbApiKey
+                            )
+                            client.newCall(req).execute().use { resp ->
+                                if (!resp.isSuccessful) emptyList()
+                                else {
+                                    val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                        ?.get("results") as? JsonArray ?: return@use emptyList()
+                                    parseTmdbDiscoverItems(arr, MediaType.MOVIE)
+                                }
                             }
-                        }
-                    }.getOrDefault(emptyList())
+                        }.getOrDefault(emptyList())
+                    }
                 }
             } else null
-            val tvDef = if (wantTv) async {
-                NetworkPacer.withTmdbPacing {
-                    runCatching {
-                        val genreClause = if (mediaFilter == MediaType.ANIME) "&with_genres=16&with_original_language=ja" else ""
-                        val req = buildTmdbRequest(
-                            "discover/tv?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1$genreClause",
-                            tmdbApiKey
-                        )
-                        client.newCall(req).execute().use { resp ->
-                            if (!resp.isSuccessful) emptyList()
-                            else {
-                                val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
-                                    ?.get("results") as? JsonArray ?: return@use emptyList()
-                                parseTmdbDiscoverItems(arr, if (mediaFilter == MediaType.ANIME) MediaType.ANIME else MediaType.SHOW)
+            val tvDef: kotlinx.coroutines.Deferred<List<SearchResultItem>>? = if (wantTv) {
+                async<List<SearchResultItem>> {
+                    NetworkPacer.withTmdbPacing {
+                        runCatching {
+                            val genreClause = if (mediaFilter == MediaType.ANIME) "&with_genres=16&with_original_language=ja" else ""
+                            val req = buildTmdbRequest(
+                                "discover/tv?with_watch_providers=$providerId&watch_region=$normRegion&sort_by=popularity.desc&page=1$genreClause",
+                                tmdbApiKey
+                            )
+                            client.newCall(req).execute().use { resp ->
+                                if (!resp.isSuccessful) emptyList()
+                                else {
+                                    val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                        ?.get("results") as? JsonArray ?: return@use emptyList()
+                                    parseTmdbDiscoverItems(arr, if (mediaFilter == MediaType.ANIME) MediaType.ANIME else MediaType.SHOW)
+                                }
                             }
-                        }
-                    }.getOrDefault(emptyList())
+                        }.getOrDefault(emptyList())
+                    }
                 }
             } else null
             val movies = movieDef?.await().orEmpty()
