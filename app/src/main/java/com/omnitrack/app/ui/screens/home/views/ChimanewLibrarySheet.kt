@@ -678,6 +678,15 @@ fun ChimanewLibrarySheet(
                             }
                         }
 
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                        SheetSectionLabel("MULTI-SEASON GROUPING")
+                        LibSwitchRow(
+                            title = "Group Anime Seasons into 1 Card",
+                            subtitle = "Collapse multi-season sequels & linked entries into a single root card in Library",
+                            checked = settings.groupAnimeSeasonsInLibrary,
+                            onCheckedChange = { onToggleOverlay("GROUP_ANIME_SEASONS", it) }
+                        )
+
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

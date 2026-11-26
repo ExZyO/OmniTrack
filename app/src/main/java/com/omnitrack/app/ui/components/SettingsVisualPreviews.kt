@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
+import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
 import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.HomeShelfPosterSize
@@ -146,7 +147,7 @@ fun VisualOptionTile(
 
 @Composable
 fun DetailsLayoutWireframe(
-    isHero: Boolean,
+    presentation: DetailsPagePresentation,
     modifier: Modifier = Modifier
 ) {
     val accent = AccentGold
@@ -156,87 +157,147 @@ fun DetailsLayoutWireframe(
         val h = size.height
         val pad = 6.dp.toPx()
 
-        if (isHero) {
-            // Full-bleed banner fade into canvas
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(variant.copy(alpha = 0.34f), AmoledBlack),
-                    startY = 0f,
-                    endY = h * 0.68f
-                ),
-                size = Size(w, h * 0.68f)
-            )
-            // Centered/full-width title lines
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.85f),
-                topLeft = Offset(pad, h * 0.56f),
-                size = Size(w * 0.56f, 5.dp.toPx()),
-                cornerRadius = CornerRadius(2.dp.toPx())
-            )
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.30f),
-                topLeft = Offset(pad, h * 0.68f),
-                size = Size(w * 0.36f, 3.dp.toPx()),
-                cornerRadius = CornerRadius(1.5.dp.toPx())
-            )
-            // Unboxed stats rule at bottom
-            drawLine(
-                color = Color.White.copy(alpha = 0.14f),
-                start = Offset(pad, h * 0.80f),
-                end = Offset(w - pad, h * 0.80f),
-                strokeWidth = 0.8.dp.toPx()
-            )
-            drawRoundRect(
-                color = accent.copy(alpha = 0.85f),
-                topLeft = Offset(pad, h * 0.86f),
-                size = Size(w * 0.24f, 4.dp.toPx()),
-                cornerRadius = CornerRadius(2.dp.toPx())
-            )
-        } else {
-            // Top backdrop strip
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(variant.copy(alpha = 0.30f), AmoledBlack),
-                    startY = 0f,
-                    endY = h * 0.45f
-                ),
-                size = Size(w, h * 0.45f)
-            )
-            // Overlapping portrait poster on left
-            val posterW = h * 0.36f
-            val posterH = h * 0.54f
-            drawRoundRect(
-                color = DarkSurfaceElevated,
-                topLeft = Offset(pad, h * 0.26f),
-                size = Size(posterW, posterH),
-                cornerRadius = CornerRadius(3.dp.toPx())
-            )
-            drawRoundRect(
-                color = accent.copy(alpha = 0.42f),
-                topLeft = Offset(pad, h * 0.26f),
-                size = Size(posterW, posterH),
-                cornerRadius = CornerRadius(3.dp.toPx()),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
-            )
-            val textX = pad + posterW + 6.dp.toPx()
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.85f),
-                topLeft = Offset(textX, h * 0.48f),
-                size = Size((w - textX - pad).coerceAtLeast(12f) * 0.88f, 4.5.dp.toPx()),
-                cornerRadius = CornerRadius(2.dp.toPx())
-            )
-            drawRoundRect(
-                color = Color.White.copy(alpha = 0.30f),
-                topLeft = Offset(textX, h * 0.62f),
-                size = Size((w - textX - pad).coerceAtLeast(12f) * 0.55f, 3.dp.toPx()),
-                cornerRadius = CornerRadius(1.5.dp.toPx())
-            )
-            drawRoundRect(
-                color = accent.copy(alpha = 0.8f),
-                topLeft = Offset(textX, h * 0.74f),
-                size = Size((w - textX - pad).coerceAtLeast(12f) * 0.36f, 3.5.dp.toPx()),
-                cornerRadius = CornerRadius(1.5.dp.toPx())
-            )
+        when (presentation) {
+            DetailsPagePresentation.HERO -> {
+                // Full-bleed banner fade into canvas (no cover art, centered logo + text)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(variant.copy(alpha = 0.38f), AmoledBlack),
+                        startY = 0f,
+                        endY = h * 0.62f
+                    ),
+                    size = Size(w, h * 0.62f)
+                )
+                // Centered clearart/title bar
+                val titleW = w * 0.58f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.88f),
+                    topLeft = Offset((w - titleW) / 2f, h * 0.48f),
+                    size = Size(titleW, 5.dp.toPx()),
+                    cornerRadius = CornerRadius(2.dp.toPx())
+                )
+                // Centered subtitle bar
+                val subW = w * 0.36f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.34f),
+                    topLeft = Offset((w - subW) / 2f, h * 0.62f),
+                    size = Size(subW, 3.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                // Centered stats hairline + accents
+                drawLine(
+                    color = Color.White.copy(alpha = 0.14f),
+                    start = Offset(pad, h * 0.75f),
+                    end = Offset(w - pad, h * 0.75f),
+                    strokeWidth = 0.8.dp.toPx()
+                )
+                val statW = w * 0.46f
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.85f),
+                    topLeft = Offset((w - statW) / 2f, h * 0.83f),
+                    size = Size(statW, 3.5.dp.toPx()),
+                    cornerRadius = CornerRadius(2.dp.toPx())
+                )
+            }
+
+            DetailsPagePresentation.CENTERED_COVER -> {
+                // Soft ambient radial glow (no wide banner)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(variant.copy(alpha = 0.28f), Color.Transparent),
+                        center = Offset(w * 0.5f, h * 0.30f),
+                        radius = w * 0.48f
+                    ),
+                    radius = w * 0.48f,
+                    center = Offset(w * 0.5f, h * 0.30f)
+                )
+                // Centered 2:3 portrait cover card
+                val posterH = h * 0.45f
+                val posterW = posterH * (2f / 3f)
+                val posterX = (w - posterW) / 2f
+                val posterY = h * 0.10f
+                drawRoundRect(
+                    color = DarkSurfaceElevated,
+                    topLeft = Offset(posterX, posterY),
+                    size = Size(posterW, posterH),
+                    cornerRadius = CornerRadius(3.5.dp.toPx())
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.55f),
+                    topLeft = Offset(posterX, posterY),
+                    size = Size(posterW, posterH),
+                    cornerRadius = CornerRadius(3.5.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                )
+                // Centered title + subtitle + stat line below cover
+                val titleW = w * 0.56f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.88f),
+                    topLeft = Offset((w - titleW) / 2f, h * 0.63f),
+                    size = Size(titleW, 4.5.dp.toPx()),
+                    cornerRadius = CornerRadius(2.dp.toPx())
+                )
+                val subW = w * 0.34f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.34f),
+                    topLeft = Offset((w - subW) / 2f, h * 0.74f),
+                    size = Size(subW, 2.8.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                val statW = w * 0.44f
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.82f),
+                    topLeft = Offset((w - statW) / 2f, h * 0.85f),
+                    size = Size(statW, 3.2.dp.toPx()),
+                    cornerRadius = CornerRadius(2.dp.toPx())
+                )
+            }
+
+            DetailsPagePresentation.CLASSIC -> {
+                // Top backdrop strip + left overlapping poster + right text
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(variant.copy(alpha = 0.34f), AmoledBlack),
+                        startY = 0f,
+                        endY = h * 0.45f
+                    ),
+                    size = Size(w, h * 0.45f)
+                )
+                val posterW = h * 0.34f
+                val posterH = h * 0.52f
+                drawRoundRect(
+                    color = DarkSurfaceElevated,
+                    topLeft = Offset(pad, h * 0.26f),
+                    size = Size(posterW, posterH),
+                    cornerRadius = CornerRadius(3.dp.toPx())
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.48f),
+                    topLeft = Offset(pad, h * 0.26f),
+                    size = Size(posterW, posterH),
+                    cornerRadius = CornerRadius(3.dp.toPx()),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                )
+                val textX = pad + posterW + 6.dp.toPx()
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.86f),
+                    topLeft = Offset(textX, h * 0.48f),
+                    size = Size((w - textX - pad).coerceAtLeast(12f) * 0.88f, 4.5.dp.toPx()),
+                    cornerRadius = CornerRadius(2.dp.toPx())
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.32f),
+                    topLeft = Offset(textX, h * 0.62f),
+                    size = Size((w - textX - pad).coerceAtLeast(12f) * 0.58f, 3.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.82f),
+                    topLeft = Offset(textX, h * 0.75f),
+                    size = Size((w - textX - pad).coerceAtLeast(12f) * 0.40f, 3.5.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+            }
         }
     }
 }

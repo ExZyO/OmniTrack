@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MediaDao {
 
-    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes, comicVineId, metronId, comicPublisher, comicFormat, comicTrackingMode, fanficSourceSite, fanficSourceUrl, fanficWorkId, fanficPrimaryFandom, fanficWordCount, fanficRating, fanficWorkStatus, fanficIsCrossover, fanficTagsSearch, isCustomEntry, bannerFocalX, bannerFocalY, bannerZoom, imdbScore, rtScore, metacriticScore, traktScore, audienceScore, traktId, simklId, vndbId, hardcoverId, bangumiId, comickId, studioOrNetwork, isFavorite, igdbId FROM media_items ORDER BY lastUpdated DESC")
+    @Query("SELECT id, title, nativeTitle, coverUrl, bannerUrl, clearartUrl, mediaType, status, currentProgress, totalProgress, userRating, lastUpdated, customCoverPath, customBannerPath, artworkRole, communityScore, imdbId, tmdbId, anilistId, malId, originCountry, platform, runtimeMinutes, playtimeHours, platforms, steamAppId, gameCompletionTier, openLibraryId, bookAuthor, bookFormat, bookTrackingMode, bookAudioMinutes, bookTotalAudioMinutes, comicVineId, metronId, comicPublisher, comicFormat, comicTrackingMode, fanficSourceSite, fanficSourceUrl, fanficWorkId, fanficPrimaryFandom, fanficWordCount, fanficRating, fanficWorkStatus, fanficIsCrossover, fanficTagsSearch, isCustomEntry, bannerFocalX, bannerFocalY, bannerZoom, imdbScore, rtScore, metacriticScore, traktScore, audienceScore, traktId, simklId, vndbId, hardcoverId, bangumiId, comickId, studioOrNetwork, isFavorite, igdbId, linkedParentMediaId, linkedSeasonNumber FROM media_items ORDER BY lastUpdated DESC")
     fun getAllMediaSummaries(): Flow<List<MediaCardSummary>>
 
     @Query("SELECT * FROM media_items ORDER BY lastUpdated DESC")
@@ -44,6 +44,15 @@ interface MediaDao {
 
     @Query("SELECT * FROM media_items WHERE malId = :malId LIMIT 1")
     suspend fun findByMalId(malId: Long): MediaItemEntity?
+
+    @Query("SELECT * FROM media_items WHERE linkedParentMediaId = :parentId ORDER BY COALESCE(linkedSeasonNumber, 999) ASC, id ASC")
+    suspend fun findLinkedChildren(parentId: Long): List<MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE anilistId IN (:ids)")
+    suspend fun findByAnilistIds(ids: List<Long>): List<MediaItemEntity>
+
+    @Query("SELECT * FROM media_items WHERE malId IN (:ids)")
+    suspend fun findByMalIds(ids: List<Long>): List<MediaItemEntity>
 
     @Query("SELECT * FROM media_items WHERE tmdbId = :tmdbId LIMIT 1")
     suspend fun findByTmdbId(tmdbId: Long): MediaItemEntity?

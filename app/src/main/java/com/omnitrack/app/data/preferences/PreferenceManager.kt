@@ -223,10 +223,12 @@ data class DiscoverCustomizationSettings(
 
 enum class DetailsPagePresentation(val displayName: String, val description: String) {
     HERO("Hero Layout", "Full-bleed edge-to-edge banner, pure AMOLED canvas"),
+    CENTERED_COVER("Centered Cover", "Centered 2:3 cover art with ambient glow, no wide banner"),
     CLASSIC("Classic Poster", "Overlaid Poster, Floating Information");
 
     companion object {
         fun fromName(name: String?): DetailsPagePresentation = when (name) {
+            "CENTERED_COVER" -> CENTERED_COVER
             "CLASSIC" -> CLASSIC
             "HERO", "UNBLOCKED_HERO" -> HERO
             else -> HERO
@@ -394,6 +396,7 @@ enum class PreferredTitleLanguage(val displayName: String, val description: Stri
 
 data class PresentationSettings(
     val detailsPagePresentation: DetailsPagePresentation = DetailsPagePresentation.HERO,
+    val autoCenterCoverWhenNoBanner: Boolean = true,
     val bannerSizing: BannerSizing = BannerSizing.FULL_BLEED,
     val detailsBackdropStyle: DetailsBackdropStyle = DetailsBackdropStyle.CINEMATIC_FADE,
     val fallbackBackgroundStyle: FallbackBackgroundStyle = FallbackBackgroundStyle.CINEMATIC_BLUR,
@@ -559,6 +562,7 @@ data class ChimanewLibrarySettings(
     val showCategoryTabs: Boolean = true,
     val showTabItemCounts: Boolean = true,
     val showHiddenCategories: Boolean = false,
+    val groupAnimeSeasonsInLibrary: Boolean = false,
     val defaultCategoryId: Long? = null
 )
 
@@ -599,6 +603,7 @@ class PreferenceManager(private val context: Context) {
         val APP_CUSTOM_FIRST_HEX = stringPreferencesKey("app_custom_first_hex")
         val APP_CUSTOM_SECOND_HEX = stringPreferencesKey("app_custom_second_hex")
         val DETAILS_PAGE_PRESENTATION = stringPreferencesKey("details_page_presentation")
+        val AUTO_CENTER_COVER_WHEN_NO_BANNER = booleanPreferencesKey("auto_center_cover_when_no_banner")
         val BANNER_SIZING = stringPreferencesKey("banner_sizing")
         val DETAILS_BACKDROP_STYLE = stringPreferencesKey("details_backdrop_style")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
@@ -666,6 +671,7 @@ class PreferenceManager(private val context: Context) {
         val CHIMANEW_LIB_SHOW_CATEGORY_TABS = booleanPreferencesKey("chimanew_lib_show_category_tabs")
         val CHIMANEW_LIB_SHOW_TAB_COUNTS = booleanPreferencesKey("chimanew_lib_show_tab_counts")
         val CHIMANEW_LIB_SHOW_HIDDEN_CATS = booleanPreferencesKey("chimanew_lib_show_hidden_cats")
+        val CHIMANEW_LIB_GROUP_ANIME_SEASONS = booleanPreferencesKey("chimanew_lib_group_anime_seasons")
         val CHIMANEW_LIB_DEFAULT_CATEGORY_ID = longPreferencesKey("chimanew_lib_default_category_id")
         val CHIMANEW_CATEGORY_ASSIGNMENTS = stringPreferencesKey("chimanew_category_assignments")
         val HERO_MULTI_RATINGS_CACHE = stringPreferencesKey("hero_multi_ratings_cache")
@@ -749,6 +755,7 @@ class PreferenceManager(private val context: Context) {
                 detailsPagePresentation = prefs[PreferencesKeys.DETAILS_PAGE_PRESENTATION]?.let {
                     DetailsPagePresentation.fromName(it)
                 } ?: DetailsPagePresentation.HERO,
+                autoCenterCoverWhenNoBanner = prefs[PreferencesKeys.AUTO_CENTER_COVER_WHEN_NO_BANNER] ?: true,
                 bannerSizing = prefs[PreferencesKeys.BANNER_SIZING]?.let {
                     runCatching { BannerSizing.valueOf(it) }.getOrNull()
                 } ?: BannerSizing.FULL_BLEED,
@@ -902,6 +909,12 @@ class PreferenceManager(private val context: Context) {
     suspend fun updateDetailsPagePresentation(presentation: DetailsPagePresentation) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.DETAILS_PAGE_PRESENTATION] = presentation.name
+        }
+    }
+
+    suspend fun updateAutoCenterCoverWhenNoBanner(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.AUTO_CENTER_COVER_WHEN_NO_BANNER] = enabled
         }
     }
 
@@ -1665,6 +1678,7 @@ class PreferenceManager(private val context: Context) {
                 showCategoryTabs = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] ?: true,
                 showTabItemCounts = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] ?: true,
                 showHiddenCategories = prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] ?: false,
+                groupAnimeSeasonsInLibrary = prefs[PreferencesKeys.CHIMANEW_LIB_GROUP_ANIME_SEASONS] ?: false,
                 defaultCategoryId = rawDefCat?.takeIf { it > 0L }
             )
         }
@@ -1741,6 +1755,7 @@ class PreferenceManager(private val context: Context) {
                 "TABS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_CATEGORY_TABS] = enabled
                 "COUNTS" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_TAB_COUNTS] = enabled
                 "HIDDEN" -> prefs[PreferencesKeys.CHIMANEW_LIB_SHOW_HIDDEN_CATS] = enabled
+                "GROUP_ANIME_SEASONS" -> prefs[PreferencesKeys.CHIMANEW_LIB_GROUP_ANIME_SEASONS] = enabled
             }
         }
     }

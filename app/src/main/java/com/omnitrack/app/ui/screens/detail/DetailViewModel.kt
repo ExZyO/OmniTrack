@@ -83,6 +83,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
@@ -246,7 +247,8 @@ private data class PreviewAndAux(
     val vnDetailMeta: VnDetailMeta = VnDetailMeta(),
     val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
-    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta()
+    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    val siblingSeasonWatched: Set<Pair<Int, Int>> = emptySet()
 )
 
 class DetailViewModel(
@@ -318,6 +320,8 @@ class DetailViewModel(
     private val _activeDiscussionSort = MutableStateFlow("newest")
     private val _seasonAniListIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
     private val _seasonMalIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
+    private val _siblingSeasonWatched = MutableStateFlow<Set<Pair<Int, Int>>>(emptySet())
+    private val _siblingSeasonEntities = MutableStateFlow<Map<Int, MediaItemEntity>>(emptyMap())
     private val _format = MutableStateFlow<String?>(null)
     private val _season = MutableStateFlow<String?>(null)
     private val _seasonYear = MutableStateFlow<Int?>(null)
@@ -723,6 +727,15 @@ class DetailViewModel(
             }
         }
 
+        // Cross-season sibling & linked custom season resolver (Anime S1/S2/S3 & manual linked entries)
+        viewModelScope.launch(Dispatchers.IO) {
+            combine(_mediaId, _previewItem, _seasonAniListIds, _seasonMalIds, _realSeasons) { mId, prev, alMap, malMap, seasons ->
+                listOf(mId, prev?.id, alMap, malMap, seasons.map { it.seasonNumber to it.episodeCount })
+            }.distinctUntilChanged().collectLatest {
+                refreshSiblingSeasonBridge()
+            }
+        }
+
         if (mediaId == -1L) {
             val ephemeral = EphemeralPreviewHolder.previewItem
             if (ephemeral != null) {
@@ -1029,7 +1042,8 @@ class DetailViewModel(
             _vnDetailMeta,
             _gameDetailMeta,
             _bookDetailMeta,
-            _comicDetailMeta
+            _comicDetailMeta,
+            _siblingSeasonWatched
         )
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
@@ -1079,7 +1093,8 @@ class DetailViewModel(
             vnDetailMeta = (args[43] as? VnDetailMeta) ?: VnDetailMeta(),
             gameDetailMeta = (args[44] as? GameDetailMeta) ?: GameDetailMeta(),
             bookDetailMeta = (args[45] as? BookDetailMeta) ?: BookDetailMeta(),
-            comicDetailMeta = (args[46] as? ComicDetailMeta) ?: ComicDetailMeta()
+            comicDetailMeta = (args[46] as? ComicDetailMeta) ?: ComicDetailMeta(),
+            siblingSeasonWatched = (args[47] as? Set<Pair<Int, Int>>).orEmpty()
         )
     }
 
@@ -1307,7 +1322,7 @@ class DetailViewModel(
                 else -> emptyList()
             }
             val watchedSet = progressList.filter { it.isWatched }
-                .map { it.seasonNumber to it.episodeNumber }.toSet()
+                .map { it.seasonNumber to it.episodeNumber }.toSet() + aux.siblingSeasonWatched
             val metaMap = progressList.associateBy { it.seasonNumber to it.episodeNumber }
             val previewRoutes = if (aux.previewItem.id > 0L && room.isPreview && room.currentId == aux.previewItem.id) {
                 room.vnRoutes
@@ -1468,7 +1483,7 @@ class DetailViewModel(
                     ActiveSiblingHolder.activeSiblingIds.ifEmpty { listOf(effectiveItem.id) }
                 }
                 val watchedSet = progressList.filter { it.isWatched }
-                    .map { it.seasonNumber to it.episodeNumber }.toSet()
+                    .map { it.seasonNumber to it.episodeNumber }.toSet() + aux.siblingSeasonWatched
                 val metaMap = progressList.associateBy { it.seasonNumber to it.episodeNumber }
                 val resolvedTitle = when (pref) {
                     PreferredTitleLanguage.ENGLISH -> aux.englishTitle ?: effectiveItem.title
@@ -1582,6 +1597,8 @@ class DetailViewModel(
         _activeDiscussionSort.value = "newest"
         _seasonAniListIds.value = emptyMap()
         _seasonMalIds.value = emptyMap()
+        _siblingSeasonWatched.value = emptySet()
+        _siblingSeasonEntities.value = emptyMap()
         allSeasonCommentsCache.clear()
         _collectionName.value = null
         _collectionItems.value = emptyList()
@@ -4303,22 +4320,15 @@ class DetailViewModel(
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
             val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = !markFillersWatched)
-            repository.setMultipleEpisodesWatched(mediaId, pairs, true)
             val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
-            val item = repository.getMediaById(mediaId).firstOrNull()
-            if (item != null) {
-                val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                    TrackingStatus.COMPLETED
-                } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                    TrackingStatus.IN_PROGRESS
-                } else {
-                    item.status
-                }
-                val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-                repository.updateMedia(updated)
-                trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-                trackerSyncEngine?.drainQueue()
-            }
+            val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            applyEpisodePairsAcrossSiblings(
+                activeMediaId = mediaId,
+                activeItem = item,
+                pairs = pairs,
+                watched = true,
+                fallbackTargetProgress = targetProgress
+            )
         }
     }
 
@@ -4471,11 +4481,252 @@ class DetailViewModel(
         return pairs.distinct()
     }
 
+    private suspend fun refreshSiblingSeasonBridge() {
+        val activeItem = _previewItem.value
+            ?: latestRoomItemCache[_mediaId.value]
+            ?: _mediaId.value.takeIf { it > 0L }?.let { repository.getMediaByIdOnce(it) }
+        if (activeItem == null) {
+            _siblingSeasonEntities.value = emptyMap()
+            _siblingSeasonWatched.value = emptySet()
+            return
+        }
+        val activeId = activeItem.id
+        val alIds = _seasonAniListIds.value
+        val malIds = _seasonMalIds.value
+
+        val alMatches = repository.findMediaByAnilistIds(alIds.values.toList())
+        val malMatches = repository.findMediaByMalIds(malIds.values.toList())
+        val rootParentId = activeItem.linkedParentMediaId ?: activeId.takeIf { it > 0L }
+        val linkedChildren = rootParentId?.let { repository.findLinkedChildren(it) }.orEmpty()
+        val linkedParent = activeItem.linkedParentMediaId?.takeIf { it > 0L }?.let { repository.getMediaByIdOnce(it) }
+
+        val byAnilist = alMatches.mapNotNull { e -> e.anilistId?.let { it to e } }.toMap()
+        val byMal = malMatches.mapNotNull { e -> e.malId?.let { it to e } }.toMap()
+
+        val seasonMap = mutableMapOf<Int, MediaItemEntity>()
+        alIds.forEach { (sNum, alId) ->
+            byAnilist[alId]?.let { seasonMap[sNum] = it }
+        }
+        malIds.forEach { (sNum, malId) ->
+            if (sNum !in seasonMap) {
+                byMal[malId]?.let { seasonMap[sNum] = it }
+            }
+        }
+        if (linkedParent != null && linkedParent.id > 0L && 1 !in seasonMap) {
+            seasonMap[1] = linkedParent
+        }
+        linkedChildren.forEach { child ->
+            val sNum = child.linkedSeasonNumber?.takeIf { it > 0 } ?: return@forEach
+            seasonMap[sNum] = child
+        }
+
+        if (activeId > 0L) {
+            val activeSeasonNum = when {
+                activeItem.linkedParentMediaId != null && (activeItem.linkedSeasonNumber ?: 0) > 0 ->
+                    activeItem.linkedSeasonNumber!!
+                activeItem.anilistId != null ->
+                    alIds.entries.firstOrNull { it.value == activeItem.anilistId }?.key
+                activeItem.malId != null ->
+                    malIds.entries.firstOrNull { it.value == activeItem.malId }?.key
+                else -> null
+            } ?: seasonMap.entries.firstOrNull { it.value.id == activeId }?.key ?: 1
+            seasonMap[activeSeasonNum] = activeItem
+        }
+
+        // Expose manually linked children / parent as season tabs if missing from fetched seasons
+        if (linkedChildren.isNotEmpty() || linkedParent != null) {
+            val existingSeasons = _realSeasons.value.toMutableList()
+            var seasonsChanged = false
+            val newEpMap = _episodesBySeason.value.toMutableMap()
+            var epsChanged = false
+
+            if (linkedParent != null && existingSeasons.none { it.seasonNumber == 1 }) {
+                val pCount = linkedParent.totalProgress?.toInt()?.takeIf { it > 0 }
+                    ?: linkedParent.currentProgress.toInt().coerceAtLeast(1)
+                existingSeasons.add(
+                    MediaSeason(
+                        seasonNumber = 1,
+                        name = linkedParent.title.ifBlank { "Season 1" },
+                        episodeCount = pCount,
+                        posterUrl = linkedParent.coverUrl.takeIf { it.isNotBlank() }
+                    )
+                )
+                seasonsChanged = true
+                if (newEpMap[1].isNullOrEmpty()) {
+                    newEpMap[1] = (1..pCount.coerceAtMost(500)).map { ep ->
+                        MediaEpisode(
+                            id = -(linkedParent.id * 10_000L + ep),
+                            episodeNumber = ep,
+                            seasonNumber = 1,
+                            title = "Episode $ep",
+                            stillUrl = linkedParent.coverUrl.takeIf { it.isNotBlank() }
+                        )
+                    }
+                    epsChanged = true
+                }
+            }
+
+            linkedChildren.forEach { child ->
+                val sNum = child.linkedSeasonNumber?.takeIf { it > 0 } ?: return@forEach
+                val epCount = child.totalProgress?.toInt()?.takeIf { it > 0 }
+                    ?: child.currentProgress.toInt().coerceAtLeast(1)
+                if (existingSeasons.none { it.seasonNumber == sNum }) {
+                    existingSeasons.add(
+                        MediaSeason(
+                            seasonNumber = sNum,
+                            name = child.title.ifBlank { "Season $sNum" },
+                            episodeCount = epCount,
+                            posterUrl = child.coverUrl.takeIf { it.isNotBlank() }
+                        )
+                    )
+                    seasonsChanged = true
+                }
+                if (newEpMap[sNum].isNullOrEmpty()) {
+                    newEpMap[sNum] = (1..epCount.coerceAtMost(500)).map { ep ->
+                        MediaEpisode(
+                            id = -(child.id * 10_000L + ep),
+                            episodeNumber = ep,
+                            seasonNumber = sNum,
+                            title = "Episode $ep",
+                            stillUrl = child.coverUrl.takeIf { it.isNotBlank() }
+                        )
+                    }
+                    epsChanged = true
+                }
+            }
+
+            if (epsChanged) {
+                _episodesBySeason.value = newEpMap
+            }
+            if (seasonsChanged) {
+                val sorted = existingSeasons.sortedBy { if (it.seasonNumber <= 0) Int.MAX_VALUE else it.seasonNumber }
+                _realSeasons.value = sorted
+                if (_realEpisodes.value.isEmpty()) {
+                    _realEpisodes.value = newEpMap[_selectedSeasonNumber.value].orEmpty()
+                }
+            }
+        }
+
+        val hasDistinctSiblings = seasonMap.values.any { it.id > 0L && it.id != activeId }
+        val bridged = mutableSetOf<Pair<Int, Int>>()
+
+        for ((sNum, entity) in seasonMap) {
+            if (entity.id <= 0L) continue
+            val rows = repository.getEpisodeProgressOnce(entity.id)
+            val watchedRows = rows.filter { it.isWatched }
+            if (rows.isEmpty()) {
+                val fallbackCount = if (entity.status == TrackingStatus.COMPLETED) {
+                    maxOf(
+                        entity.currentProgress.toInt(),
+                        entity.totalProgress?.toInt() ?: _episodesBySeason.value[sNum]?.size ?: 0
+                    )
+                } else {
+                    entity.currentProgress.toInt()
+                }.coerceIn(0, 2000)
+                for (ep in 1..fallbackCount) {
+                    bridged.add(sNum to ep)
+                }
+            } else if (entity.id != activeId) {
+                val hasExactSeason = watchedRows.any { it.seasonNumber == sNum }
+                val sourceRows = if (hasExactSeason) {
+                    watchedRows.filter { it.seasonNumber == sNum }
+                } else {
+                    watchedRows.filter { it.seasonNumber == 1 }
+                }
+                sourceRows.forEach { bridged.add(sNum to it.episodeNumber) }
+            } else if (hasDistinctSiblings && sNum > 1) {
+                // Active item is itself a S2/S3 sequel entry whose imported episodes may have been seeded as season 1
+                val hasExactSeason = watchedRows.any { it.seasonNumber == sNum }
+                if (!hasExactSeason) {
+                    watchedRows.filter { it.seasonNumber == 1 }.forEach { bridged.add(sNum to it.episodeNumber) }
+                }
+            }
+        }
+
+        _siblingSeasonEntities.value = seasonMap
+        _siblingSeasonWatched.value = bridged
+    }
+
+    private suspend fun applyEpisodePairsAcrossSiblings(
+        activeMediaId: Long,
+        activeItem: MediaItemEntity,
+        pairs: List<Pair<Int, Int>>,
+        watched: Boolean,
+        fallbackTargetProgress: Double? = null
+    ) {
+        if (activeMediaId <= 0L || pairs.isEmpty()) return
+        repository.setMultipleEpisodesWatched(activeMediaId, pairs, watched)
+        refreshSiblingSeasonBridge()
+
+        val sibMap = _siblingSeasonEntities.value
+        val hasDistinctSiblings = sibMap.values.any { it.id > 0L && it.id != activeMediaId }
+        val bySeason = pairs.groupBy({ it.first }, { it.second })
+
+        for ((sNum, epNums) in bySeason) {
+            val sib = sibMap[sNum] ?: continue
+            if (sib.id <= 0L || sib.id == activeMediaId) continue
+            val existingSibRows = repository.getEpisodeProgressOnce(sib.id)
+            if (existingSibRows.isEmpty() && sib.currentProgress >= 1.0) {
+                val cap = sib.currentProgress.toInt().coerceAtMost(2000)
+                repository.markEpisodesWatchedAdditive(sib.id, (1..cap).map { 1 to it })
+            }
+            repository.setMultipleEpisodesWatched(sib.id, epNums.distinct().map { 1 to it }, watched)
+            val updatedSibRows = repository.getEpisodeProgressOnce(sib.id)
+            val sibWatchedCount = updatedSibRows.filter { it.isWatched }.map { it.episodeNumber }.distinct().size.toDouble()
+            val sibNewStatus = when {
+                sib.totalProgress != null && sib.totalProgress > 0.0 && sibWatchedCount >= sib.totalProgress -> TrackingStatus.COMPLETED
+                watched && sibWatchedCount > 0.0 && sib.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+                !watched && sib.status == TrackingStatus.COMPLETED && (sib.totalProgress == null || sibWatchedCount < sib.totalProgress) ->
+                    if (sibWatchedCount > 0.0) TrackingStatus.IN_PROGRESS else TrackingStatus.PLAN_TO_TRACK
+                else -> sib.status
+            }
+            val updatedSib = sib.copy(
+                currentProgress = sibWatchedCount,
+                status = sibNewStatus,
+                lastUpdated = System.currentTimeMillis()
+            )
+            repository.updateMedia(updatedSib)
+            latestRoomItemCache[updatedSib.id] = updatedSib
+            trackerSyncEngine?.enqueueProgressUpdate(updatedSib, sibWatchedCount)
+        }
+
+        val updatedActiveRows = repository.getEpisodeProgressOnce(activeMediaId)
+        val activeTargetProgress = if (hasDistinctSiblings) {
+            val mySeasonNum = sibMap.entries.firstOrNull { it.value.id == activeMediaId }?.key ?: 1
+            val exactSeasonRows = updatedActiveRows.filter { it.seasonNumber == mySeasonNum }
+            val relevantRows = if (exactSeasonRows.isNotEmpty() || mySeasonNum == 1) {
+                exactSeasonRows
+            } else {
+                updatedActiveRows.filter { it.seasonNumber == 1 }
+            }
+            relevantRows.filter { it.isWatched }.map { it.episodeNumber }.distinct().size.toDouble()
+        } else {
+            fallbackTargetProgress ?: updatedActiveRows.count { it.isWatched }.toDouble()
+        }
+        val activeNewStatus = when {
+            activeItem.totalProgress != null && activeItem.totalProgress > 0.0 && activeTargetProgress >= activeItem.totalProgress -> TrackingStatus.COMPLETED
+            watched && activeTargetProgress > 0.0 && activeItem.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
+            !watched && activeItem.status == TrackingStatus.COMPLETED && (activeItem.totalProgress == null || activeTargetProgress < activeItem.totalProgress) ->
+                if (activeTargetProgress > 0.0) TrackingStatus.IN_PROGRESS else TrackingStatus.PLAN_TO_TRACK
+            else -> activeItem.status
+        }
+        val updatedActive = activeItem.copy(
+            currentProgress = activeTargetProgress,
+            status = activeNewStatus,
+            lastUpdated = System.currentTimeMillis()
+        )
+        repository.updateMedia(updatedActive)
+        latestRoomItemCache[updatedActive.id] = updatedActive
+        trackerSyncEngine?.enqueueProgressUpdate(updatedActive, activeTargetProgress)
+        trackerSyncEngine?.drainQueue()
+        refreshSiblingSeasonBridge()
+    }
+
     fun toggleEpisodeWatched(episode: MediaEpisode) {
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
-            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
             val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
             val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
             if (isLargeReadingEntry) {
@@ -4485,41 +4736,27 @@ class DetailViewModel(
                 return@launch
             }
 
-            val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val isCurrentlyWatched = currentProgress.any { it.seasonNumber == episode.seasonNumber && it.episodeNumber == episode.episodeNumber && it.isWatched }
+            val currentProgress = repository.getEpisodeProgressOnce(mediaId)
+            val localWatched = currentProgress.filter { it.isWatched }.map { it.seasonNumber to it.episodeNumber }.toSet()
+            val effectiveWatched = localWatched + _siblingSeasonWatched.value
+            val isCurrentlyWatched = (episode.seasonNumber to episode.episodeNumber) in effectiveWatched
             if (!isCurrentlyWatched) {
-                // When marking as watched: mark all previous episodes in earlier seasons AND in this season up to episode
                 val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = _isFillerSkipEnabled.value)
-                repository.setMultipleEpisodesWatched(mediaId, pairs, true)
+                val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
+                applyEpisodePairsAcrossSiblings(mediaId, item, pairs, watched = true, fallbackTargetProgress = targetProgress)
             } else {
-                // When unwatching: unmark from this episode upwards in this season
-                val epsToUnmark = _realEpisodes.value.filter {
-                    it.seasonNumber == episode.seasonNumber && it.episodeNumber >= episode.episodeNumber
-                }
+                val seasonEps = _episodesBySeason.value[episode.seasonNumber]
+                    ?: _realEpisodes.value.filter { it.seasonNumber == episode.seasonNumber }
+                val epsToUnmark = seasonEps.filter { it.episodeNumber >= episode.episodeNumber }
                 val pairs = if (epsToUnmark.isNotEmpty()) {
                     epsToUnmark.map { it.seasonNumber to it.episodeNumber }
                 } else {
-                    currentProgress.filter { it.seasonNumber == episode.seasonNumber && it.episodeNumber >= episode.episodeNumber }
-                        .map { it.seasonNumber to it.episodeNumber }
+                    effectiveWatched.filter { it.first == episode.seasonNumber && it.second >= episode.episodeNumber }.toList()
+                        .ifEmpty { listOf(episode.seasonNumber to episode.episodeNumber) }
                 }
-                repository.setMultipleEpisodesWatched(mediaId, pairs, false)
+                val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber - 1).coerceAtLeast(0.0)
+                applyEpisodePairsAcrossSiblings(mediaId, item, pairs, watched = false, fallbackTargetProgress = targetProgress)
             }
-            val targetProgress = if (!isCurrentlyWatched) {
-                calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
-            } else {
-                calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber - 1).coerceAtLeast(0.0)
-            }
-            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                TrackingStatus.COMPLETED
-            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                TrackingStatus.IN_PROGRESS
-            } else {
-                item.status
-            }
-            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-            repository.updateMedia(updated)
-            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-            trackerSyncEngine?.drainQueue()
         }
     }
 
@@ -4527,7 +4764,7 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
-            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
+            val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
             val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
             val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
             if (isLargeReadingEntry) {
@@ -4535,20 +4772,9 @@ class DetailViewModel(
                 return@launch
             }
 
-            val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber)
-            repository.setMultipleEpisodesWatched(mediaId, pairs, true)
+            val pairs = getEpisodesToMarkWatchedUpTo(episode.seasonNumber, episode.episodeNumber, skipFillers = _isFillerSkipEnabled.value)
             val targetProgress = calculateCumulativeProgress(episode.seasonNumber, episode.episodeNumber)
-            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                TrackingStatus.COMPLETED
-            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                TrackingStatus.IN_PROGRESS
-            } else {
-                item.status
-            }
-            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-            repository.updateMedia(updated)
-            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-            trackerSyncEngine?.drainQueue()
+            applyEpisodePairsAcrossSiblings(mediaId, item, pairs, watched = true, fallbackTargetProgress = targetProgress)
         }
     }
 
@@ -4556,8 +4782,10 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
-            val item = repository.getMediaById(mediaId).firstOrNull() ?: return@launch
-            val seasonEps = _episodesBySeason.value[seasonNumber] ?: _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
+            val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val seasonObj = _realSeasons.value.firstOrNull { it.seasonNumber == seasonNumber }
+            val seasonEps = _episodesBySeason.value[seasonNumber]
+                ?: _realEpisodes.value.filter { it.seasonNumber == seasonNumber }
             val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
             val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
             if (isLargeReadingEntry) {
@@ -4569,26 +4797,61 @@ class DetailViewModel(
                 return@launch
             }
 
-            val currentProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val allWatched = seasonEps.isNotEmpty() && seasonEps.all { ep ->
-                currentProgress.any { it.seasonNumber == ep.seasonNumber && it.episodeNumber == ep.episodeNumber && it.isWatched }
-            }
-            val pairs = seasonEps.map { it.seasonNumber to it.episodeNumber }
-            repository.setMultipleEpisodesWatched(mediaId, pairs, !allWatched)
-            val updatedProgress = repository.getEpisodeProgress(mediaId).firstOrNull().orEmpty()
-            val watchedCount = updatedProgress.count { it.isWatched }
-            val targetProgress = watchedCount.toDouble()
-            val newStatus = if (item.totalProgress != null && targetProgress >= item.totalProgress) {
-                TrackingStatus.COMPLETED
-            } else if (targetProgress > 0.0 && item.status == TrackingStatus.PLAN_TO_TRACK) {
-                TrackingStatus.IN_PROGRESS
+            val currentProgress = repository.getEpisodeProgressOnce(mediaId)
+            val combinedWatched = currentProgress.filter { it.isWatched }.map { it.seasonNumber to it.episodeNumber }.toSet() +
+                _siblingSeasonWatched.value
+            val fallbackCount = (seasonObj?.episodeCount ?: 0).coerceAtLeast(0)
+            val allSeasonPairs = if (seasonEps.isNotEmpty()) {
+                seasonEps.map { it.seasonNumber to it.episodeNumber }
+            } else if (fallbackCount > 0) {
+                (1..fallbackCount).map { seasonNumber to it }
+            } else emptyList()
+            if (allSeasonPairs.isEmpty()) return@launch
+
+            val allWatched = allSeasonPairs.all { it in combinedWatched }
+            val targetPairs = if (!allWatched && _isFillerSkipEnabled.value && seasonEps.isNotEmpty()) {
+                seasonEps.filter { !it.isFiller }.map { it.seasonNumber to it.episodeNumber }.ifEmpty { allSeasonPairs }
             } else {
-                item.status
+                allSeasonPairs
             }
-            val updated = item.copy(currentProgress = targetProgress, status = newStatus)
-            repository.updateMedia(updated)
-            trackerSyncEngine?.enqueueProgressUpdate(updated, targetProgress)
-            trackerSyncEngine?.drainQueue()
+            applyEpisodePairsAcrossSiblings(mediaId, item, targetPairs, watched = !allWatched)
+        }
+    }
+
+    fun markPreviousSeasonsWatched(seasonNumber: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val mediaId = ensureLibraryMediaId()
+            if (mediaId <= 0) return@launch
+            val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
+            val earlierSeasons = _realSeasons.value
+                .filter { it.seasonNumber in 1 until seasonNumber }
+                .sortedBy { it.seasonNumber }
+            if (earlierSeasons.isEmpty()) return@launch
+
+            val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
+            val isLargeReadingEntry = (item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.MANGA) && totalEps > 200
+            if (isLargeReadingEntry) {
+                val maxPrevCh = earlierSeasons.maxOfOrNull { s ->
+                    _episodesBySeason.value[s.seasonNumber]?.maxOfOrNull { it.episodeNumber } ?: 0
+                } ?: 0
+                if (maxPrevCh > 0) applyReadingProgressTarget(mediaId, item, maxPrevCh)
+                return@launch
+            }
+
+            val skipFillers = _isFillerSkipEnabled.value
+            val pairs = mutableListOf<Pair<Int, Int>>()
+            earlierSeasons.forEach { s ->
+                val sEps = _episodesBySeason.value[s.seasonNumber]
+                if (!sEps.isNullOrEmpty()) {
+                    val filtered = if (skipFillers) sEps.filter { !it.isFiller } else sEps
+                    pairs.addAll(filtered.map { it.seasonNumber to it.episodeNumber })
+                } else if (s.episodeCount > 0) {
+                    pairs.addAll((1..s.episodeCount).map { s.seasonNumber to it })
+                }
+            }
+            if (pairs.isNotEmpty()) {
+                applyEpisodePairsAcrossSiblings(mediaId, item, pairs.distinct(), watched = true)
+            }
         }
     }
 
@@ -4848,6 +5111,8 @@ class DetailViewModel(
         _romajiTitle.value = cached?.romajiTitle
         _seasonAniListIds.value = cached?.seasonAniListIds.orEmpty()
         _seasonMalIds.value = cached?.seasonMalIds.orEmpty()
+        _siblingSeasonWatched.value = emptySet()
+        _siblingSeasonEntities.value = emptyMap()
         _synonyms.value = cached?.synonyms.orEmpty()
         _tags.value = cached?.tags.orEmpty()
         _popularity.value = cached?.popularity
@@ -5543,6 +5808,9 @@ class DetailViewModel(
                 latestRoomItemCache[withTs.id] = withTs
             }
             updatePreviewEntity { withTs }
+            withContext(Dispatchers.IO) {
+                refreshSiblingSeasonBridge()
+            }
         }
     }
 
@@ -7186,7 +7454,8 @@ data class CachedDetailAux(
     val vnDiscussionComments: List<DiscussionComment> = emptyList(),
     val gameDetailMeta: GameDetailMeta = GameDetailMeta(),
     val bookDetailMeta: BookDetailMeta = BookDetailMeta(),
-    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta()
+    val comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    val siblingSeasonWatched: Set<Pair<Int, Int>> = emptySet()
 )
 
 internal object DetailAuxMemoryCache {

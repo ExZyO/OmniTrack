@@ -266,6 +266,7 @@ fun DetailScreen(
     }
     val prefManager = app.preferenceManager
     val allCategories by app.repository.getAllCategories().collectAsState(initial = emptyList())
+    val allLibrarySummaries by app.repository.getAllMediaSummaries().collectAsState(initial = emptyList())
     val categoryAssignments by prefManager.categoryAssignments.collectAsState(initial = emptyMap())
     val presentationSettings by prefManager.presentationSettings.collectAsState(initial = PresentationSettings())
     val episodeLayoutMode by prefManager.episodeLayoutMode.collectAsState(initial = com.omnitrack.app.data.preferences.EpisodeLayoutMode.HORIZONTAL)
@@ -819,106 +820,127 @@ fun DetailScreen(
             }
 
             val detailScrollBody: @Composable () -> Unit = {
+                val hasAuthenticBanner = !backdropTargetUrl.isNullOrBlank() &&
+                    backdropTargetUrl != effectiveCover &&
+                    backdropTargetUrl != item.coverUrl
+                val effectiveDetailLayout = when {
+                    presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
+                    presentationSettings.autoCenterCoverWhenNoBanner && !hasAuthenticBanner -> DetailsPagePresentation.CENTERED_COVER
+                    else -> presentationSettings.detailsPagePresentation
+                }
                 LazyColumn(
                     state = lazyListState,
                     modifier = Modifier.fillMaxSize()
                 ) {
                 item(key = "detail_top_header", contentType = "top_header") {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // PRESENTATION MODE 1 or 2 (with Adaptive Editorial Hero for Books, Comics & Fanfiction when no wide banner)
-                        val useEditorialBookHero = (item.mediaType == MediaType.BOOK || item.mediaType == MediaType.COMIC || item.mediaType == MediaType.FANFICTION) &&
-                            (backdropTargetUrl.isNullOrBlank() || backdropTargetUrl == effectiveCover || backdropTargetUrl == item.coverUrl)
-                        if (useEditorialBookHero) {
-                            DetailBookEditorialHeroSection(
-                                item = item,
-                                coverImageModel = coverImageModel,
-                                bookDetailMeta = uiState.bookDetailMeta,
-                                comicDetailMeta = uiState.comicDetailMeta,
-                                onCoverClick = { showArtworkPicker = true },
-                                onToggleTitle = { viewModel.togglePreferredTitle() },
-                                onSearchInDiscover = onSearchInDiscover,
-                                onOptionsClick = { showOptionsMenu = true },
-                                onEditProgress = { showProgressEditSheet = true },
-                                onEditStatus = { showStatusPickerSheet = true },
-                                onEditScore = { showScoreRatingSheet = true },
-                                onOpenTrackers = { showMultiTrackerSheet = true }
-                            )
-                        } else if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                            DetailHeroHeaderSection(
-                                item = item,
-                                backdropTargetUrl = backdropTargetUrl,
-                                bannerSizing = presentationSettings.bannerSizing,
-                                bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
-                                englishTitle = uiState.englishTitle,
-                                romajiTitle = uiState.romajiTitle,
-                                heroClearLogoUrl = uiState.heroClearLogoUrl,
-                                novelDetailMeta = uiState.novelDetailMeta,
-                                vnDetailMeta = uiState.vnDetailMeta,
-                                gameDetailMeta = uiState.gameDetailMeta,
-                                bookDetailMeta = uiState.bookDetailMeta,
-                                comicDetailMeta = uiState.comicDetailMeta,
-                                scrollOffsetPx = detailScrollPx,
-                                stretchPx = detailStretchPx,
-                                animateOnScroll = animateHeroScroll,
-                                onToggleTitle = { viewModel.togglePreferredTitle() },
-                                onSearchInDiscover = onSearchInDiscover,
-                                onOptionsClick = { showOptionsMenu = true },
-                                onEditProgress = {
-                                    if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
-                                        showVnPlaytimeDialog = true
-                                    } else {
-                                        showProgressEditSheet = true
-                                    }
-                                },
-                                onEditStatus = { showStatusPickerSheet = true },
-                                onEditScore = { showScoreRatingSheet = true },
-                                onOpenTrackers = { showMultiTrackerSheet = true }
-                            )
-                        } else {
-                            DetailClassicHeaderSection(
-                                item = item,
-                                coverImageModel = coverImageModel,
-                                backdropTargetUrl = backdropTargetUrl,
-                                bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
-                                englishTitle = uiState.englishTitle,
-                                romajiTitle = uiState.romajiTitle,
-                                heroClearLogoUrl = uiState.heroClearLogoUrl,
-                                novelDetailMeta = uiState.novelDetailMeta,
-                                vnDetailMeta = uiState.vnDetailMeta,
-                                gameDetailMeta = uiState.gameDetailMeta,
-                                bookDetailMeta = uiState.bookDetailMeta,
-                                comicDetailMeta = uiState.comicDetailMeta,
-                                scrollOffsetPx = detailScrollPx,
-                                stretchPx = detailStretchPx,
-                                animateOnScroll = animateHeroScroll,
-                                onToggleTitle = { viewModel.togglePreferredTitle() },
-                                onSearchInDiscover = onSearchInDiscover,
-                                onCoverClick = { showArtworkPicker = true },
-                                onCoverLoaded = { url ->
-                                    if (coverCache != null) {
-                                        val diskCache = coil3.SingletonImageLoader.get(context).diskCache
-                                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                            coverCache.promoteFromDiskCache(url, diskCache)
+                        // PRESENTATION MODES: HERO (centered, no cover), CENTERED_COVER (centered cover, no banner), CLASSIC (left poster + right text)
+                        when (effectiveDetailLayout) {
+                            DetailsPagePresentation.CENTERED_COVER -> {
+                                DetailCenteredCoverHeroSection(
+                                    item = item,
+                                    coverImageModel = coverImageModel,
+                                    novelDetailMeta = uiState.novelDetailMeta,
+                                    vnDetailMeta = uiState.vnDetailMeta,
+                                    gameDetailMeta = uiState.gameDetailMeta,
+                                    bookDetailMeta = uiState.bookDetailMeta,
+                                    comicDetailMeta = uiState.comicDetailMeta,
+                                    showInlineOptionsButton = false,
+                                    onCoverClick = { showArtworkPicker = true },
+                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onSearchInDiscover = onSearchInDiscover,
+                                    onOptionsClick = { showOptionsMenu = true },
+                                    onEditProgress = {
+                                        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
+                                            showVnPlaytimeDialog = true
+                                        } else {
+                                            showProgressEditSheet = true
                                         }
-                                    }
-                                },
-                                onOptionsClick = { showOptionsMenu = true },
-                                onEditProgress = {
-                                    if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
-                                        showVnPlaytimeDialog = true
-                                    } else {
-                                        showProgressEditSheet = true
-                                    }
-                                },
-                                onEditStatus = { showStatusPickerSheet = true },
-                                onEditScore = { showScoreRatingSheet = true },
-                                onOpenTrackers = { showMultiTrackerSheet = true }
-                            )
+                                    },
+                                    onEditStatus = { showStatusPickerSheet = true },
+                                    onEditScore = { showScoreRatingSheet = true },
+                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                )
+                            }
+                            DetailsPagePresentation.HERO -> {
+                                DetailHeroHeaderSection(
+                                    item = item,
+                                    backdropTargetUrl = backdropTargetUrl,
+                                    bannerSizing = presentationSettings.bannerSizing,
+                                    bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
+                                    englishTitle = uiState.englishTitle,
+                                    romajiTitle = uiState.romajiTitle,
+                                    heroClearLogoUrl = uiState.heroClearLogoUrl,
+                                    novelDetailMeta = uiState.novelDetailMeta,
+                                    vnDetailMeta = uiState.vnDetailMeta,
+                                    gameDetailMeta = uiState.gameDetailMeta,
+                                    bookDetailMeta = uiState.bookDetailMeta,
+                                    comicDetailMeta = uiState.comicDetailMeta,
+                                    scrollOffsetPx = detailScrollPx,
+                                    stretchPx = detailStretchPx,
+                                    animateOnScroll = animateHeroScroll,
+                                    showInlineOptionsButton = false,
+                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onSearchInDiscover = onSearchInDiscover,
+                                    onOptionsClick = { showOptionsMenu = true },
+                                    onEditProgress = {
+                                        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
+                                            showVnPlaytimeDialog = true
+                                        } else {
+                                            showProgressEditSheet = true
+                                        }
+                                    },
+                                    onEditStatus = { showStatusPickerSheet = true },
+                                    onEditScore = { showScoreRatingSheet = true },
+                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                )
+                            }
+                            DetailsPagePresentation.CLASSIC -> {
+                                DetailClassicHeaderSection(
+                                    item = item,
+                                    coverImageModel = coverImageModel,
+                                    backdropTargetUrl = backdropTargetUrl,
+                                    bannerBlurDp = presentationSettings.resolveBannerBlurDp(item.mediaType),
+                                    englishTitle = uiState.englishTitle,
+                                    romajiTitle = uiState.romajiTitle,
+                                    heroClearLogoUrl = uiState.heroClearLogoUrl,
+                                    novelDetailMeta = uiState.novelDetailMeta,
+                                    vnDetailMeta = uiState.vnDetailMeta,
+                                    gameDetailMeta = uiState.gameDetailMeta,
+                                    bookDetailMeta = uiState.bookDetailMeta,
+                                    comicDetailMeta = uiState.comicDetailMeta,
+                                    scrollOffsetPx = detailScrollPx,
+                                    stretchPx = detailStretchPx,
+                                    animateOnScroll = animateHeroScroll,
+                                    onToggleTitle = { viewModel.togglePreferredTitle() },
+                                    onSearchInDiscover = onSearchInDiscover,
+                                    onCoverClick = { showArtworkPicker = true },
+                                    onCoverLoaded = { url ->
+                                        if (coverCache != null) {
+                                            val diskCache = coil3.SingletonImageLoader.get(context).diskCache
+                                            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                coverCache.promoteFromDiskCache(url, diskCache)
+                                            }
+                                        }
+                                    },
+                                    onOptionsClick = { showOptionsMenu = true },
+                                    onEditProgress = {
+                                        if (item.mediaType == MediaType.VISUAL_NOVEL || item.mediaType == MediaType.GAME) {
+                                            showVnPlaytimeDialog = true
+                                        } else {
+                                            showProgressEditSheet = true
+                                        }
+                                    },
+                                    onEditStatus = { showStatusPickerSheet = true },
+                                    onEditScore = { showScoreRatingSheet = true },
+                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                )
+                            }
                         }
 
                         // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
                         val hasProgressControls = item.mediaType == MediaType.MOVIE
-                        val hasBackdrop = backdropTargetUrl != null
+                        val hasBackdrop = backdropTargetUrl != null && effectiveDetailLayout != DetailsPagePresentation.CENTERED_COVER
                         if (hasProgressControls) {
                             Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
                             DetailProgressSection(
@@ -1745,6 +1767,19 @@ fun DetailScreen(
                             .shadow(elevation = 8.dp, shape = CircleShape)
                     )
                 }
+                val hasAuthenticTopBarBanner = !backdropTargetUrl.isNullOrBlank() &&
+                    backdropTargetUrl != effectiveCover &&
+                    backdropTargetUrl != item?.coverUrl
+                val topBarEffectiveLayout = when {
+                    presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
+                    presentationSettings.autoCenterCoverWhenNoBanner && !hasAuthenticTopBarBanner -> DetailsPagePresentation.CENTERED_COVER
+                    else -> presentationSettings.detailsPagePresentation
+                }
+                val showTopBarOptions = topBarEffectiveLayout == DetailsPagePresentation.HERO ||
+                    topBarEffectiveLayout == DetailsPagePresentation.CENTERED_COVER
+                if (item != null && showTopBarOptions) {
+                    Spacer(modifier = Modifier.size(44.dp))
+                }
 
                 // Center Title / Clearart Logo (smooth fade-in + slide down as user scrolls down to seasons & content)
                 Box(
@@ -1794,32 +1829,49 @@ fun DetailScreen(
                     }
                 }
 
-                // Top-Right Watched / Completion Checkmark Button (1:1 Nuvio Parity)
+                // Top-Right Watched / Completion Checkmark + Options Menu (Symmetrical Header Support)
                 if (item != null) {
                     val isCompleted = item.status == TrackingStatus.COMPLETED
-                    IconButton(
-                        onClick = {
-                            val nextStatus = if (isCompleted) {
-                                if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.FANFICTION) {
-                                    TrackingStatus.IN_PROGRESS
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                val nextStatus = if (isCompleted) {
+                                    if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL || item.mediaType == MediaType.FANFICTION) {
+                                        TrackingStatus.IN_PROGRESS
+                                    } else {
+                                        TrackingStatus.PLAN_TO_TRACK
+                                    }
                                 } else {
-                                    TrackingStatus.PLAN_TO_TRACK
+                                    TrackingStatus.COMPLETED
                                 }
-                            } else {
-                                TrackingStatus.COMPLETED
+                                viewModel.updateStatus(nextStatus)
+                            },
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Toggle Watched Status",
+                                tint = if (isCompleted) Color(0xFFE52E5E) else Color.White,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .shadow(elevation = 8.dp, shape = CircleShape)
+                            )
+                        }
+                        if (showTopBarOptions) {
+                            IconButton(
+                                onClick = { showOptionsMenu = true },
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Options",
+                                    tint = Color.White,
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .shadow(elevation = 8.dp, shape = CircleShape)
+                                )
                             }
-                            viewModel.updateStatus(nextStatus)
-                        },
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Toggle Watched Status",
-                            tint = if (isCompleted) Color(0xFFE52E5E) else Color.White,
-                            modifier = Modifier
-                                .size(24.dp)
-                                .shadow(elevation = 8.dp, shape = CircleShape)
-                        )
+                        }
                     }
                 } else {
                     Spacer(modifier = Modifier.size(44.dp))
@@ -1850,10 +1902,10 @@ fun DetailScreen(
                         showArtworkPicker = true
                     },
                     onToggleLayout = {
-                        val newMode = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                            DetailsPagePresentation.CLASSIC
-                        } else {
-                            DetailsPagePresentation.HERO
+                        val newMode = when (presentationSettings.detailsPagePresentation) {
+                            DetailsPagePresentation.HERO -> DetailsPagePresentation.CENTERED_COVER
+                            DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CLASSIC
+                            DetailsPagePresentation.CLASSIC -> DetailsPagePresentation.HERO
                         }
                         coroutineScope.launch {
                             prefManager.updateDetailsPagePresentation(newMode)
@@ -1872,6 +1924,7 @@ fun DetailScreen(
                 CustomEntryEditorSheet(
                     existingItem = item,
                     availableCategories = allCategories,
+                    linkableSeries = allLibrarySummaries,
                     initialCategoryIds = categoryAssignments[item.id].orEmpty(),
                     initialVnRoutes = uiState.vnRoutes,
                     vnMeta = uiState.vnDetailMeta,
@@ -2257,6 +2310,7 @@ fun DetailScreen(
                 onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                 onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
                 onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
+                onMarkPreviousSeasonsWatched = { viewModel.markPreviousSeasonsWatched(it) },
                 onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
                 onJumpToProgress = if (isReadingType) {
                     { target -> viewModel.jumpToChapterOrVolume(target) }
@@ -2579,48 +2633,77 @@ private fun SiblingDetailPreview(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                DetailHeroHeaderSection(
-                    item = displayItem,
-                    backdropTargetUrl = backdropTargetUrl,
-                    bannerSizing = presentationSettings.bannerSizing,
-                    englishTitle = cachedAux?.englishTitle,
-                    romajiTitle = cachedAux?.romajiTitle,
-                    heroClearLogoUrl = siblingClearLogo,
-                    novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
-                    vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
-                    gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
-                    bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
-                    onOptionsClick = {},
-                    onEditProgress = {},
-                    onEditStatus = {},
-                    onEditScore = {},
-                    onOpenTrackers = {}
-                )
-            } else {
-                DetailClassicHeaderSection(
-                    item = displayItem,
-                    coverImageModel = coverImageModel,
-                    backdropTargetUrl = backdropTargetUrl,
-                    englishTitle = cachedAux?.englishTitle,
-                    romajiTitle = cachedAux?.romajiTitle,
-                    heroClearLogoUrl = siblingClearLogo,
-                    novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
-                    vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
-                    gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
-                    bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
-                    onCoverClick = {},
-                    onCoverLoaded = {},
-                    onOptionsClick = {},
-                    onEditProgress = {},
-                    onEditStatus = {},
-                    onEditScore = {},
-                    onOpenTrackers = {}
-                )
+            val sibHasBanner = !backdropTargetUrl.isNullOrBlank() &&
+                backdropTargetUrl != effectiveCover &&
+                backdropTargetUrl != item.coverUrl
+            val sibLayout = when {
+                presentationSettings.detailsPagePresentation == DetailsPagePresentation.CENTERED_COVER -> DetailsPagePresentation.CENTERED_COVER
+                presentationSettings.autoCenterCoverWhenNoBanner && !sibHasBanner -> DetailsPagePresentation.CENTERED_COVER
+                else -> presentationSettings.detailsPagePresentation
+            }
+            when (sibLayout) {
+                DetailsPagePresentation.CENTERED_COVER -> {
+                    DetailCenteredCoverHeroSection(
+                        item = displayItem,
+                        coverImageModel = coverImageModel,
+                        novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
+                        vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
+                        gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
+                        bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        showInlineOptionsButton = false,
+                        onCoverClick = {},
+                        onOptionsClick = {},
+                        onEditProgress = {},
+                        onEditStatus = {},
+                        onEditScore = {},
+                        onOpenTrackers = {}
+                    )
+                }
+                DetailsPagePresentation.HERO -> {
+                    DetailHeroHeaderSection(
+                        item = displayItem,
+                        backdropTargetUrl = backdropTargetUrl,
+                        bannerSizing = presentationSettings.bannerSizing,
+                        englishTitle = cachedAux?.englishTitle,
+                        romajiTitle = cachedAux?.romajiTitle,
+                        heroClearLogoUrl = siblingClearLogo,
+                        novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
+                        vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
+                        gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
+                        bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        showInlineOptionsButton = false,
+                        onOptionsClick = {},
+                        onEditProgress = {},
+                        onEditStatus = {},
+                        onEditScore = {},
+                        onOpenTrackers = {}
+                    )
+                }
+                DetailsPagePresentation.CLASSIC -> {
+                    DetailClassicHeaderSection(
+                        item = displayItem,
+                        coverImageModel = coverImageModel,
+                        backdropTargetUrl = backdropTargetUrl,
+                        englishTitle = cachedAux?.englishTitle,
+                        romajiTitle = cachedAux?.romajiTitle,
+                        heroClearLogoUrl = siblingClearLogo,
+                        novelDetailMeta = cachedAux?.novelDetailMeta ?: NovelDetailMeta(),
+                        vnDetailMeta = cachedAux?.vnDetailMeta ?: VnDetailMeta(),
+                        gameDetailMeta = cachedAux?.gameDetailMeta ?: GameDetailMeta(),
+                        bookDetailMeta = cachedAux?.bookDetailMeta ?: BookDetailMeta(),
+                        onCoverClick = {},
+                        onCoverLoaded = {},
+                        onOptionsClick = {},
+                        onEditProgress = {},
+                        onEditStatus = {},
+                        onEditScore = {},
+                        onOpenTrackers = {}
+                    )
+                }
             }
 
             val hasProgressControls = displayItem.mediaType == MediaType.MOVIE
-            val hasBackdrop = backdropTargetUrl != null
+            val hasBackdrop = backdropTargetUrl != null && sibLayout != DetailsPagePresentation.CENTERED_COVER
             if (hasProgressControls) {
                 Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
                 DetailProgressSection(
@@ -2860,7 +2943,10 @@ private fun UnboxedStatsRow(
 }
 
 @Composable
-private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemEntity) {
+private fun DetailNuvioMetaRow(
+    item: com.omnitrack.app.data.db.entity.MediaItemEntity,
+    centered: Boolean = false
+) {
     val releaseYearText = item.releaseYear?.trim()?.takeIf { it.isNotBlank() }
     val genres = item.categoryNames.split(",")
         .map { it.trim() }
@@ -2889,8 +2975,14 @@ private fun DetailNuvioMetaRow(item: com.omnitrack.app.data.db.entity.MediaItemE
     if (releaseLine != null || runtimeText != null || ageBadge != null) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.padding(vertical = 4.dp)
+            horizontalArrangement = if (centered) {
+                Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally)
+            } else {
+                Arrangement.spacedBy(14.dp)
+            },
+            modifier = Modifier
+                .then(if (centered) Modifier.fillMaxWidth() else Modifier)
+                .padding(vertical = 4.dp)
         ) {
             releaseLine?.let { line ->
                 Text(
@@ -2948,6 +3040,7 @@ private fun DetailHeroHeaderSection(
     scrollOffsetPx: () -> Float = { 0f },
     stretchPx: () -> Float = { 0f },
     animateOnScroll: Boolean = true,
+    showInlineOptionsButton: Boolean = false,
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
     onOptionsClick: () -> Unit,
@@ -3062,16 +3155,16 @@ private fun DetailHeroHeaderSection(
             .fillMaxWidth()
             .padding(horizontal = 20.dp)
             .let { mod -> if (isCinemaShowcase) mod else mod.offset(y = (-8).dp) },
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (showInlineOptionsButton) Modifier.padding(horizontal = 40.dp) else Modifier),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
                 val effectiveClearartUrl = heroClearLogoUrl?.takeIf { it.isNotBlank() }
@@ -3090,7 +3183,7 @@ private fun DetailHeroHeaderSection(
                             onClick = { onSearchInDiscover(item.title) },
                             onLongClick = { onToggleTitle?.invoke() }
                         ),
-                    contentAlignment = Alignment.CenterStart
+                    contentAlignment = Alignment.Center
                 ) {
                     if (hasClearart) {
                         val logoRequest = remember(effectiveClearartUrl) {
@@ -3107,7 +3200,7 @@ private fun DetailHeroHeaderSection(
                                 .height(56.dp)
                                 .padding(bottom = 4.dp),
                             contentScale = ContentScale.Fit,
-                            alignment = Alignment.CenterStart,
+                            alignment = Alignment.Center,
                             onError = { clearartFailed = true }
                         )
                     } else {
@@ -3116,7 +3209,8 @@ private fun DetailHeroHeaderSection(
                             color = TextPrimary,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Black,
-                            lineHeight = 29.sp
+                            lineHeight = 29.sp,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -3125,7 +3219,8 @@ private fun DetailHeroHeaderSection(
                     Text(
                         text = item.nativeTitle,
                         color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.5.sp
+                        fontSize = 12.5.sp,
+                        textAlign = TextAlign.Center
                     )
                 }
                 if (!item.bookAuthor.isNullOrBlank() && item.mediaType !in setOf(MediaType.BOOK, MediaType.FANFICTION)) {
@@ -3135,13 +3230,16 @@ private fun DetailHeroHeaderSection(
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
                     )
                 }
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 2.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp)
                 ) {
                     val heroTypeBadge = when (item.mediaType) {
                         MediaType.MANGA -> com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
@@ -3187,23 +3285,25 @@ private fun DetailHeroHeaderSection(
                 }
             }
 
-            IconButton(
-                onClick = onOptionsClick,
-                modifier = Modifier
-                    .size(40.dp)
-                    .padding(start = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Options",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
+            if (showInlineOptionsButton) {
+                IconButton(
+                    onClick = onOptionsClick,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
 
         if (item.mediaType != MediaType.BOOK && item.mediaType != MediaType.COMIC && item.mediaType != MediaType.FANFICTION) {
-            DetailNuvioMetaRow(item = item)
+            DetailNuvioMetaRow(item = item, centered = true)
         }
         NuvioRatingsRow(
             item = item,
@@ -3215,7 +3315,8 @@ private fun DetailHeroHeaderSection(
             vnDetailMeta = vnDetailMeta,
             gameDetailMeta = gameDetailMeta,
             bookDetailMeta = bookDetailMeta,
-            comicDetailMeta = comicDetailMeta
+            comicDetailMeta = comicDetailMeta,
+            centered = true
         )
         UnboxedStatsRow(
             item = item,
@@ -3229,11 +3330,15 @@ private fun DetailHeroHeaderSection(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DetailBookEditorialHeroSection(
+private fun DetailCenteredCoverHeroSection(
     item: com.omnitrack.app.data.db.entity.MediaItemEntity,
     coverImageModel: Any?,
-    bookDetailMeta: BookDetailMeta,
+    novelDetailMeta: NovelDetailMeta = NovelDetailMeta(),
+    vnDetailMeta: VnDetailMeta = VnDetailMeta(),
+    gameDetailMeta: GameDetailMeta = GameDetailMeta(),
+    bookDetailMeta: BookDetailMeta = BookDetailMeta(),
     comicDetailMeta: ComicDetailMeta = ComicDetailMeta(),
+    showInlineOptionsButton: Boolean = false,
     onCoverClick: () -> Unit,
     onToggleTitle: (() -> Unit)? = null,
     onSearchInDiscover: (String) -> Unit = {},
@@ -3244,26 +3349,40 @@ private fun DetailBookEditorialHeroSection(
     onOpenTrackers: () -> Unit
 ) {
     val context = LocalContext.current
+    val isEditorialBookLike = item.mediaType in setOf(MediaType.BOOK, MediaType.COMIC, MediaType.FANFICTION)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(modifier = Modifier.height(44.dp))
 
-        // Floating 2:3 Book Jacket with subtle left-edge spine sheen
+        // Centered 2:3 Cover Art with Subtle Radial Ambient Glow
         Box(
             modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
+                    .size(220.dp, 260.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                AccentGold.copy(alpha = 0.14f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+            Box(
+                modifier = Modifier
                     .width(158.dp)
                     .height(238.dp)
-                    .shadow(24.dp, RoundedCornerShape(8.dp), ambientColor = Color.Black, spotColor = Color.Black)
-                    .clip(RoundedCornerShape(8.dp))
+                    .shadow(24.dp, RoundedCornerShape(10.dp), ambientColor = Color.Black, spotColor = Color.Black)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(Color.White.copy(alpha = 0.06f))
                     .clickable { onCoverClick() }
             ) {
@@ -3291,35 +3410,36 @@ private fun DetailBookEditorialHeroSection(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.horizontalGradient(
-                                0.0f to Color.White.copy(alpha = 0.24f),
-                                0.04f to Color.White.copy(alpha = 0.06f),
-                                0.10f to Color.Transparent,
-                                1.0f to Color.Black.copy(alpha = 0.10f)
+                if (isEditorialBookLike) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    0.0f to Color.White.copy(alpha = 0.24f),
+                                    0.04f to Color.White.copy(alpha = 0.06f),
+                                    0.10f to Color.Transparent,
+                                    1.0f to Color.Black.copy(alpha = 0.10f)
+                                )
                             )
-                        )
-                )
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                 )
             }
         }
 
-        // Centered Editorial Title & Options
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
+        // Centered Title, Native Title, Author/Studio, Metadata & Ratings
+        Box(modifier = Modifier.fillMaxWidth()) {
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (showInlineOptionsButton) Modifier.padding(horizontal = 40.dp) else Modifier),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
                     text = item.title,
@@ -3328,6 +3448,7 @@ private fun DetailBookEditorialHeroSection(
                     fontWeight = FontWeight.Black,
                     lineHeight = 28.sp,
                     maxLines = 3,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
@@ -3335,66 +3456,116 @@ private fun DetailBookEditorialHeroSection(
                             onLongClick = { onToggleTitle?.invoke() }
                         )
                 )
+                if (!item.nativeTitle.isNullOrBlank()) {
+                    Text(
+                        text = item.nativeTitle,
+                        color = Color.White.copy(alpha = 0.82f),
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center
+                    )
+                }
                 val creditSub = when (item.mediaType) {
                     MediaType.COMIC -> comicDetailMeta.publisher ?: item.comicPublisher ?: item.bookAuthor
                     MediaType.FANFICTION -> item.bookAuthor?.let { "by $it" } ?: item.fanficPrimaryFandom
-                    else -> (bookDetailMeta.authorName ?: item.bookAuthor)?.let { "by $it" }
+                    MediaType.BOOK -> (bookDetailMeta.authorName ?: item.bookAuthor)?.let { "by $it" }
+                    else -> item.bookAuthor?.let { "by $it" } ?: item.studioOrNetwork
                 }
                 if (!creditSub.isNullOrBlank()) {
                     Text(
                         text = creditSub,
                         color = AccentGold,
-                        fontSize = 13.5.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 2
+                        maxLines = 2,
+                        textAlign = TextAlign.Center
                     )
+                }
+                val centeredTypeBadge = when (item.mediaType) {
+                    MediaType.MANGA -> com.omnitrack.app.ui.screens.home.inferMangaSubtype(item.originCountry, item.nativeTitle).uppercase()
+                    MediaType.NOVEL -> {
+                        val sub = com.omnitrack.app.ui.screens.home.inferNovelSubtype(
+                            item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title
+                        )
+                        if (sub == "LIGHT_NOVEL") "LIGHT NOVEL" else "WEB NOVEL"
+                    }
+                    MediaType.COMIC -> item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS"
+                    MediaType.FANFICTION -> com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).displayName.uppercase()
+                    MediaType.BOOK -> bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK"
+                    else -> item.mediaType.displayName.uppercase()
                 }
                 val metaParts = when (item.mediaType) {
                     MediaType.COMIC -> listOfNotNull(
-                        item.comicFormat?.let { ComicFormat.fromName(it).label.uppercase() } ?: "COMICS",
+                        centeredTypeBadge,
                         comicDetailMeta.startYear ?: item.releaseYear?.takeIf { it.isNotBlank() },
                         (item.totalProgress?.toInt() ?: comicDetailMeta.issueCount)?.takeIf { it > 0 }?.let { "$it ISSUES" }
-                    ).joinToString(" · ")
+                    )
                     MediaType.FANFICTION -> listOfNotNull(
-                        com.omnitrack.app.data.model.FanficSite.fromCode(item.fanficSourceSite).displayName.uppercase(),
+                        centeredTypeBadge,
                         item.fanficPrimaryFandom?.uppercase(),
                         com.omnitrack.app.data.model.formatWordCountShort(item.fanficWordCount).takeIf { it.isNotBlank() }?.uppercase(),
                         item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it CH" }
-                    ).joinToString(" · ")
-                    else -> listOfNotNull(
-                        bookDetailMeta.literaryForm?.label?.uppercase() ?: "BOOK",
+                    )
+                    MediaType.BOOK -> listOfNotNull(
+                        centeredTypeBadge,
                         item.releaseYear?.takeIf { it.isNotBlank() },
                         item.totalProgress?.toInt()?.takeIf { it > 0 }?.let { "$it PAGES" }
                             ?: bookDetailMeta.pageCount?.takeIf { it > 0 }?.let { "$it PAGES" }
                             ?: bookDetailMeta.lineCount?.takeIf { it > 0 }?.let { "$it LINES" }
-                    ).joinToString(" · ")
-                }
+                    )
+                    MediaType.NOVEL -> listOfNotNull(
+                        centeredTypeBadge,
+                        item.originCountry?.uppercase(),
+                        item.releaseYear?.takeIf { it.isNotBlank() }
+                    )
+                    else -> listOfNotNull(
+                        centeredTypeBadge,
+                        item.platform?.takeIf { it.isNotBlank() }?.uppercase()
+                    )
+                }.joinToString(" · ")
                 Text(
                     text = metaParts,
                     color = TextSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.8.sp
+                    letterSpacing = 0.8.sp,
+                    textAlign = TextAlign.Center
                 )
             }
 
-            IconButton(
-                onClick = onOptionsClick,
-                modifier = Modifier.size(40.dp).padding(start = 8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Options",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
+            if (showInlineOptionsButton) {
+                IconButton(
+                    onClick = onOptionsClick,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
 
+        if (!isEditorialBookLike) {
+            DetailNuvioMetaRow(item = item, centered = true)
+        }
         NuvioRatingsRow(
             item = item,
+            anilistScore = novelDetailMeta.anilistScore,
+            malScore = novelDetailMeta.malScore,
+            kitsuScore = novelDetailMeta.kitsuScore,
+            mangaUpdatesScore = novelDetailMeta.mangaUpdatesScore,
+            bangumiScore = novelDetailMeta.bangumiScore,
+            vnDetailMeta = vnDetailMeta,
+            gameDetailMeta = gameDetailMeta,
             bookDetailMeta = bookDetailMeta,
-            comicDetailMeta = comicDetailMeta
+            comicDetailMeta = comicDetailMeta,
+            centered = true
         )
         UnboxedStatsRow(
             item = item,
@@ -4178,10 +4349,10 @@ private fun DetailOptionsMenuBottomSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = if (presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO) {
-                            "Current: Hero Layout (Tap for Classic Poster)"
-                        } else {
-                            "Current: Classic Poster (Tap for Hero Layout)"
+                        text = when (presentationSettings.detailsPagePresentation) {
+                            DetailsPagePresentation.HERO -> "Current: Banner Only (Tap for Centered Cover)"
+                            DetailsPagePresentation.CENTERED_COVER -> "Current: Centered Cover (Tap for Classic)"
+                            DetailsPagePresentation.CLASSIC -> "Current: Classic Poster (Tap for Banner Only)"
                         },
                         color = TextMuted,
                         fontSize = 12.sp

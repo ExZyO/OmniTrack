@@ -146,6 +146,99 @@ fun EpisodeWatchedActionSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SeasonWatchedActionSheet(
+    seasonLabel: String,
+    episodeCount: Int,
+    watchedCount: Int,
+    isSeasonWatched: Boolean,
+    canMarkPreviousSeasons: Boolean,
+    isReadingMode: Boolean = false,
+    onDismiss: () -> Unit,
+    onToggleSeasonWatched: () -> Unit,
+    onMarkPreviousSeasonsWatched: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val verbPos = if (isReadingMode) "Read" else "Watched"
+    val verbNeg = if (isReadingMode) "Unread" else "Unwatched"
+    val pluralUnits = if (isReadingMode) "Volumes" else "Seasons"
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = AmoledBlack,
+        dragHandle = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = seasonLabel.uppercase(),
+                    color = AccentJade,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = if (episodeCount > 0) {
+                        "$watchedCount of $episodeCount ${if (isReadingMode) "read" else "watched"}"
+                    } else {
+                        "Batch actions for $seasonLabel"
+                    },
+                    color = TextPrimary,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            HorizontalDivider(color = GlassBorder, thickness = 0.8.dp)
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                EpisodeActionRow(
+                    icon = Icons.Default.PlaylistAddCheckCircle,
+                    iconTint = if (isSeasonWatched) Color(0xFFEF4444) else AccentJade,
+                    title = if (isSeasonWatched) "Mark $seasonLabel as $verbNeg" else "Mark $seasonLabel as $verbPos",
+                    subtitle = if (isSeasonWatched) {
+                        "Clear ${verbPos.lowercase()} state for $seasonLabel"
+                    } else {
+                        "Mark all items in $seasonLabel as ${verbPos.lowercase()}"
+                    },
+                    onClick = {
+                        scope.launch {
+                            sheetState.hide()
+                            onToggleSeasonWatched()
+                            onDismiss()
+                        }
+                    }
+                )
+
+                if (canMarkPreviousSeasons) {
+                    EpisodeActionRow(
+                        icon = Icons.Default.DoneAll,
+                        iconTint = AccentJade,
+                        title = "Mark Previous $pluralUnits as $verbPos",
+                        subtitle = "Mark all earlier ${pluralUnits.lowercase()} before $seasonLabel as ${verbPos.lowercase()}",
+                        onClick = {
+                            scope.launch {
+                                sheetState.hide()
+                                onMarkPreviousSeasonsWatched()
+                                onDismiss()
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun EpisodeActionRow(
     icon: ImageVector,

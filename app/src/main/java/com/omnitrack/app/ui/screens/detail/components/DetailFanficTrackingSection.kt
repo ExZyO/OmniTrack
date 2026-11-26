@@ -24,9 +24,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Public
@@ -434,28 +437,151 @@ fun DetailFanficTrackingSection(
             )
         }
 
-        // 3. HAIRLINE EDITORIAL SPEC STRIP (Site, Rating, Kudos, Bookmarks, Hits, Updated Date)
+        // 3. HAIRLINE EDITORIAL SPEC STRIP (Site, Rating, Metrics w/ Vector Icons, Updated Date)
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.6.dp)
-            val specItems = remember(primarySite, rating, item.fanficIsCrossover, meta, item.bookAuthor) {
-                buildList {
-                    add(primarySite.shortBadge)
-                    add(rating.label)
-                    if (item.fanficIsCrossover) add("Crossover")
-                    meta.kudosCount?.takeIf { it > 0 }?.let { add("\u2665 $it kudos") }
-                    meta.bookmarksCount?.takeIf { it > 0 }?.let { add("\u2691 $it bookmarks") }
-                    meta.hitsCount?.takeIf { it > 0 }?.let { add("$it hits") }
-                    meta.updatedDate?.takeIf { it.isNotBlank() }?.let { add("Updated $it") }
-                    meta.language?.takeIf { it.isNotBlank() }?.let { add(it) }
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                @Composable
+                fun SpecDotText(text: String) {
+                    Text(
+                        text = text,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextSecondary
+                    )
                 }
+
+                SpecDotText(primarySite.shortBadge)
+                SpecDotText(rating.label)
+                if (item.fanficIsCrossover) {
+                    SpecDotText("Crossover")
+                }
+
+                if (primarySite == FanficSite.WATTPAD) {
+                    meta.kudosCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "Votes",
+                                tint = AccentGold,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} votes")
+                        }
+                    }
+                    meta.hitsCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = "Reads",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} reads")
+                        }
+                    }
+                    meta.commentsCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = "Comments",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(12.5.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} comments")
+                        }
+                    }
+                    meta.bookmarksCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bookmark,
+                                contentDescription = "Reading lists",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(12.5.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} lists")
+                        }
+                    }
+                } else {
+                    meta.kudosCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Favorite,
+                                contentDescription = "Kudos",
+                                tint = Color(0xFFF472B6),
+                                modifier = Modifier.size(12.5.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} kudos")
+                        }
+                    }
+                    meta.bookmarksCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bookmark,
+                                contentDescription = "Bookmarks",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(12.5.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} bookmarks")
+                        }
+                    }
+                    meta.hitsCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Visibility,
+                                contentDescription = "Hits",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} hits")
+                        }
+                    }
+                    meta.commentsCount?.takeIf { it > 0 }?.let { count ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChatBubbleOutline,
+                                contentDescription = "Comments",
+                                tint = TextSecondary,
+                                modifier = Modifier.size(12.5.dp)
+                            )
+                            SpecDotText("${formatCompactFanficCount(count)} comments")
+                        }
+                    }
+                }
+
+                meta.updatedDate?.takeIf { it.isNotBlank() }?.let { SpecDotText("Updated $it") }
+                meta.language?.takeIf { it.isNotBlank() }?.let { SpecDotText(it) }
             }
-            Text(
-                text = specItems.joinToString("  \u00B7  "),
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = TextSecondary,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
             HorizontalDivider(color = Color.White.copy(alpha = 0.07f), thickness = 0.6.dp)
         }
 
@@ -1477,4 +1603,10 @@ private fun FramelessClickableTagGroup(
             )
         }
     }
+}
+
+private fun formatCompactFanficCount(count: Int): String = when {
+    count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", count / 1_000_000.0).replace(".0M", "M")
+    count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK", count / 1_000.0).replace(".0K", "K")
+    else -> count.toString()
 }

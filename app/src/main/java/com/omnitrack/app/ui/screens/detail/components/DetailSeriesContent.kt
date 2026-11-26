@@ -120,6 +120,7 @@ class DetailSeriesUiState(
     initialLayoutMode: EpisodeLayoutMode
 ) {
     var activeActionSheetEpisode by mutableStateOf<MediaEpisode?>(null)
+    var activeActionSheetSeason by mutableStateOf<MediaSeason?>(null)
     var fillerPromptEpisode by mutableStateOf<MediaEpisode?>(null)
     var showJumpDialog by mutableStateOf(false)
     var activeFilter by mutableStateOf("ALL")
@@ -303,7 +304,10 @@ fun LazyListScope.detailSeriesItems(
                             episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
                             fallbackImageUrl = fallbackCoverUrl,
-                            onSelectSeason = onSelectSeason
+                            useProgressAsWatchedTruth = useProgressAsWatchedTruth,
+                            currentTotalProgress = currentTotalProgress,
+                            onSelectSeason = onSelectSeason,
+                            onLongPressSeason = { seriesState.activeActionSheetSeason = it }
                         )
                     } else {
                         SeasonTextChipScrollRow(
@@ -312,7 +316,10 @@ fun LazyListScope.detailSeriesItems(
                             episodes = episodes,
                             episodesBySeason = episodesBySeason,
                             watchedEpisodes = watchedEpisodes,
-                            onSelectSeason = onSelectSeason
+                            useProgressAsWatchedTruth = useProgressAsWatchedTruth,
+                            currentTotalProgress = currentTotalProgress,
+                            onSelectSeason = onSelectSeason,
+                            onLongPressSeason = { seriesState.activeActionSheetSeason = it }
                         )
                     }
                 }
@@ -697,6 +704,7 @@ fun DetailSeriesDialogs(
     onToggleEpisodeWatched: (MediaEpisode) -> Unit,
     onMarkPreviousWatched: (MediaEpisode) -> Unit,
     onToggleSeasonWatched: (Int) -> Unit,
+    onMarkPreviousSeasonsWatched: ((Int) -> Unit)? = null,
     onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
     onJumpToProgress: ((Int) -> Unit)? = null
 ) {
@@ -714,6 +722,33 @@ fun DetailSeriesDialogs(
         } else {
             (ep.seasonNumber to ep.episodeNumber) in watchedEpisodes
         }
+    }
+
+    // Hold-a-Season Action Sheet (1:1 Nuvio Parity)
+    seriesState.activeActionSheetSeason?.let { season ->
+        val seasonLabel = season.name.ifBlank { formatSeasonLabel(season.seasonNumber) }
+        val seasonEps = episodesBySeason[season.seasonNumber]
+            ?: episodes.filter { it.seasonNumber == season.seasonNumber }
+        val effectiveCount = maxOf(season.episodeCount, seasonEps.size)
+        val watchedCount = if (seasonEps.isNotEmpty()) {
+            seasonEps.count { isEpWatched(it) }
+        } else {
+            watchedEpisodes.count { it.first == season.seasonNumber }
+        }
+        val isSeasonWatched = effectiveCount > 0 && watchedCount >= effectiveCount
+        val canMarkPrevious = seasons.any { it.seasonNumber in 1 until season.seasonNumber }
+
+        SeasonWatchedActionSheet(
+            seasonLabel = seasonLabel,
+            episodeCount = effectiveCount,
+            watchedCount = watchedCount,
+            isSeasonWatched = isSeasonWatched,
+            canMarkPreviousSeasons = canMarkPrevious,
+            isReadingMode = isMangaMode,
+            onDismiss = { seriesState.activeActionSheetSeason = null },
+            onToggleSeasonWatched = { onToggleSeasonWatched(season.seasonNumber) },
+            onMarkPreviousSeasonsWatched = { onMarkPreviousSeasonsWatched?.invoke(season.seasonNumber) }
+        )
     }
 
     // Watched Action Sheet
@@ -1978,6 +2013,7 @@ private fun EpisodeVerticalCardItem(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SeasonPosterScrollRow(
     seasons: List<MediaSeason>,
@@ -1986,7 +2022,10 @@ private fun SeasonPosterScrollRow(
     episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
     fallbackImageUrl: String?,
-    onSelectSeason: (Int) -> Unit
+    useProgressAsWatchedTruth: Boolean = false,
+    currentTotalProgress: Int? = null,
+    onSelectSeason: (Int) -> Unit,
+    onLongPressSeason: ((MediaSeason) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
 
@@ -2006,14 +2045,26 @@ private fun SeasonPosterScrollRow(
         items(seasons, key = { it.seasonNumber }) { season ->
             val isSelected = season.seasonNumber == selectedSeasonNumber
             val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
-            val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
-            val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
+            val watchedCount = if (seasonEps.isNotEmpty()) {
+                if (useProgressAsWatchedTruth) {
+                    seasonEps.count { it.episodeNumber <= (currentTotalProgress ?: 0) }
+                } else {
+                    seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
+                }
+            } else {
+                watchedEpisodes.count { it.first == season.seasonNumber }
+            }
+            val effectiveTotal = maxOf(season.episodeCount, seasonEps.size)
+            val allWatched = effectiveTotal > 0 && watchedCount >= effectiveTotal
             val label = season.name.ifBlank { formatSeasonLabel(season.seasonNumber) }
 
             Column(
                 modifier = Modifier
                     .width(100.dp)
-                    .clickable { onSelectSeason(season.seasonNumber) },
+                    .combinedClickable(
+                        onClick = { onSelectSeason(season.seasonNumber) },
+                        onLongClick = { onLongPressSeason?.invoke(season) }
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -2060,6 +2111,24 @@ private fun SeasonPosterScrollRow(
                             )
                         }
                     }
+                    if (allWatched) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(6.dp)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(AccentJade),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Completed",
+                                tint = Color.Black,
+                                modifier = Modifier.size(12.dp)
+                            )
+                        }
+                    }
                 }
 
                 Text(
@@ -2077,6 +2146,7 @@ private fun SeasonPosterScrollRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SeasonTextChipScrollRow(
     seasons: List<MediaSeason>,
@@ -2084,7 +2154,10 @@ private fun SeasonTextChipScrollRow(
     episodes: List<MediaEpisode>,
     episodesBySeason: Map<Int, List<MediaEpisode>>,
     watchedEpisodes: Set<Pair<Int, Int>>,
-    onSelectSeason: (Int) -> Unit
+    useProgressAsWatchedTruth: Boolean = false,
+    currentTotalProgress: Int? = null,
+    onSelectSeason: (Int) -> Unit,
+    onLongPressSeason: ((MediaSeason) -> Unit)? = null
 ) {
     val listState = rememberLazyListState()
 
@@ -2104,8 +2177,17 @@ private fun SeasonTextChipScrollRow(
         items(seasons, key = { it.seasonNumber }) { season ->
             val isSelected = season.seasonNumber == selectedSeasonNumber
             val seasonEps = episodesBySeason[season.seasonNumber] ?: episodes.filter { it.seasonNumber == season.seasonNumber }
-            val watchedCount = seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
-            val allWatched = season.episodeCount > 0 && watchedCount >= season.episodeCount
+            val watchedCount = if (seasonEps.isNotEmpty()) {
+                if (useProgressAsWatchedTruth) {
+                    seasonEps.count { it.episodeNumber <= (currentTotalProgress ?: 0) }
+                } else {
+                    seasonEps.count { (it.seasonNumber to it.episodeNumber) in watchedEpisodes }
+                }
+            } else {
+                watchedEpisodes.count { it.first == season.seasonNumber }
+            }
+            val effectiveTotal = maxOf(season.episodeCount, seasonEps.size)
+            val allWatched = effectiveTotal > 0 && watchedCount >= effectiveTotal
             val label = season.name.ifBlank { formatSeasonLabel(season.seasonNumber) }
 
             Row(
@@ -2114,7 +2196,10 @@ private fun SeasonTextChipScrollRow(
                     .background(
                         if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent
                     )
-                    .clickable { onSelectSeason(season.seasonNumber) }
+                    .combinedClickable(
+                        onClick = { onSelectSeason(season.seasonNumber) },
+                        onLongClick = { onLongPressSeason?.invoke(season) }
+                    )
                     .padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)

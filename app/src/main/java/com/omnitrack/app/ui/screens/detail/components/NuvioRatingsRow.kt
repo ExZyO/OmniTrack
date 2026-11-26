@@ -58,7 +58,8 @@ fun NuvioRatingsRow(
     vnDetailMeta: VnDetailMeta? = null,
     gameDetailMeta: GameDetailMeta? = null,
     bookDetailMeta: BookDetailMeta? = null,
-    comicDetailMeta: ComicDetailMeta? = null
+    comicDetailMeta: ComicDetailMeta? = null,
+    centered: Boolean = false
 ) {
     val badges = remember(item, anilistScore, malScore, kitsuScore, mangaUpdatesScore, bangumiScore, vnDetailMeta, gameDetailMeta, bookDetailMeta) {
         val list = mutableListOf<RatingBadgeData>()
@@ -400,14 +401,7 @@ fun NuvioRatingsRow(
 
     if (badges.isEmpty()) return
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    val rowContent: @Composable () -> Unit = {
         val ratingTextStyle = MaterialTheme.typography.titleSmall.copy(
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.sp
@@ -429,6 +423,34 @@ fun NuvioRatingsRow(
                     color = badge.valueColor
                 )
             }
+        }
+    }
+
+    if (centered) {
+        Box(
+            modifier = modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                rowContent()
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            rowContent()
         }
     }
 }

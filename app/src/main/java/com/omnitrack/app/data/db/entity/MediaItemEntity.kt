@@ -135,5 +135,7 @@ data class MediaItemEntity(
     val fanficIsCrossover: Boolean = false,
     val fanficTagsSearch: String? = null,
     val fanficMetaJson: String? = null,
+    val linkedParentMediaId: Long? = null,
+    val linkedSeasonNumber: Int? = null,
     val lastUpdated: Long = System.currentTimeMillis()
 )

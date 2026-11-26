@@ -186,6 +186,49 @@ class MediaRepository(
     fun getEpisodeProgress(mediaId: Long): Flow<List<EpisodeProgressEntity>> =
         (episodeProgressDao?.getProgressForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 
+    suspend fun getEpisodeProgressOnce(mediaId: Long): List<EpisodeProgressEntity> =
+        episodeProgressDao?.getAllProgressForMediaOnce(mediaId) ?: emptyList()
+
+    /**
+     * Merges watched episode pairs into Room without clearing existing local watched states or metadata.
+     */
+    suspend fun markEpisodesWatchedAdditive(mediaId: Long, episodes: List<Pair<Int, Int>>) {
+        if (episodeProgressDao == null || mediaId <= 0L || episodes.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val existingMap = episodeProgressDao.getAllProgressForMediaOnce(mediaId)
+            .associateBy { it.seasonNumber to it.episodeNumber }
+        val toUpsert = episodes.distinct().mapNotNull { (s, e) ->
+            val existing = existingMap[s to e]
+            if (existing?.isWatched == true) {
+                null
+            } else {
+                EpisodeProgressEntity(
+                    mediaId = mediaId,
+                    seasonNumber = s,
+                    episodeNumber = e,
+                    isWatched = true,
+                    watchedAtMs = existing?.watchedAtMs ?: now,
+                    userRating = existing?.userRating,
+                    userNote = existing?.userNote,
+                    isBookmarked = existing?.isBookmarked ?: false,
+                    customLabel = existing?.customLabel
+                )
+            }
+        }
+        if (toUpsert.isNotEmpty()) {
+            episodeProgressDao.insertOrUpdateAll(toUpsert)
+        }
+    }
+
+    suspend fun findLinkedChildren(parentId: Long): List<MediaItemEntity> =
+        if (parentId <= 0L) emptyList() else mediaDao.findLinkedChildren(parentId)
+
+    suspend fun findMediaByAnilistIds(ids: List<Long>): List<MediaItemEntity> =
+        if (ids.isEmpty()) emptyList() else mediaDao.findByAnilistIds(ids.distinct())
+
+    suspend fun findMediaByMalIds(ids: List<Long>): List<MediaItemEntity> =
+        if (ids.isEmpty()) emptyList() else mediaDao.findByMalIds(ids.distinct())
+
     fun getWatchedTimestampsSince(sinceMs: Long): Flow<List<Long>> =
         (episodeProgressDao?.getWatchedTimestampsSince(sinceMs) ?: emptyFlow()).distinctUntilChanged()
 

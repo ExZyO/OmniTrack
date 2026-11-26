@@ -1692,6 +1692,7 @@ fun HomeScreen(
                 initialTitle = customEntryInitTitle,
                 initialMediaType = customEntryInitType,
                 availableCategories = allCategories,
+                linkableSeries = uiState.allMediaSummaries,
                 visibleMediaTypes = visibleMediaTypes,
                 initialCategoryIds = libSettings.defaultCategoryId?.let { setOf(it) } ?: emptySet(),
                 onCreateCategory = { name, onCreated ->
@@ -2184,43 +2185,131 @@ private fun computeLibraryTabItems(
         true
     }
 
-    if (!sort) return filtered
+    val groupedItems = if (libSettings.groupAnimeSeasonsInLibrary && searchQuery.isBlank()) {
+        collapseGroupedSeasonsInLibrary(filtered)
+    } else {
+        filtered
+    }
+
+    if (!sort) return groupedItems
 
     val asc = libSettings.sortAscending
     return when (libSettings.sortOption) {
         LibrarySortOption.ALPHA -> {
-            val base = filtered.sortedBy { it.title.lowercase() }
+            val base = groupedItems.sortedBy { it.title.lowercase() }
             if (asc) base else base.reversed()
         }
         LibrarySortOption.RATING -> {
             if (asc) {
-                filtered.sortedWith(compareBy<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
+                groupedItems.sortedWith(compareBy<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
             } else {
-                filtered.sortedWith(compareByDescending<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
+                groupedItems.sortedWith(compareByDescending<com.omnitrack.app.data.db.dto.MediaCardSummary> { it.userRating ?: it.communityScore ?: 0f }.thenByDescending { it.lastUpdated })
             }
         }
         LibrarySortOption.TOTAL -> {
-            if (asc) filtered.sortedBy { it.totalProgress ?: 0.0 }
-            else filtered.sortedByDescending { it.totalProgress ?: 0.0 }
+            if (asc) groupedItems.sortedBy { it.totalProgress ?: 0.0 }
+            else groupedItems.sortedByDescending { it.totalProgress ?: 0.0 }
         }
         LibrarySortOption.REMAINING -> {
             val rem: (com.omnitrack.app.data.db.dto.MediaCardSummary) -> Double = {
                 val tot = it.totalProgress ?: 0.0
                 if (tot > it.currentProgress) tot - it.currentProgress else 0.0
             }
-            if (asc) filtered.sortedBy(rem) else filtered.sortedByDescending(rem)
+            if (asc) groupedItems.sortedBy(rem) else groupedItems.sortedByDescending(rem)
         }
         LibrarySortOption.PROGRESS -> {
             val frac: (com.omnitrack.app.data.db.dto.MediaCardSummary) -> Double = {
                 val tot = it.totalProgress ?: 0.0
                 if (tot > 0.0) (it.currentProgress / tot).coerceIn(0.0, 1.0) else 0.0
             }
-            if (asc) filtered.sortedBy(frac) else filtered.sortedByDescending(frac)
+            if (asc) groupedItems.sortedBy(frac) else groupedItems.sortedByDescending(frac)
         }
-        LibrarySortOption.RANDOM -> filtered.shuffled(java.util.Random(filtered.size.toLong() * 1337L + if (asc) 1L else 2L))
+        LibrarySortOption.RANDOM -> groupedItems.shuffled(java.util.Random(groupedItems.size.toLong() * 1337L + if (asc) 1L else 2L))
         LibrarySortOption.RECENT -> {
-            if (asc) filtered.sortedBy { it.lastUpdated } else filtered.sortedByDescending { it.lastUpdated }
+            if (asc) groupedItems.sortedBy { it.lastUpdated } else groupedItems.sortedByDescending { it.lastUpdated }
         }
+    }
+}
+
+private val ANIME_SEASON_SUFFIX_REGEX = Regex(
+    """(?i)(?:\s*[:\-–]?\s*(?:season\s+\d+|\d+(?:st|nd|rd|th)\s+season|part\s+\d+|cour\s+\d+|s\d+|(?:ii|iii|iv|v))|\s+(?:2|3|4|5))\s*$"""
+)
+
+private fun parseAnimeFranchiseKey(rawTitle: String): Pair<String, Boolean> {
+    var working = rawTitle.trim()
+    var hadSuffix = false
+    while (true) {
+        val next = working.replace(ANIME_SEASON_SUFFIX_REGEX, "").trim()
+        if (next == working || next.length < 2) break
+        working = next
+        hadSuffix = true
+    }
+    val key = working.lowercase().replace(Regex("[^\\p{L}\\p{Nd}]"), "")
+    return key to hadSuffix
+}
+
+private fun collapseGroupedSeasonsInLibrary(
+    items: List<com.omnitrack.app.data.db.dto.MediaCardSummary>
+): List<com.omnitrack.app.data.db.dto.MediaCardSummary> {
+    if (items.size <= 1) return items
+    val byId = items.associateBy { it.id }
+    val childrenByParent = mutableMapOf<Long, MutableList<com.omnitrack.app.data.db.dto.MediaCardSummary>>()
+    val collapsedIds = HashSet<Long>()
+
+    // 1. Collapse explicitly linked custom entries into their parent when parent is visible
+    for (item in items) {
+        val parentId = item.linkedParentMediaId
+        if (parentId != null && parentId != item.id && parentId in byId) {
+            childrenByParent.getOrPut(parentId) { mutableListOf() }.add(item)
+            collapsedIds.add(item.id)
+        }
+    }
+
+    // 2. Non-destructively collapse numbered Anime season sequels into their root S1 Anime card
+    val animeRoots = mutableMapOf<String, com.omnitrack.app.data.db.dto.MediaCardSummary>()
+    for (item in items) {
+        if (item.id in collapsedIds || item.mediaType != MediaType.ANIME) continue
+        val (baseKey, isSequel) = parseAnimeFranchiseKey(item.title)
+        if (!isSequel && baseKey.length >= 2) {
+            val prev = animeRoots[baseKey]
+            if (prev == null || item.id < prev.id) {
+                animeRoots[baseKey] = item
+            }
+        }
+    }
+    for (item in items) {
+        if (item.id in collapsedIds || item.mediaType != MediaType.ANIME) continue
+        val (baseKey, isSequel) = parseAnimeFranchiseKey(item.title)
+        val root = animeRoots[baseKey]
+        if (isSequel && root != null && root.id != item.id) {
+            childrenByParent.getOrPut(root.id) { mutableListOf() }.add(item)
+            collapsedIds.add(item.id)
+        }
+    }
+
+    if (collapsedIds.isEmpty()) return items
+
+    return items.mapNotNull { item ->
+        if (item.id in collapsedIds) return@mapNotNull null
+        val children = childrenByParent[item.id] ?: return@mapNotNull item
+        val allParts = listOf(item) + children
+        val combinedCurrent = allParts.sumOf { it.currentProgress }
+        val combinedTotal = if (allParts.all { (it.totalProgress ?: 0.0) > 0.0 }) {
+            allParts.sumOf { it.totalProgress ?: 0.0 }
+        } else {
+            item.totalProgress
+        }
+        val combinedStatus = when {
+            allParts.all { it.status == TrackingStatus.COMPLETED } -> TrackingStatus.COMPLETED
+            allParts.any { it.status == TrackingStatus.IN_PROGRESS } || combinedCurrent > 0.0 -> TrackingStatus.IN_PROGRESS
+            else -> item.status
+        }
+        item.copy(
+            currentProgress = combinedCurrent,
+            totalProgress = combinedTotal,
+            status = combinedStatus,
+            lastUpdated = allParts.maxOf { it.lastUpdated }
+        )
     }
 }
 

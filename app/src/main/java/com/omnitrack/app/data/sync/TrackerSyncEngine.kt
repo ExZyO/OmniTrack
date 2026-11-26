@@ -1567,7 +1567,10 @@ class TrackerSyncEngine(
 
     private enum class MergeOutcome { IMPORTED, UPDATED, SKIPPED }
 
-    private suspend fun smartMergeIncomingItem(incoming: MediaItemEntity): MergeOutcome {
+    private suspend fun smartMergeIncomingItem(incoming: MediaItemEntity): MergeOutcome =
+        smartMergeIncomingItemWithId(incoming).first
+
+    private suspend fun smartMergeIncomingItemWithId(incoming: MediaItemEntity): Pair<MergeOutcome, Long> {
         val existing = repository.findExistingMedia(
             anilistId = incoming.anilistId,
             malId = incoming.malId,
@@ -1582,8 +1585,8 @@ class TrackerSyncEngine(
             mediaType = incoming.mediaType
         )
         if (existing == null) {
-            repository.insertMedia(incoming)
-            return MergeOutcome.IMPORTED
+            val insertedId = repository.insertMedia(incoming)
+            return MergeOutcome.IMPORTED to insertedId
         }
 
         val bannerDisabled = existing.artworkRole == "DISABLE_BANNER" || existing.customBannerPath == "NONE"
@@ -1647,9 +1650,9 @@ class TrackerSyncEngine(
         )
         return if (changed != existing) {
             repository.updateMedia(changed)
-            MergeOutcome.UPDATED
+            MergeOutcome.UPDATED to existing.id
         } else {
-            MergeOutcome.SKIPPED
+            MergeOutcome.SKIPPED to existing.id
         }
     }
 
@@ -1808,10 +1811,15 @@ class TrackerSyncEngine(
                             anilistId = alId,
                             malId = mediaObj["idMal"].asSafeLong()
                         )
-                        when (smartMergeIncomingItem(incoming)) {
+                        val (outcome, savedId) = smartMergeIncomingItemWithId(incoming)
+                        when (outcome) {
                             MergeOutcome.IMPORTED -> imported++
                             MergeOutcome.UPDATED -> updated++
                             MergeOutcome.SKIPPED -> skipped++
+                        }
+                        if (savedId > 0L && resolvedType == com.omnitrack.app.data.model.MediaType.ANIME && progress >= 1.0) {
+                            val cap = progress.toInt().coerceAtMost(2000)
+                            repository.markEpisodesWatchedAdditive(savedId, (1..cap).map { 1 to it })
                         }
                     }
                 }
@@ -1897,7 +1905,7 @@ class TrackerSyncEngine(
                         val startMs = parseYmdToEpochMs(listStatus?.get("start_date")?.asSafeStr())
                         val finishMs = parseYmdToEpochMs(listStatus?.get("finish_date")?.asSafeStr())
                         val malMean = node["mean"]?.asSafeStr()?.toFloatOrNull()?.takeIf { it > 0f }
-                        when (smartMergeIncomingItem(
+                        val (outcome, savedId) = smartMergeIncomingItemWithId(
                             MediaItemEntity(
                                 title = title,
                                 coverUrl = cover,
@@ -1915,10 +1923,15 @@ class TrackerSyncEngine(
                                 releaseYear = year,
                                 malId = malId
                             )
-                        )) {
+                        )
+                        when (outcome) {
                             MergeOutcome.IMPORTED -> imported++
                             MergeOutcome.UPDATED -> updated++
                             MergeOutcome.SKIPPED -> skipped++
+                        }
+                        if (savedId > 0L && resolvedType == com.omnitrack.app.data.model.MediaType.ANIME && prog >= 1.0) {
+                            val cap = prog.toInt().coerceAtMost(2000)
+                            repository.markEpisodesWatchedAdditive(savedId, (1..cap).map { 1 to it })
                         }
                     }
                     nextUrl = pagingNext
@@ -2021,9 +2034,17 @@ class TrackerSyncEngine(
                 val ids = showObj["ids"].asSafeObj()
                 val year = showObj["year"].asSafeStr()
                 val aired = showObj["aired_episodes"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
-                val watchedCount = obj["seasons"].asSafeArr()?.sumOf { sEl ->
-                    sEl.asSafeObj()?.get("episodes").asSafeArr()?.size ?: 0
-                }?.toDouble() ?: 0.0
+                val watchedPairs = mutableListOf<Pair<Int, Int>>()
+                obj["seasons"].asSafeArr()?.forEach { sEl ->
+                    val sObj = sEl.asSafeObj() ?: return@forEach
+                    val sNum = sObj["number"].asSafeInt() ?: return@forEach
+                    if (sNum < 0) return@forEach
+                    sObj["episodes"].asSafeArr()?.forEach { epEl ->
+                        val epNum = epEl.asSafeObj()?.get("number").asSafeInt() ?: return@forEach
+                        if (epNum > 0) watchedPairs.add(sNum to epNum)
+                    }
+                }
+                val watchedCount = watchedPairs.size.toDouble()
                 val status = if (aired != null && watchedCount >= aired) {
                     com.omnitrack.app.data.model.TrackingStatus.COMPLETED
                 } else {
@@ -2032,7 +2053,7 @@ class TrackerSyncEngine(
                 val trId = ids?.get("trakt").asSafeLong()
                 val tmId = ids?.get("tmdb").asSafeLong()
                 val rating = (trId?.let { showRatings[it] }) ?: (tmId?.let { showRatings[-it] })
-                when (smartMergeIncomingItem(
+                val (outcome, savedId) = smartMergeIncomingItemWithId(
                     MediaItemEntity(
                         title = title,
                         coverUrl = "",
@@ -2046,10 +2067,14 @@ class TrackerSyncEngine(
                         traktId = trId,
                         imdbId = ids?.get("imdb").asSafeStr()
                     )
-                )) {
+                )
+                when (outcome) {
                     MergeOutcome.IMPORTED -> imported++
                     MergeOutcome.UPDATED -> updated++
                     MergeOutcome.SKIPPED -> skipped++
+                }
+                if (savedId > 0L && watchedPairs.isNotEmpty()) {
+                    repository.markEpisodesWatchedAdditive(savedId, watchedPairs)
                 }
             }
 
@@ -2158,7 +2183,17 @@ class TrackerSyncEngine(
                         ?: if (defaultType == com.omnitrack.app.data.model.MediaType.MOVIE && status == com.omnitrack.app.data.model.TrackingStatus.COMPLETED) 1.0 else 0.0
                     val totalEps = entry["total_episodes_count"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
                     val rating = entry["user_rating"].asSafeInt()?.takeIf { it > 0 }?.toFloat()
-                    when (smartMergeIncomingItem(
+                    val simklWatchedPairs = mutableListOf<Pair<Int, Int>>()
+                    entry["seasons"].asSafeArr()?.forEach { sEl ->
+                        val sObj = sEl.asSafeObj() ?: return@forEach
+                        val sNum = sObj["number"].asSafeInt() ?: 1
+                        if (sNum < 0) return@forEach
+                        sObj["episodes"].asSafeArr()?.forEach { epEl ->
+                            val epNum = epEl.asSafeObj()?.get("number").asSafeInt() ?: epEl.asSafeInt() ?: return@forEach
+                            if (epNum > 0) simklWatchedPairs.add(sNum to epNum)
+                        }
+                    }
+                    val (outcome, savedId) = smartMergeIncomingItemWithId(
                         MediaItemEntity(
                             title = title,
                             coverUrl = poster,
@@ -2174,10 +2209,23 @@ class TrackerSyncEngine(
                             anilistId = ids?.get("anilist").asSafeLong(),
                             imdbId = ids?.get("imdb").asSafeStr()
                         )
-                    )) {
+                    )
+                    when (outcome) {
                         MergeOutcome.IMPORTED -> imported++
                         MergeOutcome.UPDATED -> updated++
                         MergeOutcome.SKIPPED -> skipped++
+                    }
+                    if (savedId > 0L && defaultType != com.omnitrack.app.data.model.MediaType.MOVIE) {
+                        val pairsToSeed = if (simklWatchedPairs.isNotEmpty()) {
+                            simklWatchedPairs
+                        } else if (watchedEps >= 1.0) {
+                            (1..watchedEps.toInt().coerceAtMost(2000)).map { 1 to it }
+                        } else {
+                            emptyList()
+                        }
+                        if (pairsToSeed.isNotEmpty()) {
+                            repository.markEpisodesWatchedAdditive(savedId, pairsToSeed)
+                        }
                     }
                 }
             }
@@ -2271,7 +2319,7 @@ class TrackerSyncEngine(
                     val progress = obj["ep_status"].asSafeInt()?.toDouble() ?: 0.0
                     val total = subj["eps"].asSafeInt()?.takeIf { it > 0 }?.toDouble()
                     val rating = obj["rate"].asSafeInt()?.takeIf { it > 0 }?.toFloat()
-                    when (smartMergeIncomingItem(
+                    val (outcome, savedId) = smartMergeIncomingItemWithId(
                         MediaItemEntity(
                             title = title,
                             nativeTitle = native.takeIf { it != title },
@@ -2284,10 +2332,15 @@ class TrackerSyncEngine(
                             releaseYear = subj["date"].asSafeStr()?.take(4),
                             bangumiId = bgmId
                         )
-                    )) {
+                    )
+                    when (outcome) {
                         MergeOutcome.IMPORTED -> imported++
                         MergeOutcome.UPDATED -> updated++
                         MergeOutcome.SKIPPED -> skipped++
+                    }
+                    if (savedId > 0L && resolvedType == com.omnitrack.app.data.model.MediaType.ANIME && progress >= 1.0) {
+                        val cap = progress.toInt().coerceAtMost(2000)
+                        repository.markEpisodesWatchedAdditive(savedId, (1..cap).map { 1 to it })
                     }
                 }
                 if (dataArr.size < 50) break

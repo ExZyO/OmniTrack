@@ -137,7 +137,9 @@ fun MediaItemEntity.toSummary(): MediaCardSummary = MediaCardSummary(
     comickId = comickId,
     studioOrNetwork = studioOrNetwork,
     isFavorite = isFavorite,
-    igdbId = igdbId
+    igdbId = igdbId,
+    linkedParentMediaId = linkedParentMediaId,
+    linkedSeasonNumber = linkedSeasonNumber
 )
 
 val LocalCustomPosterPattern = androidx.compose.runtime.compositionLocalOf { "" }

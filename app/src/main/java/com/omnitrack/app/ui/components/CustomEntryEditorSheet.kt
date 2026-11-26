@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +53,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -75,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.omnitrack.app.OmniTrackApplication
 import com.omnitrack.app.data.cache.CoverCache
+import com.omnitrack.app.data.db.dto.MediaCardSummary
 import com.omnitrack.app.data.db.entity.CategoryEntity
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.db.entity.VnRouteEntity
@@ -130,6 +134,7 @@ fun CustomEntryEditorSheet(
     initialMediaType: MediaType = MediaType.NOVEL,
     visibleMediaTypes: List<MediaType> = DEFAULT_MEDIA_TYPE_ORDER,
     availableCategories: List<CategoryEntity> = emptyList(),
+    linkableSeries: List<MediaCardSummary> = emptyList(),
     initialCategoryIds: Set<Long> = emptySet(),
     initialVnRoutes: List<VnRouteEntity> = emptyList(),
     vnMeta: VnDetailMeta? = null,
@@ -238,6 +243,14 @@ fun CustomEntryEditorSheet(
     var manualProtected by remember(existingItem?.id) {
         mutableStateOf(existingItem?.isCustomEntry ?: true)
     }
+    var linkedParentMediaId by remember(existingItem?.id) {
+        mutableStateOf(existingItem?.linkedParentMediaId)
+    }
+    var linkedSeasonNumberStr by remember(existingItem?.id) {
+        mutableStateOf(existingItem?.linkedSeasonNumber?.toString().orEmpty())
+    }
+    var showParentPickerDialog by remember { mutableStateOf(false) }
+    var parentPickerQuery by remember { mutableStateOf("") }
 
     var vnRouteDrafts by remember(existingItem?.id, initialVnRoutes) {
         mutableStateOf(
@@ -1131,6 +1144,88 @@ fun CustomEntryEditorSheet(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                val candidateParents = remember(linkableSeries, existingItem?.id) {
+                    linkableSeries.filter { it.id > 0L && it.id != existingItem?.id }
+                }
+                if (candidateParents.isNotEmpty() || linkedParentMediaId != null) {
+                    val linkedParentSummary = remember(candidateParents, linkedParentMediaId) {
+                        candidateParents.firstOrNull { it.id == linkedParentMediaId }
+                    }
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Link,
+                                contentDescription = null,
+                                tint = AccentGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Link to Existing Series (Optional)",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .clickable { showParentPickerDialog = true }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = linkedParentSummary?.title
+                                        ?: linkedParentMediaId?.let { "Linked Series #$it" }
+                                        ?: "Tap to pick a parent series in your library",
+                                    color = if (linkedParentMediaId != null) TextPrimary else TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (linkedParentMediaId != null) FontWeight.SemiBold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (linkedParentSummary != null) {
+                                    Text(
+                                        text = "${linkedParentSummary.mediaType.displayName} • Appears in parent's seasons",
+                                        color = TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                            if (linkedParentMediaId != null) {
+                                TextButton(onClick = {
+                                    linkedParentMediaId = null
+                                    linkedSeasonNumberStr = ""
+                                }) {
+                                    Text("Unlink", color = Color(0xFFEF4444), fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        if (linkedParentMediaId != null) {
+                            OutlinedTextField(
+                                value = linkedSeasonNumberStr,
+                                onValueChange = { raw -> linkedSeasonNumberStr = raw.filter { it.isDigit() } },
+                                label = { Text("Season / Part # (e.g. 2)") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = fieldColors,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
                 if (existingItem != null) {
                     Row(
                         modifier = Modifier
@@ -1211,6 +1306,10 @@ fun CustomEntryEditorSheet(
                         comicFormat = if (selectedType == MediaType.COMIC) fmtTrim else base.comicFormat,
                         platform = if (selectedType != MediaType.BOOK && selectedType != MediaType.COMIC) fmtTrim else base.platform,
                         isCustomEntry = manualProtected,
+                        linkedParentMediaId = linkedParentMediaId,
+                        linkedSeasonNumber = if (linkedParentMediaId != null) {
+                            linkedSeasonNumberStr.trim().toIntOrNull()?.coerceAtLeast(1) ?: 2
+                        } else null,
                         lastUpdated = System.currentTimeMillis()
                     )
                     val finalRoutes = if (selectedType == MediaType.VISUAL_NOVEL) {
@@ -1326,6 +1425,107 @@ fun CustomEntryEditorSheet(
             onDismiss = {
                 showDraftRoutePhotoPicker = false
                 editingDraftPhotoIndex = null
+            }
+        )
+    }
+
+    if (showParentPickerDialog) {
+        val dialogParents = remember(linkableSeries, existingItem?.id, parentPickerQuery) {
+            val q = parentPickerQuery.trim()
+            linkableSeries.filter { s ->
+                s.id > 0L &&
+                    s.id != existingItem?.id &&
+                    s.linkedParentMediaId == null &&
+                    (q.isEmpty() || s.title.contains(q, ignoreCase = true) || s.mediaType.displayName.contains(q, ignoreCase = true))
+            }.take(80)
+        }
+        AlertDialog(
+            onDismissRequest = { showParentPickerDialog = false },
+            containerColor = Color(0xFF141418),
+            title = {
+                Text(
+                    text = "Select Parent Series",
+                    color = TextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = parentPickerQuery,
+                        onValueChange = { parentPickerQuery = it },
+                        placeholder = { Text("Search your library...", color = TextMuted) },
+                        singleLine = true,
+                        colors = fieldColors,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (dialogParents.isEmpty()) {
+                            Text(
+                                text = "No matching library titles found",
+                                color = TextMuted,
+                                fontSize = 12.5.sp,
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            )
+                        } else {
+                            dialogParents.forEach { candidate ->
+                                val isChosen = candidate.id == linkedParentMediaId
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isChosen) AccentGold.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.04f))
+                                        .clickable {
+                                            linkedParentMediaId = candidate.id
+                                            if (linkedSeasonNumberStr.isBlank()) {
+                                                linkedSeasonNumberStr = "2"
+                                            }
+                                            showParentPickerDialog = false
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = candidate.title,
+                                            color = if (isChosen) AccentGold else TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = candidate.mediaType.displayName,
+                                            color = TextMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    if (isChosen) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = AccentGold,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showParentPickerDialog = false }) {
+                    Text("Close", color = AccentGold)
+                }
             }
         )
     }

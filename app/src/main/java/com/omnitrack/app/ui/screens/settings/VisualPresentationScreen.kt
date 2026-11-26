@@ -35,6 +35,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -54,7 +56,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.OmniTrackApplication
@@ -164,43 +169,118 @@ fun VisualPresentationScreen(
             )
             HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)
 
-            // Section 1: Details Page Presentation
+            // Section 1: Details Page Presentation (Pure visual wireframes — no text labels)
             PresentationSectionTitle("DETAILS PAGE LAYOUT")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                val isHero = presentationSettings.detailsPagePresentation == DetailsPagePresentation.HERO
-                VisualOptionTile(
-                    title = "Hero Layout",
-                    subtitle = "Edge-to-edge dissolve into AMOLED canvas",
-                    isSelected = isHero,
-                    modifier = Modifier.weight(1f),
-                    previewHeight = 76.dp,
-                    onClick = {
-                        scope.launch {
-                            prefManager.updateDetailsPagePresentation(DetailsPagePresentation.HERO)
+                listOf(
+                    DetailsPagePresentation.HERO,
+                    DetailsPagePresentation.CENTERED_COVER,
+                    DetailsPagePresentation.CLASSIC
+                ).forEach { mode ->
+                    val isSelected = presentationSettings.detailsPagePresentation == mode
+                    val borderColor by animateColorAsState(
+                        targetValue = if (isSelected) AccentGold else Color.White.copy(alpha = 0.12f),
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "detailsLayoutTileBorder"
+                    )
+                    val bgColor by animateColorAsState(
+                        targetValue = if (isSelected) AccentGold.copy(alpha = 0.08f) else DarkSurfaceElevated.copy(alpha = 0.72f),
+                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                        label = "detailsLayoutTileBg"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(112.dp)
+                            .semantics { contentDescription = mode.displayName }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(bgColor)
+                            .border(
+                                width = if (isSelected) 1.5.dp else 0.8.dp,
+                                color = borderColor,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable {
+                                scope.launch {
+                                    prefManager.updateDetailsPagePresentation(mode)
+                                }
+                            }
+                            .padding(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(7.dp))
+                                .background(AmoledBlack)
+                                .border(0.6.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(7.dp))
+                        ) {
+                            DetailsLayoutWireframe(presentation = mode)
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(5.dp)
+                                        .size(16.dp)
+                                        .clip(CircleShape)
+                                        .background(AccentGold),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = OnAccentColor,
+                                        modifier = Modifier.size(10.dp)
+                                    )
+                                }
+                            }
                         }
                     }
-                ) {
-                    DetailsLayoutWireframe(isHero = true)
                 }
+            }
 
-                val isClassic = presentationSettings.detailsPagePresentation == DetailsPagePresentation.CLASSIC
-                VisualOptionTile(
-                    title = "Classic Poster",
-                    subtitle = "Overlaid poster with floating metadata",
-                    isSelected = isClassic,
-                    modifier = Modifier.weight(1f),
-                    previewHeight = 76.dp,
-                    onClick = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
                         scope.launch {
-                            prefManager.updateDetailsPagePresentation(DetailsPagePresentation.CLASSIC)
+                            prefManager.updateAutoCenterCoverWhenNoBanner(!presentationSettings.autoCenterCoverWhenNoBanner)
                         }
                     }
-                ) {
-                    DetailsLayoutWireframe(isHero = false)
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Auto-center cover when no banner",
+                        color = TextPrimary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "Automatically center cover art when a title has no wide banner",
+                        color = TextSecondary,
+                        fontSize = 11.5.sp
+                    )
                 }
+                Switch(
+                    checked = presentationSettings.autoCenterCoverWhenNoBanner,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            prefManager.updateAutoCenterCoverWhenNoBanner(enabled)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = OnAccentColor,
+                        checkedTrackColor = AccentGold,
+                        uncheckedThumbColor = TextSecondary,
+                        uncheckedTrackColor = Color.White.copy(alpha = 0.14f)
+                    )
+                )
             }
 
             // Section 1B: Discover Tab Layout (Layout A / B / C)
@@ -699,24 +779,26 @@ private fun LivePresentationMockup(
 ) {
     val accent = AccentGold
     val variant = OmniThemeState.accentVariant
-    val isHero = settings.detailsPagePresentation == DetailsPagePresentation.HERO
+    val mode = settings.detailsPagePresentation
+    val isCenteredCover = mode == DetailsPagePresentation.CENTERED_COVER
+    val isClassic = mode == DetailsPagePresentation.CLASSIC
     val isFullBleed = settings.bannerSizing == BannerSizing.FULL_BLEED
     val isSolidBlack = settings.fallbackBackgroundStyle == FallbackBackgroundStyle.SOLID_BLACK
 
     val posterAlpha by animateFloatAsState(
-        targetValue = if (isHero) 0f else 1f,
+        targetValue = if (mode == DetailsPagePresentation.HERO) 0f else 1f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "posterAlpha"
     )
 
     val posterTranslateY by animateDpAsState(
-        targetValue = if (isHero) 20.dp else 0.dp,
+        targetValue = if (mode == DetailsPagePresentation.HERO) 20.dp else 0.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "posterTransY"
     )
 
     val titlePaddingStart by animateDpAsState(
-        targetValue = if (isHero) 16.dp else 84.dp,
+        targetValue = if (isClassic) 84.dp else 16.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "titleStart"
     )
@@ -776,127 +858,180 @@ private fun LivePresentationMockup(
                 )
             }
 
-            // Banner Sizing Mockup Area
-            if (isFullBleed) {
-                // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(144.dp)
-                ) {
-                    AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
-
+            // Banner Sizing Mockup Area (hidden in CENTERED_COVER mode)
+            if (!isCenteredCover) {
+                if (isFullBleed) {
+                    // MODE A: Full-Bleed Edge-to-Edge Banner dissolving via smoothstep
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    0.15f to Color.Transparent,
-                                    0.60f to dissolveTarget.copy(alpha = 0.58f),
-                                    1.00f to dissolveTarget
-                                )
-                            )
-                    )
-                }
-            } else {
-                // MODE B: Cinema Showcase Floating 16:9 Widescreen Card with Theme Ambient Aura
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .height(108.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                scaleX = 1.06f
-                                scaleY = 1.18f
-                                alpha = 0.65f
-                            }
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        accent.copy(alpha = 0.48f),
-                                        variant.copy(alpha = 0.30f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                            .fillMaxWidth()
+                            .height(144.dp)
                     ) {
                         AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
+
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                                        0.15f to Color.Transparent,
+                                        0.60f to dissolveTarget.copy(alpha = 0.58f),
+                                        1.00f to dissolveTarget
                                     )
                                 )
+                        )
+                    }
+                } else {
+                    // MODE B: Cinema Showcase Floating 16:9 Widescreen Card with Theme Ambient Aura
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .height(108.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = 1.06f
+                                    scaleY = 1.18f
+                                    alpha = 0.65f
+                                }
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            accent.copy(alpha = 0.48f),
+                                            variant.copy(alpha = 0.30f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(10.dp))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(10.dp))
+                        ) {
+                            AnimeArtworkCanvas(modifier = Modifier.fillMaxSize())
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f))
+                                        )
+                                    )
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Soft centered ambient glow behind the centered poster
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(126.dp)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    accent.copy(alpha = 0.22f),
+                                    variant.copy(alpha = 0.14f),
+                                    Color.Transparent
+                                ),
+                                radius = 260f
+                            )
+                        )
+                )
+            }
+
+            // Mock Poster (Top-center in CENTERED_COVER, left-overlap in CLASSIC, hidden in HERO)
+            if (posterAlpha > 0.01f) {
+                if (isCenteredCover) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 18.dp)
+                            .graphicsLayer {
+                                alpha = posterAlpha
+                            }
+                            .width(60.dp)
+                            .height(90.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(variant.copy(alpha = 0.85f), accent.copy(alpha = 0.90f))
+                                )
+                            )
+                            .border(0.8.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                            .shadow(elevation = 10.dp, shape = RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "COVER",
+                            color = OnAccentColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .padding(start = 16.dp, top = 58.dp)
+                            .graphicsLayer {
+                                alpha = posterAlpha
+                                translationY = posterTranslateY.toPx()
+                            }
+                            .width(54.dp)
+                            .height(80.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(variant.copy(alpha = 0.85f), accent.copy(alpha = 0.90f))
+                                )
+                            )
+                            .border(0.8.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                            .shadow(elevation = 10.dp, shape = RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "POSTER",
+                            color = OnAccentColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
                         )
                     }
                 }
             }
 
-            // Mock Poster (Fades in when Classic layout is active)
-            if (posterAlpha > 0.01f) {
-                Box(
-                    modifier = Modifier
-                        .padding(start = 16.dp, top = 58.dp)
-                        .graphicsLayer {
-                            alpha = posterAlpha
-                            translationY = posterTranslateY.toPx()
-                        }
-                        .width(54.dp)
-                        .height(80.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            Brush.linearGradient(
-                                listOf(variant.copy(alpha = 0.85f), accent.copy(alpha = 0.90f))
-                            )
-                        )
-                        .border(0.8.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
-                        .shadow(elevation = 10.dp, shape = RoundedCornerShape(8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "POSTER",
-                        color = OnAccentColor,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Black,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-            }
-
-            // Title Row Mock
+            // Title Row Mock (Centered in HERO & CENTERED_COVER, Left-aligned next to poster in CLASSIC)
+            val isCenteredText = !isClassic
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomStart)
                     .padding(bottom = 50.dp)
-                    .padding(start = titlePaddingStart, end = 16.dp)
+                    .padding(start = titlePaddingStart, end = 16.dp),
+                horizontalAlignment = if (isCenteredText) Alignment.CenterHorizontally else Alignment.Start
             ) {
                 Text(
                     text = "Cyberpunk: Edgerunners",
                     color = TextPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1
+                    maxLines = 1,
+                    textAlign = if (isCenteredText) TextAlign.Center else TextAlign.Start
                 )
                 Text(
                     text = "ANIME · 2022 · STUDIO TRIGGER",
                     color = TextSecondary,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
+                    letterSpacing = 0.5.sp,
+                    textAlign = if (isCenteredText) TextAlign.Center else TextAlign.Start
                 )
             }
 
@@ -977,13 +1112,14 @@ private fun LivePresentationMockup(
                 color = if (isSolidBlack) TextSecondary else accent,
                 fontWeight = FontWeight.SemiBold
             )
-            Text(
-                text = (if (isHero) "Hero Layout" else "Classic Poster") + " · " +
-                    (if (isFullBleed) "Full-Bleed" else "16:9 Cinema"),
-                fontSize = 10.5.sp,
-                color = TextSecondary,
-                fontWeight = FontWeight.Medium
-            )
+            if (!isCenteredCover) {
+                Text(
+                    text = if (isFullBleed) "Full-Bleed" else "16:9 Cinema",
+                    fontSize = 10.5.sp,
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }
