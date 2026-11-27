@@ -480,7 +480,9 @@ fun HomeCustomizerSheet(
                                         text = if (item.isEnabled) "#${index + 1}" else "OFF",
                                         fontSize = 10.5.sp,
                                         fontWeight = FontWeight.Black,
-                                        color = if (item.isEnabled) AccentGold else TextSecondary
+                                        color = if (item.isEnabled) AccentGold else TextSecondary,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
 
@@ -491,6 +493,7 @@ fun HomeCustomizerSheet(
                                     verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
                                     Row(
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
@@ -500,7 +503,8 @@ fun HomeCustomizerSheet(
                                             fontWeight = FontWeight.SemiBold,
                                             color = if (item.isEnabled) TextPrimary else TextSecondary.copy(alpha = 0.6f),
                                             maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (isDiscoverRow) {
                                             Box(
@@ -513,7 +517,9 @@ fun HomeCustomizerSheet(
                                                     text = "DISCOVER",
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = AccentGold
+                                                    color = AccentGold,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }
@@ -690,13 +696,18 @@ fun HomeCustomizerSheet(
                                     Text(
                                         text = "No custom categories created yet",
                                         fontSize = 12.sp,
-                                        color = TextSecondary
+                                        color = TextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
                                     Text(
                                         text = "Manage Categories \u2192",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = AccentGold,
+                                        maxLines = 1,
+                                        softWrap = false,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(6.dp))
                                             .clickable {
@@ -859,7 +870,8 @@ fun HomeCustomizerSheet(
                                     fontSize = 11.5.sp,
                                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                     color = if (active) AccentGold else TextPrimary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -895,7 +907,8 @@ fun HomeCustomizerSheet(
                                     fontSize = 11.5.sp,
                                     fontWeight = if (isSel || ov != null) FontWeight.Bold else FontWeight.Medium,
                                     color = if (isSel || ov != null) AccentGold else TextSecondary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
@@ -908,7 +921,7 @@ fun HomeCustomizerSheet(
                         val inheritActive = currentOv == null
                         Box(
                             modifier = Modifier
-                                .weight(1.15f)
+                                .weight(1.45f)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(if (inheritActive) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                                 .border(
@@ -921,7 +934,7 @@ fun HomeCustomizerSheet(
                                         preferenceManager.updateCategoryHeroBannerBlurOverride(selectedHomeBlurCat, null)
                                     }
                                 }
-                                .padding(vertical = 7.dp),
+                                .padding(horizontal = 4.dp, vertical = 7.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -929,7 +942,9 @@ fun HomeCustomizerSheet(
                                 fontSize = 11.sp,
                                 fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
                                 color = if (inheritActive) AccentGold else TextPrimary,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         HeroBannerBlurLevel.entries.forEach { level ->
@@ -957,14 +972,15 @@ fun HomeCustomizerSheet(
                                     fontSize = 11.sp,
                                     fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
                                     color = if (active) AccentGold else TextPrimary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
                     }
                     CustomizerSwitchRow(
                         title = "Allow Cropped Cover Fallback",
-                        subtitle = "If wide banner is missing, blur portrait cover instead of Ambient Glow",
+                        subtitle = "If wide banner is missing, use portrait cover (follows your blur setting) instead of Ambient Glow",
                         checked = heroSettings.allowCroppedFallback,
                         onCheckedChange = { v -> coroutineScope.launch { preferenceManager.setHomeHeroAllowCroppedFallback(v) } }
                     )

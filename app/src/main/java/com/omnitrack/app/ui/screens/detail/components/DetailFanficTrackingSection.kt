@@ -1114,7 +1114,9 @@ fun DetailFanficTrackingSection(
                                                     text = "PAID",
                                                     color = AccentGold,
                                                     fontSize = 9.sp,
-                                                    fontWeight = FontWeight.ExtraBold
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    maxLines = 1,
+                                                    softWrap = false
                                                 )
                                             }
                                         }

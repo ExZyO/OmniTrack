@@ -183,7 +183,10 @@ fun DailyCriticsPickCard(
                         color = AccentGold,
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     item.communityScore?.let { sc ->
                         Row(
@@ -195,7 +198,9 @@ fun DailyCriticsPickCard(
                                 text = String.format(Locale.US, "%.1f", sc),
                                 color = TextPrimary,
                                 fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -232,7 +237,9 @@ fun DailyCriticsPickCard(
                     text = if (libraryMatch != null) "Open" else "+ Library",
                     color = if (libraryMatch != null) TextPrimary else OnAccentColor,
                     fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
         }

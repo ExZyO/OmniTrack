@@ -270,6 +270,7 @@ fun LazyListScope.detailSeriesItems(
                         else -> "Seasons"
                     }
                     Row(
+                        modifier = Modifier.weight(1f, fill = false),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -278,7 +279,9 @@ fun LazyListScope.detailSeriesItems(
                             color = TextPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = (-0.3).sp
+                            letterSpacing = (-0.3).sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (hiddenSeasonsCount > 0) {
                             Text(
@@ -286,6 +289,8 @@ fun LazyListScope.detailSeriesItems(
                                 color = TextMuted,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(Color.White.copy(alpha = 0.06f))
@@ -1600,7 +1605,9 @@ private fun EpisodeHorizontalCard(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.Black,
-                            letterSpacing = 0.5.sp
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }
@@ -1996,7 +2003,9 @@ private fun EpisodeListCardItem(
                                 text = String.format(java.util.Locale.US, "%.1f", meta.userRating),
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentJade
+                                color = AccentJade,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -2136,7 +2145,9 @@ private fun EpisodeVerticalCardItem(
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.Black,
                             color = Color.Black,
-                            letterSpacing = 0.5.sp
+                            letterSpacing = 0.5.sp,
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
                 }

@@ -1877,15 +1877,21 @@ private fun DiscoverSpotlightBanner(
                     .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
             )
         } else if (!bannerDisabled && coverModel != null) {
-            val fallbackBlur = maxOf(bannerBlurDp, if (dimBanner) 18 else 10)
             AsyncImage(
                 model = coverModel,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                alignment = Alignment.TopCenter,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(fallbackBlur.dp)
-                    .alpha(if (dimBanner) 0.45f else 0.84f)
+                    .then(if (bannerBlurDp > 0) Modifier.blur(bannerBlurDp.dp) else Modifier)
+                    .alpha(
+                        if (bannerBlurDp > 0) {
+                            if (dimBanner) 0.55f else 0.86f
+                        } else {
+                            if (dimBanner) 0.78f else 0.96f
+                        }
+                    )
             )
         } else {
             Box(

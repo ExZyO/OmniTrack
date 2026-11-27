@@ -60,6 +60,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.omnitrack.app.OmniTrackApplication
@@ -462,7 +463,9 @@ fun VisualPresentationScreen(
                                 text = level.shortLabel,
                                 fontSize = 12.sp,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                color = if (active) AccentGold else TextPrimary
+                                color = if (active) AccentGold else TextPrimary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -513,7 +516,9 @@ fun VisualPresentationScreen(
                                 text = if (overrideLvl != null) "${cat.displayName} \u00B7 ${overrideLvl.shortLabel}" else cat.displayName,
                                 fontSize = 11.5.sp,
                                 fontWeight = if (isSelected || hasOverride) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected || hasOverride) AccentGold else TextSecondary
+                                color = if (isSelected || hasOverride) AccentGold else TextSecondary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
@@ -527,7 +532,7 @@ fun VisualPresentationScreen(
                     val inheritActive = currentCatOverride == null
                     Box(
                         modifier = Modifier
-                            .weight(1.15f)
+                            .weight(1.45f)
                             .clip(RoundedCornerShape(6.dp))
                             .background(if (inheritActive) AccentGold.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.04f))
                             .border(
@@ -538,14 +543,17 @@ fun VisualPresentationScreen(
                             .clickable {
                                 scope.launch { prefManager.updateCategoryHeroBannerBlurOverride(selectedBlurCategory, null) }
                             }
-                            .padding(vertical = 8.dp),
+                            .padding(horizontal = 4.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "Inherit (${presentationSettings.universalBannerBlur.shortLabel})",
                             fontSize = 11.sp,
                             fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
-                            color = if (inheritActive) AccentGold else TextPrimary
+                            color = if (inheritActive) AccentGold else TextPrimary,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                     HeroBannerBlurLevel.entries.forEach { level ->
@@ -570,7 +578,9 @@ fun VisualPresentationScreen(
                                 text = level.shortLabel,
                                 fontSize = 11.sp,
                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                color = if (active) AccentGold else TextPrimary
+                                color = if (active) AccentGold else TextPrimary,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }

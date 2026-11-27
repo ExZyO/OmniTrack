@@ -587,6 +587,7 @@ fun SeasonMergeCustomizeSheet(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Row(
+                                            modifier = Modifier.weight(1f, fill = false),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
@@ -596,7 +597,9 @@ fun SeasonMergeCustomizeSheet(
                                                 color = AccentGold,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Black,
-                                                letterSpacing = 0.8.sp
+                                                letterSpacing = 0.8.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                         if (suggestedLibrary.size + suggestedOnlineRelations.size >= 2) {
@@ -605,6 +608,8 @@ fun SeasonMergeCustomizeSheet(
                                                 color = AccentGold,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                softWrap = false,
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(6.dp))
                                                     .background(AccentGold.copy(alpha = 0.14f))

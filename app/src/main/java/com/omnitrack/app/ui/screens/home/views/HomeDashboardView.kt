@@ -2221,8 +2221,7 @@ private fun ChimanewHeroBackdropLayer(
                 .then(if (data.bannerBlurDp > 0) Modifier.blur(data.bannerBlurDp.dp) else Modifier)
         )
     } else if ((heroSettings.allowCroppedFallback || data.forceCoverBackdrop) && data.posterModel != null) {
-        val fallbackBlur = if (data.bannerBlurDp > 0) maxOf(data.bannerBlurDp, 16) else 20
-        val baseAlpha = if (heroSettings.dimBanner) 0.38f else 0.76f
+        val baseAlpha = if (heroSettings.dimBanner) 0.56f else 0.94f
         AsyncImage(
             model = data.posterModel,
             contentDescription = null,
@@ -2240,7 +2239,7 @@ private fun ChimanewHeroBackdropLayer(
                     translationY = if (animateHero) sPx * 0.34f else 0f
                     alpha = baseAlpha * visibility * heroScrollBackdropAlpha(sPx, size.height)
                 }
-                .blur(fallbackBlur.dp)
+                .then(if (data.bannerBlurDp > 0) Modifier.blur(data.bannerBlurDp.dp) else Modifier)
         )
     } else {
         val auraAlpha = if (heroSettings.dimBanner) 0.24f else 0.42f
@@ -2455,7 +2454,8 @@ private fun ChimanewHeroForegroundRow(
                                         fontWeight = FontWeight.Medium,
                                         color = TextSecondary,
                                         maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
                                     )
                                 }
                                 if (showUnread) RemainingCountBadge(count = remainingCount)
@@ -2536,7 +2536,9 @@ private fun ChimanewHeroForegroundRow(
                                 text = categoryBadge.substringBefore(" \u00B7 "),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentGold
+                                color = AccentGold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                             if (progressLabel.isNotBlank()) {
                                 Text(
@@ -2544,7 +2546,8 @@ private fun ChimanewHeroForegroundRow(
                                     fontSize = 11.sp,
                                     color = TextPrimary.copy(alpha = 0.85f),
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
                             }
                             if (showUnread) RemainingCountBadge(count = remainingCount)
@@ -2562,6 +2565,8 @@ private fun RemainingCountBadge(count: Int) {
         fontSize = 10.5.sp,
         fontWeight = FontWeight.Bold,
         color = AccentGold,
+        maxLines = 1,
+        softWrap = false,
         style = TextStyle(
             shadow = Shadow(color = Color.Black.copy(alpha = 0.85f), blurRadius = 4f)
         )
@@ -3157,7 +3162,10 @@ private fun HomeShelfHeader(
             text = title,
             fontSize = 17.sp,
             fontWeight = FontWeight.Bold,
-            color = TextPrimary
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
         )
         if (actionLabel != null && onActionClick != null) {
             Row(
@@ -3171,7 +3179,9 @@ private fun HomeShelfHeader(
                     text = actionLabel,
                     fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = AccentGold
+                    color = AccentGold,
+                    maxLines = 1,
+                    softWrap = false
                 )
                 Icon(
                     imageVector = Icons.Default.ChevronRight,

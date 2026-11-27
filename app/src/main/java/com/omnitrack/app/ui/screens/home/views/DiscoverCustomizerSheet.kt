@@ -337,7 +337,9 @@ fun DiscoverCustomizerSheet(
                                                 text = level.shortLabel,
                                                 fontSize = 11.5.sp,
                                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (active) AccentGold else TextPrimary
+                                                color = if (active) AccentGold else TextPrimary,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -367,7 +369,9 @@ fun DiscoverCustomizerSheet(
                                                 text = if (ov != null) "${cat.displayName} \u00B7 ${ov.shortLabel}" else cat.displayName,
                                                 fontSize = 11.sp,
                                                 fontWeight = if (isSel || ov != null) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (isSel || ov != null) AccentGold else TextSecondary
+                                                color = if (isSel || ov != null) AccentGold else TextSecondary,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -380,7 +384,7 @@ fun DiscoverCustomizerSheet(
                                     val inheritActive = curOv == null
                                     Box(
                                         modifier = Modifier
-                                            .weight(1.15f)
+                                            .weight(1.45f)
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(if (inheritActive) AccentGold.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
                                             .border(
@@ -391,14 +395,17 @@ fun DiscoverCustomizerSheet(
                                             .clickable {
                                                 scope.launch { preferenceManager.updateCategoryHeroBannerBlurOverride(selectedBlurCat, null) }
                                             }
-                                            .padding(vertical = 7.dp),
+                                            .padding(horizontal = 4.dp, vertical = 7.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = "Inherit (${settings.universalBannerBlur.shortLabel})",
                                             fontSize = 11.sp,
                                             fontWeight = if (inheritActive) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (inheritActive) AccentGold else TextPrimary
+                                            color = if (inheritActive) AccentGold else TextPrimary,
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                     HeroBannerBlurLevel.entries.forEach { level ->
@@ -423,7 +430,9 @@ fun DiscoverCustomizerSheet(
                                                 text = level.shortLabel,
                                                 fontSize = 11.sp,
                                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (active) AccentGold else TextPrimary
+                                                color = if (active) AccentGold else TextPrimary,
+                                                maxLines = 1,
+                                                softWrap = false
                                             )
                                         }
                                     }
@@ -508,13 +517,18 @@ fun DiscoverCustomizerSheet(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = AccentGold,
-                                            letterSpacing = 0.9.sp
+                                            letterSpacing = 0.9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         Text(
                                             text = if (anyEnabled) "Turn All Off" else "Turn All On",
                                             fontSize = 11.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = TextSecondary,
+                                            maxLines = 1,
+                                            softWrap = false,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .clickable {
