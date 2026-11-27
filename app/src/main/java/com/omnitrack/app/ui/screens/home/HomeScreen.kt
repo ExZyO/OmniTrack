@@ -463,8 +463,8 @@ fun HomeScreen(
                 }
             }
     }
-    LaunchedEffect(pagerState.currentPage, dynamicTabs) {
-        val activeTab = dynamicTabs.getOrNull(pagerState.currentPage)
+    LaunchedEffect(pagerState.settledPage, dynamicTabs) {
+        val activeTab = dynamicTabs.getOrNull(pagerState.settledPage)
         viewModel.selectMediaType(activeTab?.mediaTypeFilter ?: MediaType.ALL)
     }
 
@@ -624,12 +624,11 @@ fun HomeScreen(
                 }
 
                 NavDestination.LIBRARY -> {
-                    val activeTab = dynamicTabs.getOrNull(pagerState.currentPage)
-                    val activeTabFilteredItems = remember(
+                    val itemsByTabKey = remember(
+                        dynamicTabs,
                         uiState.allMediaSummaries,
                         uiState.selectedStatus,
                         searchQuery,
-                        activeTab,
                         libSettings,
                         categoryAssignments,
                         selectedMangaSubtype,
@@ -650,33 +649,37 @@ fun HomeScreen(
                         fanficTagFilter,
                         fanficNsfwMode
                     ) {
-                        if (activeTab == null) emptyList()
-                        else computeLibraryTabItems(
-                            allSummaries = uiState.allMediaSummaries,
-                            tab = activeTab,
-                            selectedStatus = uiState.selectedStatus,
-                            searchQuery = searchQuery,
-                            libSettings = libSettings,
-                            categoryAssignments = categoryAssignments,
-                            fanficNsfwMode = fanficNsfwMode,
-                            selectedMangaSubtype = selectedMangaSubtype,
-                            selectedNovelSubtype = selectedNovelSubtype,
-                            selectedVnOriginSubtype = selectedVnOriginSubtype,
-                            selectedVnLengthSubtype = selectedVnLengthSubtype,
-                            selectedGamePlatform = selectedGamePlatform,
-                            selectedGameCompletion = selectedGameCompletion,
-                            selectedBookFormat = selectedBookFormat,
-                            selectedBookCategory = selectedBookCategory,
-                            selectedComicPublisher = selectedComicPublisher,
-                            selectedComicFormat = selectedComicFormat,
-                            selectedFanficSites = selectedFanficSites,
-                            selectedFanficRating = selectedFanficRating,
-                            selectedFanficStatus = selectedFanficStatus,
-                            selectedFanficMinWords = selectedFanficMinWords,
-                            fanficCrossoverOnly = fanficCrossoverOnly,
-                            fanficTagFilter = fanficTagFilter
-                        )
+                        dynamicTabs.associate { tab ->
+                            tab.key to computeLibraryTabItems(
+                                allSummaries = uiState.allMediaSummaries,
+                                tab = tab,
+                                selectedStatus = uiState.selectedStatus,
+                                searchQuery = searchQuery,
+                                libSettings = libSettings,
+                                categoryAssignments = categoryAssignments,
+                                fanficNsfwMode = fanficNsfwMode,
+                                selectedMangaSubtype = selectedMangaSubtype,
+                                selectedNovelSubtype = selectedNovelSubtype,
+                                selectedVnOriginSubtype = selectedVnOriginSubtype,
+                                selectedVnLengthSubtype = selectedVnLengthSubtype,
+                                selectedGamePlatform = selectedGamePlatform,
+                                selectedGameCompletion = selectedGameCompletion,
+                                selectedBookFormat = selectedBookFormat,
+                                selectedBookCategory = selectedBookCategory,
+                                selectedComicPublisher = selectedComicPublisher,
+                                selectedComicFormat = selectedComicFormat,
+                                selectedFanficSites = selectedFanficSites,
+                                selectedFanficRating = selectedFanficRating,
+                                selectedFanficStatus = selectedFanficStatus,
+                                selectedFanficMinWords = selectedFanficMinWords,
+                                fanficCrossoverOnly = fanficCrossoverOnly,
+                                fanficTagFilter = fanficTagFilter
+                            )
+                        }
                     }
+                    val settledTabIndex = pagerState.settledPage.coerceIn(0, (dynamicTabs.size - 1).coerceAtLeast(0))
+                    val activeTab = dynamicTabs.getOrNull(settledTabIndex)
+                    val activeTabFilteredItems = activeTab?.let { itemsByTabKey[it.key] }.orEmpty()
                     val activeMediaTabType = activeTab?.mediaTypeFilter
                     val activeNovelTabSplit = activeTab?.novelSubtypeFilter != null
                     val activeSubFilterPills = remember(
@@ -963,30 +966,9 @@ fun HomeScreen(
                         }
 
                         // Dynamic Chimanew Underline Group Tabs (driven by LibraryGroupMode)
-                        val tabCounts = remember(
-                            dynamicTabs,
-                            uiState.allMediaSummaries,
-                            uiState.selectedStatus,
-                            searchQuery,
-                            libSettings,
-                            categoryAssignments,
-                            selectedFanficSites,
-                            fanficNsfwMode
-                        ) {
+                        val tabCounts = remember(libSettings.showTabItemCounts, itemsByTabKey) {
                             if (!libSettings.showTabItemCounts) emptyMap()
-                            else dynamicTabs.associate { tab ->
-                                tab.key to computeLibraryTabItems(
-                                    allSummaries = uiState.allMediaSummaries,
-                                    tab = tab,
-                                    selectedStatus = uiState.selectedStatus,
-                                    searchQuery = searchQuery,
-                                    libSettings = libSettings,
-                                    categoryAssignments = categoryAssignments,
-                                    fanficNsfwMode = fanficNsfwMode,
-                                    selectedFanficSites = selectedFanficSites,
-                                    sort = false
-                                ).size
-                            }
+                            else itemsByTabKey.mapValues { it.value.size }
                         }
 
                         if (libSettings.showCategoryTabs && dynamicTabs.size > 1) {
@@ -1112,250 +1094,197 @@ fun HomeScreen(
                                 )
                             }
                         } else {
-                            HorizontalPager(
-                                state = pagerState,
-                                key = { idx -> dynamicTabs.getOrNull(idx)?.key ?: "page_$idx" },
-                                modifier = Modifier.fillMaxSize()
-                            ) { pageIndex ->
-                                if (!perfSettings.prefetchAdjacentTabs && pageIndex !in ((pagerState.currentPage - 1)..(pagerState.currentPage + 1))) {
-                                    Box(modifier = Modifier.fillMaxSize())
-                                    return@HorizontalPager
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val isLandscapeScreen = maxWidth >= 600.dp
+                                val resolvedCols = when {
+                                    posterStyle.isLandscape -> if (isLandscapeScreen) 2 else 1
+                                    isLandscapeScreen -> libSettings.landscapeColumns.coerceIn(4, 8)
+                                    libSettings.portraitColumns > 0 -> libSettings.portraitColumns.coerceIn(2, 6)
+                                    else -> (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(2)
                                 }
-                                val pageTab = dynamicTabs.getOrNull(pageIndex) ?: LibraryGroupTab("ALL", "All")
-                                val pageGridState = remember(pageTab.key) {
-                                    tabGridStates.getOrPut(pageTab.key) { androidx.compose.foundation.lazy.grid.LazyGridState() }
-                                }
-                                val pageListState = remember(pageTab.key) {
-                                    tabListStates.getOrPut(pageTab.key) { LazyListState() }
-                                }
+                                val isDense = resolvedCols >= 4 && !posterStyle.isLandscape
 
-                                val displayedItems = remember(
-                                    uiState.allMediaSummaries,
-                                    uiState.selectedStatus,
-                                    searchQuery,
-                                    pageTab,
-                                    libSettings,
-                                    categoryAssignments,
-                                    selectedMangaSubtype,
-                                    selectedNovelSubtype,
-                                    selectedVnOriginSubtype,
-                                    selectedVnLengthSubtype,
-                                    selectedGamePlatform,
-                                    selectedGameCompletion,
-                                    selectedBookFormat,
-                                    selectedBookCategory,
-                                    selectedComicPublisher,
-                                    selectedComicFormat,
-                                    selectedFanficSites,
-                                    selectedFanficRating,
-                                    selectedFanficStatus,
-                                    selectedFanficMinWords,
-                                    fanficCrossoverOnly,
-                                    fanficTagFilter,
-                                    fanficNsfwMode
-                                ) {
-                                    computeLibraryTabItems(
-                                        allSummaries = uiState.allMediaSummaries,
-                                        tab = pageTab,
-                                        selectedStatus = uiState.selectedStatus,
-                                        searchQuery = searchQuery,
-                                        libSettings = libSettings,
-                                        categoryAssignments = categoryAssignments,
-                                        fanficNsfwMode = fanficNsfwMode,
-                                        selectedMangaSubtype = selectedMangaSubtype,
-                                        selectedNovelSubtype = selectedNovelSubtype,
-                                        selectedVnOriginSubtype = selectedVnOriginSubtype,
-                                        selectedVnLengthSubtype = selectedVnLengthSubtype,
-                                        selectedGamePlatform = selectedGamePlatform,
-                                        selectedGameCompletion = selectedGameCompletion,
-                                        selectedBookFormat = selectedBookFormat,
-                                        selectedBookCategory = selectedBookCategory,
-                                        selectedComicPublisher = selectedComicPublisher,
-                                        selectedComicFormat = selectedComicFormat,
-                                        selectedFanficSites = selectedFanficSites,
-                                        selectedFanficRating = selectedFanficRating,
-                                        selectedFanficStatus = selectedFanficStatus,
-                                        selectedFanficMinWords = selectedFanficMinWords,
-                                        fanficCrossoverOnly = fanficCrossoverOnly,
-                                        fanficTagFilter = fanficTagFilter
-                                    )
-                                }
+                                HorizontalPager(
+                                    state = pagerState,
+                                    beyondViewportPageCount = if (perfSettings.prefetchAdjacentTabs) 1 else 0,
+                                    key = { idx -> dynamicTabs.getOrNull(idx)?.key ?: "page_$idx" },
+                                    modifier = Modifier.fillMaxSize()
+                                ) { pageIndex ->
+                                    val pageTab = dynamicTabs.getOrNull(pageIndex) ?: LibraryGroupTab("ALL", "All")
+                                    val pageGridState = remember(pageTab.key) {
+                                        tabGridStates.getOrPut(pageTab.key) { androidx.compose.foundation.lazy.grid.LazyGridState() }
+                                    }
+                                    val pageListState = remember(pageTab.key) {
+                                        tabListStates.getOrPut(pageTab.key) { LazyListState() }
+                                    }
+                                    val displayedItems = itemsByTabKey[pageTab.key].orEmpty()
 
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .then(
-                                            if (!perfSettings.disableCardAnimations) {
-                                                Modifier.graphicsLayer {
-                                                    val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                                                    val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.05f)).coerceIn(0.95f, 1f)
-                                                    val kinematicAlpha = (1f - (kotlin.math.abs(pageOffset) * 0.35f)).coerceIn(0.65f, 1f)
-                                                    scaleX = kinematicScale
-                                                    scaleY = kinematicScale
-                                                    alpha = kinematicAlpha
-                                                }
-                                            } else Modifier
-                                        )
-                                ) {
-                                    if (displayedItems.isEmpty()) {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(
-                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                                modifier = Modifier.padding(horizontal = 32.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .then(
+                                                if (!perfSettings.disableCardAnimations) {
+                                                    Modifier.graphicsLayer {
+                                                        val pageOffset = (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
+                                                        val kinematicScale = (1f - (kotlin.math.abs(pageOffset) * 0.035f)).coerceIn(0.965f, 1f)
+                                                        scaleX = kinematicScale
+                                                        scaleY = kinematicScale
+                                                    }
+                                                } else Modifier
+                                            )
+                                    ) {
+                                        if (displayedItems.isEmpty()) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.VideoLibrary,
-                                                    contentDescription = null,
-                                                    tint = TextMuted,
-                                                    modifier = Modifier.size(48.dp)
-                                                )
-                                                Text(
-                                                    text = when {
-                                                        searchQuery.isNotEmpty() -> "No results matching \"$searchQuery\""
-                                                        uiState.allMediaSummaries.isEmpty() -> "Your library is empty"
-                                                        else -> "No items in ${pageTab.label}"
-                                                    },
-                                                    color = TextPrimary.copy(alpha = 0.85f),
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                                if (searchQuery.isEmpty() && uiState.allMediaSummaries.isEmpty()) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.VideoLibrary,
+                                                        contentDescription = null,
+                                                        tint = TextMuted,
+                                                        modifier = Modifier.size(48.dp)
+                                                    )
                                                     Text(
-                                                        text = "Add titles from Discover or import from a tracker in Settings",
-                                                        color = TextMuted,
-                                                        fontSize = 12.5.sp,
-                                                        textAlign = TextAlign.Center
+                                                        text = when {
+                                                            searchQuery.isNotEmpty() -> "No results matching \"$searchQuery\""
+                                                            uiState.allMediaSummaries.isEmpty() -> "Your library is empty"
+                                                            else -> "No items in ${pageTab.label}"
+                                                        },
+                                                        color = TextPrimary.copy(alpha = 0.85f),
+                                                        fontSize = 15.sp,
+                                                        fontWeight = FontWeight.SemiBold
                                                     )
+                                                    if (searchQuery.isEmpty() && uiState.allMediaSummaries.isEmpty()) {
+                                                        Text(
+                                                            text = "Add titles from Discover or import from a tracker in Settings",
+                                                            color = TextMuted,
+                                                            fontSize = 12.5.sp,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
-                                    } else if (libSettings.displayMode == LibraryDisplayMode.LIST) {
-                                        Box(modifier = Modifier.fillMaxSize()) {
-                                            LazyColumn(
-                                                state = pageListState,
-                                                contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 128.dp else 112.dp),
-                                                modifier = Modifier.fillMaxSize()
-                                            ) {
-                                                items(
-                                                    items = displayedItems,
-                                                    key = { "lib_list_${it.id}" },
-                                                    contentType = { "library_list_row" }
-                                                ) { item ->
-                                                    val isItemSelected = item.id in selectedLibraryIds
-                                                    LibraryListRow(
-                                                        item = item,
-                                                        showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
-                                                        showRemainingBadge = libSettings.showRemainingBadge,
-                                                        showTypeBadge = libSettings.showTypeBadge,
-                                                        showScoreBadge = libSettings.showScoreBadge,
-                                                        isSelectionMode = isLibraryMultiSelect,
-                                                        isSelected = isItemSelected,
-                                                        onClick = {
-                                                            if (isLibraryMultiSelect) {
+                                        } else if (libSettings.displayMode == LibraryDisplayMode.LIST) {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                LazyColumn(
+                                                    state = pageListState,
+                                                    contentPadding = PaddingValues(start = 16.dp, end = 20.dp, top = 6.dp, bottom = if (isLibraryMultiSelect) 128.dp else 112.dp),
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    items(
+                                                        items = displayedItems,
+                                                        key = { "lib_list_${it.id}" },
+                                                        contentType = { "library_list_row" }
+                                                    ) { item ->
+                                                        val isItemSelected = item.id in selectedLibraryIds
+                                                        LibraryListRow(
+                                                            item = item,
+                                                            showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
+                                                            showRemainingBadge = libSettings.showRemainingBadge,
+                                                            showTypeBadge = libSettings.showTypeBadge,
+                                                            showScoreBadge = libSettings.showScoreBadge,
+                                                            isSelectionMode = isLibraryMultiSelect,
+                                                            isSelected = isItemSelected,
+                                                            onClick = {
+                                                                if (isLibraryMultiSelect) {
+                                                                    selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
+                                                                } else {
+                                                                    AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
+                                                                    com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                                    onItemClick(item.id)
+                                                                }
+                                                            },
+                                                            onLongClick = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                isLibraryMultiSelect = true
                                                                 selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
-                                                            } else {
-                                                                AppLogger.i("HomeScreen", "Tapped list item: ${item.title} (id: ${item.id})")
-                                                                com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
-                                                                onItemClick(item.id)
+                                                            },
+                                                            onQuickProgress = {
+                                                                AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
+                                                                viewModel.incrementProgress(item)
                                                             }
-                                                        },
-                                                        onLongClick = {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                            isLibraryMultiSelect = true
-                                                            selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
-                                                        },
-                                                        onQuickProgress = {
-                                                            AppLogger.i("HomeScreen", "+ progress tapped for: ${item.title}")
-                                                            viewModel.incrementProgress(item)
-                                                        }
-                                                    )
+                                                        )
+                                                    }
                                                 }
-                                            }
-                                            LibraryFastScroller(
-                                                items = displayedItems,
-                                                sortMode = scrollerSortMode,
-                                                listState = pageListState,
-                                                columnsCount = 1
-                                            )
-                                        }
-                                    } else {
-                                        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                            val isLandscapeScreen = maxWidth >= 600.dp
-                                            val resolvedCols = when {
-                                                posterStyle.isLandscape -> if (isLandscapeScreen) 2 else 1
-                                                isLandscapeScreen -> libSettings.landscapeColumns.coerceIn(4, 8)
-                                                libSettings.portraitColumns > 0 -> libSettings.portraitColumns.coerceIn(2, 6)
-                                                else -> (maxWidth / posterStyle.widthDp.dp).toInt().coerceAtLeast(2)
-                                            }
-                                            val isDense = resolvedCols >= 4 && !posterStyle.isLandscape
-                                            LazyVerticalGrid(
-                                                state = pageGridState,
-                                                columns = GridCells.Fixed(resolvedCols),
-                                                contentPadding = PaddingValues(
-                                                    start = if (isDense) 12.dp else 14.dp,
-                                                    end = if (isDense) 14.dp else 16.dp,
-                                                    top = 6.dp,
-                                                    bottom = if (isLibraryMultiSelect) 128.dp else 112.dp
-                                                ),
-                                                horizontalArrangement = Arrangement.spacedBy(if (isDense) 7.dp else 10.dp),
-                                                verticalArrangement = Arrangement.spacedBy(if (isDense) 10.dp else 14.dp),
-                                                modifier = Modifier.fillMaxSize()
-                                            ) {
-                                                itemsIndexed(
+                                                LibraryFastScroller(
                                                     items = displayedItems,
-                                                    key = { _, item -> item.id },
-                                                    contentType = { _, _ -> "library_grid_card" }
-                                                ) { _, item ->
-                                                    val isItemSelected = item.id in selectedLibraryIds
-                                                    MediaCard(
-                                                        item = item,
-                                                        isSelectionMode = isLibraryMultiSelect,
-                                                        isSelected = isItemSelected,
-                                                        cornerRadiusDp = if (isDense) minOf(posterStyle.cornerRadiusDp, 8) else posterStyle.cornerRadiusDp,
-                                                        isLandscape = posterStyle.isLandscape,
-                                                        hideLabels = posterStyle.hideLabels,
-                                                        cardDepthEnabled = posterStyle.cardDepthEnabled && posterStyle.cardDepthPostersEnabled,
-                                                        cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
-                                                        cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
-                                                        cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
-                                                        showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
-                                                        showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
-                                                        displayMode = libSettings.displayMode,
-                                                        showRemainingBadge = libSettings.showRemainingBadge,
-                                                        showTypeBadge = libSettings.showTypeBadge,
-                                                        showScoreBadge = libSettings.showScoreBadge,
-                                                        isDenseGrid = isDense,
-                                                        onCardClick = {
-                                                            if (isLibraryMultiSelect) {
-                                                                selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
-                                                            } else {
-                                                                AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
-                                                                com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
-                                                                onItemClick(item.id)
-                                                            }
-                                                        },
-                                                        onCardLongClick = {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                            isLibraryMultiSelect = true
-                                                            selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
-                                                        },
-                                                        onQuickProgress = {
-                                                            AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
-                                                            viewModel.incrementProgress(item)
-                                                        }
-                                                    )
-                                                }
+                                                    sortMode = scrollerSortMode,
+                                                    listState = pageListState,
+                                                    columnsCount = 1
+                                                )
                                             }
-                                            LibraryFastScroller(
-                                                items = displayedItems,
-                                                sortMode = scrollerSortMode,
-                                                gridState = pageGridState,
-                                                columnsCount = resolvedCols
-                                            )
+                                        } else {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                LazyVerticalGrid(
+                                                    state = pageGridState,
+                                                    columns = GridCells.Fixed(resolvedCols),
+                                                    contentPadding = PaddingValues(
+                                                        start = if (isDense) 12.dp else 14.dp,
+                                                        end = if (isDense) 14.dp else 16.dp,
+                                                        top = 6.dp,
+                                                        bottom = if (isLibraryMultiSelect) 128.dp else 112.dp
+                                                    ),
+                                                    horizontalArrangement = Arrangement.spacedBy(if (isDense) 7.dp else 10.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(if (isDense) 10.dp else 14.dp),
+                                                    modifier = Modifier.fillMaxSize()
+                                                ) {
+                                                    itemsIndexed(
+                                                        items = displayedItems,
+                                                        key = { _, item -> item.id },
+                                                        contentType = { _, _ -> "library_grid_card" }
+                                                    ) { _, item ->
+                                                        val isItemSelected = item.id in selectedLibraryIds
+                                                        MediaCard(
+                                                            item = item,
+                                                            isSelectionMode = isLibraryMultiSelect,
+                                                            isSelected = isItemSelected,
+                                                            cornerRadiusDp = if (isDense) minOf(posterStyle.cornerRadiusDp, 8) else posterStyle.cornerRadiusDp,
+                                                            isLandscape = posterStyle.isLandscape,
+                                                            hideLabels = posterStyle.hideLabels,
+                                                            cardDepthEnabled = posterStyle.cardDepthEnabled && posterStyle.cardDepthPostersEnabled,
+                                                            cardDepthEdgeStrength = posterStyle.cardDepthEdgeStrength.toFloat(),
+                                                            cardDepthSheenStrength = posterStyle.cardDepthSheenStrength.toFloat(),
+                                                            cardDepthEdgeCoverage = posterStyle.cardDepthEdgeCoverage.toFloat(),
+                                                            showQuickProgressButton = libSettings.showQuickContinue && !isLibraryMultiSelect,
+                                                            showLandscapeClearlogo = posterStyle.alwaysShowLandscapeClearlogo,
+                                                            displayMode = libSettings.displayMode,
+                                                            showRemainingBadge = libSettings.showRemainingBadge,
+                                                            showTypeBadge = libSettings.showTypeBadge,
+                                                            showScoreBadge = libSettings.showScoreBadge,
+                                                            isDenseGrid = isDense,
+                                                            onCardClick = {
+                                                                if (isLibraryMultiSelect) {
+                                                                    selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
+                                                                } else {
+                                                                    AppLogger.i("HomeScreen", "Tapped card: ${item.title} (id: ${item.id})")
+                                                                    com.omnitrack.app.ui.screens.detail.ActiveSiblingHolder.setSiblings(displayedItems.map { it.id })
+                                                                    onItemClick(item.id)
+                                                                }
+                                                            },
+                                                            onCardLongClick = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                isLibraryMultiSelect = true
+                                                                selectedLibraryIds = if (isItemSelected) selectedLibraryIds - item.id else selectedLibraryIds + item.id
+                                                            },
+                                                            onQuickProgress = {
+                                                                AppLogger.i("HomeScreen", "+1 progress tapped for: ${item.title}")
+                                                                viewModel.incrementProgress(item)
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                                LibraryFastScroller(
+                                                    items = displayedItems,
+                                                    sortMode = scrollerSortMode,
+                                                    gridState = pageGridState,
+                                                    columnsCount = resolvedCols
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -2264,11 +2193,13 @@ private fun computeLibraryTabItems(
     sort: Boolean = true
 ): List<com.omnitrack.app.data.db.dto.MediaCardSummary> {
     val pageMediaType = tab.mediaTypeFilter
-    val filtered = allSummaries.filter { item ->
+    val shouldGroupSeasons = libSettings.groupAnimeSeasonsInLibrary && searchQuery.isBlank()
+
+    // Phase A: Scope, media subtype, tracker & category filters (evaluated BEFORE status so multi-season statuses merge!)
+    val baseScopeMatches = allSummaries.filter { item ->
         if (item.mediaType == MediaType.FANFICTION && com.omnitrack.app.ui.components.shouldHideFanficItem(item.fanficRating, fanficNsfwMode)) {
             return@filter false
         }
-        // Group tab predicate
         val tabMatches = when {
             tab.mediaTypeFilter != null -> {
                 val typeMatch = tab.mediaTypeFilter == MediaType.ALL || item.mediaType == tab.mediaTypeFilter
@@ -2279,13 +2210,12 @@ private fun computeLibraryTabItems(
             }
             tab.categoryId != null -> tab.categoryId in categoryAssignments[item.id].orEmpty()
             tab.isUncategorized -> categoryAssignments[item.id].isNullOrEmpty()
-            tab.statusFilter != null -> tab.statusFilter == TrackingStatus.ALL || item.status == tab.statusFilter
+            tab.statusFilter != null -> true // Status checked in Phase C after collapsing multi-season entries
             tab.trackerKey != null -> itemMatchesTrackerKey(item, tab.trackerKey)
             else -> true
         }
         if (!tabMatches) return@filter false
 
-        // Media-specific subtype bars (when viewing a MediaType tab)
         if (pageMediaType != null) {
             val subtypeOk = (pageMediaType != MediaType.MANGA || selectedMangaSubtype == "ALL" || inferMangaSubtype(item.originCountry, item.nativeTitle) == selectedMangaSubtype) &&
                 (pageMediaType != MediaType.NOVEL || tab.novelSubtypeFilter != null || selectedNovelSubtype == "ALL" || inferNovelSubtype(item.platform, item.originCountry, item.anilistId, item.malId, item.totalProgress, item.title, item.fanficSourceSite) == selectedNovelSubtype) &&
@@ -2314,10 +2244,49 @@ private fun computeLibraryTabItems(
             if (!subtypeOk) return@filter false
         }
 
-        // Top quick status strip
+        if (libSettings.filterMediaTypes.isNotEmpty() && item.mediaType.name !in libSettings.filterMediaTypes) {
+            return@filter false
+        }
+        if (libSettings.filterTrackers.isNotEmpty() && libSettings.filterTrackers.none { itemMatchesTrackerKey(item, it) }) {
+            return@filter false
+        }
+        val itemCats = categoryAssignments[item.id].orEmpty()
+        if (libSettings.filterIncludeCategoryIds.isNotEmpty() && itemCats.none { it in libSettings.filterIncludeCategoryIds }) {
+            return@filter false
+        }
+        if (libSettings.filterExcludeCategoryIds.isNotEmpty() && itemCats.any { it in libSettings.filterExcludeCategoryIds }) {
+            return@filter false
+        }
+        true
+    }
+
+    // Pull in manually merged children (e.g. merged Movies/OVAs) whose parent is in baseScopeMatches so they fold into 1 card cleanly
+    val scopeIds = baseScopeMatches.mapTo(HashSet()) { it.id }
+    val expandedScope = if (shouldGroupSeasons) {
+        val extras = allSummaries.filter { candidate ->
+            candidate.id !in scopeIds &&
+                candidate.linkedParentMediaId != null &&
+                candidate.linkedParentMediaId in scopeIds
+        }
+        if (extras.isEmpty()) baseScopeMatches else baseScopeMatches + extras
+    } else {
+        baseScopeMatches
+    }
+
+    // Phase B: Collapse seasons into 1 card ONLY when Group Anime Seasons is enabled
+    val groupedBeforeStatus = if (shouldGroupSeasons) {
+        collapseGroupedSeasonsInLibrary(expandedScope)
+    } else {
+        expandedScope
+    }
+
+    // Phase C: Apply status tab / chip, Chimanew Tri-State filters, and search query on collapsed cards
+    val groupedItems = groupedBeforeStatus.filter { item ->
+        if (tab.statusFilter != null && tab.statusFilter != TrackingStatus.ALL && item.status != tab.statusFilter) {
+            return@filter false
+        }
         if (selectedStatus != TrackingStatus.ALL && item.status != selectedStatus) return@filter false
 
-        // Chimanew Tri-State filters
         val isStarted = item.currentProgress > 0.0 || item.playtimeHours > 0.0 || item.status == TrackingStatus.IN_PROGRESS
         when (libSettings.filterStarted) {
             TriStateFilter.INCLUDE -> if (!isStarted) return@filter false
@@ -2349,22 +2318,6 @@ private fun computeLibraryTabItems(
             TriStateFilter.OFF -> Unit
         }
 
-        // Chimanew Multi-Vertical & Multi-Tracker & Custom Category filters
-        if (libSettings.filterMediaTypes.isNotEmpty() && item.mediaType.name !in libSettings.filterMediaTypes) {
-            return@filter false
-        }
-        if (libSettings.filterTrackers.isNotEmpty() && libSettings.filterTrackers.none { itemMatchesTrackerKey(item, it) }) {
-            return@filter false
-        }
-        val itemCats = categoryAssignments[item.id].orEmpty()
-        if (libSettings.filterIncludeCategoryIds.isNotEmpty() && itemCats.none { it in libSettings.filterIncludeCategoryIds }) {
-            return@filter false
-        }
-        if (libSettings.filterExcludeCategoryIds.isNotEmpty() && itemCats.any { it in libSettings.filterExcludeCategoryIds }) {
-            return@filter false
-        }
-
-        // Search bar predicate
         if (searchQuery.isNotBlank()) {
             val matched = item.title.contains(searchQuery, ignoreCase = true) ||
                 item.nativeTitle?.contains(searchQuery, ignoreCase = true) == true ||
@@ -2377,12 +2330,6 @@ private fun computeLibraryTabItems(
             if (!matched) return@filter false
         }
         true
-    }
-
-    val groupedItems = if (libSettings.groupAnimeSeasonsInLibrary && searchQuery.isBlank()) {
-        collapseGroupedSeasonsInLibrary(filtered)
-    } else {
-        filtered
     }
 
     if (!sort) return groupedItems
@@ -2426,8 +2373,31 @@ private fun computeLibraryTabItems(
 }
 
 private val ANIME_SEASON_SUFFIX_REGEX = Regex(
-    """(?i)(?:\s*[:\-–]?\s*(?:season\s+\d+|\d+(?:st|nd|rd|th)\s+season|part\s+\d+|cour\s+\d+|s\d+|(?:ii|iii|iv|v))|\s+(?:2|3|4|5))\s*$"""
+    """(?i)(?:\s*[:\-–]?\s*(?:(?:the\s+)?final\s+season|season\s+\d+|\d+(?:st|nd|rd|th)\s+season|part\s+\d+|cour\s+\d+|s\d+|(?:ii|iii|iv|v|vi)|第\s*\d+\s*期)|\s+(?:[2-9]|1[0-5]))\s*$"""
 )
+
+private val ANIME_SEASON_NUM_REGEX = Regex(
+    """(?i)(?:season\s+(\d+)|(\d+)(?:st|nd|rd|th)\s+season|s(\d+)|part\s+(\d+)|cour\s+(\d+)|第\s*(\d+)\s*期|\b(ii|iii|iv|v|vi)\b|\s([2-9]|1[0-5]))\s*$"""
+)
+
+private fun detectAnimeSeasonHint(rawTitle: String): Int? {
+    val t = rawTitle.trim()
+    val m = ANIME_SEASON_NUM_REGEX.find(t) ?: return if (t.contains("final season", ignoreCase = true)) 99 else null
+    val roman = m.groupValues[7].uppercase()
+    if (roman.isNotEmpty()) {
+        return when (roman) {
+            "II" -> 2
+            "III" -> 3
+            "IV" -> 4
+            "V" -> 5
+            "VI" -> 6
+            else -> null
+        }
+    }
+    return listOf(1, 2, 3, 4, 5, 6, 8).firstNotNullOfOrNull { idx ->
+        m.groupValues.getOrNull(idx)?.toIntOrNull()
+    }
+}
 
 private fun parseAnimeFranchiseKey(rawTitle: String): Pair<String, Boolean> {
     var working = rawTitle.trim()
@@ -2450,32 +2420,106 @@ private fun collapseGroupedSeasonsInLibrary(
     val childrenByParent = mutableMapOf<Long, MutableList<com.omnitrack.app.data.db.dto.MediaCardSummary>>()
     val collapsedIds = HashSet<Long>()
 
-    // 1. Collapse explicitly linked custom entries into their parent when parent is visible
+    fun resolveExplicitRootId(item: com.omnitrack.app.data.db.dto.MediaCardSummary): Long {
+        var cur = item
+        val seen = HashSet<Long>()
+        while (cur.linkedParentMediaId != null && cur.linkedParentMediaId in byId && seen.add(cur.id)) {
+            val p = byId[cur.linkedParentMediaId] ?: break
+            cur = p
+        }
+        return cur.id
+    }
+
+    // 1. Collapse explicitly merged / linked entries (seasons, movies, OVAs) into their root parent
     for (item in items) {
-        val parentId = item.linkedParentMediaId
-        if (parentId != null && parentId != item.id && parentId in byId) {
-            childrenByParent.getOrPut(parentId) { mutableListOf() }.add(item)
+        if (item.linkedParentMediaId == null) continue
+        val rootId = resolveExplicitRootId(item)
+        if (rootId != item.id && rootId in byId) {
+            childrenByParent.getOrPut(rootId) { mutableListOf() }.add(item)
             collapsedIds.add(item.id)
         }
     }
 
-    // 2. Non-destructively collapse numbered Anime season sequels into their root S1 Anime card
-    val animeRoots = mutableMapOf<String, com.omnitrack.app.data.db.dto.MediaCardSummary>()
-    for (item in items) {
-        if (item.id in collapsedIds || item.mediaType != MediaType.ANIME) continue
-        val (baseKey, isSequel) = parseAnimeFranchiseKey(item.title)
-        if (!isSequel && baseKey.length >= 2) {
-            val prev = animeRoots[baseKey]
-            if (prev == null || item.id < prev.id) {
-                animeRoots[baseKey] = item
+    fun pickDeterministicRoot(group: List<com.omnitrack.app.data.db.dto.MediaCardSummary>): com.omnitrack.app.data.db.dto.MediaCardSummary {
+        return group.sortedWith(
+            compareBy<com.omnitrack.app.data.db.dto.MediaCardSummary> { parseAnimeFranchiseKey(it.title).second }
+                .thenBy { detectAnimeSeasonHint(it.title) ?: 1 }
+                .thenBy { it.anilistId ?: Long.MAX_VALUE }
+                .thenBy { it.id }
+        ).first()
+    }
+
+    // 2. Group multi-season Anime sharing the same TMDb TV series ID or IMDb ID (skip 1-ep standalone movies/OVAs unless explicitly linked)
+    val tmdbGroups = items
+        .filter {
+            it.id !in collapsedIds &&
+                it.mediaType == MediaType.ANIME &&
+                (it.tmdbId ?: 0L) > 0L &&
+                (it.totalProgress == null || it.totalProgress > 1.0)
+        }
+        .groupBy { it.tmdbId!! }
+    for ((_, group) in tmdbGroups) {
+        if (group.size < 2) continue
+        val root = pickDeterministicRoot(group)
+        for (member in group) {
+            if (member.id != root.id && member.id !in collapsedIds) {
+                childrenByParent.getOrPut(root.id) { mutableListOf() }.add(member)
+                collapsedIds.add(member.id)
             }
         }
     }
-    for (item in items) {
-        if (item.id in collapsedIds || item.mediaType != MediaType.ANIME) continue
-        val (baseKey, isSequel) = parseAnimeFranchiseKey(item.title)
-        val root = animeRoots[baseKey]
-        if (isSequel && root != null && root.id != item.id) {
+
+    val imdbGroups = items
+        .filter {
+            it.id !in collapsedIds &&
+                it.mediaType == MediaType.ANIME &&
+                !it.imdbId.isNullOrBlank() &&
+                (it.totalProgress == null || it.totalProgress > 1.0)
+        }
+        .groupBy { it.imdbId!!.trim().lowercase() }
+    for ((_, group) in imdbGroups) {
+        if (group.size < 2) continue
+        val root = pickDeterministicRoot(group)
+        for (member in group) {
+            if (member.id != root.id && member.id !in collapsedIds) {
+                childrenByParent.getOrPut(root.id) { mutableListOf() }.add(member)
+                collapsedIds.add(member.id)
+            }
+        }
+    }
+
+    // 3. Group remaining Anime by franchise base title (supports S2+S3 even when S1 isn't in library, plus "Base: Arc" subtitles)
+    val remainingAnime = items.filter { it.id !in collapsedIds && it.mediaType == MediaType.ANIME }
+    val titleKeyGroups = remainingAnime
+        .filter { parseAnimeFranchiseKey(it.title).first.length >= 2 }
+        .groupBy { parseAnimeFranchiseKey(it.title).first }
+
+    val suffixlessRootsByKey = mutableMapOf<String, com.omnitrack.app.data.db.dto.MediaCardSummary>()
+    for ((baseKey, group) in titleKeyGroups) {
+        val hasRootOrSeries = group.size >= 2
+        if (hasRootOrSeries) {
+            val root = pickDeterministicRoot(group)
+            for (member in group) {
+                if (member.id != root.id && member.id !in collapsedIds) {
+                    childrenByParent.getOrPut(root.id) { mutableListOf() }.add(member)
+                    collapsedIds.add(member.id)
+                }
+            }
+            suffixlessRootsByKey[baseKey] = root
+        } else if (group.size == 1 && !parseAnimeFranchiseKey(group.first().title).second && baseKey.length >= 6) {
+            suffixlessRootsByKey[baseKey] = group.first()
+        }
+    }
+
+    // Match "Franchise Name: Arc Subtitle" into an existing root "Franchise Name" anime entry (unless explicitly unlinked 1-ep movie/OVA)
+    for (item in remainingAnime) {
+        if (item.id in collapsedIds) continue
+        if ((item.totalProgress ?: 0.0) <= 1.0 && item.totalProgress != null) continue
+        val colonPrefix = item.title.substringBefore(":").trim()
+        if (colonPrefix == item.title.trim()) continue
+        val prefixKey = parseAnimeFranchiseKey(colonPrefix).first
+        val root = if (prefixKey.length >= 6) suffixlessRootsByKey[prefixKey] else null
+        if (root != null && root.id != item.id && root.id !in collapsedIds) {
             childrenByParent.getOrPut(root.id) { mutableListOf() }.add(item)
             collapsedIds.add(item.id)
         }
@@ -2488,21 +2532,28 @@ private fun collapseGroupedSeasonsInLibrary(
         val children = childrenByParent[item.id] ?: return@mapNotNull item
         val allParts = listOf(item) + children
         val combinedCurrent = allParts.sumOf { it.currentProgress }
-        val combinedTotal = if (allParts.all { (it.totalProgress ?: 0.0) > 0.0 }) {
-            allParts.sumOf { it.totalProgress ?: 0.0 }
+        val combinedTotal = if (allParts.any { (it.totalProgress ?: 0.0) > 0.0 }) {
+            allParts.sumOf { it.totalProgress ?: it.currentProgress }
         } else {
             item.totalProgress
         }
         val combinedStatus = when {
             allParts.all { it.status == TrackingStatus.COMPLETED } -> TrackingStatus.COMPLETED
-            allParts.any { it.status == TrackingStatus.IN_PROGRESS } || combinedCurrent > 0.0 -> TrackingStatus.IN_PROGRESS
+            allParts.any { it.status == TrackingStatus.IN_PROGRESS } -> TrackingStatus.IN_PROGRESS
+            allParts.any { it.status == TrackingStatus.COMPLETED } -> TrackingStatus.IN_PROGRESS
+            allParts.any { it.status == TrackingStatus.ON_HOLD } -> TrackingStatus.ON_HOLD
+            allParts.all { it.status == TrackingStatus.PLAN_TO_TRACK } -> TrackingStatus.PLAN_TO_TRACK
+            allParts.any { it.status == TrackingStatus.DROPPED } -> TrackingStatus.DROPPED
+            combinedCurrent > 0.0 -> TrackingStatus.IN_PROGRESS
             else -> item.status
         }
         item.copy(
             currentProgress = combinedCurrent,
             totalProgress = combinedTotal,
             status = combinedStatus,
-            lastUpdated = allParts.maxOf { it.lastUpdated }
+            lastUpdated = allParts.maxOf { it.lastUpdated },
+            isFavorite = allParts.any { it.isFavorite },
+            userRating = item.userRating ?: allParts.mapNotNull { it.userRating }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
         )
     }
 }

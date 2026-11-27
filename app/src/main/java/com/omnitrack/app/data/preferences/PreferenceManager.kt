@@ -54,6 +54,17 @@ val DEFAULT_GEMINI_MODELS = listOf(
     GeminiModelOption("gemini-2.0-flash-lite", "Gemini 2.0 Flash-Lite", "High Quota")
 )
 
+@Serializable
+data class CustomSeriesSeasonConfig(
+    val seasonOrder: List<Int> = emptyList(),
+    val customNames: Map<Int, String> = emptyMap(),
+    val hiddenSeasons: Set<Int> = emptySet(),
+    val customPosters: Map<Int, String> = emptyMap()
+) {
+    fun isEmpty(): Boolean =
+        seasonOrder.isEmpty() && customNames.isEmpty() && hiddenSeasons.isEmpty() && customPosters.isEmpty()
+}
+
 @Immutable
 data class PosterCardStyle(
     val widthDp: Int = 126,
@@ -672,6 +683,7 @@ class PreferenceManager(private val context: Context) {
         val DETAILS_PAGE_SECTION_ORDER_BY_MEDIA = stringPreferencesKey("details_page_section_order_by_media")
         val EDITIONS_SWITCHER_STYLE = stringPreferencesKey("editions_switcher_style")
         val CUSTOM_EDITION_LABELS_JSON = stringPreferencesKey("custom_edition_labels_json")
+        val CUSTOM_SERIES_SEASON_CONFIGS_JSON = stringPreferencesKey("custom_series_season_configs_json")
         val DISCOVER_LAYOUT_STYLE = stringPreferencesKey("discover_layout_style")
         val DISCOVER_SHOW_SPOTLIGHT = booleanPreferencesKey("discover_show_spotlight")
         val DISCOVER_DIM_HERO_BANNER = booleanPreferencesKey("discover_dim_hero_banner")
@@ -1750,6 +1762,56 @@ class PreferenceManager(private val context: Context) {
                 prefs[PreferencesKeys.CUSTOM_EDITION_LABELS_JSON] = Json.encodeToString(map)
             }
         }
+    }
+
+    val customSeriesSeasonConfigs: Flow<Map<Long, CustomSeriesSeasonConfig>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.CUSTOM_SERIES_SEASON_CONFIGS_JSON]
+            if (raw.isNullOrBlank()) {
+                emptyMap()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, CustomSeriesSeasonConfig>>(raw)
+                        .mapNotNull { (k, v) -> k.toLongOrNull()?.let { id -> id to v } }
+                        .toMap()
+                }.getOrDefault(emptyMap())
+            }
+        }
+        .distinctUntilChanged()
+
+    suspend fun updateCustomSeriesSeasonConfig(
+        rootMediaId: Long,
+        transform: (CustomSeriesSeasonConfig) -> CustomSeriesSeasonConfig
+    ) {
+        if (rootMediaId <= 0L) return
+        context.dataStore.edit { prefs ->
+            val raw = prefs[PreferencesKeys.CUSTOM_SERIES_SEASON_CONFIGS_JSON]
+            val map = if (raw.isNullOrBlank()) {
+                mutableMapOf()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, CustomSeriesSeasonConfig>>(raw).toMutableMap()
+                }.getOrDefault(mutableMapOf())
+            }
+            val current = map[rootMediaId.toString()] ?: CustomSeriesSeasonConfig()
+            val updated = transform(current)
+            if (updated.isEmpty()) {
+                map.remove(rootMediaId.toString())
+            } else {
+                map[rootMediaId.toString()] = updated
+            }
+            if (map.isEmpty()) {
+                prefs.remove(PreferencesKeys.CUSTOM_SERIES_SEASON_CONFIGS_JSON)
+            } else {
+                prefs[PreferencesKeys.CUSTOM_SERIES_SEASON_CONFIGS_JSON] = detailsLayoutJson.encodeToString(map)
+            }
+        }
+    }
+
+    suspend fun clearCustomSeriesSeasonConfig(rootMediaId: Long) {
+        if (rootMediaId <= 0L) return
+        updateCustomSeriesSeasonConfig(rootMediaId) { CustomSeriesSeasonConfig() }
     }
 
     val homeRowOrder: Flow<List<HomeRowItem>> = context.dataStore.data

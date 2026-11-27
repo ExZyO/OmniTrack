@@ -20,12 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.PlaylistAddCheckCircle
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -182,6 +184,9 @@ fun SeasonWatchedActionSheet(
     initialRating: Float? = null,
     initialNote: String? = null,
     onSaveSeasonMeta: ((Float?, String?) -> Unit)? = null,
+    linkedEntryTitle: String? = null,
+    onOpenLinkedEntry: (() -> Unit)? = null,
+    onManageSeasons: (() -> Unit)? = null,
     onDismiss: () -> Unit,
     onToggleSeasonWatched: () -> Unit,
     onMarkPreviousSeasonsWatched: () -> Unit
@@ -503,6 +508,38 @@ fun SeasonWatchedActionSheet(
                                 sheetState.hide()
                                 onMarkPreviousSeasonsWatched()
                                 onDismiss()
+                            }
+                        }
+                    )
+                }
+
+                if (onOpenLinkedEntry != null) {
+                    EpisodeActionRow(
+                        icon = Icons.AutoMirrored.Filled.OpenInNew,
+                        iconTint = AccentGold,
+                        title = "Open Full Details Page",
+                        subtitle = "View ${linkedEntryTitle ?: seasonLabel}'s own page",
+                        onClick = {
+                            scope.launch {
+                                sheetState.hide()
+                                onDismiss()
+                                onOpenLinkedEntry()
+                            }
+                        }
+                    )
+                }
+
+                if (onManageSeasons != null) {
+                    EpisodeActionRow(
+                        icon = Icons.Default.Tune,
+                        iconTint = AccentGold,
+                        title = "Manage & Customize Seasons",
+                        subtitle = "Reorder, rename, set cover, hide, or merge entries",
+                        onClick = {
+                            scope.launch {
+                                sheetState.hide()
+                                onDismiss()
+                                onManageSeasons()
                             }
                         }
                     )

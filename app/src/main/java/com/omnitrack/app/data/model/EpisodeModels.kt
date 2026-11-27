@@ -18,6 +18,8 @@ data class MediaEpisode(
     val airDate: String? = null,
     val runtimeMinutes: Int? = null,
     val voteAverage: Float? = null,
+    val voteCount: Int? = null,
+    val ratingSource: String? = null,
     val isWatched: Boolean = false,
     val isFiller: Boolean = false,
     val isRecap: Boolean = false,

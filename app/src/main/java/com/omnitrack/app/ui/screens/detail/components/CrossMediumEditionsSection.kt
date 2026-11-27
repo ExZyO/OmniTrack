@@ -1,5 +1,7 @@
 package com.omnitrack.app.ui.screens.detail.components
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -24,14 +27,18 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ViewCarousel
+import androidx.compose.material.icons.filled.ViewStream
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -60,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
 import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.model.MediaType
 import com.omnitrack.app.data.preferences.EditionsSwitcherStyle
@@ -67,6 +75,7 @@ import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -82,7 +91,8 @@ fun CrossMediumEditionsSection(
     onUnlinkEdition: (MediaItemEntity) -> Unit,
     switcherStyle: EditionsSwitcherStyle = EditionsSwitcherStyle.SMART_LABELS,
     customLabels: Map<Long, String> = emptyMap(),
-    onSaveCustomLabel: (MediaItemEntity, String?) -> Unit = { _, _ -> }
+    onSaveCustomLabel: (MediaItemEntity, String?) -> Unit = { _, _ -> },
+    onChangeSwitcherStyle: ((EditionsSwitcherStyle) -> Unit)? = null
 ) {
     if (isPreviewMode || currentItem.id <= 0L) return
 
@@ -115,235 +125,258 @@ fun CrossMediumEditionsSection(
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.sp
             )
-            if (sortedEditions.size > 1) {
-                Text(
-                    text = "Unlink this edition",
-                    color = Color(0xFFEF4444).copy(alpha = 0.85f),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable { onUnlinkEdition(currentItem) }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (sortedEditions.size > 1) {
+                    Text(
+                        text = "Unlink this edition",
+                        color = Color(0xFFEF4444).copy(alpha = 0.85f),
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onUnlinkEdition(currentItem) }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                if (onChangeSwitcherStyle != null) {
+                    IconButton(
+                        onClick = {
+                            val next = when (switcherStyle) {
+                                EditionsSwitcherStyle.SMART_LABELS -> EditionsSwitcherStyle.THUMBNAIL_CARDS
+                                EditionsSwitcherStyle.THUMBNAIL_CARDS -> EditionsSwitcherStyle.GROUPED_DROPDOWN
+                                EditionsSwitcherStyle.GROUPED_DROPDOWN -> EditionsSwitcherStyle.SMART_LABELS
+                            }
+                            onChangeSwitcherStyle(next)
+                        },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        val iconVec = when (switcherStyle) {
+                            EditionsSwitcherStyle.SMART_LABELS -> Icons.AutoMirrored.Filled.FormatListBulleted
+                            EditionsSwitcherStyle.THUMBNAIL_CARDS -> Icons.Default.ViewCarousel
+                            EditionsSwitcherStyle.GROUPED_DROPDOWN -> Icons.Default.ViewStream
+                        }
+                        Icon(
+                            imageVector = iconVec,
+                            contentDescription = "Switch Editions Style (${switcherStyle.displayName})",
+                            tint = AccentGold,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
         }
 
-        when (switcherStyle) {
-            EditionsSwitcherStyle.SMART_LABELS -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    sortedEditions.forEach { edition ->
-                        val isSelected = edition.id == currentItem.id
-                        val (primaryLabel, mediumSub) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
-                        Column(
-                            modifier = Modifier
-                                .width(IntrinsicSize.Max)
-                                .combinedClickable(
-                                    onClick = { if (!isSelected) onOpenEdition(edition) },
-                                    onLongClick = { editingLabelItem = edition }
-                                )
-                                .padding(top = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = primaryLabel,
-                                color = if (isSelected) TextPrimary else TextMuted,
-                                fontSize = 13.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.widthIn(max = 148.dp)
-                            )
-                            if (mediumSub != null) {
-                                Text(
-                                    text = mediumSub,
-                                    color = if (isSelected) AccentGold.copy(alpha = 0.9f) else TextMuted.copy(alpha = 0.7f),
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(2.dp)
-                                    .background(if (isSelected) AccentGold else Color.Transparent)
-                            )
-                        }
-                    }
-
-                    LinkEditionButton(onClick = onOpenLinkPicker)
-                }
-            }
-
-            EditionsSwitcherStyle.THUMBNAIL_CARDS -> {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    sortedEditions.forEach { edition ->
-                        val isSelected = edition.id == currentItem.id
-                        val (primaryLabel, mediumSub) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
-                        Column(
-                            modifier = Modifier
-                                .width(78.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) AccentGold.copy(alpha = 0.10f) else DarkSurfaceElevated.copy(alpha = 0.65f))
-                                .border(
-                                    width = if (isSelected) 1.4.dp else 0.7.dp,
-                                    color = if (isSelected) AccentGold else GlassBorder,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .combinedClickable(
-                                    onClick = { if (!isSelected) onOpenEdition(edition) },
-                                    onLongClick = { editingLabelItem = edition }
-                                )
-                                .padding(6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            AsyncImage(
-                                model = edition.customCoverPath ?: edition.coverUrl,
-                                contentDescription = edition.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(2f / 3f)
-                                    .clip(RoundedCornerShape(5.dp))
-                                    .background(AmoledBlack)
-                            )
-                            Text(
-                                text = primaryLabel,
-                                color = if (isSelected) TextPrimary else TextSecondary,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = mediumSub ?: edition.mediaType.displayName,
-                                color = if (isSelected) AccentGold else TextMuted,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Box(
+        Crossfade(
+            targetState = switcherStyle,
+            animationSpec = tween(200),
+            label = "editions_switcher_style"
+        ) { activeStyle ->
+            when (activeStyle) {
+                EditionsSwitcherStyle.SMART_LABELS -> {
+                    Row(
                         modifier = Modifier
-                            .width(68.dp)
-                            .height(136.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .border(0.7.dp, GlassBorder, RoundedCornerShape(8.dp))
-                            .clickable(onClick = onOpenLinkPicker),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Link another medium edition",
-                                tint = AccentGold,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "Link",
-                                color = AccentGold,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            }
-
-            EditionsSwitcherStyle.GROUPED_DROPDOWN -> {
-                val groupedByMedia = remember(sortedEditions, currentItem.mediaType) {
-                    val linkedGroups = sortedEditions.groupBy { it.mediaType }
-                    linkedGroups.entries.sortedWith(
-                        compareByDescending<Map.Entry<MediaType, List<MediaItemEntity>>> { it.key == currentItem.mediaType }
-                            .thenBy { it.key.displayName }
-                    )
-                }
-                var expandedMediaGroup by remember { mutableStateOf<MediaType?>(null) }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(18.dp)
-                ) {
-                    groupedByMedia.forEach { (mediaType, groupItems) ->
-                        val isGroupSelected = mediaType == currentItem.mediaType
-                        if (groupItems.size == 1) {
-                            val single = groupItems.first()
-                            val label = customLabels[single.id]?.takeIf { it.isNotBlank() } ?: mediaType.displayName
+                        sortedEditions.forEach { edition ->
+                            val isSelected = edition.id == currentItem.id
+                            val (primaryLabel, mediumSub) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
                             Column(
                                 modifier = Modifier
                                     .width(IntrinsicSize.Max)
                                     .combinedClickable(
-                                        onClick = { if (single.id != currentItem.id) onOpenEdition(single) },
-                                        onLongClick = { editingLabelItem = single }
+                                        onClick = { if (!isSelected) onOpenEdition(edition) },
+                                        onLongClick = { editingLabelItem = edition }
                                     )
                                     .padding(top = 4.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
-                                    text = label,
-                                    color = if (isGroupSelected) TextPrimary else TextMuted,
+                                    text = primaryLabel,
+                                    color = if (isSelected) TextPrimary else TextMuted,
                                     fontSize = 13.5.sp,
-                                    fontWeight = if (isGroupSelected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 148.dp)
                                 )
+                                if (mediumSub != null) {
+                                    Text(
+                                        text = mediumSub,
+                                        color = if (isSelected) AccentGold.copy(alpha = 0.9f) else TextMuted.copy(alpha = 0.7f),
+                                        fontSize = 9.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(2.dp)
-                                        .background(if (isGroupSelected) AccentGold else Color.Transparent)
+                                        .background(if (isSelected) AccentGold else Color.Transparent)
                                 )
                             }
-                        } else {
-                            Box {
+                        }
+
+                        LinkEditionButton(onClick = onOpenLinkPicker)
+                    }
+                }
+
+                EditionsSwitcherStyle.THUMBNAIL_CARDS -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        sortedEditions.forEach { edition ->
+                            val isSelected = edition.id == currentItem.id
+                            val (primaryLabel, mediumSub) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
+                            val posterModel = remember(edition.customCoverPath, edition.coverUrl) {
+                                ArtworkModelResolver.toCoilModel(edition.customCoverPath ?: edition.coverUrl)
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .width(104.dp)
+                                    .combinedClickable(
+                                        onClick = { if (!isSelected) onOpenEdition(edition) },
+                                        onLongClick = { editingLabelItem = edition }
+                                    ),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(104.dp)
+                                        .height(156.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(
+                                            width = if (isSelected) 2.dp else 0.6.dp,
+                                            color = if (isSelected) AccentGold else Color.White.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .background(DarkSurfaceElevated)
+                                ) {
+                                    AsyncImage(
+                                        model = posterModel,
+                                        contentDescription = edition.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp)
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(AccentGold),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Active edition",
+                                                tint = OnAccentColor,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(
+                                    text = primaryLabel,
+                                    color = if (isSelected) TextPrimary else TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = mediumSub ?: edition.mediaType.displayName,
+                                    color = if (isSelected) AccentGold else TextMuted,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .width(104.dp)
+                                .height(156.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkSurfaceElevated.copy(alpha = 0.35f))
+                                .border(0.8.dp, GlassBorder, RoundedCornerShape(8.dp))
+                                .clickable(onClick = onOpenLinkPicker),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Link another medium edition",
+                                    tint = AccentGold,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Text(
+                                    text = "Link Edition",
+                                    color = AccentGold,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                EditionsSwitcherStyle.GROUPED_DROPDOWN -> {
+                    val groupedByMedia = remember(sortedEditions, currentItem.mediaType) {
+                        val linkedGroups = sortedEditions.groupBy { it.mediaType }
+                        linkedGroups.entries.sortedWith(
+                            compareByDescending<Map.Entry<MediaType, List<MediaItemEntity>>> { it.key == currentItem.mediaType }
+                                .thenBy { it.key.displayName }
+                        )
+                    }
+                    var expandedMediaGroup by remember { mutableStateOf<MediaType?>(null) }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        groupedByMedia.forEach { (mediaType, groupItems) ->
+                            val isGroupSelected = mediaType == currentItem.mediaType
+                            if (groupItems.size == 1) {
+                                val single = groupItems.first()
+                                val label = customLabels[single.id]?.takeIf { it.isNotBlank() } ?: mediaType.displayName
                                 Column(
                                     modifier = Modifier
                                         .width(IntrinsicSize.Max)
-                                        .clickable { expandedMediaGroup = mediaType }
+                                        .combinedClickable(
+                                            onClick = { if (single.id != currentItem.id) onOpenEdition(single) },
+                                            onLongClick = { editingLabelItem = single }
+                                        )
                                         .padding(top = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Text(
-                                            text = "${mediaType.displayName} (${groupItems.size})",
-                                            color = if (isGroupSelected) TextPrimary else TextMuted,
-                                            fontSize = 13.5.sp,
-                                            fontWeight = if (isGroupSelected) FontWeight.Bold else FontWeight.Medium,
-                                            maxLines = 1
-                                        )
-                                        Icon(
-                                            imageVector = Icons.Default.KeyboardArrowDown,
-                                            contentDescription = null,
-                                            tint = if (isGroupSelected) AccentGold else TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
+                                    Text(
+                                        text = label,
+                                        color = if (isGroupSelected) TextPrimary else TextMuted,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = if (isGroupSelected) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1
+                                    )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Box(
                                         modifier = Modifier
@@ -352,73 +385,109 @@ fun CrossMediumEditionsSection(
                                             .background(if (isGroupSelected) AccentGold else Color.Transparent)
                                     )
                                 }
-
-                                DropdownMenu(
-                                    expanded = expandedMediaGroup == mediaType,
-                                    onDismissRequest = { expandedMediaGroup = null },
-                                    containerColor = DarkSurfaceElevated
-                                ) {
-                                    groupItems.forEach { edition ->
-                                        val isActive = edition.id == currentItem.id
-                                        val (labelText, _) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                                    modifier = Modifier.widthIn(min = 180.dp, max = 260.dp)
-                                                ) {
-                                                    AsyncImage(
-                                                        model = edition.customCoverPath ?: edition.coverUrl,
-                                                        contentDescription = edition.title,
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier
-                                                            .width(28.dp)
-                                                            .aspectRatio(2f / 3f)
-                                                            .clip(RoundedCornerShape(4.dp))
-                                                            .background(AmoledBlack)
-                                                    )
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = labelText,
-                                                            color = if (isActive) AccentGold else TextPrimary,
-                                                            fontSize = 13.sp,
-                                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = listOfNotNull(
-                                                                edition.releaseYear?.takeIf { it.isNotBlank() },
-                                                                edition.status.displayName
-                                                            ).joinToString(" • "),
-                                                            color = TextMuted,
-                                                            fontSize = 10.5.sp,
-                                                            maxLines = 1
-                                                        )
-                                                    }
-                                                    if (isActive) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Check,
-                                                            contentDescription = null,
-                                                            tint = AccentGold,
-                                                            modifier = Modifier.size(16.dp)
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            onClick = {
-                                                expandedMediaGroup = null
-                                                if (!isActive) onOpenEdition(edition)
-                                            }
+                            } else {
+                                Box {
+                                    Column(
+                                        modifier = Modifier
+                                            .width(IntrinsicSize.Max)
+                                            .clickable { expandedMediaGroup = mediaType }
+                                            .padding(top = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Text(
+                                                text = "${mediaType.displayName} (${groupItems.size})",
+                                                color = if (isGroupSelected) TextPrimary else TextMuted,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = if (isGroupSelected) FontWeight.Bold else FontWeight.Medium,
+                                                maxLines = 1
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Default.KeyboardArrowDown,
+                                                contentDescription = null,
+                                                tint = if (isGroupSelected) AccentGold else TextMuted,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(2.dp)
+                                                .background(if (isGroupSelected) AccentGold else Color.Transparent)
                                         )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = expandedMediaGroup == mediaType,
+                                        onDismissRequest = { expandedMediaGroup = null },
+                                        containerColor = DarkSurfaceElevated
+                                    ) {
+                                        groupItems.forEach { edition ->
+                                            val isActive = edition.id == currentItem.id
+                                            val (labelText, _) = resolveEditionSmartLabel(edition, sortedEditions, customLabels)
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                        modifier = Modifier.widthIn(min = 180.dp, max = 260.dp)
+                                                    ) {
+                                                        AsyncImage(
+                                                            model = ArtworkModelResolver.toCoilModel(edition.customCoverPath ?: edition.coverUrl),
+                                                            contentDescription = edition.title,
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier
+                                                                .width(28.dp)
+                                                                .aspectRatio(2f / 3f)
+                                                                .clip(RoundedCornerShape(4.dp))
+                                                                .background(AmoledBlack)
+                                                        )
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = labelText,
+                                                                color = if (isActive) AccentGold else TextPrimary,
+                                                                fontSize = 13.sp,
+                                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
+                                                            )
+                                                            Text(
+                                                                text = listOfNotNull(
+                                                                    edition.releaseYear?.takeIf { it.isNotBlank() },
+                                                                    edition.status.displayName
+                                                                ).joinToString(" • "),
+                                                                color = TextMuted,
+                                                                fontSize = 10.5.sp,
+                                                                maxLines = 1
+                                                            )
+                                                        }
+                                                        if (isActive) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Check,
+                                                                contentDescription = null,
+                                                                tint = AccentGold,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                },
+                                                onClick = {
+                                                    expandedMediaGroup = null
+                                                    if (!isActive) onOpenEdition(edition)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    LinkEditionButton(onClick = onOpenLinkPicker)
+                        LinkEditionButton(onClick = onOpenLinkPicker)
+                    }
                 }
             }
         }

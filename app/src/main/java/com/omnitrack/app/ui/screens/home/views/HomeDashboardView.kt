@@ -441,6 +441,7 @@ fun HomeDashboardView(
             malId = s.malId,
             tmdbId = s.tmdbId,
             imdbId = s.imdbId,
+            vndbId = s.vndbId,
             steamAppId = s.steamAppId,
             comicVineId = s.comicVineId,
             metronId = s.metronId,
@@ -475,7 +476,9 @@ fun HomeDashboardView(
                 if (matched != null) {
                     ArtworkModelResolver.preferredBanner(matched) != null
                 } else {
-                    !slide.item.bannerUrl.isNullOrBlank() && slide.item.bannerUrl != slide.item.coverUrl
+                    !slide.item.bannerUrl.isNullOrBlank() &&
+                        slide.item.bannerUrl != slide.item.coverUrl &&
+                        !ArtworkModelResolver.isAutoScreenshotUrl(slide.item.bannerUrl)
                 }
             }
         }
@@ -804,6 +807,7 @@ fun HomeDashboardView(
                                             malId = targetSlide.item.malId,
                                             tmdbId = targetSlide.item.tmdbId,
                                             imdbId = targetSlide.item.imdbId,
+                                            vndbId = targetSlide.item.vndbId,
                                             steamAppId = targetSlide.item.steamAppId,
                                             comicVineId = targetSlide.item.comicVineId,
                                             metronId = targetSlide.item.metronId,
@@ -858,6 +862,7 @@ fun HomeDashboardView(
                                         malId = activeSlide.item.malId,
                                         tmdbId = activeSlide.item.tmdbId,
                                         imdbId = activeSlide.item.imdbId,
+                                        vndbId = activeSlide.item.vndbId,
                                         steamAppId = activeSlide.item.steamAppId,
                                         comicVineId = activeSlide.item.comicVineId,
                                         metronId = activeSlide.item.metronId,
@@ -1467,6 +1472,8 @@ fun HomeDashboardView(
                                         anilistId = pick.anilistId,
                                         malId = pick.malId,
                                         tmdbId = pick.tmdbId,
+                                        imdbId = pick.imdbId,
+                                        vndbId = pick.vndbId,
                                         openLibraryId = pick.openLibraryId,
                                         title = pick.title
                                     )
@@ -1896,6 +1903,8 @@ fun HomeDashboardView(
                         anilistId = picked.anilistId,
                         malId = picked.malId,
                         tmdbId = picked.tmdbId,
+                        imdbId = picked.imdbId,
+                        vndbId = picked.vndbId,
                         openLibraryId = picked.openLibraryId,
                         title = picked.title
                     )
@@ -2026,10 +2035,13 @@ private fun rememberResolvedHomeHeroSlide(
                 malId = slide.item.malId,
                 tmdbId = slide.item.tmdbId,
                 imdbId = slide.item.imdbId,
+                vndbId = slide.item.vndbId,
                 steamAppId = slide.item.steamAppId,
                 comicVineId = slide.item.comicVineId,
                 metronId = slide.item.metronId,
                 openLibraryId = slide.item.openLibraryId,
+                fanficWorkId = slide.item.fanficWorkId,
+                fanficSourceUrl = slide.item.fanficSourceUrl,
                 title = slide.item.title,
                 nativeTitle = slide.item.nativeTitle
             )
@@ -2100,7 +2112,9 @@ private fun rememberResolvedHomeHeroSlide(
         val item = (slide as HomeHeroSlide.TrendingSlide).item
         val coverModel: Any? = remember(item.coverUrl) { ArtworkModelResolver.toCoilModel(item.coverUrl) }
         val authenticBannerModel = remember(item.bannerUrl, item.coverUrl) {
-            item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }?.let { LosslessCoverMapper.toLosslessUrl(it) }
+            item.bannerUrl?.takeIf {
+                it.isNotBlank() && it != item.coverUrl && !ArtworkModelResolver.isAutoScreenshotUrl(it)
+            }?.let { LosslessCoverMapper.toLosslessUrl(it) }
         }
         val progressHint = remember(item) {
             listOfNotNull(item.releaseYear, item.bookAuthor).joinToString(" \u00B7 ")

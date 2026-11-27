@@ -100,6 +100,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.Collections
 
@@ -334,6 +336,10 @@ class DetailViewModel(
     private val _seasonMalIds = MutableStateFlow<Map<Int, Long>>(emptyMap())
     private val _siblingSeasonWatched = MutableStateFlow<Set<Pair<Int, Int>>>(emptySet())
     private val _siblingSeasonEntities = MutableStateFlow<Map<Int, MediaItemEntity>>(emptyMap())
+    val siblingSeasonEntities: StateFlow<Map<Int, MediaItemEntity>> = _siblingSeasonEntities.asStateFlow()
+    private val hydratedLinkedSeasonKeys = Collections.synchronizedSet(mutableSetOf<String>())
+    private val seasonMergeMutex = Mutex()
+    private val seasonMergeSearchRepo by lazy { com.omnitrack.app.data.search.OmniSearchRepository() }
     private val _format = MutableStateFlow<String?>(null)
     private val _season = MutableStateFlow<String?>(null)
     private val _seasonYear = MutableStateFlow<Int?>(null)
@@ -1658,6 +1664,7 @@ class DetailViewModel(
         _seasonMalIds.value = emptyMap()
         _siblingSeasonWatched.value = emptySet()
         _siblingSeasonEntities.value = emptyMap()
+        hydratedLinkedSeasonKeys.clear()
         allSeasonCommentsCache.clear()
         _collectionName.value = null
         _collectionItems.value = emptyList()
@@ -2125,6 +2132,7 @@ class DetailViewModel(
         skipTransitionArmForId = -1L
         lastLoadedLibraryId = -1L
         loadedAuxKeys.clear()
+        hydratedLinkedSeasonKeys.clear()
         activeSeriesFetchKey = null
         rootAniListId = null
         allSeasonCommentsCache.clear()
@@ -2527,11 +2535,14 @@ class DetailViewModel(
                         val latest = repository.getMediaById(item.id).firstOrNull() ?: item
                         val excluded = latest.excludedArtSet()
                         val bannerDisabled = latest.artworkRole == "DISABLE_BANNER" || latest.customBannerPath == "NONE"
-                        val allowedVnBanner = vnData.bannerUrl?.takeUnless { isArtSourceExcluded(it, excluded, "VNDB") }
-                        val shouldUpgradeBanner = !bannerDisabled && latest.customBannerPath.isNullOrBlank() &&
-                            allowedVnBanner != null && (
-                            latest.bannerUrl.isNullOrBlank() ||
-                                (latest.bannerUrl.contains("t.vndb.org/sf/") && !allowedVnBanner.contains("t.vndb.org/sf/"))
+                        val allowedVnBanner = vnData.bannerUrl?.takeUnless {
+                            isArtSourceExcluded(it, excluded, "VNDB") || ArtworkModelResolver.isAutoScreenshotUrl(it)
+                        }
+                        val hasStaleAutoShotBanner = latest.customBannerPath.isNullOrBlank() &&
+                            ArtworkModelResolver.isAutoScreenshotUrl(latest.bannerUrl)
+                        val shouldUpgradeBanner = !bannerDisabled && latest.customBannerPath.isNullOrBlank() && (
+                            (allowedVnBanner != null && (latest.bannerUrl.isNullOrBlank() || hasStaleAutoShotBanner)) ||
+                                hasStaleAutoShotBanner
                             )
                         val updated = latest.copy(
                             title = resolveUpdatedTitle(latest.title),
@@ -2549,7 +2560,7 @@ class DetailViewModel(
                             communityScore = vnData.communityScore ?: latest.communityScore,
                             metacriticScore = vnData.metacriticScore ?: latest.metacriticScore,
                             synopsis = latest.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
-                            bannerUrl = if (shouldUpgradeBanner) (allowedVnBanner ?: latest.bannerUrl) else latest.bannerUrl
+                            bannerUrl = if (shouldUpgradeBanner) allowedVnBanner else latest.bannerUrl
                         )
                         if (isStillCurrentItem() && updated != latest) {
                             repository.updateMedia(updated)
@@ -2560,8 +2571,15 @@ class DetailViewModel(
                     } else if (isStillCurrentItem()) {
                         val currentPreview = _previewItem.value
                         if (currentPreview != null) {
-                            val shouldUpgradePreviewBanner = currentPreview.bannerUrl.isNullOrBlank() ||
-                                (currentPreview.bannerUrl.contains("t.vndb.org/sf/") && !vnData.bannerUrl.isNullOrBlank() && !vnData.bannerUrl.contains("t.vndb.org/sf/"))
+                            val cleanPreviewVnBanner = vnData.bannerUrl?.takeUnless {
+                                ArtworkModelResolver.isAutoScreenshotUrl(it)
+                            }
+                            val previewHasStaleAutoShot = currentPreview.customBannerPath.isNullOrBlank() &&
+                                ArtworkModelResolver.isAutoScreenshotUrl(currentPreview.bannerUrl)
+                            val shouldUpgradePreviewBanner = currentPreview.customBannerPath.isNullOrBlank() && (
+                                (cleanPreviewVnBanner != null && (currentPreview.bannerUrl.isNullOrBlank() || previewHasStaleAutoShot)) ||
+                                    previewHasStaleAutoShot
+                                )
                             val updatedPreview = currentPreview.copy(
                                 title = resolveUpdatedTitle(currentPreview.title),
                                 vndbId = vnData.resolvedVndbId ?: currentPreview.vndbId,
@@ -2578,7 +2596,7 @@ class DetailViewModel(
                                 communityScore = vnData.communityScore ?: currentPreview.communityScore,
                                 metacriticScore = vnData.metacriticScore ?: currentPreview.metacriticScore,
                                 synopsis = currentPreview.synopsis?.takeIf { it.isNotBlank() } ?: vnData.synopsis,
-                                bannerUrl = if (shouldUpgradePreviewBanner) (vnData.bannerUrl ?: currentPreview.bannerUrl) else currentPreview.bannerUrl
+                                bannerUrl = if (shouldUpgradePreviewBanner) cleanPreviewVnBanner else currentPreview.bannerUrl
                             )
                             _previewItem.value = updatedPreview
                             _previewStack.update { stack ->
@@ -3976,6 +3994,7 @@ class DetailViewModel(
                 _realSeasons.value = emptyList()
                 _realEpisodes.value = emptyList()
                 _episodesBySeason.value = emptyMap()
+                if (item.id > 0L) refreshSiblingSeasonBridge()
                 markTransitionSeriesReady(seriesGen)
                 return@launch
             }
@@ -4040,6 +4059,7 @@ class DetailViewModel(
                             else validCached.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: validCached.first().seasonNumber
                             _selectedSeasonNumber.value = target
                             _realEpisodes.value = cachedGrouped[target].orEmpty()
+                            if (item.id > 0L) refreshSiblingSeasonBridge()
                             refreshNextAiringEpisode(item)
                             markTransitionSeriesReady(seriesGen)
                             return@launch
@@ -4211,6 +4231,9 @@ class DetailViewModel(
                     _realEpisodes.value = synEps
                 }
             }
+            if (item.id > 0L) {
+                refreshSiblingSeasonBridge()
+            }
             } finally {
                 markTransitionSeriesReady(seriesGen)
             }
@@ -4281,6 +4304,9 @@ class DetailViewModel(
         }
     }
 
+    private fun isPlaceholderEpisodeList(eps: List<MediaEpisode>): Boolean =
+        eps.isNotEmpty() && eps.all { it.id < 0L && it.title == "Episode ${it.episodeNumber}" }
+
     fun selectSeason(seasonNumber: Int) {
         _selectedSeasonNumber.value = seasonNumber
         reloadCommentsForSeason(seasonNumber)
@@ -4296,9 +4322,13 @@ class DetailViewModel(
             loadFillersForMalId(malIdForSeason, activeItem?.title)
         }
 
+        val linkedEntity = _siblingSeasonEntities.value[seasonNumber]?.takeIf {
+            it.id > 0L && it.id != activeItem?.id
+        }
         val inMemory = _episodesBySeason.value[seasonNumber]
-        if (!inMemory.isNullOrEmpty()) {
-            val decorated = decorateEpisodesWithFillers(seasonNumber, inMemory, malIdForSeason)
+        val hasRealInMemory = !inMemory.isNullOrEmpty() && (linkedEntity == null || !isPlaceholderEpisodeList(inMemory))
+        if (hasRealInMemory) {
+            val decorated = decorateEpisodesWithFillers(seasonNumber, inMemory!!, malIdForSeason)
             _realEpisodes.value = decorated
             if (decorated != inMemory) {
                 _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to decorated)
@@ -4306,20 +4336,41 @@ class DetailViewModel(
             return
         }
 
-        val tmdbId = activeItem?.tmdbId ?: SeriesContentMemoryCache.resolvedTmdbIdCache[_mediaId.value]
-        SeriesContentMemoryCache.findSeasonEpisodes(activeItem, tmdbId, seasonNumber, _mediaId.value)?.let { cached ->
-            val decorated = decorateEpisodesWithFillers(seasonNumber, cached, malIdForSeason)
-            _realEpisodes.value = decorated
-            _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to decorated)
-            return
+        if (linkedEntity == null) {
+            val tmdbId = activeItem?.tmdbId ?: SeriesContentMemoryCache.resolvedTmdbIdCache[_mediaId.value]
+            SeriesContentMemoryCache.findSeasonEpisodes(activeItem, tmdbId, seasonNumber, _mediaId.value)?.let { cached ->
+                val decorated = decorateEpisodesWithFillers(seasonNumber, cached, malIdForSeason)
+                _realEpisodes.value = decorated
+                _episodesBySeason.value = _episodesBySeason.value + (seasonNumber to decorated)
+                return
+            }
+        } else if (!inMemory.isNullOrEmpty()) {
+            _realEpisodes.value = inMemory
         }
+
         seasonEpisodesJob?.cancel()
         seasonEpisodesJob = viewModelScope.launch(Dispatchers.IO) {
-            val dbItem = activeItem ?: repository.getMediaById(_mediaId.value).firstOrNull()
-            val resolvedTmdbId = tmdbId
-                ?: dbItem?.tmdbId
-                ?: return@launch
             val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            if (linkedEntity != null) {
+                val realEps = fetchRealEpisodesForLinkedEntity(linkedEntity, seasonNumber, tmdbKey)
+                if (realEps.isNotEmpty()) {
+                    val siblingMal = linkedEntity.malId ?: malIdForSeason
+                    val enrichedEps = decorateEpisodesWithFillers(seasonNumber, realEps, siblingMal)
+                    _episodesBySeason.update { it + (seasonNumber to enrichedEps) }
+                    _realSeasons.update { seasons ->
+                        seasons.map { s ->
+                            if (s.seasonNumber == seasonNumber) s.copy(episodeCount = enrichedEps.size) else s
+                        }
+                    }
+                    if (_selectedSeasonNumber.value == seasonNumber) {
+                        _realEpisodes.value = enrichedEps
+                    }
+                }
+                return@launch
+            }
+
+            val dbItem = activeItem ?: repository.getMediaById(_mediaId.value).firstOrNull()
+            val resolvedTmdbId = dbItem?.tmdbId ?: SeriesContentMemoryCache.resolvedTmdbIdCache[_mediaId.value] ?: return@launch
             val currentTitle = dbItem?.title
             val resolvedImdbId = dbItem?.imdbId
             val resolvedAnilistId = dbItem?.anilistId
@@ -4594,65 +4645,83 @@ class DetailViewModel(
             seasonMap[activeSeasonNum] = activeItem
         }
 
-        // Expose manually linked children / parent as season tabs if missing from fetched seasons
+        // Expose manually linked children / parent as season tabs & hydrate real episodes for them
         if (linkedChildren.isNotEmpty() || linkedParent != null) {
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null } ?: "844dba0bfd8f3a4f3799f6130ef9e335"
             val existingSeasons = _realSeasons.value.toMutableList()
             var seasonsChanged = false
             val newEpMap = _episodesBySeason.value.toMutableMap()
             var epsChanged = false
 
-            if (linkedParent != null && existingSeasons.none { it.seasonNumber == 1 }) {
-                val pCount = linkedParent.totalProgress?.toInt()?.takeIf { it > 0 }
+            if (linkedParent != null && linkedParent.id != activeId) {
+                val parentSlot = 1
+                val existingParentEps = newEpMap[parentSlot]
+                val pCount = existingParentEps?.takeIf { !isPlaceholderEpisodeList(it) }?.size
+                    ?: linkedParent.totalProgress?.toInt()?.takeIf { it > 0 }
                     ?: linkedParent.currentProgress.toInt().coerceAtLeast(1)
-                existingSeasons.add(
-                    MediaSeason(
-                        seasonNumber = 1,
-                        name = linkedParent.title.ifBlank { "Season 1" },
-                        episodeCount = pCount,
-                        posterUrl = linkedParent.coverUrl.takeIf { it.isNotBlank() }
+                if (existingSeasons.none { it.seasonNumber == parentSlot }) {
+                    existingSeasons.add(
+                        MediaSeason(
+                            seasonNumber = parentSlot,
+                            name = linkedParent.title.ifBlank { "Season 1" },
+                            episodeCount = pCount,
+                            posterUrl = (linkedParent.customCoverPath ?: linkedParent.coverUrl).takeIf { it.isNotBlank() },
+                            airDate = linkedParent.releaseYear
+                        )
                     )
-                )
-                seasonsChanged = true
-                if (newEpMap[1].isNullOrEmpty()) {
-                    newEpMap[1] = (1..pCount.coerceAtMost(500)).map { ep ->
+                    seasonsChanged = true
+                }
+                if (existingParentEps.isNullOrEmpty()) {
+                    newEpMap[parentSlot] = (1..pCount.coerceAtMost(500)).map { ep ->
                         MediaEpisode(
                             id = -(linkedParent.id * 10_000L + ep),
                             episodeNumber = ep,
-                            seasonNumber = 1,
+                            seasonNumber = parentSlot,
                             title = "Episode $ep",
-                            stillUrl = linkedParent.coverUrl.takeIf { it.isNotBlank() }
+                            stillUrl = (linkedParent.customCoverPath ?: linkedParent.coverUrl).takeIf { it.isNotBlank() }
                         )
                     }
                     epsChanged = true
+                }
+                if (existingParentEps.isNullOrEmpty() || isPlaceholderEpisodeList(existingParentEps)) {
+                    hydrateLinkedSeasonAsync(activeId, linkedParent, parentSlot, tmdbKey)
                 }
             }
 
             linkedChildren.forEach { child ->
                 val sNum = child.linkedSeasonNumber?.takeIf { it > 0 } ?: return@forEach
-                val epCount = child.totalProgress?.toInt()?.takeIf { it > 0 }
+                if (child.id == activeId) return@forEach
+                val existingChildEps = newEpMap[sNum]
+                val epCount = existingChildEps?.takeIf { !isPlaceholderEpisodeList(it) }?.size
+                    ?: child.totalProgress?.toInt()?.takeIf { it > 0 }
                     ?: child.currentProgress.toInt().coerceAtLeast(1)
+                val childPoster = (child.customCoverPath ?: child.coverUrl).takeIf { it.isNotBlank() }
                 if (existingSeasons.none { it.seasonNumber == sNum }) {
                     existingSeasons.add(
                         MediaSeason(
                             seasonNumber = sNum,
                             name = child.title.ifBlank { "Season $sNum" },
                             episodeCount = epCount,
-                            posterUrl = child.coverUrl.takeIf { it.isNotBlank() }
+                            posterUrl = childPoster,
+                            airDate = child.releaseYear
                         )
                     )
                     seasonsChanged = true
                 }
-                if (newEpMap[sNum].isNullOrEmpty()) {
+                if (existingChildEps.isNullOrEmpty()) {
                     newEpMap[sNum] = (1..epCount.coerceAtMost(500)).map { ep ->
                         MediaEpisode(
                             id = -(child.id * 10_000L + ep),
                             episodeNumber = ep,
                             seasonNumber = sNum,
                             title = "Episode $ep",
-                            stillUrl = child.coverUrl.takeIf { it.isNotBlank() }
+                            stillUrl = childPoster
                         )
                     }
                     epsChanged = true
+                }
+                if (existingChildEps.isNullOrEmpty() || isPlaceholderEpisodeList(existingChildEps)) {
+                    hydrateLinkedSeasonAsync(activeId, child, sNum, tmdbKey)
                 }
             }
 
@@ -4734,10 +4803,12 @@ class DetailViewModel(
             repository.setMultipleEpisodesWatched(sib.id, epNums.distinct().map { 1 to it }, watched)
             val updatedSibRows = repository.getEpisodeProgressOnce(sib.id)
             val sibWatchedCount = updatedSibRows.filter { it.isWatched }.map { it.episodeNumber }.distinct().size.toDouble()
+            val effectiveSibTotal = sib.totalProgress?.takeIf { it > 0.0 }
+                ?: _episodesBySeason.value[sNum]?.size?.takeIf { it > 0 }?.toDouble()
             val sibNewStatus = when {
-                sib.totalProgress != null && sib.totalProgress > 0.0 && sibWatchedCount >= sib.totalProgress -> TrackingStatus.COMPLETED
+                effectiveSibTotal != null && sibWatchedCount >= effectiveSibTotal -> TrackingStatus.COMPLETED
                 watched && sibWatchedCount > 0.0 && sib.status == TrackingStatus.PLAN_TO_TRACK -> TrackingStatus.IN_PROGRESS
-                !watched && sib.status == TrackingStatus.COMPLETED && (sib.totalProgress == null || sibWatchedCount < sib.totalProgress) ->
+                !watched && sib.status == TrackingStatus.COMPLETED && (effectiveSibTotal == null || sibWatchedCount < effectiveSibTotal) ->
                     if (sibWatchedCount > 0.0) TrackingStatus.IN_PROGRESS else TrackingStatus.PLAN_TO_TRACK
                 else -> sib.status
             }
@@ -4879,14 +4950,23 @@ class DetailViewModel(
         }
     }
 
-    fun markPreviousSeasonsWatched(seasonNumber: Int) {
+    fun markPreviousSeasonsWatched(
+        seasonNumber: Int,
+        orderedSeasonNumbers: List<Int>? = null
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
             val mediaId = ensureLibraryMediaId()
             if (mediaId <= 0) return@launch
             val item = repository.getMediaByIdOnce(mediaId) ?: return@launch
-            val earlierSeasons = _realSeasons.value
-                .filter { it.seasonNumber in 1 until seasonNumber }
-                .sortedBy { it.seasonNumber }
+            val earlierSeasons = if (!orderedSeasonNumbers.isNullOrEmpty()) {
+                val targetPos = orderedSeasonNumbers.indexOf(seasonNumber)
+                val earlierSet = if (targetPos > 0) orderedSeasonNumbers.take(targetPos).toSet() else emptySet()
+                _realSeasons.value.filter { it.seasonNumber in earlierSet }
+            } else {
+                _realSeasons.value
+                    .filter { it.seasonNumber in 1 until seasonNumber }
+                    .sortedBy { it.seasonNumber }
+            }
             if (earlierSeasons.isEmpty()) return@launch
 
             val totalEps = _episodesBySeason.value.values.sumOf { it.size }.coerceAtLeast(_realEpisodes.value.size)
@@ -5174,6 +5254,7 @@ class DetailViewModel(
         _seasonMalIds.value = cached?.seasonMalIds.orEmpty()
         _siblingSeasonWatched.value = emptySet()
         _siblingSeasonEntities.value = emptyMap()
+        hydratedLinkedSeasonKeys.clear()
         _synonyms.value = cached?.synonyms.orEmpty()
         _tags.value = cached?.tags.orEmpty()
         _popularity.value = cached?.popularity
@@ -5313,6 +5394,7 @@ class DetailViewModel(
         finishTransitionLoading(triggerReveal = false)
 
         loadedAuxKeys.clear()
+        hydratedLinkedSeasonKeys.clear()
         activeSeriesFetchKey = null
         rootAniListId = null
         allSeasonCommentsCache.clear()
@@ -5951,6 +6033,308 @@ class DetailViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             if (targetItem.id > 0L) {
                 repository.unlinkCrossMediumEdition(targetItem.id)
+            }
+        }
+    }
+
+    fun rootSeasonGroupId(item: MediaItemEntity): Long =
+        item.linkedParentMediaId?.takeIf { it > 0L } ?: item.id
+
+    private suspend fun nextAvailableSeasonSlotLocked(rootId: Long): Int {
+        val dbMax = if (rootId > 0L) {
+            repository.findLinkedChildren(rootId).mapNotNull { it.linkedSeasonNumber }.maxOrNull() ?: 0
+        } else 0
+        val maxSeasonNum = maxOf(
+            _realSeasons.value.maxOfOrNull { it.seasonNumber } ?: 0,
+            _siblingSeasonEntities.value.keys.maxOrNull() ?: 0,
+            dbMax,
+            1
+        )
+        return maxSeasonNum + 1
+    }
+
+    private fun hydrateLinkedSeasonAsync(
+        hostMediaId: Long,
+        entity: MediaItemEntity,
+        seasonSlot: Int,
+        tmdbKey: String
+    ) {
+        val hydKey = "${hostMediaId}_${seasonSlot}_${entity.id}"
+        if (!hydratedLinkedSeasonKeys.add(hydKey)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val realEps = fetchRealEpisodesForLinkedEntity(entity, seasonSlot, tmdbKey)
+            if (realEps.isNotEmpty() && (_mediaId.value == hostMediaId || latestRoomItemCache[_mediaId.value]?.linkedParentMediaId == hostMediaId)) {
+                if (entity.id > 0L && (entity.totalProgress == null || entity.totalProgress <= 0.0)) {
+                    val fresh = entity.copy(totalProgress = realEps.size.toDouble())
+                    repository.updateMedia(fresh)
+                    latestRoomItemCache[fresh.id] = fresh
+                }
+                val decorated = decorateEpisodesWithFillers(seasonSlot, realEps, entity.malId)
+                _episodesBySeason.update { it + (seasonSlot to decorated) }
+                _realSeasons.update { list ->
+                    list.map { s ->
+                        if (s.seasonNumber == seasonSlot) {
+                            s.copy(
+                                episodeCount = decorated.size,
+                                airDate = s.airDate ?: decorated.firstOrNull()?.airDate
+                            )
+                        } else s
+                    }
+                }
+                if (_selectedSeasonNumber.value == seasonSlot) {
+                    _realEpisodes.value = decorated
+                }
+            }
+        }
+    }
+
+    private suspend fun fetchRealEpisodesForLinkedEntity(
+        entity: MediaItemEntity,
+        targetSeasonNumber: Int,
+        tmdbKey: String
+    ): List<MediaEpisode> {
+        val effectiveImdbId = entity.imdbId
+            ?: entity.anilistId?.takeIf { it > 0L }?.let { enrichmentRepository.fetchAniZipImdbId(it) }
+            ?: entity.tmdbId?.takeIf { it > 0L }?.let {
+                enrichmentRepository.fetchTmdbImdbId(it, entity.mediaType == MediaType.MOVIE, tmdbKey)
+            }
+
+        if (entity.mediaType == MediaType.ANIME && entity.anilistId != null && entity.anilistId > 0L) {
+            val azAll = enrichmentRepository.fetchAniZipEpisodes(entity.anilistId)
+            val regularOrAll = azAll.filter { it.seasonNumber > 0 }.ifEmpty { azAll }
+            if (regularOrAll.isNotEmpty()) {
+                val reindexed = regularOrAll.mapIndexed { idx, ep ->
+                    ep.copy(seasonNumber = targetSeasonNumber, episodeNumber = idx + 1)
+                }
+                return enrichmentRepository.enrichEpisodesWithAccurateRatings(reindexed, effectiveImdbId, 1)
+            }
+            if (entity.tmdbId != null && entity.tmdbId > 0L) {
+                val tvEps = enrichmentRepository.fetchTvSeasonEpisodes(
+                    tmdbId = entity.tmdbId,
+                    seasonNumber = 1,
+                    apiKey = tmdbKey,
+                    imdbId = effectiveImdbId,
+                    showTitle = entity.title,
+                    anilistId = entity.anilistId
+                )
+                if (tvEps.isNotEmpty()) {
+                    return tvEps.mapIndexed { idx, ep ->
+                        ep.copy(seasonNumber = targetSeasonNumber, episodeNumber = idx + 1)
+                    }
+                }
+            }
+        }
+
+        if (entity.mediaType == MediaType.SHOW && entity.tmdbId != null && entity.tmdbId > 0L) {
+            val showEps = enrichmentRepository.fetchTvSeasonEpisodes(
+                tmdbId = entity.tmdbId,
+                seasonNumber = 1,
+                apiKey = tmdbKey,
+                imdbId = effectiveImdbId,
+                showTitle = entity.title,
+                anilistId = null
+            )
+            if (showEps.isNotEmpty()) {
+                return showEps.mapIndexed { idx, ep ->
+                    ep.copy(seasonNumber = targetSeasonNumber, episodeNumber = idx + 1)
+                }
+            }
+        }
+
+        // Movie / 1-episode Special / OVA single rich episode card
+        val cleanStill = entity.customBannerPath?.takeIf { it.isNotBlank() && it != "NONE" }
+            ?: entity.bannerUrl?.takeIf { !ArtworkModelResolver.isAutoScreenshotUrl(it) }
+            ?: entity.customCoverPath?.takeIf { it.isNotBlank() }
+            ?: entity.coverUrl.takeIf { it.isNotBlank() }
+        val isSingleUnit = entity.mediaType == MediaType.MOVIE || (entity.totalProgress ?: 0.0) <= 1.0
+        if (isSingleUnit) {
+            val score = entity.imdbScore ?: entity.communityScore
+            val src = if (entity.imdbScore != null) "IMDb" else null
+            return listOf(
+                MediaEpisode(
+                    id = -(entity.id * 10_000L + 1L),
+                    episodeNumber = 1,
+                    seasonNumber = targetSeasonNumber,
+                    title = entity.title.ifBlank { "Episode 1" },
+                    overview = entity.synopsis,
+                    stillUrl = cleanStill,
+                    airDate = entity.releaseYear,
+                    runtimeMinutes = entity.runtimeMinutes,
+                    voteAverage = score,
+                    ratingSource = src
+                )
+            )
+        }
+
+        val count = (entity.totalProgress?.toInt() ?: entity.currentProgress.toInt()).coerceIn(1, 500)
+        val fallbackCover = (entity.customCoverPath ?: entity.coverUrl).takeIf { it.isNotBlank() }
+        return (1..count).map { ep ->
+            MediaEpisode(
+                id = -(entity.id * 10_000L + ep),
+                episodeNumber = ep,
+                seasonNumber = targetSeasonNumber,
+                title = "Episode $ep",
+                overview = entity.synopsis,
+                stillUrl = fallbackCover,
+                airDate = entity.releaseYear,
+                runtimeMinutes = entity.runtimeMinutes
+            )
+        }
+    }
+
+    suspend fun searchOnlineForSeasonMerge(query: String): List<com.omnitrack.app.data.search.SearchResultItem> =
+        withContext(Dispatchers.IO) {
+            val trimmed = query.trim()
+            if (trimmed.length < 2) return@withContext emptyList()
+            val tmdbKey = preferenceManager?.tmdbApiKey?.firstOrNull()?.ifBlank { null }
+                ?: "844dba0bfd8f3a4f3799f6130ef9e335"
+            coroutineScope {
+                val animeDef = async {
+                    runCatching { seasonMergeSearchRepo.searchAll(trimmed, MediaType.ANIME, tmdbKey) }.getOrDefault(emptyList())
+                }
+                val showDef = async {
+                    runCatching { seasonMergeSearchRepo.searchAll(trimmed, MediaType.SHOW, tmdbKey) }.getOrDefault(emptyList())
+                }
+                val movieDef = async {
+                    runCatching { seasonMergeSearchRepo.searchAll(trimmed, MediaType.MOVIE, tmdbKey) }.getOrDefault(emptyList())
+                }
+                (animeDef.await() + showDef.await() + movieDef.await())
+                    .distinctBy { "${it.mediaType.name}_${it.anilistId ?: it.tmdbId ?: it.malId ?: it.title.lowercase()}" }
+                    .take(20)
+            }
+        }
+
+    fun mergeLibraryEntryAsSeason(target: MediaItemEntity, preferredSeasonNumber: Int? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            seasonMergeMutex.withLock {
+                mergeLibraryEntryAsSeasonBody(target, preferredSeasonNumber)
+            }
+        }
+    }
+
+    private suspend fun mergeLibraryEntryAsSeasonBody(
+        target: MediaItemEntity,
+        preferredSeasonNumber: Int? = null
+    ) {
+        val active = _mediaId.value.takeIf { it > 0L }?.let { repository.getMediaByIdOnce(it) }
+            ?: uiState.value.item
+            ?: return
+        if (active.id <= 0L || target.id <= 0L || target.id == active.id) return
+        val rootId = rootSeasonGroupId(active)
+        if (target.id == rootId) return
+
+        val existingSlot = _siblingSeasonEntities.value.entries.firstOrNull { it.value.id == target.id }?.key
+        if (existingSlot != null && target.linkedParentMediaId == rootId) return
+
+        val slot = existingSlot ?: preferredSeasonNumber?.takeIf { it > 0 } ?: nextAvailableSeasonSlotLocked(rootId)
+        repository.updateLinkedParent(target.id, rootId, slot)
+
+        val freshTarget = target.copy(linkedParentMediaId = rootId, linkedSeasonNumber = slot)
+        latestRoomItemCache[freshTarget.id] = freshTarget
+        _siblingSeasonEntities.update { it + (slot to freshTarget) }
+
+        if (preferenceManager != null) {
+            preferenceManager.updateCustomSeriesSeasonConfig(rootId) { cfg ->
+                if (cfg.seasonOrder.isEmpty() || slot in cfg.seasonOrder) cfg
+                else cfg.copy(seasonOrder = cfg.seasonOrder + slot)
+            }
+        }
+
+        hydratedLinkedSeasonKeys.remove("${active.id}_${slot}_${freshTarget.id}")
+        refreshSiblingSeasonBridge()
+    }
+
+    fun mergeOnlineSearchResultAsSeason(result: com.omnitrack.app.data.search.SearchResultItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            seasonMergeMutex.withLock {
+                val active = _mediaId.value.takeIf { it > 0L }?.let { repository.getMediaByIdOnce(it) }
+                    ?: uiState.value.item
+                    ?: return@withLock
+                if (active.id <= 0L) return@withLock
+                val existing = repository.findExistingMedia(
+                    anilistId = result.anilistId,
+                    malId = result.malId,
+                    tmdbId = result.tmdbId,
+                    vndbId = result.vndbId,
+                    igdbId = result.igdbId,
+                    steamAppId = result.steamAppId,
+                    title = result.title,
+                    mediaType = result.mediaType
+                )
+                val entity = if (existing != null && existing.id > 0L) {
+                    existing
+                } else {
+                    val rootId = rootSeasonGroupId(active)
+                    val slot = nextAvailableSeasonSlotLocked(rootId)
+                    val rawEntity = result.toMediaItemEntity(status = TrackingStatus.PLAN_TO_TRACK).copy(
+                        linkedParentMediaId = rootId,
+                        linkedSeasonNumber = slot
+                    )
+                    val newId = repository.insertMedia(rawEntity)
+                    rawEntity.copy(id = newId)
+                }
+                mergeLibraryEntryAsSeasonBody(entity, entity.linkedSeasonNumber)
+            }
+        }
+    }
+
+    fun mergeAnimeRelationAsSeason(relation: AnimeRelationItem) {
+        val targetType = when {
+            relation.mediaType == MediaType.MOVIE || relation.format.equals("MOVIE", ignoreCase = true) -> MediaType.MOVIE
+            relation.mediaType == MediaType.SHOW || relation.format.uppercase() in setOf("TV_SERIES", "MINISERIES", "SHOW") -> MediaType.SHOW
+            else -> MediaType.ANIME
+        }
+        val alId = relation.id.takeIf { it > 0L && targetType == MediaType.ANIME }
+        val tmdbId = relation.tmdbId?.takeIf { it > 0L }
+            ?: relation.id.takeIf { it > 0L && (targetType == MediaType.MOVIE || targetType == MediaType.SHOW) }
+        val searchItem = com.omnitrack.app.data.search.SearchResultItem(
+            title = relation.title,
+            coverUrl = relation.coverUrl.orEmpty(),
+            bannerUrl = relation.bannerUrl,
+            releaseYear = relation.year?.toString(),
+            mediaType = targetType,
+            sourceProvider = "AniList",
+            anilistId = alId,
+            tmdbId = tmdbId
+        )
+        mergeOnlineSearchResultAsSeason(searchItem)
+    }
+
+    fun unlinkMergedSeason(seasonNumber: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val active = _mediaId.value.takeIf { it > 0L }?.let { repository.getMediaByIdOnce(it) }
+                ?: uiState.value.item
+                ?: return@launch
+            val target = _siblingSeasonEntities.value[seasonNumber] ?: return@launch
+            if (target.id <= 0L || target.id == active.id) return@launch
+            val rootId = rootSeasonGroupId(active)
+
+            repository.updateLinkedParent(target.id, null, null)
+            latestRoomItemCache[target.id] = target.copy(linkedParentMediaId = null, linkedSeasonNumber = null)
+
+            if (preferenceManager != null && rootId > 0L) {
+                preferenceManager.updateCustomSeriesSeasonConfig(rootId) { cfg ->
+                    cfg.copy(
+                        seasonOrder = cfg.seasonOrder.filterNot { it == seasonNumber },
+                        customNames = cfg.customNames - seasonNumber,
+                        hiddenSeasons = cfg.hiddenSeasons - seasonNumber,
+                        customPosters = cfg.customPosters - seasonNumber
+                    )
+                }
+            }
+
+            hydratedLinkedSeasonKeys.remove("${active.id}_${seasonNumber}_${target.id}")
+            _episodesBySeason.update { it - seasonNumber }
+            val wasNativeTmdbSeason = active.tmdbId != null && active.mediaType in setOf(MediaType.SHOW, MediaType.ANIME)
+            if (target.linkedParentMediaId == rootId || !wasNativeTmdbSeason) {
+                _realSeasons.update { list -> list.filterNot { it.seasonNumber == seasonNumber } }
+            }
+            refreshSiblingSeasonBridge()
+            if (_selectedSeasonNumber.value == seasonNumber) {
+                val fallbackSeason = _realSeasons.value.firstOrNull { it.seasonNumber > 0 }?.seasonNumber ?: 1
+                withContext(Dispatchers.Main) {
+                    selectSeason(fallbackSeason)
+                }
             }
         }
     }

@@ -226,6 +226,10 @@ class MediaRepository(
     suspend fun findLinkedChildren(parentId: Long): List<MediaItemEntity> =
         if (parentId <= 0L) emptyList() else mediaDao.findLinkedChildren(parentId)
 
+    suspend fun updateLinkedParent(id: Long, parentId: Long?, seasonNumber: Int?) {
+        if (id > 0L) mediaDao.updateLinkedParent(id, parentId, seasonNumber)
+    }
+
     fun observeSeasonMeta(mediaId: Long): Flow<List<SeasonMetaEntity>> =
         (seasonMetaDao?.observeForMedia(mediaId) ?: emptyFlow()).distinctUntilChanged()
 

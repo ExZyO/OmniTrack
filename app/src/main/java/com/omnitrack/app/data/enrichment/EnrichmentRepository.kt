@@ -153,6 +153,23 @@ class EnrichmentRepository(
         val episodesBySeason: Map<Int, List<com.omnitrack.app.data.model.MediaEpisode>>
     )
 
+    private data class TmdbEpisodeGroupSeason(
+        val seasonNumber: Int,
+        val name: String,
+        val airDate: String?,
+        val episodes: List<com.omnitrack.app.data.model.MediaEpisode>
+    )
+
+    private data class ExternalEpisodeRating(
+        val season: Int,
+        val episode: Int,
+        val title: String,
+        val airDate: String?,
+        val rating: Float,
+        val votes: Int?,
+        val source: String
+    )
+
     private val cinemetaVideosCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val cinemetaTvdbIdCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val tmdbTvdbIdCache = java.util.concurrent.ConcurrentHashMap<Long, Long>()
@@ -160,6 +177,9 @@ class EnrichmentRepository(
     private val tmdbSeason1StillsCache = java.util.concurrent.ConcurrentHashMap<Long, List<com.omnitrack.app.data.model.MediaEpisode>>()
     private val tmdbSeasonMetaCache = java.util.concurrent.ConcurrentHashMap<Long, List<TmdbRawSeasonMeta>>()
     private val tmdbSeasonRawEpisodesCache = java.util.concurrent.ConcurrentHashMap<String, List<com.omnitrack.app.data.model.MediaEpisode>>()
+    private val tmdbAnimeEpisodeGroupCache = java.util.concurrent.ConcurrentHashMap<Long, List<TmdbEpisodeGroupSeason>>()
+    private val omdbSeasonRatingsCache = java.util.concurrent.ConcurrentHashMap<String, List<ExternalEpisodeRating>>()
+    private val traktSeasonRatingsCache = java.util.concurrent.ConcurrentHashMap<String, List<ExternalEpisodeRating>>()
     private val aniListSeasonPosterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val aniListSubSeriesCoursCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<Long, String?>>>()
     private val kitsuSeasonDataCache = java.util.concurrent.ConcurrentHashMap<String, KitsuSeasonData>()
@@ -1128,7 +1148,8 @@ class EnrichmentRepository(
                             stillUrl = thumb,
                             airDate = dateOnly,
                             runtimeMinutes = null,
-                            voteAverage = voteAvg
+                            voteAverage = voteAvg,
+                            ratingSource = if (voteAvg != null) "Cinemeta" else null
                         )
                     }
                     if (result.isNotEmpty()) {
@@ -1294,7 +1315,11 @@ class EnrichmentRepository(
                             val stillPath = obj["still_path"].cleanString()
                             val airDate = obj["air_date"].cleanString()
                             val runtime = obj["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                            val voteAverage = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                            val rawVoteAvg = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                            val voteCount = obj["vote_count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                            val trustedVote = rawVoteAvg?.takeIf {
+                                it > 0f && (voteCount == null || voteCount >= 5)
+                            }
                             com.omnitrack.app.data.model.MediaEpisode(
                                 id = id,
                                 episodeNumber = epNumber,
@@ -1304,7 +1329,9 @@ class EnrichmentRepository(
                                 stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w780$it" },
                                 airDate = airDate,
                                 runtimeMinutes = runtime,
-                                voteAverage = voteAverage
+                                voteAverage = trustedVote,
+                                voteCount = voteCount,
+                                ratingSource = if (trustedVote != null) "TMDb" else null
                             )
                         }.sortedBy { it.episodeNumber }
                         if (parsed.isNotEmpty()) {
@@ -1448,6 +1475,336 @@ class EnrichmentRepository(
         return null
     }
 
+    private suspend fun fetchBestTmdbAnimeEpisodeGroup(
+        tmdbId: Long,
+        apiKey: String
+    ): List<TmdbEpisodeGroupSeason> {
+        tmdbAnimeEpisodeGroupCache[tmdbId]?.let { return it }
+        return NetworkPacer.coalesce("tmdb_anime_eg_$tmdbId") {
+            tmdbAnimeEpisodeGroupCache[tmdbId]?.let { return@coalesce it }
+            val result = NetworkPacer.withTmdbPacing {
+                try {
+                    val listUrl = "https://api.themoviedb.org/3/tv/$tmdbId/episode_groups?api_key=$apiKey"
+                    val listReq = Request.Builder().url(listUrl).get().build()
+                    val bestGroupId = client.newCall(listReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use null
+                        val body = resp.body?.string() ?: return@use null
+                        val results = json.parseToJsonElement(body).jsonObject["results"]?.jsonArray
+                            ?: return@use null
+                        data class CandidateGroup(val id: String, val rank: Int, val groupCount: Int)
+                        val rejectKeywords = listOf(
+                            "arc", "saga", "filler", "chronolog", "dvd", "blu-ray", "bluray",
+                            "absolute", "production", "netflix", "order"
+                        )
+                        results.mapNotNull { node ->
+                            val obj = node.jsonObject
+                            val id = obj["id"].cleanString() ?: return@mapNotNull null
+                            val name = obj["name"].cleanString().orEmpty()
+                            val lower = name.lowercase()
+                            val type = obj["type"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            val gCount = obj["group_count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            val epCount = obj["episode_count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            if (gCount !in 2..20 || epCount < 12) return@mapNotNull null
+                            if (rejectKeywords.any { lower.contains(it) }) return@mapNotNull null
+                            val rank = when {
+                                type == 7 || lower.contains("season") -> 0
+                                type == 6 || lower.contains("cour") -> 1
+                                type == 1 || lower.contains("wikipedia") -> 2
+                                else -> return@mapNotNull null
+                            }
+                            CandidateGroup(id, rank, gCount)
+                        }.sortedWith(compareBy<CandidateGroup> { it.rank }.thenByDescending { it.groupCount })
+                            .firstOrNull()?.id
+                    } ?: return@withTmdbPacing emptyList()
+
+                    val detailUrl = "https://api.themoviedb.org/3/tv/episode_group/$bestGroupId?api_key=$apiKey"
+                    val detailReq = Request.Builder().url(detailUrl).get().build()
+                    client.newCall(detailReq).execute().use { resp ->
+                        if (!resp.isSuccessful) return@use emptyList()
+                        val body = resp.body?.string() ?: return@use emptyList()
+                        val groupsArr = json.parseToJsonElement(body).jsonObject["groups"]?.jsonArray
+                            ?: return@use emptyList()
+                        val sortedGroups = groupsArr.mapNotNull { node ->
+                            val obj = node as? JsonObject ?: return@mapNotNull null
+                            val order = obj["order"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: Int.MAX_VALUE
+                            order to obj
+                        }.sortedBy { it.first }.map { it.second }
+
+                        val nonAsciiOrGenericSeasonRegex = Regex("(?i)^(?:cour|season|part)\\s*\\d+$")
+                        val out = mutableListOf<TmdbEpisodeGroupSeason>()
+                        sortedGroups.forEachIndexed { idx, grpObj ->
+                            val rawEps = grpObj["episodes"]?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
+                            if (rawEps.isEmpty()) return@forEachIndexed
+                            val regularEps = rawEps.filter { ep ->
+                                (ep["season_number"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 1) != 0
+                            }.ifEmpty { rawEps }
+
+                            val sNum = out.size + 1
+                            val rawName = grpObj["name"].cleanString().orEmpty()
+                            val hasNonAscii = rawName.any { it.code > 127 }
+                            val seasonName = if (rawName.isBlank() || hasNonAscii || nonAsciiOrGenericSeasonRegex.matches(rawName)) {
+                                "Season $sNum"
+                            } else {
+                                rawName
+                            }
+                            val mappedEps = regularEps.mapIndexedNotNull { epIdx, obj ->
+                                val epNum = epIdx + 1
+                                val id = obj["id"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                                    ?: (sNum * 1000L + epNum)
+                                val title = obj["name"].cleanString() ?: "Episode $epNum"
+                                val overview = obj["overview"].cleanString()
+                                val stillPath = obj["still_path"].cleanString()
+                                val airDate = obj["air_date"].cleanString()?.take(10)
+                                val runtime = obj["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                val rawVote = obj["vote_average"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                                val voteCount = obj["vote_count"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                                val trustedVote = rawVote?.takeIf { it > 0f && (voteCount == null || voteCount >= 5) }
+                                com.omnitrack.app.data.model.MediaEpisode(
+                                    id = id,
+                                    episodeNumber = epNum,
+                                    seasonNumber = sNum,
+                                    title = title,
+                                    overview = overview,
+                                    stillUrl = stillPath?.let { "https://image.tmdb.org/t/p/w780$it" },
+                                    airDate = airDate,
+                                    runtimeMinutes = runtime,
+                                    voteAverage = trustedVote,
+                                    voteCount = voteCount,
+                                    ratingSource = if (trustedVote != null) "TMDb" else null
+                                )
+                            }
+                            if (mappedEps.isNotEmpty()) {
+                                out.add(
+                                    TmdbEpisodeGroupSeason(
+                                        seasonNumber = sNum,
+                                        name = seasonName,
+                                        airDate = mappedEps.firstOrNull()?.airDate,
+                                        episodes = mappedEps
+                                    )
+                                )
+                            }
+                        }
+                        out
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+            tmdbAnimeEpisodeGroupCache[tmdbId] = result
+            result
+        }
+    }
+
+    private suspend fun fetchOmdbSeasonRatings(
+        imdbId: String,
+        seasonNumber: Int,
+        apiKey: String
+    ): List<ExternalEpisodeRating> {
+        val cacheKey = "${imdbId.lowercase()}_s$seasonNumber"
+        omdbSeasonRatingsCache[cacheKey]?.let { return it }
+        return NetworkPacer.coalesce("omdb_ep_$cacheKey") {
+            omdbSeasonRatingsCache[cacheKey]?.let { return@coalesce it }
+            val result = NetworkPacer.withGeneralPacing {
+                try {
+                    val url = "https://www.omdbapi.com/?i=${URLEncoder.encode(imdbId, "UTF-8")}&Season=$seasonNumber&apikey=${URLEncoder.encode(apiKey, "UTF-8")}"
+                    val req = Request.Builder().url(url).get().build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                        val body = resp.body?.string() ?: return@withGeneralPacing emptyList()
+                        val root = json.parseToJsonElement(body).jsonObject
+                        if (!root["Response"].cleanString().equals("True", ignoreCase = true)) {
+                            return@withGeneralPacing emptyList()
+                        }
+                        root["Episodes"]?.jsonArray.orEmpty().mapNotNull { node ->
+                            val o = node as? JsonObject ?: return@mapNotNull null
+                            val epNum = o["Episode"].cleanString()?.toIntOrNull() ?: return@mapNotNull null
+                            val epTitle = o["Title"].cleanString().orEmpty()
+                            val released = o["Released"].cleanString()
+                                ?.takeUnless { it.equals("N/A", ignoreCase = true) }
+                                ?.take(10)
+                            val rating = o["imdbRating"].cleanString()
+                                ?.takeUnless { it.equals("N/A", ignoreCase = true) }
+                                ?.toFloatOrNull()
+                                ?.takeIf { it > 0f }
+                                ?: return@mapNotNull null
+                            ExternalEpisodeRating(
+                                season = seasonNumber,
+                                episode = epNum,
+                                title = epTitle,
+                                airDate = released,
+                                rating = kotlin.math.round(rating * 10f) / 10f,
+                                votes = null,
+                                source = "IMDb"
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+            omdbSeasonRatingsCache[cacheKey] = result
+            result
+        }
+    }
+
+    private suspend fun fetchTraktSeasonRatings(
+        imdbId: String,
+        seasonNumber: Int
+    ): List<ExternalEpisodeRating> {
+        val cacheKey = "${imdbId.lowercase()}_s$seasonNumber"
+        traktSeasonRatingsCache[cacheKey]?.let { return it }
+        return NetworkPacer.coalesce("trakt_ep_$cacheKey") {
+            traktSeasonRatingsCache[cacheKey]?.let { return@coalesce it }
+            val result = NetworkPacer.withGeneralPacing {
+                try {
+                    val url = "https://api.trakt.tv/shows/${URLEncoder.encode(imdbId, "UTF-8")}/seasons/$seasonNumber?extended=full"
+                    val req = Request.Builder()
+                        .url(url)
+                        .header("Content-Type", "application/json")
+                        .header("trakt-api-version", "2")
+                        .header("trakt-api-key", com.omnitrack.app.data.sync.TrackerAccountVerifier.TRAKT_CLIENT_ID)
+                        .header("User-Agent", "OmniTrack/1.0")
+                        .get()
+                        .build()
+                    client.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful) return@withGeneralPacing emptyList()
+                        val body = resp.body?.string() ?: return@withGeneralPacing emptyList()
+                        val arr = json.parseToJsonElement(body).jsonArray
+                        arr.mapNotNull { node ->
+                            val o = node as? JsonObject ?: return@mapNotNull null
+                            val epNum = o["number"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@mapNotNull null
+                            val sNum = o["season"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: seasonNumber
+                            val epTitle = o["title"].cleanString().orEmpty()
+                            val airDate = o["first_aired"].cleanString()?.take(10)
+                            val rawRating = o["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                                ?.takeIf { it > 0f }
+                                ?: return@mapNotNull null
+                            val votes = o["votes"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: 0
+                            if (votes < 5) return@mapNotNull null
+                            ExternalEpisodeRating(
+                                season = sNum,
+                                episode = epNum,
+                                title = epTitle,
+                                airDate = airDate,
+                                rating = kotlin.math.round(rawRating * 10f) / 10f,
+                                votes = votes,
+                                source = "Trakt"
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    emptyList()
+                }
+            }
+            traktSeasonRatingsCache[cacheKey] = result
+            result
+        }
+    }
+
+    suspend fun enrichEpisodesWithAccurateRatings(
+        episodes: List<com.omnitrack.app.data.model.MediaEpisode>,
+        imdbId: String?,
+        seasonNumber: Int
+    ): List<com.omnitrack.app.data.model.MediaEpisode> = withContext(Dispatchers.IO) {
+        if (episodes.isEmpty()) return@withContext episodes
+        val cleanImdb = imdbId?.trim()?.takeIf { it.isNotBlank() }
+
+        fun cleanFallbackEp(ep: com.omnitrack.app.data.model.MediaEpisode): com.omnitrack.app.data.model.MediaEpisode {
+            // Drop noisy 1-4 voter TMDb outliers (e.g. 6.0 / 6.5 on anime episodes) unless corroborated
+            val isUnreliableTmdb = ep.ratingSource == "TMDb" && (ep.voteCount ?: 0) < 10
+            val isUnreliableCinemeta = ep.ratingSource == "Cinemeta"
+            return if (isUnreliableTmdb || isUnreliableCinemeta) {
+                ep.copy(voteAverage = null, ratingSource = null)
+            } else {
+                ep
+            }
+        }
+
+        if (cleanImdb == null || seasonNumber < 0) {
+            return@withContext episodes.map(::cleanFallbackEp)
+        }
+
+        fun normTitle(raw: String): String = raw.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+        fun findMatch(
+            ep: com.omnitrack.app.data.model.MediaEpisode,
+            pool: List<ExternalEpisodeRating>,
+            allowExactNumberMatch: Boolean
+        ): ExternalEpisodeRating? {
+            if (pool.isEmpty()) return null
+            val epTitleNorm = normTitle(ep.title)
+            if (epTitleNorm.length >= 3) {
+                pool.firstOrNull { normTitle(it.title) == epTitleNorm }?.let { return it }
+            }
+            pool.firstOrNull { isAirDateWithinDays(ep.airDate, it.airDate, 2L) }?.let { return it }
+            if (allowExactNumberMatch) {
+                pool.firstOrNull { it.season == ep.seasonNumber && it.episode == ep.episodeNumber }?.let { return it }
+            }
+            return null
+        }
+
+        val omdbKey = PreferenceManager.cachedOmdbApiKey.trim().takeIf { it.isNotBlank() }
+        val omdbDirect = if (omdbKey != null) fetchOmdbSeasonRatings(cleanImdb, seasonNumber, omdbKey) else emptyList()
+        val omdbHasContentMatch = omdbDirect.isNotEmpty() && episodes.any { findMatch(it, omdbDirect, allowExactNumberMatch = false) != null }
+        val omdbPool: List<ExternalEpisodeRating> = when {
+            omdbKey == null -> emptyList()
+            omdbHasContentMatch -> omdbDirect
+            else -> {
+                val collected = mutableListOf<ExternalEpisodeRating>()
+                if (omdbDirect.isNotEmpty()) collected.addAll(omdbDirect)
+                // Multi-cour anime splits may map OmniTrack S2..S5 across OMDb/IMDb S1..S4; check up to 5 seasons
+                for (sIdx in 1..5) {
+                    if (sIdx == seasonNumber) continue
+                    val list = fetchOmdbSeasonRatings(cleanImdb, sIdx, omdbKey)
+                    if (list.isEmpty()) break
+                    collected.addAll(list)
+                }
+                collected
+            }
+        }
+        val omdbAllowExact = omdbDirect.isNotEmpty() && (omdbHasContentMatch || omdbPool.size == omdbDirect.size && seasonNumber == 1)
+
+        // Zero-key high-accuracy Trakt season ratings (always queried when OMDb lacks IMDb coverage)
+        val needTrakt = episodes.any { findMatch(it, omdbPool, allowExactNumberMatch = omdbAllowExact) == null }
+        val traktDirect = if (needTrakt) fetchTraktSeasonRatings(cleanImdb, seasonNumber) else emptyList()
+        val traktHasContentMatch = traktDirect.isNotEmpty() && episodes.any { findMatch(it, traktDirect, allowExactNumberMatch = false) != null }
+        val traktPool: List<ExternalEpisodeRating> = when {
+            !needTrakt -> emptyList()
+            traktHasContentMatch -> traktDirect
+            seasonNumber > 1 -> {
+                val traktS1 = fetchTraktSeasonRatings(cleanImdb, 1)
+                (traktDirect + traktS1)
+            }
+            else -> traktDirect
+        }
+        val traktAllowExact = traktDirect.isNotEmpty() && (traktHasContentMatch || (seasonNumber == 1 && traktDirect.size <= episodes.size + 2))
+
+        episodes.map { ep ->
+            val omdbMatch = findMatch(ep, omdbPool, allowExactNumberMatch = omdbAllowExact)
+            if (omdbMatch != null) {
+                ep.copy(
+                    voteAverage = omdbMatch.rating,
+                    voteCount = omdbMatch.votes ?: ep.voteCount,
+                    ratingSource = "IMDb"
+                )
+            } else {
+                val traktMatch = findMatch(ep, traktPool, allowExactNumberMatch = traktAllowExact)
+                if (traktMatch != null) {
+                    ep.copy(
+                        voteAverage = traktMatch.rating,
+                        voteCount = traktMatch.votes ?: ep.voteCount,
+                        ratingSource = "Trakt"
+                    )
+                } else {
+                    cleanFallbackEp(ep)
+                }
+            }
+        }
+    }
+
     suspend fun fetchTvSeasons(
         tmdbId: Long,
         apiKey: String,
@@ -1496,7 +1853,8 @@ class EnrichmentRepository(
         }
 
         // Fast path: if TMDb returned multiple regular seasons with episodes (e.g. standard multi-season TV shows like Breaking Bad), return immediately.
-        // If TMDb only returned <= 1 regular season or Season 1 has > 26 episodes (lumped anime runs like Bleach / The Apothecary Diaries), consult Cinemeta for split seasons!
+        // If TMDb only returned <= 1 regular season or Season 1 has > 26 episodes (lumped anime runs like Bungo Stray Dogs / Bleach / The Apothecary Diaries),
+        // consult TMDb Episode Groups (Seasons / TV Cours) and Cinemeta + TVDB!
         val hasMultiSeasonTmdb = tmdbSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 } > 1
         val hasLumpedSeason1 = tmdbSeasons.any { it.seasonNumber == 1 && it.episodeCount > 26 }
         if (hasMultiSeasonTmdb && !hasLumpedSeason1) {
@@ -1505,17 +1863,62 @@ class EnrichmentRepository(
                 .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
         }
 
-        // Cinemeta + TVDB (SkyHook) merge for multi-season anime (e.g. Frieren S2, Bleach S1-16, Apothecary Diaries S2/3)
         val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
-        val tvdbId = resolveTvdbId(tmdbId, apiKey, effectiveImdbId, anilistId)
+        val isAnimeLookup = anilistId != null && anilistId > 0L
+        val (epGroupSeasons, tvdbId, cinemetaVideos) = coroutineScope {
+            val egDeferred = async {
+                if (isAnimeLookup) fetchBestTmdbAnimeEpisodeGroup(tmdbId, apiKey) else emptyList()
+            }
+            val tvdbDeferred = async { resolveTvdbId(tmdbId, apiKey, effectiveImdbId, anilistId) }
+            val cmDeferred = async {
+                if (!effectiveImdbId.isNullOrBlank()) fetchCinemetaVideos(effectiveImdbId) else emptyList()
+            }
+            Triple(egDeferred.await(), tvdbDeferred.await(), cmDeferred.await())
+        }
         val skyHook = if (tvdbId != null && tvdbId > 0L) fetchSkyHookShow(tvdbId) else null
-        if (!effectiveImdbId.isNullOrBlank()) {
-            val cinemetaVideos = fetchCinemetaVideos(effectiveImdbId)
+        val tmdbSeason1Poster = tmdbSeasons.find { it.seasonNumber == 1 }?.posterUrl
+        val tmdbRegularCount = tmdbSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 }
+        val cinemetaRegularCount = cinemetaVideos.map { it.seasonNumber }.filter { it > 0 }.distinct().size
 
+        // Prefer curated TMDb "Seasons"/"TV Cours" episode groups when Cinemeta/TVDB still collapses multi-cour runs (e.g. Bungo Stray Dogs 3 -> 5 seasons)
+        if (epGroupSeasons.size >= 2 && epGroupSeasons.size > maxOf(cinemetaRegularCount, tmdbRegularCount)) {
+            val postersBySeason: Map<Int, String?> = if (!showTitle.isNullOrBlank()) {
+                coroutineScope {
+                    epGroupSeasons.map { s ->
+                        async {
+                            val poster = skyHook?.seasonPosters?.get(s.seasonNumber)?.takeIf { epGroupSeasons.size == cinemetaRegularCount }
+                                ?: fetchAniListSeasonPoster(showTitle, s.seasonNumber)
+                                ?: fetchKitsuSeasonData(showTitle, s.seasonNumber)?.posterUrl
+                                ?: skyHook?.seasonPosters?.get(s.seasonNumber)
+                                ?: tmdbSeason1Poster
+                            s.seasonNumber to poster
+                        }
+                    }.awaitAll().toMap()
+                }
+            } else emptyMap()
+
+            val splitSeasons = epGroupSeasons.map { grp ->
+                com.omnitrack.app.data.model.MediaSeason(
+                    seasonNumber = grp.seasonNumber,
+                    name = grp.name,
+                    episodeCount = grp.episodes.size,
+                    posterUrl = postersBySeason[grp.seasonNumber] ?: tmdbSeason1Poster,
+                    airDate = grp.airDate
+                )
+            }.toMutableList()
+            tmdbSeasons.find { it.seasonNumber == 0 && it.episodeCount > 0 }?.let { specials ->
+                splitSeasons.add(specials)
+            }
+            return splitSeasons
+                .distinctBy { it.seasonNumber }
+                .sortedWith(compareBy({ it.seasonNumber == 0 }, { it.seasonNumber }))
+        }
+
+        // Cinemeta + TVDB (SkyHook) merge for multi-season anime (e.g. Frieren S2, Bleach S1-16, Apothecary Diaries S2/3)
+        if (!effectiveImdbId.isNullOrBlank()) {
             if (cinemetaVideos.isNotEmpty()) {
                 val cinemetaSeasons = cinemetaVideos.groupBy { it.seasonNumber }
                 val mergedList = tmdbSeasons.toMutableList()
-                val tmdbSeason1Poster = tmdbSeasons.find { it.seasonNumber == 1 }?.posterUrl
 
                 // Parallel AniList/Kitsu poster discovery for any seasons still missing a SkyHook TVDB poster (up to 20 seasons)
                 val seasonsNeedingPosters = cinemetaSeasons.keys.filter { sNum ->
@@ -1663,6 +2066,7 @@ class EnrichmentRepository(
             if (!isTmdbTvCompatibleWithAnime(tmdbId, apiKey, showTitle)) return emptyList()
         }
         val rawSeasons = fetchTmdbRawSeasonMeta(tmdbId, apiKey)
+        val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
 
         // Sub-Series Detection (e.g. "BLEACH: Thousand-Year Blood War" cours 1..4 inside TMDb Season 2)
         val matchedSubSeason = findMatchedSubSeason(rawSeasons, showTitle)
@@ -1670,16 +2074,32 @@ class EnrichmentRepository(
             val rawEps = fetchTmdbRawSeasonEpisodes(tmdbId, matchedSubSeason.seasonNumber, apiKey)
             val cours = splitEpisodesIntoCours(rawEps)
             val targetCour = cours.getOrNull(seasonNumber - 1) ?: return emptyList()
-            return targetCour.mapIndexed { idx, ep ->
+            val mapped = targetCour.mapIndexed { idx, ep ->
                 ep.copy(
                     seasonNumber = seasonNumber,
                     episodeNumber = idx + 1
                 )
             }
+            return enrichEpisodesWithAccurateRatings(mapped, effectiveImdbId, seasonNumber)
         }
 
-        val effectiveImdbId = imdbId ?: fetchTmdbImdbId(tmdbId, false, apiKey)
         val cinemetaVideos = if (!effectiveImdbId.isNullOrBlank()) fetchCinemetaVideos(effectiveImdbId) else emptyList()
+        val hasMultiSeasonTmdb = rawSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 } > 1
+        val hasLumpedSeason1 = rawSeasons.any { it.seasonNumber == 1 && it.episodeCount > 26 }
+        val isAnimeLookup = anilistId != null && anilistId > 0L
+
+        if (isAnimeLookup && seasonNumber > 0 && (hasLumpedSeason1 || !hasMultiSeasonTmdb)) {
+            val epGroupSeasons = fetchBestTmdbAnimeEpisodeGroup(tmdbId, apiKey)
+            val tmdbRegularCount = rawSeasons.count { it.seasonNumber > 0 && it.episodeCount > 0 }
+            val cinemetaRegularCount = cinemetaVideos.map { it.seasonNumber }.filter { it > 0 }.distinct().size
+            if (epGroupSeasons.size >= 2 && epGroupSeasons.size > maxOf(cinemetaRegularCount, tmdbRegularCount)) {
+                val matchedGroup = epGroupSeasons.firstOrNull { it.seasonNumber == seasonNumber }
+                if (matchedGroup != null && matchedGroup.episodes.isNotEmpty()) {
+                    return enrichEpisodesWithAccurateRatings(matchedGroup.episodes, effectiveImdbId, seasonNumber)
+                }
+            }
+        }
+
         val tvdbId = resolveTvdbId(tmdbId, apiKey, effectiveImdbId, anilistId)
         val skyHookEps = if (tvdbId != null && tvdbId > 0L) {
             (skyHookShowCache[tvdbId] ?: fetchSkyHookShow(tvdbId))?.episodesBySeason?.get(seasonNumber).orEmpty()
@@ -1709,7 +2129,7 @@ class EnrichmentRepository(
                     if (!isEpYearMismatch) tmdbEpisodes else null
                 }
                 if (sliced != null) {
-                    return sliced.map { ep ->
+                    val base = sliced.map { ep ->
                         val shMatch = skyHookEps.firstOrNull { it.episodeNumber == ep.episodeNumber }
                         ep.copy(
                             stillUrl = ep.stillUrl ?: shMatch?.stillUrl,
@@ -1717,6 +2137,7 @@ class EnrichmentRepository(
                             runtimeMinutes = ep.runtimeMinutes ?: shMatch?.runtimeMinutes
                         )
                     }
+                    return enrichEpisodesWithAccurateRatings(base, effectiveImdbId, seasonNumber)
                 }
             }
         }
@@ -1730,7 +2151,7 @@ class EnrichmentRepository(
                 cinemetaVideos.count { it.seasonNumber in 1 until seasonNumber }
             } else 0
 
-            return cmSeasonEps.mapIndexed { idx, ep ->
+            val merged = cmSeasonEps.mapIndexed { idx, ep ->
                 val cumulativeEpNum = if (seasonNumber > 0) priorCinemetaEpsCount + idx + 1 else -1
                 val byCumulative = if (isLumpedSeries && cumulativeEpNum in 1..tmdbSeason1Eps.size) {
                     tmdbSeason1Eps.firstOrNull { it.episodeNumber == cumulativeEpNum }
@@ -1748,20 +2169,22 @@ class EnrichmentRepository(
                 val shMatch = skyHookEps.firstOrNull { it.episodeNumber == ep.episodeNumber }
                 val resolvedStill = tmdbMatch?.stillUrl ?: shMatch?.stillUrl ?: ep.stillUrl
                 val resolvedOverview = if (ep.overview.isNullOrBlank()) (tmdbMatch?.overview ?: shMatch?.overview) else ep.overview
-                val resolvedVote = tmdbMatch?.voteAverage ?: ep.voteAverage
                 val resolvedRuntime = ep.runtimeMinutes ?: tmdbMatch?.runtimeMinutes ?: shMatch?.runtimeMinutes
 
                 ep.copy(
                     stillUrl = resolvedStill,
                     overview = resolvedOverview,
                     runtimeMinutes = resolvedRuntime,
-                    voteAverage = resolvedVote
+                    voteAverage = tmdbMatch?.voteAverage ?: ep.voteAverage,
+                    voteCount = tmdbMatch?.voteCount ?: ep.voteCount,
+                    ratingSource = if (tmdbMatch?.voteAverage != null) tmdbMatch.ratingSource else ep.ratingSource
                 )
             }
+            return enrichEpisodesWithAccurateRatings(merged, effectiveImdbId, seasonNumber)
         }
 
         if (skyHookEps.isNotEmpty()) {
-            return skyHookEps
+            return enrichEpisodesWithAccurateRatings(skyHookEps, effectiveImdbId, seasonNumber)
         }
 
         return emptyList()
@@ -5843,7 +6266,7 @@ class EnrichmentRepository(
                 val airDate = (o["airDate"].cleanString() ?: o["airdate"].cleanString())?.take(10)
                 val runtime = o["runtime"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
                     ?: o["length"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
-                val rating = o["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()
+                val rating = o["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.takeIf { it > 0f }
 
                 epsList.add(
                     com.omnitrack.app.data.model.MediaEpisode(
@@ -5855,7 +6278,8 @@ class EnrichmentRepository(
                         stillUrl = image,
                         airDate = airDate,
                         runtimeMinutes = runtime,
-                        voteAverage = rating
+                        voteAverage = rating,
+                        ratingSource = if (rating != null) "AniDB" else null
                     )
                 )
             }

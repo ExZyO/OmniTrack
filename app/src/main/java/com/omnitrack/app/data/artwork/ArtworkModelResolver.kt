@@ -24,6 +24,18 @@ object ArtworkModelResolver {
     fun preferredCover(summary: MediaCardSummary): String =
         summary.customCoverPath?.takeIf { it.isNotBlank() } ?: summary.coverUrl
 
+    /**
+     * Rejects VN gameplay screenshots or Steam store screenshot stills as automatic
+     * hero/Discover banners. Manual custom banners explicitly chosen by the user bypass this.
+     */
+    fun isAutoScreenshotUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val lower = url.lowercase()
+        return lower.contains("t.vndb.org/sf/") ||
+            lower.contains("t.vndb.org/st/") ||
+            (lower.contains("steamstatic.com") && lower.contains("ss_"))
+    }
+
     fun isBannerDisabled(summary: MediaCardSummary): Boolean =
         summary.customBannerPath == "NONE" || summary.artworkRole == "DISABLE_BANNER"
 
@@ -32,7 +44,9 @@ object ArtworkModelResolver {
         return summary.customBannerPath?.takeIf { it.isNotBlank() }
             ?: when (summary.artworkRole) {
                 "COVER_AS_BANNER" -> summary.coverUrl.takeIf { it.isNotBlank() }
-                else -> summary.bannerUrl?.takeIf { it.isNotBlank() && it != summary.coverUrl }
+                else -> summary.bannerUrl?.takeIf {
+                    it.isNotBlank() && it != summary.coverUrl && !isAutoScreenshotUrl(it)
+                }
             }
     }
 
@@ -43,6 +57,7 @@ object ArtworkModelResolver {
         malId: Long? = null,
         tmdbId: Long? = null,
         imdbId: String? = null,
+        vndbId: String? = null,
         steamAppId: Long? = null,
         comicVineId: Long? = null,
         metronId: Long? = null,
@@ -53,6 +68,7 @@ object ArtworkModelResolver {
         nativeTitle: String? = null
     ): MediaCardSummary? {
         val cleanImdb = imdbId?.trim()?.takeIf { it.isNotBlank() }
+        val cleanVndb = vndbId?.trim()?.takeIf { it.isNotBlank() }
         val cleanOpenLib = openLibraryId?.trim()?.takeIf { it.isNotBlank() }
         val cleanFanficWork = fanficWorkId?.trim()?.takeIf { it.isNotBlank() }
         val cleanFanficUrl = fanficSourceUrl?.trim()?.takeIf { it.isNotBlank() }
@@ -68,6 +84,7 @@ object ArtworkModelResolver {
                     (malId != null && summary.malId == malId) ||
                     (tmdbId != null && summary.tmdbId == tmdbId) ||
                     (cleanImdb != null && summary.imdbId?.trim()?.equals(cleanImdb, ignoreCase = true) == true) ||
+                    (cleanVndb != null && summary.vndbId?.trim()?.equals(cleanVndb, ignoreCase = true) == true) ||
                     (steamAppId != null && summary.steamAppId == steamAppId) ||
                     (comicVineId != null && summary.comicVineId == comicVineId) ||
                     (metronId != null && summary.metronId == metronId) ||

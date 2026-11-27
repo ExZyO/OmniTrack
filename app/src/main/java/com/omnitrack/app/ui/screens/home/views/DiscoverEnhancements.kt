@@ -102,6 +102,7 @@ fun DailyCriticsPickCard(
     libraryMatch: MediaCardSummary?,
     onOpenDetails: () -> Unit,
     onAddToLibrary: () -> Unit,
+    mediumLabel: String? = null,
     horizontalPadding: Dp = 16.dp
 ) {
     Box(
@@ -114,10 +115,27 @@ fun DailyCriticsPickCard(
             .border(0.7.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(10.dp))
             .clickable { onOpenDetails() }
     ) {
-        val backdrop = libraryMatch?.customBannerPath?.takeUnless { it == "NONE" }
-            ?: item.bannerUrl
-            ?: libraryMatch?.customCoverPath
-            ?: item.coverUrl
+        val coverModel = remember(libraryMatch?.customCoverPath, libraryMatch?.coverUrl, item.coverUrl) {
+            ArtworkModelResolver.toCoilModel(libraryMatch?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl)
+        }
+        val bannerDisabled = libraryMatch != null && ArtworkModelResolver.isBannerDisabled(libraryMatch)
+        val backdrop = remember(
+            libraryMatch?.customBannerPath,
+            libraryMatch?.bannerUrl,
+            libraryMatch?.artworkRole,
+            libraryMatch?.coverUrl,
+            item.bannerUrl,
+            item.coverUrl,
+            bannerDisabled
+        ) {
+            if (bannerDisabled) null
+            else ArtworkModelResolver.toCoilModel(
+                libraryMatch?.let { ArtworkModelResolver.preferredBanner(it) }
+                    ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl && !ArtworkModelResolver.isAutoScreenshotUrl(it) }
+                    ?: libraryMatch?.let { ArtworkModelResolver.preferredCover(it) }
+                    ?: item.coverUrl
+            )
+        }
         AsyncImage(
             model = backdrop,
             contentDescription = item.title,
@@ -143,7 +161,7 @@ fun DailyCriticsPickCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             AsyncImage(
-                model = libraryMatch?.customCoverPath ?: item.coverUrl,
+                model = coverModel,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -161,7 +179,7 @@ fun DailyCriticsPickCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "DAILY CRITICS' PICK",
+                        text = if (!mediumLabel.isNullOrBlank()) "DAILY CRITICS' PICK · ${mediumLabel.uppercase(Locale.US)}" else "DAILY CRITICS' PICK",
                         color = AccentGold,
                         fontSize = 10.5.sp,
                         fontWeight = FontWeight.Black,
@@ -228,7 +246,10 @@ fun DiscoveryQueueLauncherCard(
     horizontalPadding: Dp = 20.dp
 ) {
     val stack = queueItems.take(3)
-    val backdropUrl = stack.firstOrNull()?.let { it.bannerUrl ?: it.coverUrl }
+    val backdropUrl = stack.firstOrNull()?.let { first ->
+        first.bannerUrl?.takeIf { it.isNotBlank() && it != first.coverUrl && !ArtworkModelResolver.isAutoScreenshotUrl(it) }
+            ?: first.coverUrl
+    }
 
     Box(
         modifier = Modifier
@@ -495,12 +516,13 @@ fun StreamingServiceDiscoverSection(
                         anilistId = item.anilistId,
                         malId = item.malId,
                         tmdbId = item.tmdbId,
+                        vndbId = item.vndbId,
                         openLibraryId = item.openLibraryId,
                         title = item.title
                     )
                     NuvioRailPosterCard(
                         title = item.title,
-                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
+                        coverUrl = inLib?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl,
                         subtitle = item.releaseYear ?: item.mediaType.displayName,
                         rating = item.communityScore,
                         inLibraryBadge = inLib != null,
@@ -628,12 +650,13 @@ fun TasteMatchedDiscoverSection(
                     anilistId = item.anilistId,
                     malId = item.malId,
                     tmdbId = item.tmdbId,
+                    vndbId = item.vndbId,
                     openLibraryId = item.openLibraryId,
                     title = item.title
                 )
                 NuvioRailPosterCard(
                     title = item.title,
-                    coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
+                    coverUrl = inLib?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl,
                     subtitle = item.releaseYear ?: item.mediaType.displayName,
                     rating = item.communityScore,
                     inLibraryBadge = inLib != null,
@@ -744,12 +767,13 @@ fun CuratedFilterDiscoverSection(
                         anilistId = item.anilistId,
                         malId = item.malId,
                         tmdbId = item.tmdbId,
+                        vndbId = item.vndbId,
                         openLibraryId = item.openLibraryId,
                         title = item.title
                     )
                     NuvioRailPosterCard(
                         title = item.title,
-                        coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
+                        coverUrl = inLib?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl,
                         subtitle = item.releaseYear ?: item.mediaType.displayName,
                         rating = item.communityScore,
                         inLibraryBadge = inLib != null,

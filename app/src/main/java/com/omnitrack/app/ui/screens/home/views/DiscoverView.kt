@@ -208,6 +208,7 @@ fun DiscoverView(
     val curatedRowItemsFlow = remember(homeViewModel) { homeViewModel?.curatedRowItems ?: MutableStateFlow(emptyList()) }
     val isLoadingCuratedRowFlow = remember(homeViewModel) { homeViewModel?.isLoadingCuratedRow ?: MutableStateFlow(false) }
     val dailyCriticsPickFlow = remember(homeViewModel) { homeViewModel?.dailyCriticsPick ?: MutableStateFlow(null) }
+    val dailyCriticsPicksByMediaFlow = remember(homeViewModel) { homeViewModel?.dailyCriticsPicksByMedia ?: MutableStateFlow(emptyMap()) }
     val skippedSwipeKeysFlow = remember(homeViewModel) { homeViewModel?.skippedSwipeKeys ?: MutableStateFlow(emptySet()) }
 
     val streamingProviders by streamingProvidersFlow.collectAsState()
@@ -221,6 +222,7 @@ fun DiscoverView(
     val curatedRowItems by curatedRowItemsFlow.collectAsState()
     val isLoadingCuratedRow by isLoadingCuratedRowFlow.collectAsState()
     val dailyCriticsPick by dailyCriticsPickFlow.collectAsState()
+    val dailyCriticsPicksByMedia by dailyCriticsPicksByMediaFlow.collectAsState()
     val skippedSwipeKeys by skippedSwipeKeysFlow.collectAsState()
     var showSwipeQueueSheet by remember { mutableStateOf(false) }
 
@@ -281,6 +283,10 @@ fun DiscoverView(
         homeViewModel?.loadDiscoverHighlights(
             mediaFilter = selectedFilter,
             regionPref = watchRegionPref,
+            tmdbApiKey = tmdbKey
+        )
+        homeViewModel?.loadDailyCriticsPickForMedia(
+            mediaType = selectedFilter,
             tmdbApiKey = tmdbKey
         )
     }
@@ -1056,6 +1062,11 @@ fun DiscoverView(
                                     summary.mediaType == item.mediaType && (
                                         (item.fanficWorkId != null && summary.fanficWorkId == item.fanficWorkId) ||
                                             (item.fanficSourceUrl != null && summary.fanficSourceUrl.equals(item.fanficSourceUrl, ignoreCase = true)) ||
+                                            (item.anilistId != null && summary.anilistId == item.anilistId) ||
+                                            (item.malId != null && summary.malId == item.malId) ||
+                                            (item.tmdbId != null && summary.tmdbId == item.tmdbId) ||
+                                            (item.vndbId != null && summary.vndbId?.equals(item.vndbId, ignoreCase = true) == true) ||
+                                            (item.steamAppId != null && summary.steamAppId == item.steamAppId) ||
                                             (item.comicVineId != null && summary.comicVineId == item.comicVineId) ||
                                             (item.metronId != null && summary.metronId == item.metronId) ||
                                             (item.openLibraryId != null && summary.openLibraryId == item.openLibraryId) ||
@@ -1074,7 +1085,7 @@ fun DiscoverView(
                                     title = item.title,
                                     nativeTitle = item.nativeTitle,
                                     coverUrl = item.coverUrl,
-                                    bannerUrl = item.bannerUrl,
+                                    bannerUrl = item.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) },
                                     mediaType = item.mediaType,
                                     status = TrackingStatus.PLAN_TO_TRACK,
                                     currentProgress = 0.0,
@@ -1249,7 +1260,9 @@ fun DiscoverView(
                 }.distinctBy { "${it.mediaType}_${it.title.lowercase()}" }
                 val withBanner = raw.filter { item ->
                     findLibraryMatch(allMedia, item)?.let { ArtworkModelResolver.preferredBanner(it) != null }
-                        ?: (!item.bannerUrl.isNullOrBlank() && item.bannerUrl != item.coverUrl)
+                        ?: (!item.bannerUrl.isNullOrBlank() &&
+                            item.bannerUrl != item.coverUrl &&
+                            !ArtworkModelResolver.isAutoScreenshotUrl(item.bannerUrl))
                 }
                 val withoutBanner = raw.filterNot { item -> item in withBanner }
                 (withBanner + withoutBanner).take(6)
@@ -1392,23 +1405,25 @@ fun DiscoverView(
                     }
                 }
 
-                // Daily Critics' Pick editorial card
-                if (discoverSettings.showDailyCriticsPick && dailyCriticsPick != null) {
-                    item(key = "discover_daily_critics_pick") {
-                        val pick = dailyCriticsPick!!
-                        val libMatch = findLibraryMatch(allMedia, pick)
+                // Daily Critics' Pick editorial card (medium-aware when switching Discover categories)
+                val activeCriticsPick = dailyCriticsPicksByMedia[selectedFilter]
+                    ?: if (selectedFilter == MediaType.ALL) dailyCriticsPick else null
+                if (discoverSettings.showDailyCriticsPick && activeCriticsPick != null) {
+                    item(key = "discover_daily_critics_pick_${selectedFilter.name}") {
+                        val libMatch = findLibraryMatch(allMedia, activeCriticsPick)
                         DailyCriticsPickCard(
-                            item = pick,
+                            item = activeCriticsPick,
                             libraryMatch = libMatch,
+                            mediumLabel = if (selectedFilter == MediaType.ALL) null else selectedFilter.displayName,
                             onOpenDetails = {
                                 if (libMatch != null) {
                                     onItemClick(libMatch.id)
                                 } else {
-                                    EphemeralPreviewHolder.previewItem = pick.toMediaItemEntity()
+                                    EphemeralPreviewHolder.previewItem = activeCriticsPick.toMediaItemEntity()
                                     onItemClick(-1L)
                                 }
                             },
-                            onAddToLibrary = { onAddMedia(pick) }
+                            onAddToLibrary = { onAddMedia(activeCriticsPick) }
                         )
                     }
                 }
@@ -1580,7 +1595,7 @@ fun DiscoverView(
                                         val inLib = findLibraryMatch(allMedia, item)
                                         NuvioRailPosterCard(
                                             title = item.title,
-                                            coverUrl = inLib?.customCoverPath ?: inLib?.coverUrl ?: item.coverUrl,
+                                            coverUrl = inLib?.let { ArtworkModelResolver.preferredCover(it) } ?: item.coverUrl,
                                             subtitle = item.bookAuthor ?: item.comicPublisher ?: item.releaseYear ?: item.mediaType.displayName,
                                             rating = item.communityScore,
                                             inLibraryBadge = inLib != null,
@@ -1768,6 +1783,7 @@ private fun findLibraryMatch(allMedia: List<MediaCardSummary>, item: SearchResul
         malId = item.malId,
         tmdbId = item.tmdbId,
         imdbId = item.imdbId,
+        vndbId = item.vndbId,
         steamAppId = item.steamAppId,
         comicVineId = item.comicVineId,
         metronId = item.metronId,
@@ -1824,7 +1840,9 @@ private fun DiscoverSpotlightBanner(
         if (bannerDisabled) null
         else ArtworkModelResolver.toCoilModel(
             libraryMatch?.let { ArtworkModelResolver.preferredBanner(it) }
-                ?: item.bannerUrl?.takeIf { it.isNotBlank() && it != item.coverUrl }
+                ?: item.bannerUrl?.takeIf {
+                    it.isNotBlank() && it != item.coverUrl && !ArtworkModelResolver.isAutoScreenshotUrl(it)
+                }
         )
     }
     val focalX = libraryMatch?.bannerFocalX ?: 0f

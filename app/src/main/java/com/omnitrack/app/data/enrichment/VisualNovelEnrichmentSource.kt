@@ -540,18 +540,13 @@ class VisualNovelEnrichmentSource(
                         fetchAniZipLogoUrl(aniData.aniListId)
                     } else null
 
-                    val safeFallbackBanner = screenshots.firstOrNull { !it.isSensitive }?.url
-                        ?: screenshots.firstOrNull()?.url
-
                     val existingNonShotBanner = item.bannerUrl?.takeIf {
-                        it.isNotBlank() && !it.contains("t.vndb.org/sf/")
+                        it.isNotBlank() && !com.omnitrack.app.data.artwork.ArtworkModelResolver.isAutoScreenshotUrl(it)
                     }
                     val finalBanner = steamData?.libraryHeroUrl
                         ?: sgdbPair?.first
                         ?: igdbData?.artworks?.firstOrNull()
                         ?: existingNonShotBanner
-                        ?: safeFallbackBanner
-                        ?: item.bannerUrl?.takeIf { it.isNotBlank() }
                     val finalClearLogo = steamData?.logoUrl ?: sgdbPair?.second ?: aniZipLogo
                     val combinedRelations = (vndbRelations + aniData?.relations.orEmpty())
                         .distinctBy { it.vndbId ?: "${it.mediaType}_${it.title.lowercase()}" }

@@ -133,6 +133,9 @@ class HomeViewModel(
     val isLoadingCuratedRow: StateFlow<Boolean> = _isLoadingCuratedRow.asStateFlow()
     private val _dailyCriticsPick = MutableStateFlow<SearchResultItem?>(null)
     val dailyCriticsPick: StateFlow<SearchResultItem?> = _dailyCriticsPick.asStateFlow()
+    private val _dailyCriticsPicksByMedia = MutableStateFlow<Map<MediaType, SearchResultItem>>(emptyMap())
+    val dailyCriticsPicksByMedia: StateFlow<Map<MediaType, SearchResultItem>> = _dailyCriticsPicksByMedia.asStateFlow()
+    private val inFlightCriticsPickMedia = java.util.Collections.synchronizedSet(mutableSetOf<MediaType>())
     private val _skippedSwipeKeys = MutableStateFlow<Set<String>>(emptySet())
     val skippedSwipeKeys: StateFlow<Set<String>> = _skippedSwipeKeys.asStateFlow()
     private var loadedHighlightsKey: String? = null
@@ -1322,8 +1325,22 @@ class HomeViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             coroutineScope {
                 launch {
-                    val pick = runCatching { homeSearchRepository.fetchDailyCriticsPick(tmdbKey) }.getOrNull()
-                    if (pick != null) _dailyCriticsPick.value = pick
+                    val pick = runCatching { homeSearchRepository.fetchDailyCriticsPick(tmdbKey, mediaFilter) }.getOrNull()
+                    if (pick != null) {
+                        _dailyCriticsPicksByMedia.update { it + (mediaFilter to pick) }
+                        if (mediaFilter == MediaType.ALL || _dailyCriticsPick.value == null) {
+                            _dailyCriticsPick.value = pick
+                        }
+                    }
+                }
+                if (mediaFilter != MediaType.ALL && !_dailyCriticsPicksByMedia.value.containsKey(MediaType.ALL)) {
+                    launch {
+                        val allPick = runCatching { homeSearchRepository.fetchDailyCriticsPick(tmdbKey, MediaType.ALL) }.getOrNull()
+                        if (allPick != null) {
+                            _dailyCriticsPicksByMedia.update { it + (MediaType.ALL to allPick) }
+                            _dailyCriticsPick.value = allPick
+                        }
+                    }
                 }
                 launch {
                     val top10 = runCatching { homeSearchRepository.fetchTop10Today(mediaFilter, tmdbKey) }.getOrDefault(emptyList())
@@ -1392,6 +1409,28 @@ class HomeViewModel(
                 }.getOrDefault(emptyList())
             } finally {
                 _isLoadingStreamingTitles.value = false
+            }
+        }
+    }
+
+    fun loadDailyCriticsPickForMedia(mediaType: MediaType, tmdbApiKey: String? = null) {
+        if (mediaType == MediaType.FANFICTION) return
+        if (_dailyCriticsPicksByMedia.value.containsKey(mediaType)) return
+        if (!inFlightCriticsPickMedia.add(mediaType)) return
+        val tmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pick = runCatching {
+                    homeSearchRepository.fetchDailyCriticsPick(tmdbKey, mediaType)
+                }.getOrNull()
+                if (pick != null) {
+                    _dailyCriticsPicksByMedia.update { it + (mediaType to pick) }
+                    if (mediaType == MediaType.ALL) {
+                        _dailyCriticsPick.value = pick
+                    }
+                }
+            } finally {
+                inFlightCriticsPickMedia.remove(mediaType)
             }
         }
     }

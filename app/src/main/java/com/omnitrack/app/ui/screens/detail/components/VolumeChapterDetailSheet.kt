@@ -509,7 +509,7 @@ fun VolumeChapterDetailSheet(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    if (!isMangaMode) {
+                                    if (!isMangaMode && ep.ratingSource.equals("IMDb", ignoreCase = true)) {
                                         Image(
                                             painter = painterResource(R.drawable.rating_imdb),
                                             contentDescription = "IMDb",
@@ -519,7 +519,7 @@ fun VolumeChapterDetailSheet(
                                     } else {
                                         Icon(
                                             imageVector = Icons.Default.Star,
-                                            contentDescription = null,
+                                            contentDescription = ep.ratingSource ?: "Rating",
                                             tint = AccentGold,
                                             modifier = Modifier.size(12.dp)
                                         )

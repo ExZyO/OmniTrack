@@ -52,7 +52,9 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material.icons.filled.ViewStream
@@ -174,7 +176,11 @@ fun LazyListScope.detailSeriesItems(
     isLightNovelVolumeMode: Boolean = false,
     currentTotalProgress: Int? = null,
     onStepProgress: ((Int) -> Unit)? = null,
-    onJumpToProgress: ((Int) -> Unit)? = null
+    onJumpToProgress: ((Int) -> Unit)? = null,
+    hiddenSeasonsCount: Int = 0,
+    onOpenManageSeasons: (() -> Unit)? = null,
+    linkedSeasonEntities: Map<Int, com.omnitrack.app.data.db.entity.MediaItemEntity> = emptyMap(),
+    currentMediaId: Long = -1L
 ) {
     if (seasons.isEmpty() && episodes.isEmpty() && episodesBySeason.isEmpty()) {
         return
@@ -240,7 +246,8 @@ fun LazyListScope.detailSeriesItems(
     }
 
     // 1. Seasons Section Header & Poster/Text Selector
-    if (seasons.size > 1) {
+    val showSeasonsBlock = seasons.size > 1 || (hiddenSeasonsCount > 0 && onOpenManageSeasons != null)
+    if (showSeasonsBlock) {
         item(key = "series_seasons_selector", contentType = "series_seasons") {
             Column(
                 modifier = Modifier
@@ -262,33 +269,72 @@ fun LazyListScope.detailSeriesItems(
                         isMangaMode -> "Volumes"
                         else -> "Seasons"
                     }
-                    Text(
-                        text = seasonSectionTitle,
-                        color = TextPrimary,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp
-                    )
-
-                    if (hasDistinctBookPosters) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.08f))
-                                .clickable {
-                                    val next = if (seriesState.currentSeasonViewMode == "Posters") "Text" else "Posters"
-                                    seriesState.currentSeasonViewMode = next
-                                    onSeasonViewModeChanged?.invoke(next)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 5.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = seasonSectionTitle,
+                            color = TextPrimary,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
+                        )
+                        if (hiddenSeasonsCount > 0) {
                             Text(
-                                text = if (seriesState.currentSeasonViewMode == "Posters") "Posters" else "Text",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                text = "$hiddenSeasonsCount hidden",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .clickable(enabled = onOpenManageSeasons != null) {
+                                        onOpenManageSeasons?.invoke()
+                                    }
+                                    .padding(horizontal = 7.dp, vertical = 2.dp)
                             )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (onOpenManageSeasons != null && !isMangaMode && !isLightNovelVolumeMode) {
+                            IconButton(
+                                onClick = onOpenManageSeasons,
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Manage & Customize Seasons",
+                                    tint = com.omnitrack.app.ui.theme.AccentGold,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        if (hasDistinctBookPosters) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .clickable {
+                                        val next = if (seriesState.currentSeasonViewMode == "Posters") "Text" else "Posters"
+                                        seriesState.currentSeasonViewMode = next
+                                        onSeasonViewModeChanged?.invoke(next)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (seriesState.currentSeasonViewMode == "Posters") "Posters" else "Text",
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -482,6 +528,20 @@ fun LazyListScope.detailSeriesItems(
                                     color = if (isFillerSkipEnabled) AccentJade else Color.White.copy(alpha = 0.85f)
                                 )
                             }
+                        }
+                    }
+
+                    if (!showSeasonsBlock && onOpenManageSeasons != null && !isMangaMode && !isLightNovelVolumeMode) {
+                        IconButton(
+                            onClick = onOpenManageSeasons,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.LibraryAdd,
+                                contentDescription = "Merge & Customize Seasons",
+                                tint = AccentGold,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
 
@@ -746,7 +806,11 @@ fun DetailSeriesDialogs(
     onMarkWatchedChoice: ((MediaEpisode, Boolean) -> Unit)? = null,
     onJumpToProgress: ((Int) -> Unit)? = null,
     seasonMetaMap: Map<Int, com.omnitrack.app.data.db.entity.SeasonMetaEntity> = emptyMap(),
-    onSaveSeasonMeta: ((Int, Float?, String?) -> Unit)? = null
+    onSaveSeasonMeta: ((Int, Float?, String?) -> Unit)? = null,
+    siblingSeasonEntities: Map<Int, com.omnitrack.app.data.db.entity.MediaItemEntity> = emptyMap(),
+    currentMediaId: Long = -1L,
+    onOpenLinkedSeasonEntry: ((com.omnitrack.app.data.db.entity.MediaItemEntity) -> Unit)? = null,
+    onOpenManageSeasons: (() -> Unit)? = null
 ) {
     val totalItemsAcrossSeasons = remember(episodesBySeason, episodes) {
         val byMap = episodesBySeason.values.sumOf { it.size }
@@ -779,6 +843,7 @@ fun DetailSeriesDialogs(
         val canMarkPrevious = seasons.any { it.seasonNumber in 1 until season.seasonNumber }
 
         val existingMeta = seasonMetaMap[season.seasonNumber]
+        val linkedSibling = siblingSeasonEntities[season.seasonNumber]?.takeIf { it.id > 0L && it.id != currentMediaId }
         SeasonWatchedActionSheet(
             seasonLabel = seasonLabel,
             episodeCount = effectiveCount,
@@ -791,6 +856,11 @@ fun DetailSeriesDialogs(
             onSaveSeasonMeta = onSaveSeasonMeta?.let { cb ->
                 { rating, note -> cb(season.seasonNumber, rating, note) }
             },
+            linkedEntryTitle = linkedSibling?.title,
+            onOpenLinkedEntry = if (linkedSibling != null && onOpenLinkedSeasonEntry != null) {
+                { onOpenLinkedSeasonEntry(linkedSibling) }
+            } else null,
+            onManageSeasons = onOpenManageSeasons,
             onDismiss = { seriesState.activeActionSheetSeason = null },
             onToggleSeasonWatched = { onToggleSeasonWatched(season.seasonNumber) },
             onMarkPreviousSeasonsWatched = { onMarkPreviousSeasonsWatched?.invoke(season.seasonNumber) }
@@ -1028,11 +1098,13 @@ fun NuvioAnimatedWatchedBadge(
 }
 
 /**
- * Official IMDb Rating Badge for episodes.
+ * Honest Episode Rating Badge: displays the official IMDb logo ONLY for authentic IMDb ratings
+ * (OMDb / verified IMDb sources) and a crisp star badge for Trakt, AniDB, or TMDb ratings.
  */
 @Composable
-private fun ImdbEpisodeRatingBadge(
+private fun EpisodeRatingBadge(
     rating: Float,
+    ratingSource: String? = null,
     modifier: Modifier = Modifier,
     logoWidth: Dp = 24.dp,
     logoHeight: Dp = 12.dp,
@@ -1043,14 +1115,23 @@ private fun ImdbEpisodeRatingBadge(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Image(
-            painter = painterResource(R.drawable.rating_imdb),
-            contentDescription = "IMDb",
-            modifier = Modifier
-                .width(logoWidth)
-                .height(logoHeight),
-            contentScale = ContentScale.Fit
-        )
+        if (ratingSource.equals("IMDb", ignoreCase = true)) {
+            Image(
+                painter = painterResource(R.drawable.rating_imdb),
+                contentDescription = "IMDb",
+                modifier = Modifier
+                    .width(logoWidth)
+                    .height(logoHeight),
+                contentScale = ContentScale.Fit
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = ratingSource ?: "Rating",
+                tint = Color(0xFFF5C518),
+                modifier = Modifier.size(logoHeight)
+            )
+        }
         Text(
             text = String.format(java.util.Locale.US, "%.1f", rating),
             fontSize = textSize,
@@ -1629,8 +1710,9 @@ private fun EpisodeHorizontalCard(
                             color = AccentGold
                         )
                     } else {
-                        ImdbEpisodeRatingBadge(
+                        EpisodeRatingBadge(
                             rating = episode.voteAverage,
+                            ratingSource = episode.ratingSource,
                             logoWidth = 22.dp,
                             logoHeight = 11.dp,
                             textSize = 10.sp
@@ -1945,8 +2027,9 @@ private fun EpisodeListCardItem(
                                     color = AccentGold
                                 )
                             } else {
-                                ImdbEpisodeRatingBadge(
+                                EpisodeRatingBadge(
                                     rating = episode.voteAverage,
+                                    ratingSource = episode.ratingSource,
                                     logoWidth = 24.dp,
                                     logoHeight = 12.dp,
                                     textSize = 12.sp
@@ -2158,7 +2241,10 @@ private fun EpisodeVerticalCardItem(
                             color = AccentGold
                         )
                     } else {
-                        ImdbEpisodeRatingBadge(rating = episode.voteAverage)
+                        EpisodeRatingBadge(
+                            rating = episode.voteAverage,
+                            ratingSource = episode.ratingSource
+                        )
                     }
                 }
                 Spacer(modifier = Modifier.weight(1f))

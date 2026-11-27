@@ -58,10 +58,7 @@ class OmniSearchRepository(
         private val discoverShelfCache = java.util.concurrent.ConcurrentHashMap<String, List<SearchResultItem>>()
         private val wikidataAliasCache = java.util.concurrent.ConcurrentHashMap<String, List<Pair<String, String>>>()
         private val streamingProvidersCache = java.util.concurrent.ConcurrentHashMap<String, List<StreamingProviderChip>>()
-        @Volatile
-        private var cachedCriticsPickDay: Long = -1L
-        @Volatile
-        private var cachedCriticsPickItem: SearchResultItem? = null
+        private val cachedCriticsPickByKey = java.util.concurrent.ConcurrentHashMap<String, SearchResultItem>()
 
         fun cleanSynopsis(raw: String?): String? {
             if (raw.isNullOrBlank()) return null
@@ -1466,13 +1463,6 @@ class OmniSearchRepository(
                     val releaseYear = obj["released"].cleanString()?.take(4)?.takeIf { y -> y.length == 4 && y.all { it.isDigit() } }
                     val imageObj = obj["image"] as? JsonObject
                     val cover = imageObj?.get("url").cleanString() ?: return@mapNotNull null
-                    val screenshots = obj["screenshots"] as? JsonArray
-                    val safeShot = (screenshots?.firstOrNull {
-                        val s = it as? JsonObject ?: return@firstOrNull false
-                        (s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f) < 0.5f && (s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f) < 1f
-                    } as? JsonObject)?.get("url").cleanString()
-                        ?: (screenshots?.firstOrNull() as? JsonObject)?.get("url").cleanString()
-
                     val rating = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f }
                     val desc = cleanSynopsis(
                         obj["description"].cleanString()
@@ -1485,7 +1475,8 @@ class OmniSearchRepository(
                         nativeTitle = nativeTitle,
                         synopsis = desc,
                         coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
-                        bannerUrl = safeShot?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                        // Clean art only for auto banners (never auto-pick VN gameplay screenshots)
+                        bannerUrl = null,
                         mediaType = MediaType.VISUAL_NOVEL,
                         releaseYear = releaseYear,
                         communityScore = rating,
@@ -2588,11 +2579,6 @@ class OmniSearchRepository(
                         val imgViol = imageObj["violence"]?.jsonPrimitive?.floatOrNull ?: 0f
                         if (hideNsfw && (imgSexual >= 1.0f || imgViol >= 1.5f)) return@mapNotNull null
                         val cover = imageObj["url"].cleanString() ?: return@mapNotNull null
-                        val screenshots = obj["screenshots"] as? JsonArray
-                        val safeShot = (screenshots?.firstOrNull {
-                            val s = it as? JsonObject ?: return@firstOrNull false
-                            (s["sexual"]?.jsonPrimitive?.floatOrNull ?: 0f) < 0.5f && (s["violence"]?.jsonPrimitive?.floatOrNull ?: 0f) < 1f
-                        } as? JsonObject)?.get("url").cleanString()
                         val origin = when (olang?.lowercase()) {
                             "ja" -> "JP"
                             "en" -> "EN"
@@ -2605,7 +2591,8 @@ class OmniSearchRepository(
                             nativeTitle = altTitle,
                             synopsis = cleanSynopsis(obj["description"].cleanString()?.replace(Regex("\\[[^\\]]*]"), "")),
                             coverUrl = LosslessCoverMapper.toLosslessUrl(cover),
-                            bannerUrl = safeShot?.let { LosslessCoverMapper.toLosslessUrl(it) },
+                            // Clean art only for Discover VN hero/spotlight (no gameplay screenshots)
+                            bannerUrl = null,
                             mediaType = MediaType.VISUAL_NOVEL,
                             releaseYear = obj["released"].cleanString()?.take(4)?.takeIf { y -> y.length == 4 && y.all { it.isDigit() } },
                             communityScore = obj["rating"]?.jsonPrimitive?.contentOrNull?.toFloatOrNull()?.let { it / 10f },
@@ -2962,28 +2949,85 @@ class OmniSearchRepository(
         items
     }
 
-    suspend fun fetchDailyCriticsPick(tmdbApiKey: String? = null): SearchResultItem? = withContext(Dispatchers.IO) {
+    suspend fun fetchDailyCriticsPick(
+        tmdbApiKey: String? = null,
+        mediaType: MediaType = MediaType.ALL
+    ): SearchResultItem? = withContext(Dispatchers.IO) {
+        if (mediaType == MediaType.FANFICTION) return@withContext null
         val dayKey = java.time.LocalDate.now().toEpochDay()
-        if (cachedCriticsPickDay == dayKey && cachedCriticsPickItem != null) {
-            return@withContext cachedCriticsPickItem
-        }
-        val pool = NetworkPacer.withTmdbPacing {
-            runCatching {
-                val req = buildTmdbRequest("movie/top_rated?language=en-US&page=1", tmdbApiKey)
-                client.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) emptyList()
-                    else {
-                        val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
-                            ?.get("results") as? JsonArray ?: return@use emptyList()
-                        parseTmdbDiscoverItems(arr, MediaType.MOVIE).filter { !it.bannerUrl.isNullOrBlank() }
+        val cacheKey = "${dayKey}_${mediaType.name}"
+        cachedCriticsPickByKey[cacheKey]?.let { return@withContext it }
+
+        val rawPool: List<SearchResultItem> = when (mediaType) {
+            MediaType.ALL -> {
+                coroutineScope {
+                    val moviesDef = async {
+                        NetworkPacer.withTmdbPacing {
+                            runCatching {
+                                val req = buildTmdbRequest("movie/top_rated?language=en-US&page=1", tmdbApiKey)
+                                client.newCall(req).execute().use { resp ->
+                                    if (!resp.isSuccessful) emptyList()
+                                    else {
+                                        val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                            ?.get("results") as? JsonArray ?: return@use emptyList()
+                                        parseTmdbDiscoverItems(arr, MediaType.MOVIE)
+                                    }
+                                }
+                            }.getOrDefault(emptyList())
+                        }
+                    }
+                    val showsDef = async {
+                        NetworkPacer.withTmdbPacing {
+                            runCatching {
+                                val req = buildTmdbRequest("tv/top_rated?language=en-US&page=1", tmdbApiKey)
+                                client.newCall(req).execute().use { resp ->
+                                    if (!resp.isSuccessful) emptyList()
+                                    else {
+                                        val arr = (json.parseToJsonElement(resp.body?.string().orEmpty()) as? JsonObject)
+                                            ?.get("results") as? JsonArray ?: return@use emptyList()
+                                        parseTmdbDiscoverItems(arr, MediaType.SHOW)
+                                    }
+                                }
+                            }.getOrDefault(emptyList())
+                        }
+                    }
+                    val movies = moviesDef.await()
+                    val shows = showsDef.await()
+                    buildList {
+                        val maxLen = maxOf(movies.size, shows.size)
+                        for (i in 0 until maxLen) {
+                            movies.getOrNull(i)?.let { add(it) }
+                            shows.getOrNull(i)?.let { add(it) }
+                        }
                     }
                 }
-            }.getOrDefault(emptyList())
+            }
+            MediaType.MOVIE -> fetchDiscoverMoviesShelves("top_rated", tmdbApiKey)
+            MediaType.SHOW -> fetchDiscoverShowsShelves("top_rated", tmdbApiKey)
+            MediaType.ANIME -> fetchDiscoverAnimeShelves("top_rated")
+            MediaType.MANGA -> fetchDiscoverMangaShelves("top_rated")
+            MediaType.NOVEL -> fetchDiscoverNovelsShelves("top_rated_ln")
+            MediaType.VISUAL_NOVEL -> fetchDiscoverVisualNovelsShelves("top_rated")
+            MediaType.GAME -> fetchDiscoverGamesShelves("top_rated")
+            MediaType.BOOK -> fetchDiscoverBooksShelves("classics_poetry")
+            MediaType.COMIC -> fetchDiscoverComicsShelves("indie")
+            MediaType.FANFICTION -> emptyList()
         }
-        val pick = if (pool.isNotEmpty()) pool[((dayKey % pool.size).toInt().coerceIn(0, pool.lastIndex))] else null
+
+        val withCleanBanner = rawPool.filter {
+            !it.bannerUrl.isNullOrBlank() &&
+                it.bannerUrl != it.coverUrl &&
+                !com.omnitrack.app.data.artwork.ArtworkModelResolver.isAutoScreenshotUrl(it.bannerUrl)
+        }
+        val pool = withCleanBanner.ifEmpty { rawPool.filter { it.coverUrl.isNotBlank() } }
+        val pick = if (pool.isNotEmpty()) {
+            val offset = ((dayKey + mediaType.ordinal * 7L) % pool.size).toInt().let {
+                if (it < 0) it + pool.size else it
+            }
+            pool[offset]
+        } else null
         if (pick != null) {
-            cachedCriticsPickDay = dayKey
-            cachedCriticsPickItem = pick
+            cachedCriticsPickByKey[cacheKey] = pick
         }
         pick
     }

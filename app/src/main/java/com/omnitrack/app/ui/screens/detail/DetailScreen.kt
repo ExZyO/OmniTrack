@@ -163,9 +163,12 @@ import com.omnitrack.app.ui.screens.detail.components.DetailGenresTagsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNamesSynonymsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailNetworksSection
 import com.omnitrack.app.ui.screens.detail.components.DetailPersonalNotesSection
+import com.omnitrack.app.data.artwork.ArtworkModelResolver
+import com.omnitrack.app.data.preferences.CustomSeriesSeasonConfig
 import com.omnitrack.app.ui.screens.detail.components.DetailSeriesDialogs
 import com.omnitrack.app.ui.screens.detail.components.DetailShowDetailsSection
 import com.omnitrack.app.ui.screens.detail.components.DetailTrailersSection
+import com.omnitrack.app.ui.screens.detail.components.SeasonMergeCustomizeSheet
 import com.omnitrack.app.ui.screens.detail.components.detailSeriesItems
 import com.omnitrack.app.ui.screens.detail.components.rememberDetailSeriesState
 import com.omnitrack.app.ui.screens.detail.components.MultiTrackerSheet
@@ -278,6 +281,7 @@ sealed class DetailSheetTarget {
 private sealed class DetailNavStep {
     data class Sheet(val target: DetailSheetTarget) : DetailNavStep()
     data class Preview(val token: Long) : DetailNavStep()
+    data class LibraryEntry(val previousItem: MediaItemEntity) : DetailNavStep()
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -328,6 +332,8 @@ fun DetailScreen(
     val watchRegionPref by prefManager.watchProviderRegion.collectAsState(initial = PreferenceManager.cachedWatchProviderRegion)
     val editionsSwitcherStyle by prefManager.editionsSwitcherStyle.collectAsState(initial = EditionsSwitcherStyle.SMART_LABELS)
     val customEditionLabels by prefManager.customEditionLabels.collectAsState(initial = emptyMap())
+    val customSeriesSeasonConfigs by prefManager.customSeriesSeasonConfigs.collectAsState(initial = emptyMap())
+    val siblingSeasonEntities by viewModel.siblingSeasonEntities.collectAsState()
     val mergedEpisodeMeta = remember(uiState.episodeMetaMap, previewEpisodeMeta) {
         uiState.episodeMetaMap + previewEpisodeMeta
     }
@@ -364,11 +370,58 @@ fun DetailScreen(
         when {
             item == null -> null
             item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER" -> null
-            item.customBannerPath != null -> item.customBannerPath
+            !item.customBannerPath.isNullOrBlank() -> item.customBannerPath
             !customBannerFailed && customBannerUrl != null -> customBannerUrl
             item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-            item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
-            else -> item.bannerUrl
+            item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) }
+            else -> item.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) }
+        }
+    }
+    val rootSeasonId = remember(item?.id, item?.linkedParentMediaId) {
+        item?.let { viewModel.rootSeasonGroupId(it) } ?: -1L
+    }
+    val activeSeasonConfig = remember(customSeriesSeasonConfigs, rootSeasonId) {
+        if (rootSeasonId > 0L) customSeriesSeasonConfigs[rootSeasonId] ?: CustomSeriesSeasonConfig()
+        else CustomSeriesSeasonConfig()
+    }
+    val allCustomizedSeasons = remember(uiState.realSeasons, activeSeasonConfig) {
+        val raw = uiState.realSeasons
+        if (raw.isEmpty()) emptyList()
+        else {
+            val mapped = raw.map { s ->
+                val cName = activeSeasonConfig.customNames[s.seasonNumber]?.takeIf { it.isNotBlank() }
+                val cPoster = activeSeasonConfig.customPosters[s.seasonNumber]?.takeIf { it.isNotBlank() }
+                s.copy(
+                    name = cName ?: s.name,
+                    posterUrl = cPoster ?: s.posterUrl
+                )
+            }
+            if (activeSeasonConfig.seasonOrder.isEmpty()) {
+                mapped
+            } else {
+                val orderMap = activeSeasonConfig.seasonOrder.withIndex().associate { (i, num) -> num to i }
+                mapped.sortedWith(
+                    compareBy<com.omnitrack.app.data.model.MediaSeason> { orderMap[it.seasonNumber] ?: Int.MAX_VALUE }
+                        .thenBy { if (it.seasonNumber == 0) Int.MAX_VALUE else it.seasonNumber }
+                )
+            }
+        }
+    }
+    val visibleSeasons = remember(allCustomizedSeasons, activeSeasonConfig.hiddenSeasons) {
+        if (activeSeasonConfig.hiddenSeasons.isEmpty()) allCustomizedSeasons
+        else allCustomizedSeasons.filter { it.seasonNumber !in activeSeasonConfig.hiddenSeasons }
+            .ifEmpty { allCustomizedSeasons.take(1) }
+    }
+    val hiddenSeasonsCount = remember(allCustomizedSeasons, visibleSeasons) {
+        (allCustomizedSeasons.size - visibleSeasons.size).coerceAtLeast(0)
+    }
+    val canCustomizeSeasons = !uiState.isPreviewMode &&
+        (item?.id ?: 0L) > 0L &&
+        item?.mediaType in setOf(MediaType.ANIME, MediaType.SHOW, MediaType.MOVIE)
+
+    LaunchedEffect(visibleSeasons, uiState.selectedSeasonNumber) {
+        if (visibleSeasons.isNotEmpty() && visibleSeasons.none { it.seasonNumber == uiState.selectedSeasonNumber }) {
+            viewModel.selectSeason(visibleSeasons.first().seasonNumber)
         }
     }
     val isReadingType = item?.mediaType == MediaType.MANGA || item?.mediaType == MediaType.NOVEL
@@ -396,6 +449,7 @@ fun DetailScreen(
     var pendingHideRatingBadge by remember { mutableStateOf<RatingBadgeData?>(null) }
     var showManageRatingsSheet by remember { mutableStateOf(false) }
     var showLinkEditionSheet by remember { mutableStateOf(false) }
+    var showManageSeasonsSheet by remember { mutableStateOf(false) }
     val entryRatingKey = remember(
         item?.id, item?.mediaType, item?.title, item?.tmdbId, item?.anilistId, item?.malId,
         item?.igdbId, item?.steamAppId, item?.vndbId, item?.hardcoverId, item?.comicVineId
@@ -440,9 +494,19 @@ fun DetailScreen(
         coroutineScope.launch { lazyListState.scrollToItem(0) }
     }
 
+    val pushLibraryEntry: (MediaItemEntity) -> Unit = { target ->
+        val current = uiState.item
+        if (current != null && current.id > 0L && current.id != target.id) {
+            viewModel.saveScrollOffset(lazyListState.firstVisibleItemIndex, lazyListState.firstVisibleItemScrollOffset)
+            navHistory.add(DetailNavStep.LibraryEntry(current))
+        }
+        viewModel.switchToCrossMediumEdition(target)
+        coroutineScope.launch { lazyListState.scrollToItem(0) }
+    }
+
     val stepBackOneLevel: () -> Unit = {
         if (navHistory.isNotEmpty()) {
-            when (navHistory.removeAt(navHistory.lastIndex)) {
+            when (val step = navHistory.removeAt(navHistory.lastIndex)) {
                 is DetailNavStep.Sheet -> {
                     val restoredOffset = viewModel.popScrollOffset()
                     if (restoredOffset != null) {
@@ -458,6 +522,15 @@ fun DetailScreen(
                         if (restoredOffset != null) {
                             coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
                         }
+                    }
+                }
+                is DetailNavStep.LibraryEntry -> {
+                    viewModel.switchToCrossMediumEdition(step.previousItem)
+                    val restoredOffset = viewModel.popScrollOffset()
+                    if (restoredOffset != null) {
+                        coroutineScope.launch { lazyListState.scrollToItem(restoredOffset.first, restoredOffset.second) }
+                    } else {
+                        coroutineScope.launch { lazyListState.scrollToItem(0) }
                     }
                 }
             }
@@ -558,7 +631,8 @@ fun DetailScreen(
 
     // Pre-warm adjacent siblings' blurred backdrops, dominant colors, and images before swipe starts
     listOfNotNull(uiState.previousItem, uiState.nextItem).forEach { sibling ->
-        val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null else (sibling.customBannerPath ?: sibling.bannerUrl)
+        val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null
+        else (sibling.customBannerPath?.takeIf { it.isNotBlank() } ?: sibling.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) })
         val sibCover = sibling.customCoverPath ?: if (sibling.artworkRole == "BANNER_AS_COVER") (sibling.bannerUrl ?: sibling.coverUrl) else sibling.coverUrl
         rememberArtworkBackdrop(imageUrl = sibBanner ?: sibCover, enabled = isCinematicBlur)
         rememberCoverDominantColor(LosslessCoverMapper.toLosslessUrl(sibCover))
@@ -569,7 +643,8 @@ fun DetailScreen(
         val loader = coil3.SingletonImageLoader.get(context)
         val pref = com.omnitrack.app.data.preferences.PreferenceManager.cachedPreferredTitleLanguage
         listOfNotNull(uiState.previousItem, uiState.nextItem).forEach { sibling ->
-            val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null else (sibling.customBannerPath ?: sibling.bannerUrl)
+            val sibBanner = if (sibling.customBannerPath == "NONE" || sibling.artworkRole == "DISABLE_BANNER") null
+            else (sibling.customBannerPath?.takeIf { it.isNotBlank() } ?: sibling.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) })
             val sibCover = sibling.customCoverPath ?: if (sibling.artworkRole == "BANNER_AS_COVER") (sibling.bannerUrl ?: sibling.coverUrl) else sibling.coverUrl
             val sibClearart = sibling.clearartUrl?.takeIf {
                 it.isNotBlank() && (!it.contains("thetvdb.com") || pref == com.omnitrack.app.data.preferences.PreferredTitleLanguage.NATIVE)
@@ -1287,10 +1362,16 @@ fun DetailScreen(
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
                                 }
-                            } else if (item.mediaType == MediaType.SHOW || item.mediaType == MediaType.ANIME || item.mediaType == MediaType.MANGA || item.mediaType == MediaType.NOVEL) {
+                            } else if (
+                                item.mediaType == MediaType.SHOW ||
+                                item.mediaType == MediaType.ANIME ||
+                                item.mediaType == MediaType.MANGA ||
+                                item.mediaType == MediaType.NOVEL ||
+                                (item.mediaType == MediaType.MOVIE && allCustomizedSeasons.isNotEmpty())
+                            ) {
                                 detailSeriesItems(
                                     seriesState = seriesUiState,
-                                    seasons = uiState.realSeasons,
+                                    seasons = visibleSeasons,
                                     episodes = uiState.realEpisodes,
                                     episodesBySeason = uiState.episodesBySeason,
                                     watchedEpisodes = uiState.watchedEpisodes,
@@ -1323,7 +1404,13 @@ fun DetailScreen(
                                     } else null,
                                     onJumpToProgress = if (isReadingType) {
                                         { target -> viewModel.jumpToChapterOrVolume(target) }
-                                    } else null
+                                    } else null,
+                                    hiddenSeasonsCount = hiddenSeasonsCount,
+                                    onOpenManageSeasons = if (canCustomizeSeasons) {
+                                        { showManageSeasonsSheet = true }
+                                    } else null,
+                                    linkedSeasonEntities = siblingSeasonEntities,
+                                    currentMediaId = item.id
                                 )
                             }
                         }
@@ -1767,9 +1854,7 @@ fun DetailScreen(
                                             editions = crossMediumEditions,
                                             isPreviewMode = uiState.isPreviewMode,
                                             onOpenEdition = { edition ->
-                                                navHistory.clear()
-                                                viewModel.switchToCrossMediumEdition(edition)
-                                                coroutineScope.launch { lazyListState.scrollToItem(0) }
+                                                pushLibraryEntry(edition)
                                             },
                                             onOpenLinkPicker = { showLinkEditionSheet = true },
                                             onUnlinkEdition = { edition -> viewModel.unlinkCrossMediumEdition(edition) },
@@ -1778,6 +1863,11 @@ fun DetailScreen(
                                             onSaveCustomLabel = { edition, label ->
                                                 coroutineScope.launch {
                                                     prefManager.setCustomEditionLabel(edition.id, label)
+                                                }
+                                            },
+                                            onChangeSwitcherStyle = { nextStyle ->
+                                                coroutineScope.launch {
+                                                    prefManager.setEditionsSwitcherStyle(nextStyle)
                                                 }
                                             }
                                         )
@@ -2022,7 +2112,12 @@ fun DetailScreen(
                     presentationSettings = presentationSettings,
                     isCustomEntry = item.isCustomEntry,
                     canLinkEditions = !uiState.isPreviewMode && item.id > 0L,
+                    canManageSeasons = canCustomizeSeasons,
                     onDismiss = { showOptionsMenu = false },
+                    onManageSeasons = {
+                        showOptionsMenu = false
+                        showManageSeasonsSheet = true
+                    },
                     onLinkEditions = {
                         showOptionsMenu = false
                         showLinkEditionSheet = true
@@ -2771,7 +2866,7 @@ fun DetailScreen(
 
             DetailSeriesDialogs(
                 seriesState = seriesUiState,
-                seasons = uiState.realSeasons,
+                seasons = visibleSeasons,
                 episodes = uiState.realEpisodes,
                 episodesBySeason = uiState.episodesBySeason,
                 watchedEpisodes = uiState.watchedEpisodes,
@@ -2784,7 +2879,9 @@ fun DetailScreen(
                 onToggleEpisodeWatched = { viewModel.toggleEpisodeWatched(it) },
                 onMarkPreviousWatched = { viewModel.markPreviousEpisodesWatched(it) },
                 onToggleSeasonWatched = { viewModel.toggleSeasonWatched(it) },
-                onMarkPreviousSeasonsWatched = { viewModel.markPreviousSeasonsWatched(it) },
+                onMarkPreviousSeasonsWatched = { seasonNum ->
+                    viewModel.markPreviousSeasonsWatched(seasonNum, visibleSeasons.map { it.seasonNumber })
+                },
                 onMarkWatchedChoice = { ep, markFillers -> viewModel.markWatchedUpToWithFillerChoice(ep, markFillers) },
                 onJumpToProgress = if (isReadingType) {
                     { target -> viewModel.jumpToChapterOrVolume(target) }
@@ -2792,7 +2889,15 @@ fun DetailScreen(
                 seasonMetaMap = seasonMetaMap,
                 onSaveSeasonMeta = { seasonNum, rating, note ->
                     viewModel.saveSeasonMeta(seasonNum, rating, note)
-                }
+                },
+                siblingSeasonEntities = siblingSeasonEntities,
+                currentMediaId = item.id,
+                onOpenLinkedSeasonEntry = { linked ->
+                    pushLibraryEntry(linked)
+                },
+                onOpenManageSeasons = if (canCustomizeSeasons) {
+                    { showManageSeasonsSheet = true }
+                } else null
             )
         }
     }
@@ -3041,6 +3146,36 @@ fun DetailScreen(
                 onDismiss = { showLinkEditionSheet = false }
             )
         }
+        if (showManageSeasonsSheet && item != null && item.id > 0L && rootSeasonId > 0L) {
+            SeasonMergeCustomizeSheet(
+                currentItem = item,
+                rootMediaId = rootSeasonId,
+                allCustomizedSeasons = allCustomizedSeasons,
+                rawSeasons = uiState.realSeasons,
+                customConfig = activeSeasonConfig,
+                siblingSeasonEntities = siblingSeasonEntities,
+                allLibraryItems = allLibraryMedia,
+                animeRelations = uiState.animeRelations,
+                fallbackCoverUrl = fallbackSeriesCover,
+                onUpdateConfig = { transform ->
+                    coroutineScope.launch {
+                        prefManager.updateCustomSeriesSeasonConfig(rootSeasonId, transform)
+                    }
+                },
+                onResetConfig = {
+                    coroutineScope.launch {
+                        prefManager.clearCustomSeriesSeasonConfig(rootSeasonId)
+                    }
+                },
+                onMergeLibraryEntry = { target -> viewModel.mergeLibraryEntryAsSeason(target) },
+                onMergeOnlineResult = { res -> viewModel.mergeOnlineSearchResultAsSeason(res) },
+                onMergeRelation = { rel -> viewModel.mergeAnimeRelationAsSeason(rel) },
+                onUnlinkSeason = { sNum -> viewModel.unlinkMergedSeason(sNum) },
+                onOpenLinkedEntry = { linked -> pushLibraryEntry(linked) },
+                onSearchOnline = { query -> viewModel.searchOnlineForSeasonMerge(query) },
+                onDismiss = { showManageSeasonsSheet = false }
+            )
+        }
         awardWinnersSheetState?.let { winnersState ->
             AwardWinnersBrowserSheet(
                 awardTitle = winnersState.awardTitle,
@@ -3069,9 +3204,7 @@ fun DetailScreen(
                 },
                 onOpenLibraryItem = { match ->
                     viewModel.closeAwardWinners()
-                    navHistory.clear()
-                    viewModel.switchToCrossMediumEdition(match)
-                    coroutineScope.launch { lazyListState.scrollToItem(0) }
+                    pushLibraryEntry(match)
                 }
             )
         }
@@ -3149,11 +3282,11 @@ private fun SiblingDetailPreview(
     val isBannerExplicitlyDisabled = item.customBannerPath == "NONE" || item.artworkRole == "DISABLE_BANNER"
     val effectiveBanner = when {
         isBannerExplicitlyDisabled -> null
-        item.customBannerPath != null -> item.customBannerPath
+        !item.customBannerPath.isNullOrBlank() -> item.customBannerPath
         siblingCustomBannerUrl != null -> siblingCustomBannerUrl
         item.artworkRole == "COVER_AS_BANNER" -> item.coverUrl
-        item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl
-        else -> item.bannerUrl
+        item.artworkRole == "BANNER_AS_COVER" -> item.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) }
+        else -> item.bannerUrl?.takeUnless { ArtworkModelResolver.isAutoScreenshotUrl(it) }
     }
     val backdropTargetUrl = effectiveBanner
 
@@ -4896,7 +5029,9 @@ private fun DetailOptionsMenuBottomSheet(
     presentationSettings: PresentationSettings,
     isCustomEntry: Boolean = false,
     canLinkEditions: Boolean = false,
+    canManageSeasons: Boolean = false,
     onDismiss: () -> Unit,
+    onManageSeasons: () -> Unit = {},
     onLinkEditions: () -> Unit = {},
     onToggleTitleLanguage: () -> Unit = {},
     onEditDetails: () -> Unit = {},
@@ -5127,6 +5262,38 @@ private fun DetailOptionsMenuBottomSheet(
                         color = TextMuted,
                         fontSize = 12.sp
                     )
+                }
+            }
+
+            if (canManageSeasons) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onManageSeasons() }
+                        .padding(vertical = 12.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ViewCarousel,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column {
+                        Text(
+                            text = "Merge & Customize Seasons",
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Add sequels, movies, OVAs, reorder, rename or customize covers",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
 
