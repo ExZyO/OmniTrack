@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import com.omnitrack.app.data.preferences.ContinueTrackingStyle
 import com.omnitrack.app.data.preferences.DetailsPagePresentation
 import com.omnitrack.app.data.preferences.DiscoverLayoutStyle
+import com.omnitrack.app.data.preferences.EditionsSwitcherStyle
 import com.omnitrack.app.data.preferences.EpisodeLayoutMode
 import com.omnitrack.app.data.preferences.HomeShelfPosterSize
 import com.omnitrack.app.ui.theme.AccentGold
@@ -1012,6 +1013,112 @@ fun HeroMetadataLayoutWireframe(
                     topLeft = Offset(pad, h * 0.74f),
                     size = Size(w * 0.34f, 3.dp.toPx()),
                     cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EditionsStyleWireframe(
+    style: EditionsSwitcherStyle,
+    modifier: Modifier = Modifier
+) {
+    val accent = AccentGold
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val pad = 7.dp.toPx()
+        val usableW = w - pad * 2
+
+        when (style) {
+            EditionsSwitcherStyle.SMART_LABELS -> {
+                val yText = h * 0.44f
+                val tab1W = usableW * 0.28f
+                val tab2W = usableW * 0.26f
+                val tab3W = usableW * 0.22f
+                val gap = usableW * 0.08f
+                drawRoundRect(
+                    color = accent,
+                    topLeft = Offset(pad, yText),
+                    size = Size(tab1W, 4.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                drawRect(
+                    color = accent,
+                    topLeft = Offset(pad, yText + 7.dp.toPx()),
+                    size = Size(tab1W, 2.dp.toPx())
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.32f),
+                    topLeft = Offset(pad + tab1W + gap, yText),
+                    size = Size(tab2W, 4.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.24f),
+                    topLeft = Offset(pad + tab1W + gap + tab2W + gap, yText),
+                    size = Size(tab3W, 4.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                drawRect(
+                    color = Color.White.copy(alpha = 0.10f),
+                    topLeft = Offset(pad, yText + 9.5.dp.toPx()),
+                    size = Size(usableW, 0.7.dp.toPx())
+                )
+            }
+            EditionsSwitcherStyle.THUMBNAIL_CARDS -> {
+                val cardW = usableW * 0.24f
+                val cardH = h - pad * 2
+                val gap = (usableW - cardW * 3) / 2f
+                repeat(3) { idx ->
+                    val x = pad + idx * (cardW + gap)
+                    drawRoundRect(
+                        color = if (idx == 0) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.09f),
+                        topLeft = Offset(x, pad),
+                        size = Size(cardW, cardH),
+                        cornerRadius = CornerRadius(3.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = if (idx == 0) accent else Color.White.copy(alpha = 0.30f),
+                        topLeft = Offset(x + 2.5.dp.toPx(), h - pad - 4.5.dp.toPx()),
+                        size = Size(cardW - 5.dp.toPx(), 2.2.dp.toPx()),
+                        cornerRadius = CornerRadius(1.dp.toPx())
+                    )
+                }
+            }
+            EditionsSwitcherStyle.GROUPED_DROPDOWN -> {
+                val topY = h * 0.24f
+                drawRoundRect(
+                    color = accent,
+                    topLeft = Offset(pad, topY),
+                    size = Size(usableW * 0.34f, 4.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.28f),
+                    topLeft = Offset(pad + usableW * 0.42f, topY),
+                    size = Size(usableW * 0.22f, 4.dp.toPx()),
+                    cornerRadius = CornerRadius(1.5.dp.toPx())
+                )
+                val panelTop = h * 0.46f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.11f),
+                    topLeft = Offset(pad, panelTop),
+                    size = Size(usableW * 0.68f, h - panelTop - pad),
+                    cornerRadius = CornerRadius(3.dp.toPx())
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.78f),
+                    topLeft = Offset(pad + 4.dp.toPx(), panelTop + 4.dp.toPx()),
+                    size = Size(usableW * 0.42f, 2.5.dp.toPx()),
+                    cornerRadius = CornerRadius(1.dp.toPx())
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.30f),
+                    topLeft = Offset(pad + 4.dp.toPx(), panelTop + 9.5.dp.toPx()),
+                    size = Size(usableW * 0.34f, 2.5.dp.toPx()),
+                    cornerRadius = CornerRadius(1.dp.toPx())
                 )
             }
         }

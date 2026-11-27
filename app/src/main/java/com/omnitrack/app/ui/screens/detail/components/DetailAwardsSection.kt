@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.omnitrack.app.data.db.entity.MediaItemEntity
 import com.omnitrack.app.data.enrichment.AwardHonorItem
 import com.omnitrack.app.data.enrichment.AwardWinnerEntry
 import com.omnitrack.app.ui.theme.AccentGold
@@ -136,7 +138,9 @@ fun AwardWinnersBrowserSheet(
     isLoading: Boolean,
     onOpenWinner: (AwardWinnerEntry) -> Unit,
     onAddWinner: (AwardWinnerEntry) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    resolveLibraryMatch: (AwardWinnerEntry) -> MediaItemEntity? = { null },
+    onOpenLibraryItem: (MediaItemEntity) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -208,16 +212,20 @@ fun AwardWinnersBrowserSheet(
                         .heightIn(max = 460.dp)
                 ) {
                     items(winners, key = { "${it.imdbId}_${it.title}" }) { winner ->
+                        val libraryMatch = resolveLibraryMatch(winner)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onOpenWinner(winner) }
+                                .clickable {
+                                    if (libraryMatch != null) onOpenLibraryItem(libraryMatch)
+                                    else onOpenWinner(winner)
+                                }
                                 .padding(vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             AsyncImage(
-                                model = winner.posterUrl,
+                                model = libraryMatch?.customCoverPath ?: winner.posterUrl,
                                 contentDescription = winner.title,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
@@ -241,17 +249,33 @@ fun AwardWinnersBrowserSheet(
                                 }.joinToString(" • ")
                                 Text(text = sub, color = TextSecondary, fontSize = 12.sp)
                             }
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .border(0.7.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                                    .clickable { onAddWinner(winner) }
-                                    .padding(horizontal = 9.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
-                                Text("Add", color = AccentGold, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            if (libraryMatch != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(AccentGold.copy(alpha = 0.14f))
+                                        .border(0.7.dp, AccentGold.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                                        .clickable { onOpenLibraryItem(libraryMatch) }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                    Text("In Library", color = AccentGold, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .border(0.7.dp, AccentGold.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                                        .clickable { onAddWinner(winner) }
+                                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, tint = AccentGold, modifier = Modifier.size(14.dp))
+                                    Text("Add", color = AccentGold, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                         HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.6.dp)

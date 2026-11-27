@@ -298,7 +298,13 @@ enum class HomeRowKey(val displayName: String, val description: String) {
     ON_HOLD("On Hold", "Paused entries waiting to be resumed"),
     DROPPED("Dropped", "Titles you decided to stop tracking"),
     CUSTOM_CATEGORIES("Custom Categories", "Horizontal shelves for your visible custom categories"),
+    DISCOVER_TASTE_MATCHED("Because You Liked", "Personalized picks matched to your highest-rated titles"),
+    DISCOVER_TOP_10("Top 10 Today", "Numbered countdown of today's most popular titles"),
+    DISCOVER_CRITICS_PICK("Daily Critics' Pick", "Acclaimed spotlight recommendation updated daily"),
     TRENDING("Trending Now", "Live trending anime, shows, movies & books"),
+    DISCOVER_SWIPE_QUEUE("Discovery Queue", "Quick-swipe card deck of personalized picks"),
+    DISCOVER_STREAMING("Browse by Streaming Service", "Filter catalogs by Netflix, Crunchyroll, Max & more"),
+    DISCOVER_CURATED("Curated Spotlight Lists", "Under 90 Min, Hidden Gems, Limited Series & decade rails"),
     DISCOVER_ANIME("Trending Anime", "Live trending anime from AniList"),
     DISCOVER_MANGA("Trending Manga", "Live trending manga & manhwa"),
     DISCOVER_COMICS("Trending Comics", "Acclaimed comic runs & weekly pull list"),
@@ -318,8 +324,15 @@ data class HomeRowItem(
 )
 
 object HomeLayoutDefaults {
+    private val defaultEnabledHighlightKeys = setOf(
+        HomeRowKey.DISCOVER_TASTE_MATCHED,
+        HomeRowKey.DISCOVER_TOP_10,
+        HomeRowKey.DISCOVER_CRITICS_PICK
+    )
+
     val defaultRows: List<HomeRowItem> = HomeRowKey.entries.map { key ->
-        HomeRowItem(key = key, isEnabled = !key.name.startsWith("DISCOVER_"))
+        val enabled = !key.name.startsWith("DISCOVER_") || key in defaultEnabledHighlightKeys
+        HomeRowItem(key = key, isEnabled = enabled)
     }
 }
 
@@ -656,6 +669,9 @@ class PreferenceManager(private val context: Context) {
         val BANNER_SIZING = stringPreferencesKey("banner_sizing")
         val FALLBACK_BACKGROUND_STYLE = stringPreferencesKey("fallback_background_style")
         val DETAILS_PAGE_SECTION_ORDER = stringPreferencesKey("details_page_section_order")
+        val DETAILS_PAGE_SECTION_ORDER_BY_MEDIA = stringPreferencesKey("details_page_section_order_by_media")
+        val EDITIONS_SWITCHER_STYLE = stringPreferencesKey("editions_switcher_style")
+        val CUSTOM_EDITION_LABELS_JSON = stringPreferencesKey("custom_edition_labels_json")
         val DISCOVER_LAYOUT_STYLE = stringPreferencesKey("discover_layout_style")
         val DISCOVER_SHOW_SPOTLIGHT = booleanPreferencesKey("discover_show_spotlight")
         val DISCOVER_DIM_HERO_BANNER = booleanPreferencesKey("discover_dim_hero_banner")
@@ -1607,39 +1623,132 @@ class PreferenceManager(private val context: Context) {
         }
     }
 
+    private val detailsLayoutJson = Json { ignoreUnknownKeys = true }
+
+    private fun parseLegacyDetailsSectionOrder(raw: String?): List<DetailSectionItem> {
+        if (raw.isNullOrBlank()) return DetailsPageLayoutDefaults.defaultSections
+        return try {
+            val parsed = detailsLayoutJson.decodeFromString<List<DetailSectionItem>>(raw)
+            val existingKeys = parsed.map { it.key }.toSet()
+            val missingTop = DetailsPageLayoutDefaults.defaultSections
+                .filter {
+                    (it.key == DetailSectionKey.CROSS_MEDIUM_EDITIONS ||
+                        it.key == DetailSectionKey.PERSONAL_NOTES) &&
+                        it.key !in existingKeys
+                }
+            val missingTail = DetailsPageLayoutDefaults.defaultSections
+                .filter {
+                    it.key != DetailSectionKey.CROSS_MEDIUM_EDITIONS &&
+                        it.key != DetailSectionKey.PERSONAL_NOTES &&
+                        it.key !in existingKeys
+                }
+            missingTop + parsed + missingTail
+        } catch (_: Exception) {
+            DetailsPageLayoutDefaults.defaultSections
+        }
+    }
+
     val detailsPageSectionOrder: Flow<List<DetailSectionItem>> = context.dataStore.data
         .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
-        .map { prefs ->
-            val raw = prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER]
-            if (raw.isNullOrBlank()) {
-                DetailsPageLayoutDefaults.defaultSections
-            } else {
-                try {
-                    val parsed = Json { ignoreUnknownKeys = true }.decodeFromString<List<DetailSectionItem>>(raw)
-                    val existingKeys = parsed.map { it.key }.toSet()
-                    val missingTop = DetailsPageLayoutDefaults.defaultSections
-                        .filter {
-                            (it.key == DetailSectionKey.CROSS_MEDIUM_EDITIONS ||
-                                it.key == DetailSectionKey.PERSONAL_NOTES) &&
-                                it.key !in existingKeys
-                        }
-                    val missingTail = DetailsPageLayoutDefaults.defaultSections
-                        .filter {
-                            it.key != DetailSectionKey.CROSS_MEDIUM_EDITIONS &&
-                                it.key != DetailSectionKey.PERSONAL_NOTES &&
-                                it.key !in existingKeys
-                        }
-                    missingTop + parsed + missingTail
-                } catch (_: Exception) {
-                    DetailsPageLayoutDefaults.defaultSections
-                }
-            }
-        }
+        .map { prefs -> parseLegacyDetailsSectionOrder(prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER]) }
         .distinctUntilChanged()
 
     suspend fun setDetailsPageSectionOrder(items: List<DetailSectionItem>) {
         context.dataStore.edit { prefs ->
             prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER] = Json.encodeToString(items)
+        }
+    }
+
+    val detailsPageSectionOrdersByMedia: Flow<Map<MediaType, List<DetailSectionItem>>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val legacy = parseLegacyDetailsSectionOrder(prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER])
+            val byMediaRaw = prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER_BY_MEDIA]
+            val decodedMap: Map<String, List<DetailSectionItem>> = if (byMediaRaw.isNullOrBlank()) {
+                emptyMap()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, List<DetailSectionItem>>>(byMediaRaw)
+                }.getOrDefault(emptyMap())
+            }
+            MediaType.entries.filter { it != MediaType.ALL }.associateWith { type ->
+                val savedForType = decodedMap[type.name] ?: legacy
+                DetailsPageLayoutDefaults.normalizeForMedia(type, savedForType)
+            }
+        }
+        .distinctUntilChanged()
+
+    suspend fun setDetailsPageSectionOrderForMedia(mediaType: MediaType, items: List<DetailSectionItem>) {
+        context.dataStore.edit { prefs ->
+            val existingRaw = prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER_BY_MEDIA]
+            val currentMap = if (existingRaw.isNullOrBlank()) {
+                mutableMapOf()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, List<DetailSectionItem>>>(existingRaw).toMutableMap()
+                }.getOrDefault(mutableMapOf())
+            }
+            currentMap[mediaType.name] = DetailsPageLayoutDefaults.normalizeForMedia(mediaType, items)
+            prefs[PreferencesKeys.DETAILS_PAGE_SECTION_ORDER_BY_MEDIA] = Json.encodeToString(currentMap)
+        }
+    }
+
+    suspend fun resetDetailsPageSectionOrderForMedia(mediaType: MediaType) {
+        setDetailsPageSectionOrderForMedia(
+            mediaType = mediaType,
+            items = DetailsPageLayoutDefaults.defaultSectionsFor(mediaType)
+        )
+    }
+
+    val editionsSwitcherStyle: Flow<EditionsSwitcherStyle> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs -> EditionsSwitcherStyle.fromName(prefs[PreferencesKeys.EDITIONS_SWITCHER_STYLE]) }
+        .distinctUntilChanged()
+
+    suspend fun setEditionsSwitcherStyle(style: EditionsSwitcherStyle) {
+        context.dataStore.edit { prefs ->
+            prefs[PreferencesKeys.EDITIONS_SWITCHER_STYLE] = style.name
+        }
+    }
+
+    val customEditionLabels: Flow<Map<Long, String>> = context.dataStore.data
+        .catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+        .map { prefs ->
+            val raw = prefs[PreferencesKeys.CUSTOM_EDITION_LABELS_JSON]
+            if (raw.isNullOrBlank()) {
+                emptyMap()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, String>>(raw)
+                        .mapNotNull { (k, v) -> k.toLongOrNull()?.let { id -> id to v } }
+                        .toMap()
+                }.getOrDefault(emptyMap())
+            }
+        }
+        .distinctUntilChanged()
+
+    suspend fun setCustomEditionLabel(mediaId: Long, label: String?) {
+        if (mediaId <= 0L) return
+        context.dataStore.edit { prefs ->
+            val raw = prefs[PreferencesKeys.CUSTOM_EDITION_LABELS_JSON]
+            val map = if (raw.isNullOrBlank()) {
+                mutableMapOf()
+            } else {
+                runCatching {
+                    detailsLayoutJson.decodeFromString<Map<String, String>>(raw).toMutableMap()
+                }.getOrDefault(mutableMapOf())
+            }
+            val cleaned = label?.trim()?.takeIf { it.isNotBlank() }
+            if (cleaned == null) {
+                map.remove(mediaId.toString())
+            } else {
+                map[mediaId.toString()] = cleaned
+            }
+            if (map.isEmpty()) {
+                prefs.remove(PreferencesKeys.CUSTOM_EDITION_LABELS_JSON)
+            } else {
+                prefs[PreferencesKeys.CUSTOM_EDITION_LABELS_JSON] = Json.encodeToString(map)
+            }
         }
     }
 

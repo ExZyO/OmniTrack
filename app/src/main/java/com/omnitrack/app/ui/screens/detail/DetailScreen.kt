@@ -202,6 +202,8 @@ import com.omnitrack.app.data.model.VnSpoilerLevel
 import com.omnitrack.app.data.model.formatBookDuration
 import com.omnitrack.app.data.model.parseVndbBbCodeSegments
 import com.omnitrack.app.data.preferences.DetailSectionKey
+import com.omnitrack.app.data.preferences.EditionsSwitcherStyle
+import com.omnitrack.app.data.enrichment.AwardWinnerEntry
 import com.omnitrack.app.ui.components.FormattedRichText
 import com.omnitrack.app.ui.components.LocalPerformanceSettings
 import com.omnitrack.app.ui.components.heroScrollBackdropAlpha
@@ -246,6 +248,7 @@ import com.omnitrack.app.ui.theme.DarkSurface
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
 import com.omnitrack.app.ui.theme.DarkSurfaceElevated
 import com.omnitrack.app.ui.theme.GlassBorder
+import com.omnitrack.app.ui.theme.OnAccentColor
 import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
@@ -323,6 +326,8 @@ fun DetailScreen(
     val awards by viewModel.awards.collectAsState()
     val awardWinnersSheetState by viewModel.awardWinnersSheetState.collectAsState()
     val watchRegionPref by prefManager.watchProviderRegion.collectAsState(initial = PreferenceManager.cachedWatchProviderRegion)
+    val editionsSwitcherStyle by prefManager.editionsSwitcherStyle.collectAsState(initial = EditionsSwitcherStyle.SMART_LABELS)
+    val customEditionLabels by prefManager.customEditionLabels.collectAsState(initial = emptyMap())
     val mergedEpisodeMeta = remember(uiState.episodeMetaMap, previewEpisodeMeta) {
         uiState.episodeMetaMap + previewEpisodeMeta
     }
@@ -919,7 +924,12 @@ fun DetailScreen(
                                     },
                                     onEditStatus = { showStatusPickerSheet = true },
                                     onEditScore = { showScoreRatingSheet = true },
-                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                    onOpenTrackers = { showMultiTrackerSheet = true },
+                                    isPreviewMode = uiState.isPreviewMode,
+                                    onAddToLibrary = {
+                                        navHistory.clear()
+                                        viewModel.addToLibrary(item)
+                                    }
                                 )
                             }
                             DetailsPagePresentation.HERO -> {
@@ -957,7 +967,12 @@ fun DetailScreen(
                                     },
                                     onEditStatus = { showStatusPickerSheet = true },
                                     onEditScore = { showScoreRatingSheet = true },
-                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                    onOpenTrackers = { showMultiTrackerSheet = true },
+                                    isPreviewMode = uiState.isPreviewMode,
+                                    onAddToLibrary = {
+                                        navHistory.clear()
+                                        viewModel.addToLibrary(item)
+                                    }
                                 )
                             }
                             DetailsPagePresentation.CLASSIC -> {
@@ -1007,13 +1022,18 @@ fun DetailScreen(
                                     },
                                     onEditStatus = { showStatusPickerSheet = true },
                                     onEditScore = { showScoreRatingSheet = true },
-                                    onOpenTrackers = { showMultiTrackerSheet = true }
+                                    onOpenTrackers = { showMultiTrackerSheet = true },
+                                    isPreviewMode = uiState.isPreviewMode,
+                                    onAddToLibrary = {
+                                        navHistory.clear()
+                                        viewModel.addToLibrary(item)
+                                    }
                                 )
                             }
                         }
 
-                        // 1. Actions / Progress Section (Only rendered for media types with top progress cards)
-                        val hasProgressControls = item.mediaType == MediaType.MOVIE
+                        // 1. Actions / Progress Section (Only rendered for tracked media types with top progress cards)
+                        val hasProgressControls = !uiState.isPreviewMode && item.mediaType == MediaType.MOVIE
                         val hasBackdrop = backdropTargetUrl != null && effectiveDetailLayout != DetailsPagePresentation.CENTERED_COVER
                         if (hasProgressControls) {
                             Spacer(modifier = Modifier.height(if (hasBackdrop) (-10).dp else 4.dp))
@@ -1752,7 +1772,14 @@ fun DetailScreen(
                                                 coroutineScope.launch { lazyListState.scrollToItem(0) }
                                             },
                                             onOpenLinkPicker = { showLinkEditionSheet = true },
-                                            onUnlinkEdition = { edition -> viewModel.unlinkCrossMediumEdition(edition) }
+                                            onUnlinkEdition = { edition -> viewModel.unlinkCrossMediumEdition(edition) },
+                                            switcherStyle = editionsSwitcherStyle,
+                                            customLabels = customEditionLabels,
+                                            onSaveCustomLabel = { edition, label ->
+                                                coroutineScope.launch {
+                                                    prefManager.setCustomEditionLabel(edition.id, label)
+                                                }
+                                            }
                                         )
                                         Spacer(modifier = Modifier.height(16.dp))
                                     }
@@ -1794,38 +1821,6 @@ fun DetailScreen(
                                         Spacer(modifier = Modifier.height(20.dp))
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-
-                // PREVIEW MODE HERO ACTION: + Add to Library
-                if (uiState.isPreviewMode) {
-                    item(key = "preview_add_button", contentType = "preview_add") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    navHistory.clear()
-                                    viewModel.addToLibrary(item)
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
-                                shape = RoundedCornerShape(999.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentJade)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, tint = AmoledBlack, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Add to Library",
-                                    color = AmoledBlack,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Black
-                                )
                             }
                         }
                     }
@@ -3068,7 +3063,16 @@ fun DetailScreen(
                 onAddWinner = { winner ->
                     viewModel.addAwardWinnerToLibrary(winner)
                 },
-                onDismiss = { viewModel.closeAwardWinners() }
+                onDismiss = { viewModel.closeAwardWinners() },
+                resolveLibraryMatch = { winner ->
+                    findAwardWinnerLibraryMatch(allLibraryMedia, winner)
+                },
+                onOpenLibraryItem = { match ->
+                    viewModel.closeAwardWinners()
+                    navHistory.clear()
+                    viewModel.switchToCrossMediumEdition(match)
+                    coroutineScope.launch { lazyListState.scrollToItem(0) }
+                }
             )
         }
 }
@@ -3605,7 +3609,9 @@ private fun DetailHeroHeaderSection(
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
     onEditScore: () -> Unit,
-    onOpenTrackers: () -> Unit
+    onOpenTrackers: () -> Unit,
+    isPreviewMode: Boolean = false,
+    onAddToLibrary: () -> Unit = {}
 ) {
     val isCinemaShowcase = bannerSizing == BannerSizing.CINEMA_SHOWCASE
     if (backdropTargetUrl != null) {
@@ -3894,13 +3900,20 @@ private fun DetailHeroHeaderSection(
             onLongPressBadge = onLongPressRatingBadge,
             centered = true
         )
-        UnboxedStatsRow(
-            item = item,
-            onEditProgress = onEditProgress,
-            onEditStatus = onEditStatus,
-            onEditScore = onEditScore,
-            onOpenTrackers = onOpenTrackers
-        )
+        if (isPreviewMode) {
+            DetailPreviewAddToLibraryBar(
+                onAddToLibrary = onAddToLibrary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+            )
+        } else {
+            UnboxedStatsRow(
+                item = item,
+                onEditProgress = onEditProgress,
+                onEditStatus = onEditStatus,
+                onEditScore = onEditScore,
+                onOpenTrackers = onOpenTrackers
+            )
+        }
     }
 }
 
@@ -3925,7 +3938,9 @@ private fun DetailCenteredCoverHeroSection(
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
     onEditScore: () -> Unit,
-    onOpenTrackers: () -> Unit
+    onOpenTrackers: () -> Unit,
+    isPreviewMode: Boolean = false,
+    onAddToLibrary: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isEditorialBookLike = item.mediaType in setOf(MediaType.BOOK, MediaType.COMIC, MediaType.FANFICTION)
@@ -4154,13 +4169,20 @@ private fun DetailCenteredCoverHeroSection(
             onLongPressBadge = onLongPressRatingBadge,
             centered = true
         )
-        UnboxedStatsRow(
-            item = item,
-            onEditProgress = onEditProgress,
-            onEditStatus = onEditStatus,
-            onEditScore = onEditScore,
-            onOpenTrackers = onOpenTrackers
-        )
+        if (isPreviewMode) {
+            DetailPreviewAddToLibraryBar(
+                onAddToLibrary = onAddToLibrary,
+                modifier = Modifier.padding(vertical = 10.dp)
+            )
+        } else {
+            UnboxedStatsRow(
+                item = item,
+                onEditProgress = onEditProgress,
+                onEditStatus = onEditStatus,
+                onEditScore = onEditScore,
+                onOpenTrackers = onOpenTrackers
+            )
+        }
     }
 }
 
@@ -4193,7 +4215,9 @@ private fun DetailClassicHeaderSection(
     onEditProgress: () -> Unit,
     onEditStatus: () -> Unit,
     onEditScore: () -> Unit,
-    onOpenTrackers: () -> Unit
+    onOpenTrackers: () -> Unit,
+    isPreviewMode: Boolean = false,
+    onAddToLibrary: () -> Unit = {}
 ) {
     val hasBackdrop = backdropTargetUrl != null
     val posterOffset = if (hasBackdrop) (-50).dp else 0.dp
@@ -4489,15 +4513,85 @@ private fun DetailClassicHeaderSection(
                 hiddenSources = hiddenRatingSources,
                 onLongPressBadge = onLongPressRatingBadge
             )
-            UnboxedStatsRow(
-                item = item,
-                onEditProgress = onEditProgress,
-                onEditStatus = onEditStatus,
-                onEditScore = onEditScore,
-                onOpenTrackers = onOpenTrackers
-            )
+            if (isPreviewMode) {
+                DetailPreviewAddToLibraryBar(
+                    onAddToLibrary = onAddToLibrary,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 10.dp)
+                )
+            } else {
+                UnboxedStatsRow(
+                    item = item,
+                    onEditProgress = onEditProgress,
+                    onEditStatus = onEditStatus,
+                    onEditScore = onEditScore,
+                    onOpenTrackers = onOpenTrackers
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun DetailPreviewAddToLibraryBar(
+    onAddToLibrary: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onAddToLibrary,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = AccentGold,
+            contentColor = OnAccentColor
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = null,
+            tint = OnAccentColor,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "Add to Library",
+            color = OnAccentColor,
+            fontSize = 14.5.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private fun findAwardWinnerLibraryMatch(
+    library: List<MediaItemEntity>,
+    winner: AwardWinnerEntry
+): MediaItemEntity? {
+    val winnerImdb = winner.imdbId?.trim()?.takeIf { it.isNotBlank() }
+    if (winnerImdb != null) {
+        library.firstOrNull { it.imdbId?.trim()?.equals(winnerImdb, ignoreCase = true) == true }?.let { return it }
+    }
+    val winnerTmdb = winner.tmdbId?.takeIf { it > 0L }
+    if (winnerTmdb != null) {
+        val isWinnerMovie = winner.mediaType == MediaType.MOVIE
+        library.firstOrNull {
+            it.tmdbId == winnerTmdb && (it.mediaType == MediaType.MOVIE) == isWinnerMovie
+        }?.let { return it }
+    }
+    fun normalizeAwardTitle(raw: String): String =
+        raw.lowercase().replace(Regex("[^a-z0-9]"), "")
+    val normWinnerTitle = normalizeAwardTitle(winner.title)
+    if (normWinnerTitle.isBlank()) return null
+    library.firstOrNull {
+        it.mediaType == winner.mediaType && normalizeAwardTitle(it.title) == normWinnerTitle
+    }?.let { return it }
+    val winnerYear = winner.year?.toString()
+    if (winnerYear != null) {
+        library.firstOrNull {
+            it.releaseYear == winnerYear && normalizeAwardTitle(it.title) == normWinnerTitle
+        }?.let { return it }
+    }
+    return library.firstOrNull { normalizeAwardTitle(it.title) == normWinnerTitle }
 }
 
 @Composable

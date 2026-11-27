@@ -208,6 +208,7 @@ fun DiscoverView(
     val curatedRowItemsFlow = remember(homeViewModel) { homeViewModel?.curatedRowItems ?: MutableStateFlow(emptyList()) }
     val isLoadingCuratedRowFlow = remember(homeViewModel) { homeViewModel?.isLoadingCuratedRow ?: MutableStateFlow(false) }
     val dailyCriticsPickFlow = remember(homeViewModel) { homeViewModel?.dailyCriticsPick ?: MutableStateFlow(null) }
+    val skippedSwipeKeysFlow = remember(homeViewModel) { homeViewModel?.skippedSwipeKeys ?: MutableStateFlow(emptySet()) }
 
     val streamingProviders by streamingProvidersFlow.collectAsState()
     val selectedStreamingProviderId by selectedStreamingProviderIdFlow.collectAsState()
@@ -220,6 +221,7 @@ fun DiscoverView(
     val curatedRowItems by curatedRowItemsFlow.collectAsState()
     val isLoadingCuratedRow by isLoadingCuratedRowFlow.collectAsState()
     val dailyCriticsPick by dailyCriticsPickFlow.collectAsState()
+    val skippedSwipeKeys by skippedSwipeKeysFlow.collectAsState()
     var showSwipeQueueSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(aiSearchSetting) {
@@ -1723,7 +1725,8 @@ fun DiscoverView(
                 tasteMatchedItems,
                 curatedRowItems,
                 streamingServiceTitles,
-                discoverShelves
+                discoverShelves,
+                skippedSwipeKeys
             ) {
                 homeViewModel.buildSwipeQueue(allMedia)
             }
@@ -1735,6 +1738,12 @@ fun DiscoverView(
                 },
                 onSkip = { skipped ->
                     homeViewModel.skipSwipeQueueItem(skipped)
+                },
+                onUndoSkip = { restored ->
+                    homeViewModel.unskipSwipeQueueItem(restored)
+                },
+                onUndoAdd = { undone ->
+                    homeViewModel.undoAddSwipeQueueItem(undone)
                 },
                 onOpenDetails = { picked ->
                     val inLib = findLibraryMatch(allMedia, picked)

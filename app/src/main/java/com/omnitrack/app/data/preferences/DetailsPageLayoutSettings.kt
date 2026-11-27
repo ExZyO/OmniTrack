@@ -1,6 +1,19 @@
 package com.omnitrack.app.data.preferences
 
+import com.omnitrack.app.data.model.MediaType
 import kotlinx.serialization.Serializable
+
+@Serializable
+enum class EditionsSwitcherStyle(val displayName: String) {
+    SMART_LABELS("Smart Labels"),
+    THUMBNAIL_CARDS("Cover Cards"),
+    GROUPED_DROPDOWN("Grouped");
+
+    companion object {
+        fun fromName(name: String?): EditionsSwitcherStyle =
+            entries.firstOrNull { it.name.equals(name, ignoreCase = true) } ?: SMART_LABELS
+    }
+}
 
 @Serializable
 enum class DetailSectionKey(val displayName: String, val description: String) {
@@ -59,4 +72,211 @@ object DetailsPageLayoutDefaults {
         DetailSectionItem(DetailSectionKey.COLLECTION, isEnabled = true),
         DetailSectionItem(DetailSectionKey.RECOMMENDATIONS, isEnabled = true)
     )
+
+    private val animeApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.AIRING_STATUS,
+        DetailSectionKey.WHERE_TO_WATCH,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.FRANCHISE,
+        DetailSectionKey.CAST,
+        DetailSectionKey.NETWORKS,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.AWARDS,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.TRAILERS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val showApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.AIRING_STATUS,
+        DetailSectionKey.WHERE_TO_WATCH,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.CAST,
+        DetailSectionKey.NETWORKS,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.AWARDS,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.TRAILERS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val movieApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.WHERE_TO_WATCH,
+        DetailSectionKey.CAST,
+        DetailSectionKey.NETWORKS,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.AWARDS,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.TRAILERS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.COLLECTION,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val mangaAndNovelApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.FRANCHISE,
+        DetailSectionKey.CAST,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val bookApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.QUOTES,
+        DetailSectionKey.SCREENSHOTS,
+        DetailSectionKey.EDITIONS,
+        DetailSectionKey.CAST,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.AWARDS,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val comicApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.CAST,
+        DetailSectionKey.NETWORKS,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val gameApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.ACHIEVEMENTS,
+        DetailSectionKey.SCREENSHOTS,
+        DetailSectionKey.NETWORKS,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.AWARDS,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.TRAILERS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val vnApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.SCREENSHOTS,
+        DetailSectionKey.RELEASES,
+        DetailSectionKey.FRANCHISE,
+        DetailSectionKey.CAST,
+        DetailSectionKey.GENRES_TAGS,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.EXTERNAL_LINKS,
+        DetailSectionKey.REVIEWS,
+        DetailSectionKey.RECOMMENDATIONS
+    )
+
+    private val fanficApplicable = listOf(
+        DetailSectionKey.CROSS_MEDIUM_EDITIONS,
+        DetailSectionKey.PERSONAL_NOTES,
+        DetailSectionKey.EPISODES,
+        DetailSectionKey.NAMES_SYNONYMS,
+        DetailSectionKey.DETAILS_INFO,
+        DetailSectionKey.REVIEWS
+    )
+
+    fun applicableSectionsFor(mediaType: MediaType): List<DetailSectionKey> = when (mediaType) {
+        MediaType.ANIME -> animeApplicable
+        MediaType.SHOW -> showApplicable
+        MediaType.MOVIE -> movieApplicable
+        MediaType.MANGA, MediaType.NOVEL -> mangaAndNovelApplicable
+        MediaType.BOOK -> bookApplicable
+        MediaType.COMIC -> comicApplicable
+        MediaType.GAME -> gameApplicable
+        MediaType.VISUAL_NOVEL -> vnApplicable
+        MediaType.FANFICTION -> fanficApplicable
+        MediaType.ALL -> defaultSections.map { it.key }
+    }
+
+    fun defaultSectionsFor(mediaType: MediaType): List<DetailSectionItem> =
+        applicableSectionsFor(mediaType).map { DetailSectionItem(it, isEnabled = true) }
+
+    fun displayNameFor(key: DetailSectionKey, mediaType: MediaType): String = when (key) {
+        DetailSectionKey.EPISODES -> when (mediaType) {
+            MediaType.MANGA, MediaType.NOVEL -> "Chapters & Volumes"
+            MediaType.BOOK -> "Pages & Reading"
+            MediaType.COMIC -> "Issues & Arcs"
+            MediaType.GAME -> "Playtime & DLCs"
+            MediaType.VISUAL_NOVEL -> "Routes & Playtime"
+            MediaType.FANFICTION -> "Chapters & Tags"
+            else -> key.displayName
+        }
+        DetailSectionKey.CAST -> when (mediaType) {
+            MediaType.BOOK -> "Author & Works"
+            MediaType.COMIC -> "Creators & Characters"
+            MediaType.ANIME, MediaType.MANGA, MediaType.NOVEL, MediaType.VISUAL_NOVEL -> "Characters & Cast"
+            else -> "Cast & Crew"
+        }
+        DetailSectionKey.SCREENSHOTS -> when (mediaType) {
+            MediaType.BOOK -> "Illustrations & Art"
+            MediaType.GAME -> "Media & Screenshots"
+            else -> key.displayName
+        }
+        DetailSectionKey.NETWORKS -> when (mediaType) {
+            MediaType.GAME -> "Developers & Publishers"
+            MediaType.COMIC -> "Publisher & Imprint"
+            else -> key.displayName
+        }
+        else -> key.displayName
+    }
+
+    fun normalizeForMedia(
+        mediaType: MediaType,
+        saved: List<DetailSectionItem>?
+    ): List<DetailSectionItem> {
+        val allowed = applicableSectionsFor(mediaType)
+        val allowedSet = allowed.toSet()
+        if (saved.isNullOrEmpty()) return defaultSectionsFor(mediaType)
+        val filtered = saved.filter { it.key in allowedSet }.distinctBy { it.key }
+        val existingKeys = filtered.map { it.key }.toSet()
+        val missingTop = allowed.filter {
+            (it == DetailSectionKey.CROSS_MEDIUM_EDITIONS || it == DetailSectionKey.PERSONAL_NOTES) &&
+                it !in existingKeys
+        }.map { DetailSectionItem(it, isEnabled = true) }
+        val missingTail = allowed.filter {
+            it != DetailSectionKey.CROSS_MEDIUM_EDITIONS &&
+                it != DetailSectionKey.PERSONAL_NOTES &&
+                it !in existingKeys
+        }.map { DetailSectionItem(it, isEnabled = true) }
+        return missingTop + filtered + missingTail
+    }
 }

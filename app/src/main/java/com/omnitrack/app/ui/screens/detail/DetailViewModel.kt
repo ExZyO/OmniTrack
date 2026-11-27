@@ -233,7 +233,7 @@ private data class PreviewAndAux(
     val animeStaff: List<AnimeStaffItem> = emptyList(),
     val animeRelations: List<AnimeRelationItem> = emptyList(),
     val animeAiring: AnimeAiringSchedule? = null,
-    val sectionOrder: List<DetailSectionItem> = DetailsPageLayoutDefaults.defaultSections,
+    val sectionOrderByMedia: Map<MediaType, List<DetailSectionItem>> = emptyMap(),
     val discussionComments: List<DiscussionComment> = emptyList(),
     val englishTitle: String? = null,
     val romajiTitle: String? = null,
@@ -324,7 +324,7 @@ class DetailViewModel(
     )
     private val _animeRelations = MutableStateFlow<List<AnimeRelationItem>>(emptyList())
     private val _animeAiring = MutableStateFlow<AnimeAiringSchedule?>(null)
-    private val _sectionOrder = MutableStateFlow<List<DetailSectionItem>>(DetailsPageLayoutDefaults.defaultSections)
+    private val _sectionOrderByMedia = MutableStateFlow<Map<MediaType, List<DetailSectionItem>>>(emptyMap())
     private val _stableSiblingIds = MutableStateFlow<List<Long>>(emptyList())
     private val enrichedKeys = mutableSetOf<String>()
     private val _activeDiscussionAniListId = MutableStateFlow<Long?>(null)
@@ -594,8 +594,8 @@ class DetailViewModel(
     init {
         if (preferenceManager != null) {
             viewModelScope.launch {
-                preferenceManager.detailsPageSectionOrder.collect {
-                    _sectionOrder.value = it
+                preferenceManager.detailsPageSectionOrdersByMedia.collect {
+                    _sectionOrderByMedia.value = it
                 }
             }
         }
@@ -1045,7 +1045,7 @@ class DetailViewModel(
             _animeStaff,
             _animeRelations,
             _animeAiring,
-            _sectionOrder,
+            _sectionOrderByMedia,
             _discussionComments,
             _englishTitle,
             _romajiTitle,
@@ -1097,7 +1097,7 @@ class DetailViewModel(
             animeStaff = args[16] as List<AnimeStaffItem>,
             animeRelations = args[17] as List<AnimeRelationItem>,
             animeAiring = args[18] as? AnimeAiringSchedule,
-            sectionOrder = args[19] as List<DetailSectionItem>,
+            sectionOrderByMedia = (args[19] as? Map<MediaType, List<DetailSectionItem>>).orEmpty(),
             discussionComments = args[20] as List<DiscussionComment>,
             englishTitle = args[21] as? String,
             romajiTitle = args[22] as? String,
@@ -1423,7 +1423,8 @@ class DetailViewModel(
                 animeStaff = aux.animeStaff,
                 animeRelations = mappedRelations,
                 animeAiring = aux.animeAiring,
-                sectionOrder = aux.sectionOrder,
+                sectionOrder = aux.sectionOrderByMedia[displayPreviewItem.mediaType]
+                    ?: DetailsPageLayoutDefaults.defaultSectionsFor(displayPreviewItem.mediaType),
                 discussionComments = aux.discussionComments,
                 englishTitle = aux.englishTitle,
                 romajiTitle = aux.romajiTitle,
@@ -1555,7 +1556,8 @@ class DetailViewModel(
                     animeStaff = aux.animeStaff,
                     animeRelations = mappedRelations,
                     animeAiring = aux.animeAiring,
-                    sectionOrder = aux.sectionOrder,
+                    sectionOrder = aux.sectionOrderByMedia[displayItem.mediaType]
+                        ?: DetailsPageLayoutDefaults.defaultSectionsFor(displayItem.mediaType),
                     discussionComments = aux.discussionComments,
                     englishTitle = aux.englishTitle,
                     romajiTitle = aux.romajiTitle,

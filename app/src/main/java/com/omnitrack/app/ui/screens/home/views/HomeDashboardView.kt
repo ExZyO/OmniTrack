@@ -149,8 +149,10 @@ import com.omnitrack.app.ui.components.heroStretchHeight
 import com.omnitrack.app.ui.components.heroStretchZoom
 import com.omnitrack.app.ui.components.heroVisibleLayers
 import com.omnitrack.app.ui.components.homeHeroPagerGesture
+import com.omnitrack.app.ui.screens.detail.EphemeralPreviewHolder
 import com.omnitrack.app.ui.screens.detail.components.allowedRatingSourcesFor
 import com.omnitrack.app.ui.screens.detail.components.formatSmartRating
+import com.omnitrack.app.ui.screens.home.HomeViewModel
 import com.omnitrack.app.ui.theme.AccentGold
 import com.omnitrack.app.ui.theme.AmoledBlack
 import com.omnitrack.app.ui.theme.DarkSurfaceCard
@@ -160,6 +162,7 @@ import com.omnitrack.app.ui.theme.TextMuted
 import com.omnitrack.app.ui.theme.TextPrimary
 import com.omnitrack.app.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -222,7 +225,9 @@ fun HomeDashboardView(
     onNavigateToCustomCategory: (Long) -> Unit = {},
     heroMultiRatingsCache: Map<String, CachedMultiRatings> = emptyMap(),
     onPrefetchLocalHeroRatings: (MediaCardSummary) -> Unit = {},
-    onPrefetchSearchHeroRatings: (SearchResultItem) -> Unit = {}
+    onPrefetchSearchHeroRatings: (SearchResultItem) -> Unit = {},
+    homeViewModel: HomeViewModel? = null,
+    tmdbApiKey: String = ""
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
@@ -247,6 +252,69 @@ fun HomeDashboardView(
     }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var actionSheetItem by remember { mutableStateOf<MediaCardSummary?>(null) }
+    var showHomeSwipeQueueSheet by remember { mutableStateOf(false) }
+
+    val watchRegionPref by remember(heroPrefManager) {
+        heroPrefManager?.watchProviderRegion ?: kotlinx.coroutines.flow.flowOf(PreferenceManager.cachedWatchProviderRegion)
+    }.collectAsState(initial = PreferenceManager.cachedWatchProviderRegion)
+    val streamingProviders by remember(homeViewModel) {
+        homeViewModel?.streamingProviders ?: MutableStateFlow(emptyList())
+    }.collectAsState()
+    val selectedStreamingProviderId by remember(homeViewModel) {
+        homeViewModel?.selectedStreamingProviderId ?: MutableStateFlow(null)
+    }.collectAsState()
+    val streamingServiceTitles by remember(homeViewModel) {
+        homeViewModel?.streamingServiceTitles ?: MutableStateFlow(emptyList())
+    }.collectAsState()
+    val isLoadingStreamingTitles by remember(homeViewModel) {
+        homeViewModel?.isLoadingStreamingTitles ?: MutableStateFlow(false)
+    }.collectAsState()
+    val top10TodayItems by remember(homeViewModel) {
+        homeViewModel?.top10TodayItems ?: MutableStateFlow(emptyList())
+    }.collectAsState()
+    val tasteMatchedSeed by remember(homeViewModel) {
+        homeViewModel?.tasteMatchedSeed ?: MutableStateFlow(null)
+    }.collectAsState()
+    val tasteMatchedItems by remember(homeViewModel) {
+        homeViewModel?.tasteMatchedItems ?: MutableStateFlow(emptyList())
+    }.collectAsState()
+    val selectedCuratedRowKey by remember(homeViewModel) {
+        homeViewModel?.selectedCuratedRowKey ?: MutableStateFlow("under_90")
+    }.collectAsState()
+    val curatedRowItems by remember(homeViewModel) {
+        homeViewModel?.curatedRowItems ?: MutableStateFlow(emptyList())
+    }.collectAsState()
+    val isLoadingCuratedRow by remember(homeViewModel) {
+        homeViewModel?.isLoadingCuratedRow ?: MutableStateFlow(false)
+    }.collectAsState()
+    val dailyCriticsPick by remember(homeViewModel) {
+        homeViewModel?.dailyCriticsPick ?: MutableStateFlow(null)
+    }.collectAsState()
+    val skippedSwipeKeys by remember(homeViewModel) {
+        homeViewModel?.skippedSwipeKeys ?: MutableStateFlow(emptySet())
+    }.collectAsState()
+
+    val anyHighlightRowEnabled = remember(homeRows) {
+        homeRows.any { row ->
+            row.isEnabled && row.key in setOf(
+                HomeRowKey.DISCOVER_TASTE_MATCHED,
+                HomeRowKey.DISCOVER_TOP_10,
+                HomeRowKey.DISCOVER_CRITICS_PICK,
+                HomeRowKey.DISCOVER_SWIPE_QUEUE,
+                HomeRowKey.DISCOVER_STREAMING,
+                HomeRowKey.DISCOVER_CURATED
+            )
+        }
+    }
+    LaunchedEffect(anyHighlightRowEnabled, selectedCategory, watchRegionPref, tmdbApiKey, allMedia.size) {
+        if (anyHighlightRowEnabled) {
+            homeViewModel?.loadDiscoverHighlights(
+                mediaFilter = selectedCategory,
+                regionPref = watchRegionPref,
+                tmdbApiKey = tmdbApiKey
+            )
+        }
+    }
 
     val isUnlimitedShelf = heroSettings.shelfItemLimit <= 0
     val shelfLimit = if (isUnlimitedShelf) Int.MAX_VALUE else heroSettings.shelfItemLimit.coerceIn(8, 24)
@@ -1361,6 +1429,132 @@ fun HomeDashboardView(
                         }
                     }
 
+                    HomeRowKey.DISCOVER_TASTE_MATCHED -> {
+                        if (tasteMatchedSeed != null && tasteMatchedItems.isNotEmpty()) {
+                            item(key = "row_discover_taste_matched") {
+                                TasteMatchedDiscoverSection(
+                                    seed = tasteMatchedSeed,
+                                    items = tasteMatchedItems,
+                                    allMedia = allMedia,
+                                    onItemClick = onItemClick,
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DISCOVER_TOP_10 -> {
+                        if (top10TodayItems.isNotEmpty()) {
+                            item(key = "row_discover_top_10") {
+                                Top10TodayDiscoverSection(
+                                    items = top10TodayItems,
+                                    allMedia = allMedia,
+                                    onItemClick = onItemClick,
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DISCOVER_CRITICS_PICK -> {
+                        val pick = dailyCriticsPick
+                        if (pick != null) {
+                            item(key = "row_discover_critics_pick") {
+                                val libMatch = remember(allMedia, pick) {
+                                    ArtworkModelResolver.findLibraryMatch(
+                                        library = allMedia,
+                                        mediaType = pick.mediaType,
+                                        anilistId = pick.anilistId,
+                                        malId = pick.malId,
+                                        tmdbId = pick.tmdbId,
+                                        openLibraryId = pick.openLibraryId,
+                                        title = pick.title
+                                    )
+                                }
+                                DailyCriticsPickCard(
+                                    item = pick,
+                                    libraryMatch = libMatch,
+                                    onOpenDetails = {
+                                        if (libMatch != null) onItemClick(libMatch.id)
+                                        else onPreviewSearchItem(pick)
+                                    },
+                                    onAddToLibrary = { onAddSearchItem(pick) },
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DISCOVER_SWIPE_QUEUE -> {
+                        if (homeViewModel != null) {
+                            val queuePreview = remember(
+                                allMedia,
+                                top10TodayItems,
+                                tasteMatchedItems,
+                                curatedRowItems,
+                                streamingServiceTitles,
+                                skippedSwipeKeys
+                            ) {
+                                homeViewModel.buildSwipeQueue(allMedia)
+                            }
+                            item(key = "row_discover_swipe_queue") {
+                                DiscoveryQueueLauncherCard(
+                                    queueItems = queuePreview,
+                                    onStartSwiping = { showHomeSwipeQueueSheet = true },
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DISCOVER_STREAMING -> {
+                        val showStreamingOnHome = selectedCategory == MediaType.ALL ||
+                            selectedCategory == MediaType.MOVIE ||
+                            selectedCategory == MediaType.SHOW ||
+                            selectedCategory == MediaType.ANIME
+                        if (showStreamingOnHome && (streamingProviders.isNotEmpty() || streamingServiceTitles.isNotEmpty())) {
+                            item(key = "row_discover_streaming") {
+                                StreamingServiceDiscoverSection(
+                                    providers = streamingProviders,
+                                    selectedProviderId = selectedStreamingProviderId,
+                                    regionPref = watchRegionPref,
+                                    titles = streamingServiceTitles,
+                                    isLoadingTitles = isLoadingStreamingTitles,
+                                    allMedia = allMedia,
+                                    onSelectProvider = { provId ->
+                                        homeViewModel?.selectStreamingProvider(provId, watchRegionPref, selectedCategory, tmdbApiKey)
+                                    },
+                                    onSelectRegionPref = { chosen ->
+                                        scope.launch { heroPrefManager?.setWatchProviderRegion(chosen) }
+                                    },
+                                    onItemClick = onItemClick,
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
+                    HomeRowKey.DISCOVER_CURATED -> {
+                        val showCuratedOnHome = selectedCategory == MediaType.ALL ||
+                            selectedCategory == MediaType.MOVIE ||
+                            selectedCategory == MediaType.SHOW
+                        if (showCuratedOnHome) {
+                            item(key = "row_discover_curated") {
+                                CuratedFilterDiscoverSection(
+                                    selectedRowKey = selectedCuratedRowKey,
+                                    items = curatedRowItems,
+                                    isLoading = isLoadingCuratedRow,
+                                    allMedia = allMedia,
+                                    onSelectRow = { rowKey ->
+                                        homeViewModel?.selectCuratedRow(rowKey, tmdbApiKey)
+                                    },
+                                    onItemClick = onItemClick,
+                                    horizontalPadding = 20.dp
+                                )
+                            }
+                        }
+                    }
+
                     HomeRowKey.TRENDING -> {
                         val shownTrending = if (shelfLimit == Int.MAX_VALUE) categoryTrending else categoryTrending.take(shelfLimit)
                         if (shownTrending.isNotEmpty()) {
@@ -1667,6 +1861,52 @@ fun HomeDashboardView(
                     )
                 }
             }
+        }
+
+        if (showHomeSwipeQueueSheet && homeViewModel != null) {
+            val homeQueue = remember(
+                allMedia,
+                top10TodayItems,
+                tasteMatchedItems,
+                curatedRowItems,
+                streamingServiceTitles,
+                skippedSwipeKeys
+            ) {
+                homeViewModel.buildSwipeQueue(allMedia)
+            }
+            SwipeDiscoveryQueueSheet(
+                queueItems = homeQueue,
+                onAddPlanToWatch = { picked ->
+                    onAddSearchItem(picked)
+                    homeViewModel.skipSwipeQueueItem(picked)
+                },
+                onSkip = { skipped ->
+                    homeViewModel.skipSwipeQueueItem(skipped)
+                },
+                onUndoSkip = { restored ->
+                    homeViewModel.unskipSwipeQueueItem(restored)
+                },
+                onUndoAdd = { undone ->
+                    homeViewModel.undoAddSwipeQueueItem(undone)
+                },
+                onOpenDetails = { picked ->
+                    val inLib = ArtworkModelResolver.findLibraryMatch(
+                        library = allMedia,
+                        mediaType = picked.mediaType,
+                        anilistId = picked.anilistId,
+                        malId = picked.malId,
+                        tmdbId = picked.tmdbId,
+                        openLibraryId = picked.openLibraryId,
+                        title = picked.title
+                    )
+                    if (inLib != null) {
+                        onItemClick(inLib.id)
+                    } else {
+                        onPreviewSearchItem(picked)
+                    }
+                },
+                onDismiss = { showHomeSwipeQueueSheet = false }
+            )
         }
     }
 }

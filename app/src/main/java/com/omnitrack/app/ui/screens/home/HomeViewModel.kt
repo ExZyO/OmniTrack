@@ -134,6 +134,7 @@ class HomeViewModel(
     private val _dailyCriticsPick = MutableStateFlow<SearchResultItem?>(null)
     val dailyCriticsPick: StateFlow<SearchResultItem?> = _dailyCriticsPick.asStateFlow()
     private val _skippedSwipeKeys = MutableStateFlow<Set<String>>(emptySet())
+    val skippedSwipeKeys: StateFlow<Set<String>> = _skippedSwipeKeys.asStateFlow()
     private var loadedHighlightsKey: String? = null
     private var loadedCalendarWindowDays: Int = 14
 
@@ -1302,14 +1303,19 @@ class HomeViewModel(
         }
     }
 
-    fun loadDiscoverHighlights(mediaFilter: MediaType, regionPref: String, tmdbApiKey: String? = null) {
+    fun loadDiscoverHighlights(
+        mediaFilter: MediaType,
+        regionPref: String,
+        tmdbApiKey: String? = null,
+        force: Boolean = false
+    ) {
         val effectiveRegion = if (regionPref.equals("AUTO", ignoreCase = true) || regionPref.isBlank()) {
             PreferenceManager.resolveEffectiveWatchRegion()
         } else {
             regionPref.trim().uppercase()
         }
         val key = "${mediaFilter.name}_$effectiveRegion"
-        if (loadedHighlightsKey == key && _top10TodayItems.value.isNotEmpty()) return
+        if (!force && loadedHighlightsKey == key && _top10TodayItems.value.isNotEmpty()) return
         loadedHighlightsKey = key
         val tmdbKey = tmdbApiKey?.takeIf { it.isNotBlank() } ?: PreferenceManager.cachedTmdbApiKey
 
@@ -1405,9 +1411,44 @@ class HomeViewModel(
         }
     }
 
+    private fun swipeQueueKey(item: SearchResultItem): String =
+        "${item.mediaType.name}_${item.tmdbId}_${item.anilistId}_${item.title.trim().lowercase()}"
+
     fun skipSwipeQueueItem(item: SearchResultItem) {
-        val key = "${item.mediaType.name}_${item.tmdbId}_${item.anilistId}_${item.title.lowercase()}"
-        _skippedSwipeKeys.value = _skippedSwipeKeys.value + key
+        _skippedSwipeKeys.value = _skippedSwipeKeys.value + swipeQueueKey(item)
+    }
+
+    fun unskipSwipeQueueItem(item: SearchResultItem) {
+        _skippedSwipeKeys.value = _skippedSwipeKeys.value - swipeQueueKey(item)
+    }
+
+    fun undoAddSwipeQueueItem(item: SearchResultItem) {
+        unskipSwipeQueueItem(item)
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.findExistingMedia(
+                anilistId = item.anilistId,
+                malId = item.malId,
+                tmdbId = item.tmdbId,
+                vndbId = item.vndbId,
+                igdbId = item.igdbId,
+                steamAppId = item.steamAppId,
+                openLibraryId = item.openLibraryId,
+                hardcoverId = item.hardcoverId,
+                isbn = item.isbn,
+                comicVineId = item.comicVineId,
+                metronId = item.metronId,
+                fanficWorkId = item.fanficWorkId,
+                fanficSourceUrl = item.fanficSourceUrl,
+                title = item.title,
+                mediaType = item.mediaType
+            )
+            if (existing != null &&
+                existing.status == TrackingStatus.PLAN_TO_TRACK &&
+                existing.currentProgress.toDouble() <= 0.0
+            ) {
+                repository.deleteMedia(existing)
+            }
+        }
     }
 
     fun buildSwipeQueue(allMedia: List<MediaCardSummary>): List<SearchResultItem> {
@@ -1417,8 +1458,7 @@ class HomeViewModel(
         return combined
             .distinctBy { "${it.mediaType.name}_${it.title.trim().lowercase()}" }
             .filter { item ->
-                val key = "${item.mediaType.name}_${item.tmdbId}_${item.anilistId}_${item.title.lowercase()}"
-                key !in skipped && ArtworkModelResolver.findLibraryMatch(
+                swipeQueueKey(item) !in skipped && ArtworkModelResolver.findLibraryMatch(
                     library = allMedia,
                     mediaType = item.mediaType,
                     anilistId = item.anilistId,

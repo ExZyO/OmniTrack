@@ -2210,6 +2210,12 @@ private fun HomeTabContent(
         onRefresh = {
             viewModel.loadHomeTrending(force = true)
             viewModel.loadReleaseCalendar(force = true)
+            viewModel.loadDiscoverHighlights(
+                mediaFilter = heroSettings.defaultCategory,
+                regionPref = PreferenceManager.cachedWatchProviderRegion,
+                tmdbApiKey = tmdbKey,
+                force = true
+            )
         },
         fanfictionEnabled = fanfictionEnabled,
         visibleFilterTabs = visibleFilterTabs,
@@ -2225,7 +2231,9 @@ private fun HomeTabContent(
         onPrefetchSearchHeroRatings = { searchItem ->
             val cached = heroMultiRatingsCache[heroRatingsCacheKey(null, searchItem.mediaType, searchItem.title)]
             viewModel.prefetchSearchHeroRatings(searchItem, cached, prefManager)
-        }
+        },
+        homeViewModel = viewModel,
+        tmdbApiKey = tmdbKey
     )
 }
 
