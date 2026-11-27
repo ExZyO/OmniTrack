@@ -1487,17 +1487,17 @@ fun HomeDashboardView(
 
                     HomeRowKey.DISCOVER_SWIPE_QUEUE -> {
                         if (homeViewModel != null) {
-                            val queuePreview = remember(
-                                allMedia,
-                                top10TodayItems,
-                                tasteMatchedItems,
-                                curatedRowItems,
-                                streamingServiceTitles,
-                                skippedSwipeKeys
-                            ) {
-                                homeViewModel.buildSwipeQueue(allMedia)
-                            }
                             item(key = "row_discover_swipe_queue") {
+                                val queuePreview = remember(
+                                    allMedia,
+                                    top10TodayItems,
+                                    tasteMatchedItems,
+                                    curatedRowItems,
+                                    streamingServiceTitles,
+                                    skippedSwipeKeys
+                                ) {
+                                    homeViewModel.buildSwipeQueue(allMedia)
+                                }
                                 DiscoveryQueueLauncherCard(
                                     queueItems = queuePreview,
                                     onStartSwiping = { showHomeSwipeQueueSheet = true },
